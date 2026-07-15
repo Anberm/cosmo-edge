@@ -30,7 +30,8 @@ struct ParsedModelConfig {
     std::string algorithm_code;
     std::string model_name;
     std::string model_type;
-    std::string version;  // From config.json "version" field (fallback only)
+    std::string chip_type;  // From config.json "chip_type" (e.g. BM1688, CV186X)
+    std::string version;    // From config.json "version" field (fallback only)
     ParsedIoShape input;
     ParsedIoShape output;
     std::vector<ParsedLabel> labels;

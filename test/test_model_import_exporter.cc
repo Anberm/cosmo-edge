@@ -82,7 +82,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         REQUIRE(res == cosmo::util::ErrorEnum::Success);
 
         std::string expectedDir =
-            testModelDir + "/" + std::string(cosmo::util::kPlatformDirPrefix) + "1234567_AtomicName_V1.0.0";
+            testModelDir + "/" + std::string(cosmo::util::kNewDirPrefix) + "1234567_AtomicName_V1.0.0";
         REQUIRE(fs::exists(expectedDir));
         REQUIRE(fs::exists(expectedDir + "/config.json"));
         REQUIRE(fs::exists(expectedDir + "/model" + std::string(cosmo::util::kModelFileExt)));
@@ -375,14 +375,14 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         auto res = importExporter.ImportModel(tarFile);
         REQUIRE(res == cosmo::util::ErrorEnum::Success);
 
-        // ImportFlatArchive uses kPlatformDirPrefix + alg_code + "_" + name + "_" + version
+        // ImportFlatArchive uses kNewDirPrefix + alg_code + "_" + name + "_" + version
         // alg_code defaults to "0000000" (no "algorithm_code" key in config.json),
         // name defaults to "imported", version defaults to "V1.0.0"
-        REQUIRE(fs::exists(testModelDir + "/" + std::string(cosmo::util::kPlatformDirPrefix) +
+        REQUIRE(fs::exists(testModelDir + "/" + std::string(cosmo::util::kNewDirPrefix) +
                            "0000000_imported_V1.0.0/config.json"));
 
         fs::remove_all(tempArchiveDir);
-        fs::remove_all(testModelDir + "/" + std::string(cosmo::util::kPlatformDirPrefix) +
+        fs::remove_all(testModelDir + "/" + std::string(cosmo::util::kNewDirPrefix) +
                        "0000000_imported_V1.0.0");
         fs::remove(tarFile);
     }

@@ -68,7 +68,7 @@ util::ErrorEnum ModelImportExporter::ImportFlatArchive(const std::string& temp_d
         '_');
 
     std::string dir_name =
-        std::string(cosmo::util::kPlatformDirPrefix) + alg_code + "_" + modelName + "_" + version;
+        std::string(cosmo::util::kNewDirPrefix) + alg_code + "_" + modelName + "_" + version;
     std::string dest_dir = (fs::path(models_dir) / dir_name).string();
 
     // Remove existing if present

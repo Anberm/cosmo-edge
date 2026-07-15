@@ -66,7 +66,7 @@ void ModelServiceImpl::QueryModels(const std::string& modelName, const std::stri
                 model.updateTime = date.Date().ToYMD() + " " + date.Time().ToHMS();
             }
 
-            model.gpuCode = cosmo::util::kEngineType;
+            model.gpuCode = cfg.chip_type.empty() ? cosmo::util::kEngineType : cfg.chip_type;
 
             // Preset (built-in) models live under the preset search path and are
             // encrypted / read-only — not deletable / updatable / exportable.

@@ -204,9 +204,10 @@ cosmo::util::ErrorEnum ModelServiceImpl::CheckModelValid(std::string un_zip_file
     if (decoded_json == false) {
         return cosmo::util::ErrorEnum::ModelFileAnalysis;
     }
-    if (cosmo::util::ToLower(cfgInfo.chip_type) != cosmo::util::ToLower(plat_form)) {
-        LOG_WARN("{} ChipType:{} platFrom:{} Not Match {} {}", un_zip_file, cfgInfo.chip_type, plat_form,
-                 cosmo::util::ToLower(cfgInfo.chip_type), cosmo::util::ToLower(plat_form));
+    // config.json "chip_type" is the source of truth; validate it against the chip
+    // set supported by the compiled backend. The folder-name token is a label, not a gate.
+    if (!cosmo::util::IsSupportedChip(cfgInfo.chip_type)) {
+        LOG_WARN("{} Unsupported ChipType:{}", un_zip_file, cfgInfo.chip_type);
         return cosmo::util::ErrorEnum::ModelFilePlatform;
     }
     cfgInfo.version = version;
@@ -351,7 +352,11 @@ bool ModelServiceImpl::ModelValid(const std::string& modelCode) {
 std::string ModelServiceImpl::FindModelDir(const std::string& modelCode) {
     namespace fs = std::filesystem;
     std::string result;
-    std::string prefix = std::string(cosmo::util::kPlatformDirPrefix) + modelCode + "_";
+
+    // Chip-agnostic: folder is prod_<TOKEN>_<CODE>_<NAME>_<VERSION> where TOKEN may be
+    // BM1688, CV186X, SOPHGO, ... Locate by algorithm code (matched literally after the
+    // token, so codes containing underscores are handled correctly).
+    std::regex pattern("^prod_[A-Z0-9]+_" + modelCode + "_");
 
     for (const auto& modelsDir : GetModelSearchPaths()) {
         std::error_code ec;
@@ -359,7 +364,7 @@ std::string ModelServiceImpl::FindModelDir(const std::string& modelCode) {
             if (!dirEntry.is_directory())
                 continue;
             std::string dir_name = dirEntry.path().filename().string();
-            if (dir_name.find(prefix) == 0) {
+            if (std::regex_search(dir_name, pattern)) {
                 result = dirEntry.path().string();
                 break;
             }
