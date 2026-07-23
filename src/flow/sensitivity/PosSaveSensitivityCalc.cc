@@ -125,6 +125,7 @@ void PosSaveSensitivity::FillAlarmData(AlgDataPtr algData, DataAlarmUnit& alarmU
 }
 
 void PosSaveSensitivity::FillAlarmDataTrackId(DataAlarmUnit& alarmUnit, TrackIdData& idData) {
+    alarmUnit.targets.push_back(MakeOnEventsTarget(idData.target));
     // alarmTarget.box = // Max Confidence Box and Pic
     for (auto& trackData : idData.history) {
         DataAlarmTargetConfidence targetConf;

@@ -84,6 +84,14 @@ CosmoEdge 支持将告警/事件通过 HTTP 推送到外部平台。当前推送
   "recordId": "RECORD_ID",
   "isRetryMessage": false,
   "category": "alarm",
+  "targets": [
+    {
+      "label": "category0",
+      "confidence": 0.93,
+      "trackId": "TARGET_TRACK_ID",
+      "box": {"x": 120, "y": 80, "width": 240, "height": 360}
+    }
+  ],
   "property": {}
 }
 ```
@@ -91,6 +99,19 @@ CosmoEdge 支持将告警/事件通过 HTTP 推送到外部平台。当前推送
 > 事件 DTO（`CMsgOnEventsReq`）中还定义了 `itimestamp`（数值时间戳）和 `files`（关联文件列表），但当前出站序列化（`to_json`）不输出这两个字段，故实际推送负载中不会出现。字段名 `orignalPicture` 沿用当前实现（legacy 拼写）。
 
 字段说明见[字段级 API 参考](api-fields.md#事件上报负载)。
+
+## 检测目标
+
+`targets` 是触发本次事件的检测目标列表。每个元素包含：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `label` | string | 模型检测标签名称，例如 `category0`、`person` 或 `Pedestrian` |
+| `confidence` | number | 检测置信度 |
+| `trackId` | string | 目标跟踪 ID；未启用跟踪时可能不输出 |
+| `box` | object | 像素坐标目标框，包含 `x`、`y`、`width`、`height` |
+
+无独立目标的统计类事件可能不输出 `targets`。HTTP 首次推送与离线重推使用相同结构。
 
 ## 属性对象
 

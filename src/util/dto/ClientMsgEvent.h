@@ -76,6 +76,18 @@ struct CMsgAiAttr {
     friend void from_json(const nlohmann::json& j, CMsgAiAttr& v);
 };
 
+// Detection target that caused an event. Kept separate from algorithm-specific
+// property data so generic HTTP consumers can always identify the model class.
+struct CMsgOnEventsTarget {
+    std::string label;
+    float confidence{0.0F};
+    std::string trackId;
+    MsgRectReal box;
+
+    friend void to_json(nlohmann::json& j, const CMsgOnEventsTarget& v);
+    friend void from_json(const nlohmann::json& j, CMsgOnEventsTarget& v);
+};
+
 struct CMsgOnEventsPropertyVehicle {
     std::string plateColor;    // License plate color
     std::string vehicleColor;  // Vehicle body color
@@ -221,6 +233,7 @@ struct CMsgOnEventsReq : public MsgRecvHead {
     bool isRetryMessage{false};      // Whether it is a retried message
     bool bHaveProperty{false};       // Whether property field exists
     CMsgOnEventsProperty property;   // Property
+    std::vector<CMsgOnEventsTarget> targets;  // Detection targets that triggered this event
     std::string category;            // Category
 };
 

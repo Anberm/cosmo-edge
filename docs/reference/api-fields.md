@@ -104,6 +104,7 @@ HTTP webhook 和部分内部事件消息使用 `CMsgOnEventsReq` 语义：
 | `recordId` | string | 告警记录 ID |
 | `files` | string[] | 关联文件列表（DTO 中定义；当前出站 `to_json` 不输出此字段，仅入站反序列化时读取） |
 | `isRetryMessage` | boolean | 是否为重试消息 |
+| `targets` | object[] | 触发事件的检测目标；包含 `label`、`confidence`、可选 `trackId` 和像素坐标 `box` |
 | `property` | object | 属性对象，按算法类型变化 |
 | `category` | string | 事件类别 |
 

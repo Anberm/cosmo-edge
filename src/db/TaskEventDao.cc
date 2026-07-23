@@ -42,6 +42,7 @@ void TaskEventDao::CreateTable() {
             "originepic_url         text,"     // Original picture URL
             "extraFiles             text,"     // File list
             "property               text,"     // Property in JSON format
+            "targets                text,"     // Event target list in JSON format
             "libPersionName         text,"     // Person name (NOTE: historical column name typo)
             "libPersionNumber       text,"     // Person number (NOTE: historical column name typo)
             "libFacesID             text,"     // Belonging face library
@@ -88,6 +89,9 @@ void TaskEventDao::CreateTable() {
     if (!IsColumnExist(all_columns, "propDirection")) {
         AddColumnToTable(table_name_, "propDirection", ColumnType::TEXT);
     }
+    if (!IsColumnExist(all_columns, "targets")) {
+        AddColumnToTable(table_name_, "targets", ColumnType::TEXT);
+    }
 }
 
 // Task event record query (parameterized)
@@ -121,7 +125,7 @@ TaskEventsResult TaskEventDao::Query(const QueryTaskEventCondition& condition, i
             " select "
             " rec_id, category,algorithm_code,create_time,camera_id,"
             " camera_outid,camera_name,area_id,area_name,disk_id,isreported,"
-            " target_id,pic_url,fullpic_url, originepic_url, extraFiles, property, libPersionName, "
+            " target_id,pic_url,fullpic_url, originepic_url, extraFiles, property, targets, libPersionName, "
             "libPersionNumber, libFacesID, video_flag, x,"
             " y, width, height, eventFrame, propStr, propColor, propRelatedColor, propType, propDirection"
             " from ")
@@ -170,6 +174,7 @@ TaskEventsResult TaskEventDao::Query(const QueryTaskEventCondition& condition, i
         row.SetValue(event_data.orig_pic_url);
         row.SetValue(event_data.extra_files);
         row.SetValue(event_data.property);
+        row.SetValue(event_data.targets);
         row.SetValue(event_data.lib_person_name);
         row.SetValue(event_data.lib_person_number);
         row.SetValue(event_data.lib_faces_id);
@@ -199,14 +204,14 @@ bool TaskEventDao::Insert(const TaskEventData& data) {
         .append(
             " (rec_id, category, algorithm_code, create_time, camera_id, camera_outid, camera_name, area_id, "
             "area_name,"
-            " disk_id, isreported, target_id, pic_url, fullpic_url, originepic_url, extraFiles, property, "
+            " disk_id, isreported, target_id, pic_url, fullpic_url, originepic_url, extraFiles, property, targets, "
             "libPersionName, libPersionNumber, libFacesID, video_flag,"
             " x, y, width, height, eventFrame, propStr, propColor, propRelatedColor, propType, propDirection"
             " ) values ("
             "?,?,?,?,?,?,?,?,?,"
             "?,?,?,?,?,?,?,?,?,"
             "?,?,?,?,?,?,?,?,?,"
-            "?,?,?,?)");
+            "?,?,?,?,?)");
 
     SQLite::Statement stmt(Db(), insert_sql);
     stmt.bind(1, data.id);
@@ -226,20 +231,21 @@ bool TaskEventDao::Insert(const TaskEventData& data) {
     stmt.bind(15, data.orig_pic_url);
     stmt.bind(16, data.extra_files);
     stmt.bind(17, data.property);
-    stmt.bind(18, data.lib_person_name);
-    stmt.bind(19, data.lib_person_number);
-    stmt.bind(20, data.lib_faces_id);
-    stmt.bind(21, data.video_flag);
-    stmt.bind(22, data.tar_x);
-    stmt.bind(23, data.tar_y);
-    stmt.bind(24, data.tar_width);
-    stmt.bind(25, data.tar_height);
-    stmt.bind(26, static_cast<int64_t>(data.event_frame));
-    stmt.bind(27, data.prop_str);
-    stmt.bind(28, data.prop_color);
-    stmt.bind(29, data.prop_related_color);
-    stmt.bind(30, data.prop_type);
-    stmt.bind(31, data.prop_direction);
+    stmt.bind(18, data.targets);
+    stmt.bind(19, data.lib_person_name);
+    stmt.bind(20, data.lib_person_number);
+    stmt.bind(21, data.lib_faces_id);
+    stmt.bind(22, data.video_flag);
+    stmt.bind(23, data.tar_x);
+    stmt.bind(24, data.tar_y);
+    stmt.bind(25, data.tar_width);
+    stmt.bind(26, data.tar_height);
+    stmt.bind(27, static_cast<int64_t>(data.event_frame));
+    stmt.bind(28, data.prop_str);
+    stmt.bind(29, data.prop_color);
+    stmt.bind(30, data.prop_related_color);
+    stmt.bind(31, data.prop_type);
+    stmt.bind(32, data.prop_direction);
     return stmt.exec() > 0;
 }
 

@@ -218,6 +218,7 @@ struct AlarmRecordUnit {
     int64_t eventFrame{-1};
     std::string extraFiles;  // File list   path/id_{name}   This is a json list of {name}
     std::string property;    // property json format
+    std::string targets;     // event target list json
 };
 
 struct MsgResultInfo {

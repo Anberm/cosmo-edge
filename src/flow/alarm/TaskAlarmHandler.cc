@@ -111,6 +111,8 @@ DataAlarmUnit TaskAlarm::AlarmDataCombineAlarm(DataAlarmUnit alarm, DataAlarmUni
         unit.areaName = alarm.areaName;
         if (!alarm.boxs.empty())
             unit.boxs.insert(unit.boxs.end(), alarm.boxs.begin(), alarm.boxs.end());
+        if (!alarm.targets.empty())
+            unit.targets.insert(unit.targets.end(), alarm.targets.begin(), alarm.targets.end());
         if (alarm.areaId != assoAlarm.areaId) {
             // Primary alarm's associated area for overlay region lookup
             unit.assoAreaId   = assoAlarm.areaId;
@@ -124,6 +126,8 @@ DataAlarmUnit TaskAlarm::AlarmDataCombineAlarm(DataAlarmUnit alarm, DataAlarmUni
         unit = alarm;
         if (!assoAlarm.boxs.empty())
             unit.boxs.insert(unit.boxs.end(), assoAlarm.boxs.begin(), assoAlarm.boxs.end());
+        if (!assoAlarm.targets.empty())
+            unit.targets.insert(unit.targets.end(), assoAlarm.targets.begin(), assoAlarm.targets.end());
         if (alarm.areaId != assoAlarm.areaId) {
             unit.assoAreaId   = assoAlarm.areaId;
             unit.assoAreaName = assoAlarm.areaName;
