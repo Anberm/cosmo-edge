@@ -509,7 +509,7 @@ TEST_CASE("HttpServer reports payload limits as 413 before dispatch", "[http-ser
     SECTION("libevent transport limit preserves 413 when the URI is cleared") {
         auto client = Connect(port);
         REQUIRE(client.Get() >= 0);
-        constexpr std::size_t kOversizedBody = 10 * 1024 * 1024 + 1;
+        constexpr std::size_t kOversizedBody = 32 * 1024 * 1024 + 1;
         const std::string request =
             "POST /test/request-lifetime HTTP/1.1\r\n"
             "Host: 127.0.0.1\r\n"
