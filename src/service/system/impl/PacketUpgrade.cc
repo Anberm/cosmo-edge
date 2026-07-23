@@ -73,6 +73,26 @@ namespace {
         return true;
     }
 
+    // A symlink is acceptable only if its target resolves to a path inside the
+    // archive root: relative (never absolute), no backslashes, and it must not
+    // traverse above the root via "..". This permits the normal shared-library
+    // versioning chains (libfoo.so -> libfoo.so.1 -> libfoo.so.1.0.0) while
+    // still blocking symlinks that would escape the extraction directory.
+    bool IsSafeSymlinkTarget(const std::string& link_member, const std::string& target) {
+        if (target.empty() || target.front() == '/' || target.find('\\') != std::string::npos) {
+            return false;
+        }
+        fs::path resolved = fs::path(link_member).parent_path();
+        resolved /= target;
+        resolved = resolved.lexically_normal();
+        for (const auto& component : resolved) {
+            if (component == "..") {
+                return false;
+            }
+        }
+        return true;
+    }
+
     bool ValidateUpgradeArchiveListing(const std::string& archive_path) {
         std::string listing;
         if (util::Exec({"tar", "-tzvf", archive_path, "--quoting-style=escape"}, listing) != 0) {
@@ -94,8 +114,10 @@ namespace {
                 return false;
             }
 
-            const bool is_directory = line.front() == 'd';
-            if (line.front() != '-' && !is_directory) {
+            const char entry_type   = line.front();
+            const bool is_directory = entry_type == 'd';
+            const bool is_symlink   = entry_type == 'l';
+            if (entry_type != '-' && !is_directory && !is_symlink) {
                 LOG_ERRO("{}", "upgrade archive contains a non-regular entry");
                 return false;
             }
@@ -112,12 +134,31 @@ namespace {
             }
             std::getline(line_stream >> std::ws, member);
 
+            std::string link_target;
+            if (is_symlink) {
+                // tar lists a symlink as "linkpath -> target"; split on the
+                // literal separator so the link path and its target are
+                // validated independently.
+                static const std::string kArrow = " -> ";
+                const auto arrow_pos            = member.find(kArrow);
+                if (arrow_pos == std::string::npos) {
+                    LOG_ERRO("upgrade archive contains an unparsable symlink: {}", member);
+                    return false;
+                }
+                link_target = member.substr(arrow_pos + kArrow.size());
+                member.resize(arrow_pos);
+            }
+
             std::string normalized;
             if (++entry_count > kMaxUpgradeArchiveEntries || entry_size > kMaxUpgradeFileBytes ||
                 entry_size > kMaxUpgradeExtractedBytes - total_size ||
                 !NormalizeUpgradeArchiveMember(member, is_directory, normalized) ||
                 !members.insert(normalized).second) {
                 LOG_ERRO("upgrade archive contains unsafe entry: {}", member);
+                return false;
+            }
+            if (is_symlink && !IsSafeSymlinkTarget(normalized, link_target)) {
+                LOG_ERRO("upgrade archive symlink target is unsafe: {} -> {}", normalized, link_target);
                 return false;
             }
             total_size += entry_size;
