@@ -121,6 +121,8 @@ Key specifications:
 | Network    | 2 × 10/100/1000 Mbps auto-negotiation Ethernet         |
 | Interfaces | USB 3.0 × 2, Type-C × 1, HDMI × 1, TF × 1, SIM × 1 |
 
+> CosmoEdge-ready certified devices are available in mainland China through the [Taobao store](https://item.taobao.com/item.htm?id=1066672051450). The open-source software does not require a device purchase. For availability outside mainland China or project deployment support, contact [hello@cosmowander.ai](mailto:hello@cosmowander.ai).
+
 ### Step 1: Hardware Connection
 
 Connect the device to your local network and power it on.
