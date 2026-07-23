@@ -146,6 +146,58 @@ main {
     color: var(--secondary-color);
 }
 
+/* 检测目标徽章（推送 payload 的 targets 字段） */
+.alert-target-count {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 7px;
+    border-radius: 10px;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.alert-targets-row {
+    margin: 6px 0 4px;
+}
+
+.alert-targets {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    vertical-align: middle;
+}
+
+.alert-target {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: #1e293b;
+    cursor: help;
+}
+
+.alert-target-label {
+    font-weight: 600;
+    color: #1d4ed8;
+}
+
+.alert-target-conf {
+    color: #16a34a;
+    font-variant-numeric: tabular-nums;
+}
+
+.alert-target-track {
+    color: #64748b;
+    font-size: 0.68rem;
+}
+
 /* MQTT Layout */
 .mqtt-layout {
     display: grid;
