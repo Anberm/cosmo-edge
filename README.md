@@ -331,7 +331,7 @@ Certified devices help teams avoid hardware bring-up and model packaging work. T
 
 Certified devices improve deployment readiness; they do not lock software features behind a hardware SKU.
 
-The open-source engine and all software features are available worldwide today, no purchase required. Certified devices are rolling out region by region and the online store is still in setup. To register interest or ask about availability (including international), contact <hello@cosmowander.ai>.
+The open-source engine and all software features are available worldwide today, no purchase required. CosmoEdge-ready certified devices are now available in mainland China through the [Taobao store](https://item.taobao.com/item.htm?id=1066672051450). For availability outside mainland China or project deployment support, contact <hello@cosmowander.ai>.
 
 ## Documentation
 
