@@ -219,6 +219,8 @@ MsgOverviewMem AlgActionBase::GetOverviewInfo(const std::string& /*channelId*/, 
 }
 
 void AlgActionBase::run() {
+    int consecutive_errors                     = 0;
+    static constexpr int kMaxConsecutiveErrors = 10;
     while (running) {
         try {
             auto decData = data_queue->Pop();
@@ -232,13 +234,43 @@ void AlgActionBase::run() {
                     HandFrame(decData);
                     duration_stat.EndSample();
                 }
+                consecutive_errors = 0;
             } else {
                 data_queue->WaitForData();
+                consecutive_errors = 0;
             }
         } catch (const std::exception& e) {
-            LOG_ERRO("[{}] Action [{}] HandFrame exception: {}", task_id, Name(), e.what());
+            consecutive_errors++;
+            if (consecutive_errors <= 3) {
+                LOG_ERRO("[{}] Action [{}] HandFrame exception ({}): {}", task_id, Name(), consecutive_errors,
+                         e.what());
+            } else if (consecutive_errors == 4) {
+                LOG_ERRO(
+                    "[{}] Action [{}] HandFrame exception: suppressed further errors "
+                    "(10ms backoff, auto-stop at {})",
+                    task_id, Name(), kMaxConsecutiveErrors);
+            }
+            if (consecutive_errors >= kMaxConsecutiveErrors) {
+                LOG_ERRO("[{}] Action [{}] Stopping due to {} consecutive HandFrame failures", task_id,
+                         Name(), consecutive_errors);
+                running = false;
+                break;
+            }
+            // Backoff to avoid tight-loop log storms (e.g. VPU resource destroyed)
+            data_queue->WaitForData(10);
         } catch (...) {
-            LOG_ERRO("[{}] Action [{}] HandFrame non-std exception caught", task_id, Name());
+            consecutive_errors++;
+            if (consecutive_errors <= 3) {
+                LOG_ERRO("[{}] Action [{}] HandFrame non-std exception caught ({})", task_id, Name(),
+                         consecutive_errors);
+            }
+            if (consecutive_errors >= kMaxConsecutiveErrors) {
+                LOG_ERRO("[{}] Action [{}] Stopping due to {} consecutive HandFrame failures", task_id,
+                         Name(), consecutive_errors);
+                running = false;
+                break;
+            }
+            data_queue->WaitForData(10);
         }
     }
 

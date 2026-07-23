@@ -60,6 +60,11 @@ ParsedModelConfig ModelConfigParser::Parse(const std::string& config_path) {
         result.model_type = doc["model_type"].get<std::string>();
     }
 
+    // Parse chip_type (Sophon chip identifier, e.g. BM1688 / CV186X)
+    if (doc.contains("chip_type") && doc["chip_type"].is_string()) {
+        result.chip_type = doc["chip_type"].get<std::string>();
+    }
+
     // Parse config.json "version" as fallback
     if (doc.contains("version") && doc["version"].is_string()) {
         result.version = doc["version"].get<std::string>();

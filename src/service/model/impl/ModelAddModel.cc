@@ -294,23 +294,22 @@ std::string ModelImportExporter::CalculateNextVersion(const std::string& models_
 
     int max_version = 0;
     {
-        std::string prefix = std::string(cosmo::util::kPlatformDirPrefix) + modelCode + "_";
-        std::regex pattern("^" + prefix + ".+_V(\\d+)\\.0\\.(\\d+)$");
+        // Chip-agnostic: match prod_<TOKEN>_<code>_..._<version>, where TOKEN may be
+        // BM1688, CV186X, SOPHGO, ... so legacy and new directories both count.
+        std::regex pattern("^prod_[A-Z0-9]+_" + modelCode + "_.*_V(\\d+)\\.0\\.(\\d+)$");
         for (const auto& dirEntry : fs::directory_iterator(models_dir)) {
             if (!dirEntry.is_directory())
                 continue;
             std::string dir_name = dirEntry.path().filename().string();
-            if (dir_name.find(prefix) == 0) {
-                std::smatch matches;
-                if (std::regex_match(dir_name, matches, pattern) && matches.size() > 2) {
-                    try {
-                        int major   = std::stoi(matches[1].str());
-                        int minor   = std::stoi(matches[2].str());
-                        int version = major * 1000 + minor;
-                        if (version > max_version)
-                            max_version = version;
-                    } catch (const std::exception&) {
-                    }
+            std::smatch matches;
+            if (std::regex_match(dir_name, matches, pattern) && matches.size() > 2) {
+                try {
+                    int major   = std::stoi(matches[1].str());
+                    int minor   = std::stoi(matches[2].str());
+                    int version = major * 1000 + minor;
+                    if (version > max_version)
+                        max_version = version;
+                } catch (const std::exception&) {
                 }
             }
         }
@@ -554,7 +553,7 @@ util::ErrorEnum ModelImportExporter::AddAtomicModel(
     std::replace(clean_model_name.begin(), clean_model_name.end(), '/', '_');
     std::replace(clean_model_name.begin(), clean_model_name.end(), '\\', '_');
 
-    std::string folder_name = std::string(cosmo::util::kPlatformDirPrefix) + resolved_model_code + "_" +
+    std::string folder_name = std::string(cosmo::util::kNewDirPrefix) + resolved_model_code + "_" +
                               clean_model_name + "_" + version_str;
     std::string model_dir;
     if (!cosmo::path::IsSafePathComponent(folder_name, 200) ||

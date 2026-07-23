@@ -16,15 +16,18 @@ using namespace cosmo;
 
 // Helper: create a minimal model directory with config.json on disk
 static std::string CreateTestModelOnDisk(const std::string& modelsDir, const std::string& modelCode,
-                                         const std::string& modelName) {
-    std::string dirName =
-        std::string(cosmo::util::kPlatformDirPrefix) + modelCode + "_" + modelName + "_V1.0.0";
+                                         const std::string& modelName,
+                                         const std::string& dirPrefix = cosmo::util::kPlatformDirPrefix,
+                                         const std::string& chipType  = "") {
+    std::string dirName  = std::string(dirPrefix) + modelCode + "_" + modelName + "_V1.0.0";
     std::string modelDir = (std::filesystem::path(modelsDir) / dirName).string();
     std::filesystem::create_directories(modelDir);
 
     std::string configJson = R"({
         "algorithm_code": ")" +
                              modelCode + R"(",
+        "chip_type": ")" + chipType +
+                             R"(",
         "model_type": "yolov8_det",
         "version": "1.0",
         "models": [{"name": ")" +
@@ -301,6 +304,21 @@ TEST_CASE("ModelServiceImpl: 模型服务核心逻辑", "[model-service]") {
             std::string dictionaryPath;
             REQUIRE_FALSE(sut.GetModelCfg("missing_config", configPath, resolvedModelPath, dictionaryPath));
         }
+    }
+
+    SECTION("CV186X 芯片目录可被芯片无关地发现") {
+        // prod_CV186X_<code>_... 目录(芯片型号不同于 prod_BM1688_)也必须能被发现并加载
+        CreateTestModelOnDisk(testModelsDir, "7002001", "Cv186xModel", "prod_CV186X_", "CV186X");
+
+        REQUIRE(sut.ModelValid("7002001") == true);
+
+        std::string foundName;
+        REQUIRE(sut.ModelValid("7002001", foundName) == true);
+        REQUIRE(foundName == "Cv186xModel");
+
+        auto info = sut.GetModelInfo("7002001");
+        REQUIRE(info.id == "7002001");
+        REQUIRE(info.name == "Cv186xModel");
     }
 
     std::filesystem::remove_all(testBaseDir);
