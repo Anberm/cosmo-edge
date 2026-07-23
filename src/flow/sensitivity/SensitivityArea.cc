@@ -149,6 +149,7 @@ void Sensitivity::CalcAreaTargetSensitity(AlgDataPtr algData) {
                     alarmUnit.boxs.push_back(box);
                     alarmUnit.box       = target.box;
                     alarmUnit.matchInfo = target.matchInfo;
+                    alarmUnit.targets.push_back(MakeOnEventsTarget(target));
                 }
                 LOG_INFO(
                     "{}[{}] [NEED ALARM] In Area:{}/{} Detect:{} Total:{} At Frame:{} sensitivity:{} "

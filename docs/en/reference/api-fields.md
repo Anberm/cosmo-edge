@@ -104,6 +104,7 @@ HTTP webhook and some internal event messages use `CMsgOnEventsReq` semantics:
 | `recordId` | string | Alarm record ID |
 | `files` | string[] | Related file list (defined in the DTO; the current outbound `to_json` does not output this field, only inbound deserialization reads it) |
 | `isRetryMessage` | boolean | Whether this is a retry message |
+| `targets` | object[] | Detection targets that triggered the event, with `label`, `confidence`, optional `trackId`, and pixel-coordinate `box` |
 | `property` | object | Attribute object; varies by algorithm type |
 | `category` | string | Event category |
 

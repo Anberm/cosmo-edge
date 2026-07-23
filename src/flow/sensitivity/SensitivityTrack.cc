@@ -350,6 +350,7 @@ void Sensitivity::FillAlarmData(AlgDataPtr algData, DataAlarmUnit& alarmUnit) {
 }
 
 void Sensitivity::FillAlarmDataTrackId(DataAlarmUnit& alarmUnit, TrackIdData& trackIdData) {
+    alarmUnit.targets.push_back(MakeOnEventsTarget(trackIdData.target));
     for (auto& history : trackIdData.history) {
         DataAlarmTargetConfidence targetConf;
         targetConf.box       = history.targetCondidenceInfo.box;

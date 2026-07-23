@@ -347,6 +347,7 @@ void AiRecognizer::HandFace(AlgDataPtr alg_data) {
                                                 : input->targets[index].classifyRst;
             unit.reportType  = OnEventsReportType::Realtime;
             unit.matchInfo   = match_info;
+            unit.targets.push_back(MakeOnEventsTarget(input->targets[index]));
             alg_data->taskDataAlarm.alarmData->alarms.push_back(unit);
         }
     }

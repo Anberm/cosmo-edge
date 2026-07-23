@@ -11,6 +11,7 @@
 #include "util/JsonStructUtil.h"
 #include "util/MsgBaseTypes.h"
 #include "util/MsgDynamicElement.h"
+#include "util/dto/ClientMsgEvent.h"
 #include "util/dto/ServerMsgTypes.h"
 #include "util/dto/TaskCreateTypes.h"
 
@@ -88,6 +89,37 @@ TEST_CASE("legacy JSON O(): optional fields round-trip", "[json][baseline]") {
         CHECK(restored.label == "cat");
         CHECK(restored.confidence == 0.0f);  // default
     }
+}
+
+TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {
+    cosmo::CMsgOnEventsReq event;
+    event.messageId = "event-1";
+
+    cosmo::CMsgOnEventsTarget target;
+    target.label      = "category0";
+    target.confidence = 0.93F;
+    target.trackId    = "track-1";
+    target.box.x      = 120;
+    target.box.y      = 80;
+    target.box.width  = 240;
+    target.box.height = 360;
+    event.targets.push_back(target);
+
+    std::string json;
+    REQUIRE(cosmo::util::EncodeJson(event, json));
+    auto doc = ParseJson(json);
+    REQUIRE(doc.contains("targets"));
+    REQUIRE(doc["targets"].size() == 1);
+    CHECK(doc["targets"][0]["label"] == "category0");
+    CHECK(doc["targets"][0]["confidence"].get<float>() == Catch::Approx(0.93F));
+    CHECK(doc["targets"][0]["trackId"] == "track-1");
+    CHECK(doc["targets"][0]["box"]["width"] == 240);
+
+    cosmo::CMsgOnEventsReq restored;
+    REQUIRE(cosmo::util::DecodeJson(json, restored));
+    REQUIRE(restored.targets.size() == 1);
+    CHECK(restored.targets[0].label == "category0");
+    CHECK(restored.targets[0].box.height == 360);
 }
 
 // ===========================================================================

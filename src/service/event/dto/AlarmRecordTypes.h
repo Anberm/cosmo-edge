@@ -61,6 +61,7 @@ struct AlarmEventRecord {
     int64_t eventFrame{-1};
     std::string extraFiles;
     std::string property;
+    std::string targets;
 
     std::string libPersionName;
     std::string libPersionNumber;

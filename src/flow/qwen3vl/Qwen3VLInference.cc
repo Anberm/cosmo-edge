@@ -436,6 +436,15 @@ void Qwen3VLWorker::ProcessInferResults(std::vector<InferEntry>& entries,
                 unit.box = entry.crop_info.roi;
                 unit.boxs.push_back(entry.crop_info.roi);
             }
+            CMsgOnEventsTarget target;
+            target.label      = kw;
+            target.confidence = 1.0F;
+            target.trackId    = unit.strTrackId;
+            target.box.x      = unit.box.x;
+            target.box.y      = unit.box.y;
+            target.box.width  = unit.box.width;
+            target.box.height = unit.box.height;
+            unit.targets.push_back(std::move(target));
 
             data->taskDataAlarm.alarmData->alarms.push_back(std::move(unit));
         }

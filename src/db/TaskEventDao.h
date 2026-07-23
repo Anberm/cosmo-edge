@@ -67,6 +67,7 @@ struct TaskEventData {
     int64_t event_frame{-1};  // Event frame sequence in video
     std::string extra_files;  // File list
     std::string property;     // Property in JSON format
+    std::string targets;      // Event target list in JSON format
 
     std::string lib_person_name;    // Person name
     std::string lib_person_number;  // Person number

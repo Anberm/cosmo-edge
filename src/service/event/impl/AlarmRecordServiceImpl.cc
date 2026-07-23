@@ -82,6 +82,7 @@ cosmo::service::AlarmEventRecord ToDto(cosmo::db::TaskEventData&& dao) {
     dto.eventFrame       = dao.event_frame;
     dto.extraFiles       = std::move(dao.extra_files);
     dto.property         = std::move(dao.property);
+    dto.targets          = std::move(dao.targets);
     dto.libPersionName   = std::move(dao.lib_person_name);
     dto.libPersionNumber = std::move(dao.lib_person_number);
     dto.libFacesID       = std::move(dao.lib_faces_id);
@@ -160,6 +161,7 @@ cosmo::db::TaskEventData AlarmRecordServiceImpl::AlarmDataToEventData(cosmo::Ala
     data.video_flag        = static_cast<int>(unit.videoFlag);
     data.extra_files       = unit.extraFiles;
     data.property          = unit.property;
+    data.targets           = unit.targets;
     data.event_frame       = unit.eventFrame;
     data.lib_faces_id      = unit.libFacesID;
     data.lib_person_name   = unit.libPersionName;

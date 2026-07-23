@@ -136,6 +136,7 @@ void AreaAlarm::HandAreaTargetLimit(AlgDataPtr algData, DataDetTrackClassifyPtr 
                         continue;
                     }
                     alarmUnit.boxs.push_back(target.box);
+                    alarmUnit.targets.push_back(MakeOnEventsTarget(target));
                 }
                 FillAlarmData(algData, alarmUnit);
             }
@@ -182,6 +183,7 @@ void AreaAlarm::HandAreaTargetLimit(AlgDataPtr algData, DataDetTrackClassifyPtr 
                         continue;
                     }
                     alarmUnit.boxs.push_back(target.box);
+                    alarmUnit.targets.push_back(MakeOnEventsTarget(target));
                     if (target.bestEl.bActive) {
                         alarmUnit.bestInfos.push_back(target.bestEl);
                     }

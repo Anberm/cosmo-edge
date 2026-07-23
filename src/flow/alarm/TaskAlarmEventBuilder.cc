@@ -343,7 +343,8 @@ bool TaskAlarm::FillAlarmData(AlgDataPtr algData) {
         areaData.haveReport    = true;
 
         // Build event
-        auto eventData = BuildBaseEventData(algData, alarmUnit);
+        auto eventData    = BuildBaseEventData(algData, alarmUnit);
+        eventData.targets = alarmUnit.targets;
         AttachAlarmMedia(eventData, algData, alarmUnit);
         FillEventProperty(eventData, algData, alarmUnit, idData);
 
@@ -428,6 +429,7 @@ void TaskAlarm::EventRecord(CMsgOnEventsReq& eventData) {
         }
         (void)util::EncodeJson(eventData.property, alarmRecordUnit.property);
     }
+    (void)util::EncodeJson(eventData.targets, alarmRecordUnit.targets);
     service::ServiceRegistry::Instance().Get<service::IAlarmRecordService>().Insert(alarmRecordUnit);
 }
 
