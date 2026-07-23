@@ -121,6 +121,8 @@ CosmoEdge基于算能的AI边缘计算设备，采用算能BM1688性能强劲处
 | 网口       | 10/100/1000Mbps自适应网口 * 2个                  |
 | 接口       | USB3.0*2、 TypeC*1 、HDMI*1 、 TF*1 、 SIM*1 |
 
+> 需要开箱即用的认证设备，可通过[淘宝购买 CosmoEdge-ready 认证设备](https://item.taobao.com/item.htm?id=1066672051450)。开源软件无需购买设备即可使用；中国大陆以外地区的可用性及项目部署需求请联系 [hello@cosmowander.ai](mailto:hello@cosmowander.ai)。
+
 ### 第一步：硬件连接
 
 将设备接入您的局域网并通电。
