@@ -2,8 +2,11 @@
 
 #include "app/application.h"
 
+#include <malloc.h>
+
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 
@@ -19,6 +22,33 @@
 namespace cosmo::app {
 
 Application::Application(std::string name) : app_name_(std::move(name)) {}
+
+namespace {
+    // Configure glibc malloc to prevent per-thread arena fragmentation under
+    // concurrent video inference. Pooled inference threads alloc/free many
+    // multi-MB frame buffers; ptmalloc2 fragments each thread's arena and never
+    // returns it to the OS (malloc_trim only handles the main arena). Under
+    // --jobs N benchmarks this makes RSS climb monotonically and OOM the box
+    // even though every allocation is correctly freed (verified: deletes
+    // succeed, pool recycle succeeds, no orphaned objects). Limiting arenas +
+    // aggressive trim/mmap returns freed memory to the OS promptly.
+    // Each setting honors an explicit MALLOC_* env override so operators can
+    // tune per-deployment (e.g. raise MALLOC_ARENA_MAX to trade RSS for
+    // throughput under high concurrency).
+    void ConfigureAllocator() {
+        auto apply = [](int param, const char* env_name, int default_val) {
+            const char* env = std::getenv(env_name);
+            int val         = env ? std::atoi(env) : default_val;
+            if (val > 0) {
+                mallopt(param, val);
+            }
+        };
+        apply(M_ARENA_MAX, "MALLOC_ARENA_MAX", 2);
+        apply(M_TRIM_THRESHOLD, "MALLOC_TRIM_THRESHOLD_", 65536);
+        apply(M_MMAP_THRESHOLD, "MALLOC_MMAP_THRESHOLD_", 131072);
+        apply(M_TOP_PAD, "MALLOC_TOP_PAD_", 0);
+    }
+}  // namespace
 
 void LogInit(const std::string& name, const std::string& basedir, const std::string& version) {
     using namespace constants;
@@ -55,6 +85,10 @@ void Application::run(const char* base_dir) {
     try {
         signal(SIGILL, SIG_IGN);
         signal(SIGPIPE, SIG_IGN);
+
+        // Tune glibc malloc before any inference allocation to prevent
+        // per-thread arena fragmentation (see ConfigureAllocator comment).
+        ConfigureAllocator();
 
         SwDevicePreInit();
 
