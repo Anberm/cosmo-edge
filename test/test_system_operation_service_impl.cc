@@ -163,12 +163,14 @@ TEST_CASE("PacketUpgrade validates archive boundaries before extraction", "[syst
         REQUIRE_FALSE(fs::exists(data_root / "payload"));
     }
 
-    SECTION("rejects a package containing a symbolic link") {
-        const auto source = root / "symlink_source";
+    SECTION("rejects a package containing an unsafe symlink") {
+        const auto source = root / "symlink_unsafe_source";
         CreateUpgradeLayout(source);
-        fs::create_symlink(root / "outside-target", source / "bin" / "unsafe-link", ec);
+        // Target traverses above the archive root: must still be rejected even
+        // though safe same-directory symlinks are now allowed.
+        fs::create_symlink("../../etc/passwd", source / "bin" / "unsafe-link", ec);
         REQUIRE(!ec);
-        const auto unsigned_archive = staging / "symlink.tar.gz";
+        const auto unsigned_archive = staging / "symlink_unsafe.tar.gz";
         std::string output;
         REQUIRE(cosmo::util::Exec({"tar", "-czf", unsigned_archive.string(), "-C", source.string(), "."},
                                   output) == 0);
@@ -177,6 +179,29 @@ TEST_CASE("PacketUpgrade validates archive boundaries before extraction", "[syst
 
         REQUIRE(cosmo::PacketUpgrade(archive) == cosmo::util::ErrorEnum::UpgradeFileVerifyFailed);
         REQUIRE(fs::is_regular_file(archive));
+    }
+
+    SECTION("accepts a package containing safe internal symlinks") {
+        const auto source = root / "symlink_safe_source";
+        CreateUpgradeLayout(source);
+        // Shared-library versioning chain: libfoo.so -> libfoo.so.1 -> the real
+        // file, all relative and confined to lib/. Must be accepted.
+        std::ofstream(source / "lib" / "libfoo.so.1.0.0") << "payload";
+        fs::create_symlink("libfoo.so.1.0.0", source / "lib" / "libfoo.so.1", ec);
+        REQUIRE(!ec);
+        fs::create_symlink("libfoo.so.1", source / "lib" / "libfoo.so", ec);
+        REQUIRE(!ec);
+        const auto unsigned_archive = staging / "symlink_safe.tar.gz";
+        std::string output;
+        REQUIRE(cosmo::util::Exec({"tar", "-czf", unsigned_archive.string(), "-C", source.string(), "."},
+                                  output) == 0);
+        const auto archive = AddUpgradeChecksumToName(unsigned_archive, staging, "9.9.4");
+        REQUIRE_FALSE(archive.empty());
+
+        REQUIRE(cosmo::PacketUpgrade(archive) == cosmo::util::ErrorEnum::Success);
+        const auto upgrade_root = fs::path(cosmo::path::GetUpgradePath());
+        REQUIRE(fs::is_symlink(upgrade_root / "lib" / "libfoo.so"));
+        REQUIRE(fs::is_regular_file(upgrade_root / "lib" / "libfoo.so.1.0.0"));
     }
 
     SECTION("rejects a sparse member above the declared per-file limit") {
