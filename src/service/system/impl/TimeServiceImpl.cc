@@ -2,16 +2,27 @@
 
 #include "service/system/impl/TimeServiceImpl.h"
 
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
+#include <utility>
 
 #include "service/detail/ServiceRegistry.h"
 #include "service/system/impl/NtpHelpers.h"
 #include "util/DateTimeFormat.h"
 #include "util/ErrorCode.h"
+#include "util/JsonStructUtil.h"
 #include "util/LimitedTypeJson.h"
 #include "util/PathUtil.h"
 #include "util/TimeUtil.h"
@@ -199,6 +210,80 @@ struct TimeServiceImpl::TimeZoneCityList {
     }
 };
 
+struct TimeServiceImpl::NtpOperation {
+    bool IsCancelled() const {
+        return cancelled.load(std::memory_order_acquire);
+    }
+
+    bool AttachSocket(int descriptor) {
+        std::lock_guard<std::mutex> lock(socket_mutex);
+        if (IsCancelled()) {
+            return false;
+        }
+        socket = descriptor;
+        return true;
+    }
+
+    void CloseSocket(int descriptor) {
+        {
+            std::lock_guard<std::mutex> lock(socket_mutex);
+            if (socket == descriptor) {
+                socket = -1;
+            }
+        }
+        close(descriptor);
+    }
+
+    void Activate() {
+        {
+            std::lock_guard<std::mutex> lock(wait_mutex);
+            activated = true;
+        }
+        wait_cv.notify_all();
+    }
+
+    bool WaitUntilActivated() {
+        std::unique_lock<std::mutex> lock(wait_mutex);
+        wait_cv.wait(lock, [this]() { return activated || IsCancelled(); });
+        return activated && !IsCancelled();
+    }
+
+    bool WaitFor(std::chrono::milliseconds duration) {
+        std::unique_lock<std::mutex> lock(wait_mutex);
+        return wait_cv.wait_for(lock, duration, [this]() { return IsCancelled(); });
+    }
+
+    void ApplyTime(int64_t timestamp) {
+        std::lock_guard<std::mutex> lock(apply_mutex);
+        if (!IsCancelled()) {
+            ApplyNtpTime(timestamp);
+        }
+    }
+
+    void Cancel() {
+        cancelled.store(true, std::memory_order_release);
+        wait_cv.notify_all();
+        {
+            std::lock_guard<std::mutex> lock(socket_mutex);
+            if (socket >= 0) {
+                // The worker retains descriptor ownership. shutdown() interrupts a
+                // blocking send/recv without exposing a descriptor-reuse race.
+                (void)shutdown(socket, SHUT_RDWR);
+            }
+        }
+        // Do not return while a successful calibration is applying system time.
+        std::lock_guard<std::mutex> lock(apply_mutex);
+    }
+
+    std::atomic<bool> cancelled{false};
+    std::mutex socket_mutex;
+    int socket{-1};
+    std::mutex wait_mutex;
+    std::condition_variable wait_cv;
+    bool activated{false};
+    std::mutex apply_mutex;
+};
+
 // ---------------------------------------------------------------------------
 // Construction / destruction
 // ---------------------------------------------------------------------------
@@ -218,11 +303,23 @@ TimeServiceImpl::~TimeServiceImpl() {
 // NTP calibration — single-shot time sync
 // ---------------------------------------------------------------------------
 
-int64_t TimeServiceImpl::NtpCalibrate(const std::string& host, int port) {
-    int sockfd = ConnectNtpServer(host, port);
+int64_t TimeServiceImpl::NtpCalibrate(const std::string& host, int port,
+                                      const std::shared_ptr<NtpOperation>& operation) {
+    if (operation == nullptr || operation->IsCancelled()) {
+        return 0;
+    }
+
+    int sockfd = ConnectNtpServer(
+        host, port, [operation]() { return operation->IsCancelled(); },
+        [operation](std::chrono::milliseconds duration) { (void)operation->WaitFor(duration); });
     if (sockfd < 0) {
         return 0;
     }
+    if (!operation->AttachSocket(sockfd)) {
+        close(sockfd);
+        return 0;
+    }
+    const auto close_socket = [&operation, sockfd]() { operation->CloseSocket(sockfd); };
 
     // T1: client send time
     int64_t t[4] = {0};
@@ -233,26 +330,38 @@ int64_t TimeServiceImpl::NtpCalibrate(const std::string& host, int port) {
     struct timeval now {};
     gettimeofday(&now, nullptr);
     TimevalToTimestamp(pkt.transmit_ts, now.tv_sec, now.tv_usec);
-    t[0] = TimevalToNs100(now.tv_sec, now.tv_usec);
+    t[0]                           = TimevalToNs100(now.tv_sec, now.tv_usec);
+    const auto request_transmit_ts = pkt.transmit_ts;
 
     HtonPacket(pkt);
-    if (send(sockfd, &pkt, sizeof(pkt), 0) < 0) {
+    if (send(sockfd, &pkt, sizeof(pkt), 0) != static_cast<ssize_t>(sizeof(pkt))) {
         LOG_INFO("{}", "NTP send failed");
-        close(sockfd);
+        close_socket();
         return 0;
     }
 
     // Receive response
     NtpPacket resp{};
-    if (recv(sockfd, &resp, sizeof(resp), 0) < 0) {
-        LOG_INFO("{}", "NTP recv failed");
-        close(sockfd);
+    const auto received = recv(sockfd, &resp, sizeof(resp), MSG_TRUNC);
+    if (received != static_cast<ssize_t>(sizeof(resp))) {
+        if (!operation->IsCancelled()) {
+            LOG_INFO("{}", "NTP recv failed");
+        }
+        close_socket();
         return 0;
     }
     t[3] = GetTimevalueNs100();  // T4: client receive time
-    close(sockfd);
+    close_socket();
+
+    if (operation->IsCancelled()) {
+        return 0;
+    }
 
     NtohPacket(resp);
+    if (!ValidateNtpResponse(resp, request_transmit_ts)) {
+        LOG_WARN("{}", "NTP response validation failed");
+        return 0;
+    }
     t[1] = TimestampToNs100(resp.receive_ts);   // T2: server receive time
     t[2] = TimestampToNs100(resp.transmit_ts);  // T3: server transmit time
 
@@ -265,55 +374,63 @@ int64_t TimeServiceImpl::NtpCalibrate(const std::string& host, int port) {
 // ---------------------------------------------------------------------------
 
 void TimeServiceImpl::StopNtpTimer() {
+    std::thread thread;
+    std::shared_ptr<NtpOperation> operation;
     {
         std::lock_guard<std::mutex> lock(ntp_mutex_);
-        ntp_stop_ = true;
+        operation = std::move(ntp_operation_);
+        thread    = std::move(ntp_thread_);
     }
-    ntp_cv_.notify_all();
-    if (ntp_thread_.joinable()) {
-        ntp_thread_.join();
+    if (operation != nullptr) {
+        operation->Cancel();
+    }
+    if (thread.joinable()) {
+        thread.join();
     }
     LOG_INFO("{}", "NTP sync timer stopped");
 }
 
-void TimeServiceImpl::StartNtpTimer(int interval_min, const std::string& host, int port) {
-    StopNtpTimer();
-
+bool TimeServiceImpl::StartNtpTimer(int interval_min, const std::string& host, int port) {
     int interval_sec = interval_min * 60;
     if (interval_sec < kMinSyncIntervalSec) {
         interval_sec = kMinSyncIntervalSec;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(ntp_mutex_);
-        ntp_stop_ = false;
+    std::shared_ptr<NtpOperation> operation;
+    std::thread thread;
+    try {
+        operation = std::make_shared<NtpOperation>();
+        thread    = std::thread([operation, interval_sec, host, port]() {
+            if (!operation->WaitUntilActivated()) {
+                return;
+            }
+
+            LOG_INFO("NTP sync thread started, interval={}s host={} port={}", interval_sec, host, port);
+            while (!operation->IsCancelled()) {
+                if (auto timestamp = NtpCalibrate(host, port, operation)) {
+                    operation->ApplyTime(timestamp);
+                }
+                if (operation->WaitFor(std::chrono::seconds(interval_sec))) {
+                    break;
+                }
+            }
+            LOG_INFO("{}", "NTP sync thread exiting");
+        });
+    } catch (const std::exception& e) {
+        LOG_ERRO("Failed to start NTP sync thread: {}", e.what());
+        return false;
     }
 
-    ntp_thread_ = std::thread([this, interval_sec, host, port]() {
-        LOG_INFO("NTP sync thread started, interval={}s host={} port={}", interval_sec, host, port);
-
-        // Initial sync immediately
-        if (auto ts = NtpCalibrate(host, port)) {
-            ApplyNtpTime(ts);
-        }
-
-        std::unique_lock<std::mutex> lock(ntp_mutex_);
-        while (!ntp_stop_) {
-            ntp_cv_.wait_for(lock, std::chrono::seconds(interval_sec));
-            // cppcheck-suppress knownConditionTrueFalse
-            if (ntp_stop_) {
-                break;
-            }
-            // Periodic sync (release lock during network I/O)
-            lock.unlock();
-            if (auto ts = NtpCalibrate(host, port)) {
-                ApplyNtpTime(ts);
-            }
-            lock.lock();
-        }
-
-        LOG_INFO("{}", "NTP sync thread exiting");
-    });
+    // Creating the replacement can fail; retain the active timer until a fully
+    // constructed replacement is ready.
+    StopNtpTimer();
+    {
+        std::lock_guard<std::mutex> lock(ntp_mutex_);
+        ntp_operation_ = operation;
+        ntp_thread_    = std::move(thread);
+    }
+    operation->Activate();
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,9 +442,6 @@ void TimeServiceImpl::LoadConfig() {
     tz_config_path_  = (std::filesystem::path(config_dir) / "TimeZoneInfo.json").string();
     ntp_config_path_ = (std::filesystem::path(config_dir) / "NTPStatusConfig.json").string();
 
-    ReadJson(*tz_persist_, tz_config_path_);
-    ReadJson(*ntp_persist_, ntp_config_path_);
-
     // Parse embedded timezone city list (no file I/O needed)
     try {
         auto doc    = nlohmann::json::parse(kTimeZoneCitysJson);
@@ -336,51 +450,147 @@ void TimeServiceImpl::LoadConfig() {
         LOG_ERRO("Failed to parse embedded timezone city list: {}", e.what());
     }
 
-    // Single source of truth for TZ environment setup during startup
-    ApplyTimeZone(tz_persist_->tz_citys);
+    NtpPersist loaded_ntp;
+    std::error_code ntp_exists_error;
+    const bool ntp_config_exists = std::filesystem::exists(ntp_config_path_, ntp_exists_error);
+    const bool ntp_loaded        = cosmo::util::LoadStructFromJsonFile(ntp_config_path_, loaded_ntp);
+    if (ntp_loaded && IsValidNtpConfig(loaded_ntp)) {
+        *ntp_persist_ = std::move(loaded_ntp);
+    } else {
+        LOG_WARN("{}", "Invalid persisted NTP configuration, falling back to safe defaults");
+        *ntp_persist_ = NtpPersist{};
+        if (ntp_config_exists || ntp_exists_error) {
+            // A malformed persisted configuration must not unexpectedly enable
+            // external clock control after an upgrade or restart.
+            ntp_persist_->enable = 0;
+        }
+        if (!SaveNtpConfig(*ntp_persist_)) {
+            LOG_WARN("Failed to repair invalid NTP configuration: {}", ntp_config_path_);
+        }
+    }
+
+    TimeZonePersist loaded_time_zone;
+    const bool time_zone_loaded = cosmo::util::LoadStructFromJsonFile(tz_config_path_, loaded_time_zone);
+    const int requested_city    = time_zone_loaded && loaded_time_zone.tz_citys <=
+                                                       static_cast<uint64_t>(std::numeric_limits<int>::max())
+                                      ? static_cast<int>(loaded_time_zone.tz_citys)
+                                      : 75;
+
+    TimeZonePersist time_zone;
+    std::string environment;
+    bool time_zone_valid = BuildTimeZoneConfig(requested_city, time_zone, environment);
+    if (!time_zone_valid) {
+        LOG_WARN("Invalid persisted timezone id {}, falling back to 75", loaded_time_zone.tz_citys);
+        time_zone_valid = BuildTimeZoneConfig(75, time_zone, environment);
+    }
+    if (time_zone_valid) {
+        *tz_persist_ = time_zone;
+        if (!ApplyTimeZoneEnvironment(environment)) {
+            LOG_ERRO("Failed to apply persisted timezone environment: {}", environment);
+        }
+        const bool time_zone_needs_repair =
+            !time_zone_loaded || loaded_time_zone.tz_citys != time_zone.tz_citys ||
+            loaded_time_zone.tz_west != time_zone.tz_west ||
+            loaded_time_zone.tz_offset != time_zone.tz_offset ||
+            loaded_time_zone.content != time_zone.content || loaded_time_zone.value != time_zone.value;
+        if (time_zone_needs_repair) {
+            if (!SaveTimeZoneConfig(time_zone)) {
+                LOG_WARN("Failed to repair invalid timezone configuration: {}", tz_config_path_);
+            }
+        }
+    } else {
+        LOG_ERRO("{}", "Embedded timezone list does not contain the default timezone");
+    }
+
+    if (ntp_persist_->enable == 1 &&
+        !StartNtpTimer(ntp_persist_->interval, ntp_persist_->ntp_server, ntp_persist_->ntp_port)) {
+        LOG_ERRO("{}", "Failed to restore persisted NTP timer");
+        ntp_persist_->enable = 0;
+        if (!SaveNtpConfig(*ntp_persist_)) {
+            LOG_ERRO("{}", "Failed to persist disabled NTP state after timer startup failure");
+        }
+    }
 }
 
-void TimeServiceImpl::ApplyTimeZone(int city_id) {
-    std::string tz_value  = tz_persist_->value;
-    std::string city_name = tz_persist_->content;
+bool TimeServiceImpl::IsValidNtpConfig(const NtpPersist& config) {
+    return (config.enable == 0 || config.enable == 1) && IsValidNtpHost(config.ntp_server) &&
+           config.ntp_port > 0 && config.ntp_port <= 65535 && config.interval >= 1 &&
+           config.interval <= kMaxSyncIntervalMin;
+}
 
+bool TimeServiceImpl::BuildTimeZoneConfig(int city_id, TimeZonePersist& config,
+                                          std::string& environment) const {
     auto it =
         std::find_if(city_list_->timezone_list.begin(), city_list_->timezone_list.end(),
                      [city_id](const auto& city) { return city.area_id == static_cast<size_t>(city_id); });
-    if (it != city_list_->timezone_list.end()) {
-        tz_value  = it->tz;
-        city_name = it->zh_cn;
+    if (it == city_list_->timezone_list.end()) {
+        return false;
     }
 
     uint64_t is_west = 0;
     uint64_t offset  = 0;
-    if (ParseTimeZoneString(tz_value, is_west, offset)) {
-        tz_persist_->tz_citys  = city_id;
-        tz_persist_->content   = city_name;
-        tz_persist_->value     = tz_value;
-        tz_persist_->tz_west   = is_west;
-        tz_persist_->tz_offset = offset;
-
-        // NOTE: setenv and tzset affect process global state.
-        // It is not strictly thread-safe with localtime() calls in other threads.
-        char buffer[64] = {0};
-        snprintf(buffer, sizeof(buffer), "UTC%s%02zu:%02zu", is_west ? "+" : "-",
-                 static_cast<size_t>(offset / 100), static_cast<size_t>(offset % 100));
-        setenv("TZ", buffer, 1);
-        tzset();
-
-        SaveTimeZoneConfig();
-    } else {
-        LOG_ERRO("Failed to parse time zone string: {}", tz_value);
+    if (!ParseTimeZoneString(it->tz, is_west, offset)) {
+        LOG_ERRO("Failed to parse time zone string: {}", it->tz);
+        return false;
     }
+
+    config.tz_citys  = static_cast<uint64_t>(city_id);
+    config.content   = it->zh_cn;
+    config.value     = it->tz;
+    config.tz_west   = is_west;
+    config.tz_offset = offset;
+
+    char buffer[64]  = {};
+    const auto count = snprintf(buffer, sizeof(buffer), "UTC%s%02zu:%02zu", is_west ? "+" : "-",
+                                static_cast<size_t>(offset / 100), static_cast<size_t>(offset % 100));
+    if (count <= 0 || static_cast<size_t>(count) >= sizeof(buffer)) {
+        return false;
+    }
+    environment = buffer;
+    return true;
 }
 
-void TimeServiceImpl::SaveNtpConfig() {
-    WriteJson(*ntp_persist_, ntp_config_path_);
+bool TimeServiceImpl::ApplyTimeZoneEnvironment(const std::string& environment) {
+    if (setenv("TZ", environment.c_str(), 1) != 0) {
+        LOG_ERRO("Failed to set TZ environment to {}", environment);
+        return false;
+    }
+    tzset();
+    return true;
 }
 
-void TimeServiceImpl::SaveTimeZoneConfig() {
-    WriteJson(*tz_persist_, tz_config_path_);
+bool TimeServiceImpl::SaveNtpConfig(const NtpPersist& config) const {
+    return cosmo::util::SaveStructToJsonFile(ntp_config_path_, config);
+}
+
+bool TimeServiceImpl::SaveTimeZoneConfig(const TimeZonePersist& config) const {
+    return cosmo::util::SaveStructToJsonFile(tz_config_path_, config);
+}
+
+bool TimeServiceImpl::PersistConfig(const NtpPersist& ntp_config, const TimeZonePersist& time_zone_config,
+                                    const NtpPersist& old_ntp_config) const {
+    if (!SaveNtpConfig(ntp_config)) {
+        LOG_ERRO("Failed to persist NTP configuration: {}", ntp_config_path_);
+        return false;
+    }
+    if (!SaveTimeZoneConfig(time_zone_config)) {
+        LOG_ERRO("Failed to persist timezone configuration: {}", tz_config_path_);
+        if (!SaveNtpConfig(old_ntp_config)) {
+            LOG_ERRO("Failed to roll back NTP configuration: {}", ntp_config_path_);
+        }
+        return false;
+    }
+    return true;
+}
+
+void TimeServiceImpl::RestoreConfig(const NtpPersist& ntp_config,
+                                    const TimeZonePersist& time_zone_config) const {
+    if (!SaveNtpConfig(ntp_config)) {
+        LOG_ERRO("Failed to restore NTP configuration: {}", ntp_config_path_);
+    }
+    if (!SaveTimeZoneConfig(time_zone_config)) {
+        LOG_ERRO("Failed to restore timezone configuration: {}", tz_config_path_);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -410,42 +620,130 @@ TimeStatus TimeServiceImpl::GetTimeStatus(std::vector<TimeZoneItem>& zones) {
 }
 
 util::ErrorEnum TimeServiceImpl::SyncNtp(const NtpConfig& config, int time_zone_id) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    if (time_zone_id < 1 || time_zone_id > 95 || config.enable < 0 || config.enable > 2) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    if (config.enable != 0 && (!IsValidNtpHost(config.server) || config.port <= 0 || config.port > 65535 ||
+                               config.interval < 1 || config.interval > kMaxSyncIntervalMin)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
 
-    if (config.enable == 0) {
-        StopNtpTimer();
-        ntp_persist_->enable = 0;
-        SaveNtpConfig();
-    } else if (config.enable == 1) {
-        ntp_persist_->enable     = 1;
-        ntp_persist_->ntp_server = config.server;
-        ntp_persist_->ntp_port   = config.port;
-        ntp_persist_->interval   = config.interval;
-        SaveNtpConfig();
-
-        StartNtpTimer(config.interval, config.server, config.port);
-    } else {
+    if (config.enable == 2) {
         // Test mode — single calibration attempt
-        if (NtpCalibrate(config.server, config.port) == 0) {
+        auto operation = std::make_shared<NtpOperation>();
+        if (NtpCalibrate(config.server, config.port, operation) == 0) {
             LOG_INFO("{}", "NTP test failed");
             return cosmo::util::ErrorEnum::TimeSyncFailed;
         }
     }
 
-    ApplyTimeZone(time_zone_id);
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    TimeZonePersist time_zone_config;
+    std::string environment;
+    if (!BuildTimeZoneConfig(time_zone_id, time_zone_config, environment)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+
+    const NtpPersist old_ntp_config            = *ntp_persist_;
+    const TimeZonePersist old_time_zone_config = *tz_persist_;
+    NtpPersist ntp_config                      = old_ntp_config;
+    if (config.enable == 0) {
+        ntp_config.enable = 0;
+    } else if (config.enable == 1) {
+        ntp_config.enable     = 1;
+        ntp_config.ntp_server = config.server;
+        ntp_config.ntp_port   = config.port;
+        ntp_config.interval   = config.interval;
+    }
+
+    TimeZonePersist canonical_old_time_zone;
+    std::string old_environment;
+    if (!BuildTimeZoneConfig(static_cast<int>(old_time_zone_config.tz_citys), canonical_old_time_zone,
+                             old_environment)) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+
+    if (!PersistConfig(ntp_config, time_zone_config, old_ntp_config)) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+    if (!ApplyTimeZoneEnvironment(environment)) {
+        RestoreConfig(old_ntp_config, old_time_zone_config);
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+
+    *ntp_persist_ = ntp_config;
+    *tz_persist_  = time_zone_config;
+
+    if (config.enable == 1 &&
+        !StartNtpTimer(ntp_config.interval, ntp_config.ntp_server, ntp_config.ntp_port)) {
+        *ntp_persist_ = old_ntp_config;
+        *tz_persist_  = old_time_zone_config;
+        if (!ApplyTimeZoneEnvironment(old_environment)) {
+            LOG_ERRO("Failed to restore timezone environment: {}", old_environment);
+        }
+        RestoreConfig(old_ntp_config, old_time_zone_config);
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+    if (config.enable == 0) {
+        StopNtpTimer();
+    }
     return cosmo::util::ErrorEnum::Success;
 }
 
 cosmo::util::ErrorEnum TimeServiceImpl::SetTime(int64_t timestamp, int time_zone_id) {
     std::lock_guard<std::mutex> lock(mutex_);
-    StopNtpTimer();
-    ntp_persist_->enable = 0;
-    SaveNtpConfig();
+    if (timestamp <= 0 || time_zone_id < 1 || time_zone_id > 95) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
 
-    ApplyTimeZone(time_zone_id);
+    TimeZonePersist time_zone_config;
+    std::string environment;
+    if (!BuildTimeZoneConfig(time_zone_id, time_zone_config, environment)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+
+    const NtpPersist old_ntp_config            = *ntp_persist_;
+    const TimeZonePersist old_time_zone_config = *tz_persist_;
+    NtpPersist ntp_config                      = old_ntp_config;
+    ntp_config.enable                          = 0;
+
+    TimeZonePersist canonical_old_time_zone;
+    std::string old_environment;
+    if (!BuildTimeZoneConfig(static_cast<int>(old_time_zone_config.tz_citys), canonical_old_time_zone,
+                             old_environment)) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+
+    if (!PersistConfig(ntp_config, time_zone_config, old_ntp_config)) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+    if (!ApplyTimeZoneEnvironment(environment)) {
+        RestoreConfig(old_ntp_config, old_time_zone_config);
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+
+    *ntp_persist_ = ntp_config;
+    *tz_persist_  = time_zone_config;
+    StopNtpTimer();
+
     auto result = cosmo::platform::SetSystemTime(timestamp);
     if (result != cosmo::util::ErrorEnum::Success) {
         LOG_WARN("set time failed:[{}], code:{}", timestamp, static_cast<int>(result));
+
+        if (old_ntp_config.enable == 1 &&
+            !StartNtpTimer(old_ntp_config.interval, old_ntp_config.ntp_server, old_ntp_config.ntp_port)) {
+            // The candidate disabled state remains internally consistent when
+            // restoration cannot create its required worker.
+            LOG_ERRO("{}", "Failed to restore NTP timer after setting system time failed");
+            return cosmo::util::ErrorEnum::SysErr;
+        }
+        *ntp_persist_ = old_ntp_config;
+        *tz_persist_  = old_time_zone_config;
+        if (!ApplyTimeZoneEnvironment(old_environment)) {
+            LOG_ERRO("Failed to restore timezone environment: {}", old_environment);
+        }
+        RestoreConfig(old_ntp_config, old_time_zone_config);
         return result;
     }
     LOG_INFO("set time:[{}]", timestamp);

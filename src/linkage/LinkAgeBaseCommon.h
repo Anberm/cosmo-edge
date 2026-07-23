@@ -8,14 +8,21 @@
 #include "util/dto/AlgorithmMsgTypes.h"
 namespace cosmo::linkage {
 
-inline constexpr std::string_view kLaAlarmDataCode   = "EVT_00001";
-inline constexpr std::string_view kLaAudioDeviceCode = "DA_00001";
+// IDs emitted by data/resource/*/layout/linkageStorages.json.
+inline constexpr std::string_view kLaAlarmDataCode   = "LA_AlarmData_Code";
+inline constexpr std::string_view kLaAudioDeviceCode = "LA_AudioDevice_Code";
+// Keep already-persisted strategies from older releases readable.
+inline constexpr std::string_view kLaAlarmDataLegacyCode   = "EVT_00001";
+inline constexpr std::string_view kLaAudioDeviceLegacyCode = "DA_00001";
 
 inline constexpr std::string_view kKeyStrageAlgs                 = "strageAlgorithms";
+inline constexpr std::string_view kKeyLinkageAlgs                = "algs";
 inline constexpr std::string_view kKeyStrageAudioDeviceId        = "deviceSN";
+inline constexpr std::string_view kKeyLinkageAudioDeviceId       = "audioDeviceId";
 inline constexpr std::string_view kKeyStrageAudioDeviceOperation = "operation";
 inline constexpr std::string_view kKeyStrageAudioDeviceData      = "data";
 inline constexpr std::string_view kKeyStrageAudioDeviceText      = "dataText";
+inline constexpr std::string_view kKeyLinkageAudioDeviceText     = "text";
 inline constexpr std::string_view kKeyStrageAudioDeviceTone      = "tone";
 inline constexpr std::string_view kKeyStrageAudioDeviceSpeed     = "speed";
 inline constexpr std::string_view kKeyStrageAudioDeviceVolume    = "volume";

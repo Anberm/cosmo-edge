@@ -5,6 +5,7 @@
 .antigravitycli
 .claude
 /.codex/
+/.agents/skills/
 CLAUDE.md
 AGENTS.md
 build

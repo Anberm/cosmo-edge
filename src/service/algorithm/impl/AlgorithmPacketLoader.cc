@@ -3,8 +3,11 @@
 #include "service/algorithm/impl/AlgorithmPacketLoader.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <filesystem>
-#include <list>
+#include <fstream>
+#include <system_error>
 
 #include "nlohmann/json.hpp"
 #include "service/algorithm/IActionService.h"
@@ -12,55 +15,155 @@
 #include "service/algorithm/impl/AlgorithmLayoutMng.h"
 #include "service/algorithm/impl/AlgorithmValidator.h"
 #include "service/detail/ServiceRegistry.h"
+#include "util/ArchiveListingValidator.h"
 #include "util/DateTimeFormat.h"
 #include "util/Exec.h"
 #include "util/FileUtil.h"
 #include "util/JsonFileUtil.h"
 #include "util/JsonStructUtil.h"
 #include "util/Log.h"
+#include "util/PathUtil.h"
 
 namespace cosmo::service::detail {
 
+namespace {
+
+    constexpr size_t kMaxAlgorithmArchiveEntries         = 10000;
+    constexpr std::uintmax_t kMaxAlgorithmArchiveBytes   = 500ULL * 1024 * 1024;
+    constexpr std::uintmax_t kMaxAlgorithmExtractedBytes = 1024ULL * 1024 * 1024;
+
+    enum class AlgorithmArchiveKind {
+        kUnknown,
+        kZip,
+        kTarGzip,
+    };
+
+    AlgorithmArchiveKind DetectAlgorithmArchiveKind(const std::string& path, const std::string& filename) {
+        std::ifstream stream(path, std::ios::binary);
+        std::array<unsigned char, 4> header{};
+        if (!stream.read(reinterpret_cast<char*>(header.data()), header.size())) {
+            return AlgorithmArchiveKind::kUnknown;
+        }
+
+        const bool is_zip = header[0] == 'P' && header[1] == 'K' &&
+                            ((header[2] == 3 && header[3] == 4) || (header[2] == 5 && header[3] == 6) ||
+                             (header[2] == 7 && header[3] == 8));
+        if (filename.size() > 4 && filename.compare(filename.size() - 4, 4, ".zip") == 0) {
+            return is_zip ? AlgorithmArchiveKind::kZip : AlgorithmArchiveKind::kUnknown;
+        }
+
+        const bool has_tar_gzip_extension =
+            (filename.size() > 7 && filename.compare(filename.size() - 7, 7, ".tar.gz") == 0) ||
+            (filename.size() > 4 && filename.compare(filename.size() - 4, 4, ".tgz") == 0);
+        if (has_tar_gzip_extension && header[0] == 0x1f && header[1] == 0x8b) {
+            return AlgorithmArchiveKind::kTarGzip;
+        }
+        return AlgorithmArchiveKind::kUnknown;
+    }
+
+    bool ValidateAlgorithmArchiveListing(const std::string& archive_path, AlgorithmArchiveKind kind) {
+        const auto format = kind == AlgorithmArchiveKind::kZip
+                                ? cosmo::util::ArchiveListingFormat::kZipVerbose
+                                : cosmo::util::ArchiveListingFormat::kTarVerbose;
+        if (!cosmo::util::ValidateArchiveListingFile(
+                archive_path, format,
+                {kMaxAlgorithmArchiveEntries, kMaxAlgorithmArchiveBytes, kMaxAlgorithmExtractedBytes})) {
+            LOG_WARN("Failed to inspect algorithm archive: {}", archive_path);
+            return false;
+        }
+        return true;
+    }
+
+    std::string AlgorithmExtractDirectoryName(const std::string& filename, AlgorithmArchiveKind kind) {
+        if (kind == AlgorithmArchiveKind::kTarGzip) {
+            if (filename.size() > 7 && filename.compare(filename.size() - 7, 7, ".tar.gz") == 0) {
+                return filename.substr(0, filename.size() - 7);
+            }
+            return filename.substr(0, filename.size() - 4);
+        }
+        return filename.substr(0, filename.size() - 4);
+    }
+
+}  // namespace
+
 std::string AlgorithmPacketLoader::UnzipPackageFile(const std::string& filePath) {
-    // Determine output directory: strip archive extension(s)
-    std::string upload_path;
-    // Handle .tar.gz / .tgz double extension
-    if (filePath.size() > 7 && filePath.substr(filePath.size() - 7) == ".tar.gz") {
-        upload_path = filePath.substr(0, filePath.size() - 7);
-    } else if (filePath.size() > 4 && filePath.substr(filePath.size() - 4) == ".tgz") {
-        upload_path = filePath.substr(0, filePath.size() - 4);
-    } else {
-        upload_path = cosmo::util::RemoveExtension(filePath);
-    }
-
     std::error_code ec;
-    std::filesystem::create_directories(upload_path, ec);
-    // Choose decompression command based on file extension
-    std::vector<std::string> argv;
-    bool is_gzip = false;
-    if (filePath.size() > 7 && filePath.substr(filePath.size() - 7) == ".tar.gz") {
-        argv    = {"tar", "xzf", filePath, "-C", upload_path};
-        is_gzip = true;
-    } else if (filePath.size() > 4 && filePath.substr(filePath.size() - 4) == ".tgz") {
-        argv    = {"tar", "xzf", filePath, "-C", upload_path};
-        is_gzip = true;
-    } else {
-        // Default: treat as zip
-        argv = {"unzip", "-d", upload_path, filePath};
+    const auto absolute_archive = std::filesystem::absolute(filePath, ec);
+    if (ec || absolute_archive.filename().empty() ||
+        !cosmo::path::IsSafePathComponent(absolute_archive.filename().string(), 255)) {
+        return {};
     }
 
-    std::string out_str;
-    auto ret = cosmo::util::Exec(argv, out_str);
-    if (ret != 0 && is_gzip) {
-        LOG_WARN("tar xzf {} -C {} Failed Result:{}, retry without gzip", filePath, upload_path, out_str);
-        out_str.clear();
-        argv = {"tar", "xf", filePath, "-C", upload_path};
-        ret  = cosmo::util::Exec(argv, out_str);
+    std::string archive_path;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(absolute_archive.parent_path().string(),
+                                                    absolute_archive.string(),
+                                                    cosmo::path::PathEntryType::kRegularFile, archive_path)) {
+        LOG_WARN("Reject unsafe algorithm archive path: {}", filePath);
+        return {};
     }
-    if (ret != 0) {
-        LOG_WARN("extract {} Failed Result:{}", filePath, out_str);
-        return "";
+
+    const auto archive_size = std::filesystem::file_size(archive_path, ec);
+    if (ec || archive_size == 0 || archive_size > kMaxAlgorithmArchiveBytes) {
+        LOG_WARN("Reject invalid algorithm archive size: {}", filePath);
+        return {};
     }
+
+    const std::string filename = absolute_archive.filename().string();
+    const auto archive_kind    = DetectAlgorithmArchiveKind(archive_path, filename);
+    if (archive_kind == AlgorithmArchiveKind::kUnknown ||
+        !ValidateAlgorithmArchiveListing(archive_path, archive_kind)) {
+        LOG_WARN("Reject invalid algorithm archive: {}", filePath);
+        return {};
+    }
+
+    const std::string directory_name = AlgorithmExtractDirectoryName(filename, archive_kind);
+    if (!cosmo::path::IsSafePathComponent(directory_name, 255)) {
+        return {};
+    }
+
+    std::string upload_path;
+    if (!cosmo::path::ResolvePathWithinRoot(absolute_archive.parent_path().string(),
+                                            (absolute_archive.parent_path() / directory_name).string(),
+                                            upload_path)) {
+        return {};
+    }
+
+    const auto output_status = std::filesystem::symlink_status(upload_path, ec);
+    if ((!ec && std::filesystem::exists(output_status)) ||
+        (ec && ec != std::errc::no_such_file_or_directory)) {
+        LOG_WARN("Reject existing algorithm extraction destination: {}", upload_path);
+        return {};
+    }
+    ec.clear();
+    if (!std::filesystem::create_directory(upload_path, ec) || ec) {
+        LOG_WARN("Cannot create algorithm extraction destination: {}", upload_path);
+        return {};
+    }
+    std::filesystem::permissions(upload_path, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace, ec);
+    if (ec) {
+        std::error_code cleanup_ec;
+        std::filesystem::remove_all(upload_path, cleanup_ec);
+        return {};
+    }
+
+    const std::vector<std::string> extract_argv =
+        archive_kind == AlgorithmArchiveKind::kZip
+            ? std::vector<std::string>{"unzip", "-q", archive_path, "-d", upload_path}
+            : std::vector<std::string>{"tar",       "--extract",       "--gzip",
+                                       "--file",    archive_path,      "--directory",
+                                       upload_path, "--no-same-owner", "--no-same-permissions"};
+    std::string output;
+    const int exit_code = cosmo::util::Exec(extract_argv, output);
+    if (exit_code != 0 || !cosmo::path::ValidateDirectoryTreeWithinRoot(
+                              upload_path, kMaxAlgorithmArchiveEntries, kMaxAlgorithmArchiveBytes,
+                              kMaxAlgorithmExtractedBytes)) {
+        LOG_WARN("Extract algorithm archive {} failed or produced an unsafe tree: {}", filePath, output);
+        std::error_code cleanup_ec;
+        std::filesystem::remove_all(upload_path, cleanup_ec);
+        return {};
+    }
+
     LOG_INFO("extract file OK {} -> {}", filePath, upload_path);
     return upload_path;
 }

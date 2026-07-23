@@ -2,6 +2,7 @@
 
 #include "service/path/impl/file/HttpFileServerCli.h"
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 
@@ -19,6 +20,14 @@ static constexpr const char* kTag = "HttpFileServerCli";
 
 /// Minimum length a response string must have to contain valid JSON.
 static constexpr size_t kMinJsonLength = 10;
+
+namespace {
+    bool IsSafeHeaderValue(const std::string& value, size_t max_size) {
+        return !value.empty() && value.size() <= max_size &&
+               std::none_of(value.begin(), value.end(),
+                            [](unsigned char ch) { return ch < 0x20 || ch == 0x7f; });
+    }
+}  // namespace
 
 HttpFileServerCli::HttpFileServerCli() {
     BoundaryGen();
@@ -103,11 +112,16 @@ std::string HttpFileServerCli::FileServerRespTrim(const std::string& strInput) {
 
 bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, cosmo::FMsgRspGetFileUrl& rgtIn,
                                          cosmo::FMsgReqGetFileUrl& rgtOut) {
-    FileServerReq http_req(GetPostUrl(type));
+    const auto post_url = GetPostUrl(type);
+    if (post_url.empty()) {
+        return false;
+    }
+    FileServerReq http_req(post_url);
     http_req.GetHttpRequest().SetContentType("application/json");
     std::string json_result;
     if (!cosmo::util::EncodeJson(rgtIn, json_result)) {
         LOG_ERRO("{} Get_Upload_Url StructToJson failed", kTag);
+        return false;
     }
     http_req.SetMsgBody(json_result);
     int ret_code = static_cast<int>(http_req.Submit());
@@ -118,6 +132,7 @@ bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, cosmo::FMsgR
     std::string json_str = FileServerRespTrim(http_req.GetContent());
     if (!cosmo::util::DecodeJson(json_str, rgtOut)) {
         LOG_ERRO("{} DecodeJson failed: {}", kTag, json_str);
+        return false;
     }
     return true;
 }
@@ -125,7 +140,13 @@ bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, cosmo::FMsgR
 bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, const std::string& rgtIn,
                                          cosmo::FMsgReqGetFileUrl& rgtOut, const std::string& bucket,
                                          const std::string& fileUrl) {
-    FilePost http_req(GetPostUrl(type));
+    rgtOut              = {};
+    const auto post_url = GetPostUrl(type);
+    if (post_url.empty() || !IsSafeHeaderValue(bucket, 128) || !IsSafeHeaderValue(fileUrl, 2048)) {
+        LOG_ERRO("{} rejected invalid upload endpoint metadata", kTag);
+        return false;
+    }
+    FilePost http_req(post_url);
     auto& http_post_req = http_req.GetHttpRequest();
     http_post_req.SetContentType("multipart/form-data; boundary=" + http_req.GetBoundary());
     http_post_req.AppendHeader("bucket", bucket);
@@ -164,14 +185,16 @@ bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, const std::s
     std::string json_str = FileServerRespTrim(http_req.GetContent());
     if (!cosmo::util::DecodeJson(json_str, rgtOut)) {
         LOG_ERRO("{} DecodeJson failed: {}", kTag, json_str);
+        return false;
     }
     return true;
 }
 
-// Point upload — not yet implemented, returns true as a stub.
+// Point upload is not implemented.  Report failure so callers never publish a
+// false successful completion.
 bool HttpFileServerCli::HttpclientSubmit(FileServerClientType /*type*/, const std::string& /*filepath*/,
                                          cosmo::FMsgReqPUpFile& /*rgtOut*/) {
-    return true;
+    return false;
 }
 
 bool HttpFileServerCli::HttpclientSubmit(FileServerClientType /*type*/, cosmo::FMsgRspUpFile& /*rgtIn*/,

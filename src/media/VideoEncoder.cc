@@ -30,6 +30,12 @@ namespace media {
             LOG_WARN("{}", "invalid frame");
             return nullptr;
         }
+        if (frame->GetWidth() != width_ || frame->GetHeight() != height_ ||
+            frame->GetPixelFormat() != PixelFormat::PIXEL_I420) {
+            LOG_WARN("Encoder input mismatch: expected {}x{} I420, got {}x{} format {}", width_, height_,
+                     frame->GetWidth(), frame->GetHeight(), frame->GetPixelFormat());
+            return nullptr;
+        }
 
         auto data = frame->GetData();
         auto pkt  = SendYUVFrame(data);

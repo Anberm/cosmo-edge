@@ -68,8 +68,12 @@ public:
 
     mutable std::mutex attr_mtx_;
     MsgCameraAttr cached_attr_{};  // Cached resolution/codec/fps
-    std::mutex switch_mtx_;        // Protects switch_thread_
-    std::thread switch_thread_;    // Background switch thread (joinable, replaces detach)
+    // Serializes commands that schedule/join switch_thread_ and destructive
+    // per-camera operations. deleting_ is protected by this mutex.
+    std::mutex command_mtx_;
+    bool deleting_{false};
+    std::mutex switch_mtx_;      // Protects switch_thread_
+    std::thread switch_thread_;  // Background switch thread (joinable, replaces detach)
 
     // Wait for background switch thread to finish
     void WaitForSwitchThread();
@@ -90,6 +94,8 @@ public:
 
     CameraServiceImpl(const CameraServiceImpl&)            = delete;
     CameraServiceImpl& operator=(const CameraServiceImpl&) = delete;
+
+    void Stop() override;
 
     util::ErrorEnum Add(MsgCameraInfo& config, std::string& id) override;
     util::ErrorEnum Update(MsgCameraInfo& config) override;
@@ -165,6 +171,11 @@ private:
             LOG_INFO("{} Not Exist", cameraId);
             return util::ErrorEnum::CameraNotExist;
         }
+        std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+        if (camera->deleting_) {
+            LOG_INFO("{} Is Being Deleted", cameraId);
+            return util::ErrorEnum::CameraNotExist;
+        }
         return fn(camera);
     }
 
@@ -193,6 +204,12 @@ private:
     void StartTasksAfterReload(const CameraEntityPtr& camera, const std::vector<std::string>& taskIds);
 
 private:
+    // Add/Update/Delete are multi-phase operations (task creation/destruction,
+    // file moves and persistence). Keep them serialized so an ID cannot be
+    // removed and re-created while the old channel is still being destroyed.
+    std::mutex camera_crud_mtx_;
+    std::mutex lifecycle_mtx_;
+    std::atomic<bool> stopping_{false};
     mutable std::shared_mutex mtx_;
     std::string conf_file_path_{"camera"};
     std::string conf_file_name_{"cameraList.json"};

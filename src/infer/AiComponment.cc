@@ -40,7 +40,7 @@ util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
         if (!image || !image->Active())
             continue;
 
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
         // CPU backend: CpuResizeNode/CpuNormalizeNode expect packed BGR/RGB (NHWC)
         // input, but DecodeJpeg() on CPU produces I420 (YUV420P planar) format.
         // Convert I420 to packed BGR before wrapping in a self-allocating blob.
@@ -121,7 +121,7 @@ std::shared_ptr<cosmo::nn::Blob> ConvertImageToBlob(VideoFramePtr image) {
         return nullptr;
     }
 
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
     // CPU backend: same I420 -> BGR conversion as ConvertImagesToBlobs
     if (image->GetPixelFormat() == media::PixelFormat::PIXEL_I420) {
         int w = static_cast<int>(image->GetWidth());

@@ -33,6 +33,12 @@ std::string ShellEscape(const std::string& path) {
 
 namespace {
 
+    enum class ReadStatus {
+        kComplete,
+        kError,
+        kOutputLimitExceeded,
+    };
+
     // Read all bytes from `fd` until EOF, appending them to `out`. Stops on EOF or a
     // non-EINTR read error.
     void ReadAllFromFd(int fd, std::string& out) {
@@ -45,6 +51,39 @@ namespace {
                 break;  // EOF
             } else if (errno != EINTR) {
                 break;  // unrecoverable read error
+            }
+        }
+    }
+
+    ReadStatus ReadAllFromFdWithLimit(int fd, std::string& out, size_t max_output_bytes) {
+        const size_t initial_size = out.size();
+        char buf[1024];
+        for (;;) {
+            const ssize_t read_size = read(fd, buf, sizeof(buf));
+            if (read_size > 0) {
+                const size_t appended_size  = out.size() - initial_size;
+                const size_t remaining_size = max_output_bytes - appended_size;
+                const size_t received_size  = static_cast<size_t>(read_size);
+                if (received_size > remaining_size) {
+                    out.append(buf, remaining_size);
+                    return ReadStatus::kOutputLimitExceeded;
+                }
+                out.append(buf, received_size);
+            } else if (read_size == 0) {
+                return ReadStatus::kComplete;
+            } else if (errno != EINTR) {
+                return ReadStatus::kError;
+            }
+        }
+    }
+
+    bool TerminateChild(pid_t pid) {
+        for (;;) {
+            if (kill(pid, SIGKILL) == 0 || errno == ESRCH) {
+                return true;
+            }
+            if (errno != EINTR) {
+                return false;
             }
         }
     }
@@ -73,7 +112,8 @@ namespace {
     // into a pipe read by the parent. Appends captured output to `out`. The char*
     // argv array is built up front so the child only performs async-signal-safe
     // calls between fork() and execvp() (this process is multithreaded).
-    int ExecArgv(const std::vector<std::string>& argv, std::string& out) {
+    int ExecArgv(const std::vector<std::string>& argv, std::string& out,
+                 const size_t* max_output_bytes = nullptr) {
         if (argv.empty()) {
             return kExecFailureCode;
         }
@@ -117,7 +157,17 @@ namespace {
         // Parent — drain the pipe before reaping to avoid deadlock when the child's
         // output exceeds the pipe buffer.
         close(pipefd[1]);
-        ReadAllFromFd(pipefd[0], out);
+        ReadStatus read_status = ReadStatus::kComplete;
+        if (max_output_bytes == nullptr) {
+            ReadAllFromFd(pipefd[0], out);
+        } else {
+            read_status = ReadAllFromFdWithLimit(pipefd[0], out, *max_output_bytes);
+        }
+        if (read_status != ReadStatus::kComplete) {
+            if (!TerminateChild(pid)) {
+                read_status = ReadStatus::kError;
+            }
+        }
         close(pipefd[0]);
 
         int status = 0;
@@ -125,6 +175,9 @@ namespace {
             if (errno != EINTR) {
                 return kExecFailureCode;
             }
+        }
+        if (read_status != ReadStatus::kComplete) {
+            return kExecFailureCode;
         }
         if (WIFEXITED(status)) {
             return WEXITSTATUS(status);
@@ -136,6 +189,10 @@ namespace {
 
 int Exec(const std::vector<std::string>& argv, std::string& out) {
     return ExecArgv(argv, out);
+}
+
+int ExecWithOutputLimit(const std::vector<std::string>& argv, std::string& out, size_t max_output_bytes) {
+    return ExecArgv(argv, out, &max_output_bytes);
 }
 
 int Exec(const std::vector<std::string>& argv, std::vector<std::string>& out, bool remove_newline) {

@@ -58,6 +58,7 @@ void to_json(nlohmann::json& j, const MsgUploadRecv& v) {
     j["contentLength"] = v.contentLength;
     j["fileName"]      = v.fileName;
     j["filePath"]      = v.filePath;
+    j["uploadId"]      = v.uploadId;
 }
 
 void from_json(const nlohmann::json& j, MsgUploadRecv& v) {
@@ -65,6 +66,7 @@ void from_json(const nlohmann::json& j, MsgUploadRecv& v) {
     JSON_OPT(j, v, contentLength);
     JSON_OPT(j, v, fileName);
     JSON_OPT(j, v, filePath);
+    JSON_OPT(j, v, uploadId);
 }
 
 void to_json(nlohmann::json& j, const MsgUpdateRecv& v) {

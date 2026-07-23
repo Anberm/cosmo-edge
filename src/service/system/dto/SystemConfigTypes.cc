@@ -3,6 +3,7 @@
 #include "SystemConfigTypes.h"
 
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 
 #include "util/JsonFieldOpt.h"
 #include "util/LimitedTypeJson.h"
@@ -14,7 +15,12 @@ void to_json(nlohmann::json& j, const RunMode& v) {
     j = static_cast<int>(v);
 }
 void from_json(const nlohmann::json& j, RunMode& v) {
-    v = static_cast<RunMode>(j.get<int>());
+    const auto value = j.get<int>();
+    if (value != static_cast<int>(RunMode::RunModeStandAlone) &&
+        value != static_cast<int>(RunMode::RunModeIotNetwork)) {
+        throw std::invalid_argument("invalid run mode");
+    }
+    v = static_cast<RunMode>(value);
 }
 
 void from_json(const nlohmann::json& j, CfgSystemDebugInfo& v) {

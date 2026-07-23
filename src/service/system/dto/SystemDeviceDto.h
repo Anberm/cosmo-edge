@@ -37,6 +37,7 @@ struct MsgQueryHardwareResourceSend : public MsgSendHead {
     struct ResData {
         std::string customScore;
         std::vector<Item> itemList;
+        MsgGpuInfo accelerator;
         friend void to_json(nlohmann::json& j, const ResData& v);
         friend void from_json(const nlohmann::json& j, ResData& v);
     } resData;

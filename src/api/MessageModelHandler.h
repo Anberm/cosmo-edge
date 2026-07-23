@@ -2,6 +2,7 @@
 #include <system_error>
 
 #include "service/model/dto/ModelDto.h"
+#include "util/IRequestDispatcher.h"
 
 namespace cosmo::service {
 class IModelService;
@@ -16,10 +17,21 @@ public:
 
     [[nodiscard]] Model::MsgPageSend Handle(Model::MsgPageRecv&& data, std::error_condition& errc) const;
     [[nodiscard]] Model::MsgUploadSend Handle(Model::MsgUploadRecv&& data, std::error_condition& errc) const;
+    [[nodiscard]] Model::MsgUploadSend Handle(Model::MsgUploadRecv&& data,
+                                              const RequestDispatchContext& context,
+                                              std::error_condition& errc) const;
     [[nodiscard]] Model::MsgListSend Handle(Model::MsgListRecv&& data, std::error_condition& errc) const;
     [[nodiscard]] Model::MsgAddSend Handle(Model::MsgAddRecv&& data, std::error_condition& errc) const;
+    [[nodiscard]] Model::MsgAddSend Handle(Model::MsgAddRecv&& data, const RequestDispatchContext& context,
+                                           std::error_condition& errc) const;
     [[nodiscard]] Model::MsgUploadTempSend Handle(Model::MsgUploadTempRecv&& data,
                                                   std::error_condition& errc) const;
+    [[nodiscard]] Model::MsgUploadTempSend Handle(Model::MsgUploadTempRecv&& data,
+                                                  const RequestDispatchContext& context,
+                                                  std::error_condition& errc) const;
+    [[nodiscard]] Model::MsgCancelUploadSend Handle(Model::MsgCancelUploadRecv&& data,
+                                                    const RequestDispatchContext& context,
+                                                    std::error_condition& errc) const;
     [[nodiscard]] Model::MsgGetConfigSend Handle(Model::MsgGetConfigRecv&& data,
                                                  std::error_condition& errc) const;
     [[nodiscard]] Model::MsgSaveConfigSend Handle(Model::MsgSaveConfigRecv&& data,
@@ -31,6 +43,9 @@ public:
     [[nodiscard]] Model::MsgExportConfigSend Handle(Model::MsgExportConfigRecv&& data,
                                                     std::error_condition& errc) const;
     [[nodiscard]] Model::MsgImportModelSend Handle(Model::MsgImportModelRecv&& data,
+                                                   std::error_condition& errc) const;
+    [[nodiscard]] Model::MsgImportModelSend Handle(Model::MsgImportModelRecv&& data,
+                                                   const RequestDispatchContext& context,
                                                    std::error_condition& errc) const;
 
 private:

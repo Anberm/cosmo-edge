@@ -101,10 +101,13 @@ bool FaceLib::SaveData() {
 
 std::pair<FacePicPtr, float> FaceLib::SearchFeature(const AiFeature &feature) const {
     std::shared_lock<std::shared_mutex> lock(mtx_);
-    FacePicPtr most_similar;
+    if (vec_faces_.empty()) {
+        return {nullptr, -1.0f};
+    }
 
     // Divide feature values into multiple parts, use multi-threading for comparison
-    size_t division = std::thread::hardware_concurrency();
+    size_t division = std::max<size_t>(1, std::thread::hardware_concurrency());
+    division        = std::min(division, vec_faces_.size());
     while (faces_.size() / division < 100) {
         if (division == 1) {
             break;

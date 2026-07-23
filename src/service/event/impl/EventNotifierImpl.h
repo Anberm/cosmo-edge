@@ -45,6 +45,7 @@ public:
     bool GetVideoPlayUrl(cosmo::CMsgGetVideoPlayReq& req, cosmo::CMsgGetVideoPlayRsp& rsp) override;
 
     void SetEventPostQue(cosmo::AsyncQueue<cosmo::CMsgOnEventsReq>& que) override;
+    void ClearEventPostQue(const cosmo::AsyncQueue<cosmo::CMsgOnEventsReq>& que) override;
     void SetCollectPostQue(cosmo::AsyncQueue<cosmo::CMsgCollectRptReq>& que) override;
     void SetFaceEventPostQue(cosmo::AsyncQueue<cosmo::CMsgFaceEventReq>& que) override;
 
@@ -87,6 +88,7 @@ private:
     cosmo::AsyncQueue<cosmo::CMsgOnEventsReq> ws_event_que_;
 
     // ---- Queue pointers (migrated from TaskClientMsgHandle) ----
+    std::mutex post_queue_mtx_;
     cosmo::AsyncQueue<cosmo::CMsgOnEventsReq>* event_que_{nullptr};
     cosmo::AsyncQueue<cosmo::CMsgFaceEventReq>* face_event_que_{nullptr};
     cosmo::AsyncQueue<cosmo::CMsgCollectRptReq>* collect_que_{nullptr};

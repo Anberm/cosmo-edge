@@ -3,11 +3,15 @@
 #include "api/MessageImportFileHandler.h"
 
 #include <charconv>
+#include <exception>
 #include <filesystem>
+#include <utility>
 
+#include "api/HttpUploadClaim.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/face/IFaceImport.h"
 #include "service/media/IAudioService.h"
+#include "service/path/IUploadStagingService.h"
 #include "util/ErrorCode.h"
 #include "util/FileUtil.h"
 #include "util/Log.h"
@@ -82,6 +86,44 @@ service::MsgImportFileSend MessageImportFileHandler::Handle(service::MsgImportFi
     return {};
 }
 
+service::MsgImportFileSend MessageImportFileHandler::Handle(service::MsgImportFileRecv&& data,
+                                                            const RequestDispatchContext& context,
+                                                            std::error_condition& errc) {
+    service::MsgImportFileSend result{};
+    if (context.transport != RequestTransport::kHttp || context.principal.empty()) {
+        errc = util::ErrorEnum::InvalidParam;
+        return result;
+    }
+
+    service::UploadPurpose purpose;
+    if (data.importType == 2) {
+        purpose = service::UploadPurpose::kFaceImport;
+    } else if (data.importType == 5) {
+        purpose = service::UploadPurpose::kAudio;
+    } else {
+        errc = util::ErrorEnum::UnknownOperation;
+        return result;
+    }
+
+    service::StagedFileLease lease;
+    if (!data.uploadId.empty()) {
+        errc = service::ServiceRegistry::Instance().Get<service::IUploadStagingService>().Consume(
+            context.principal, data.uploadId, purpose, lease);
+    } else {
+        errc = detail::ClaimHttpUpload(context, data.filePath, purpose, lease);
+    }
+    if (errc) {
+        return result;
+    }
+    if (!lease.Revalidate()) {
+        errc = util::ErrorEnum::FileAnalysisFailed;
+        return result;
+    }
+    data.filePath      = lease.Path();
+    data.contentLength = std::to_string(lease.Size());
+    return Handle(std::move(data), errc);
+}
+
 // Import status query
 service::MsgQueryImportStatusSend MessageImportFileHandler::Handle(service::MsgQueryImportStatusRecv&& data,
                                                                    std::error_condition& errc) {
@@ -112,6 +154,11 @@ service::MsgQueryImportStatusSend MessageImportFileHandler::Handle(service::MsgQ
             result.resData.importStatus.statusMsg = e.what();
             result.resData.importStatus.failedUrl = import_svc.GetImportFailedUrl();
             LOG_INFO("{} {}", kTag, e.what());
+        } catch (const std::exception& e) {
+            result.resData.importStatus.status    = 2;
+            result.resData.importStatus.statusMsg = e.what();
+            result.resData.importStatus.failedUrl = import_svc.GetImportFailedUrl();
+            LOG_ERRO("{} Person import failed: {}", kTag, e.what());
         }
         return result;
     } else if (data.importType == 3) {

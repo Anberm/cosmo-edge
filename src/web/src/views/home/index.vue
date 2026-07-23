@@ -546,9 +546,14 @@ const getTaskTypeLabel = (task) => {
 }
 
 const openRunningView = (task) => {
+  const channelId = Array.isArray(task.channels)
+    ? task.channels.find((channel) => channel?.channelId)?.channelId || ''
+    : ''
+
   router.push({
     path: '/bigScreen/warnningScreen',
     query: {
+      channelId,
       algorithmId: task.algorithmId || '',
       algorithmName: resolveResourceAlgorithmName(task) || task.name || ''
     }

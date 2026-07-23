@@ -42,6 +42,9 @@ public:
     virtual bool UpdatePerson(const db::PersonCondition& person,
                               const std::vector<std::pair<std::string, std::vector<float>>>& face) = 0;
     virtual bool RemovePerson(const std::string& personId)                                         = 0;
+    /// Remove one library membership and delete the person/face rows only
+    /// when no other library membership remains.
+    virtual bool RemovePersonFromFaceLib(const std::string& personId, const std::string& faceLibId) = 0;
 
     // ── Queries ──
 

@@ -110,9 +110,22 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     return values.length ? Math.max(...values) : null;
   };
   const maxNpu = peak((tick) => tick.hardware?.npuUtilization?.usedPercent);
+  const maxAcceleratorMem = peak((tick) => {
+    const memoryKeys = [
+      'specialMemoryUtilization',
+      'modelMemoryUtilization',
+      'pictureMemoryUtilization',
+      'TPPMemoryUtilization',
+    ];
+    const values = memoryKeys
+      .map((key) => tick.hardware?.[key]?.usedPercent)
+      .filter((value) => typeof value === 'number');
+    return values.length ? Math.max(...values) : null;
+  });
   const maxCpu = peak((tick) => tick.hardware?.cpuUtilization?.usedPercent);
   const maxMem = peak((tick) => tick.hardware?.generalMemoryUtilization?.usedPercent);
   const taskStats = summarizeTasks(channelStats);
+  const mediaStages = summarizeMediaStages(ticks, maxPrimaryLat);
 
   const perThreshold = [];
   const overall = { pass: true, reasons: [] };
@@ -156,13 +169,94 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     primaryLatencyMs: maxPrimaryLat,
     criticalPathLatencyMs: maxCriticalLat,
     maxNpu,
+    maxAcceleratorMem,
     maxCpu,
     maxMem,
+    mediaStages,
     channelStats,
     taskStats,
     perThreshold,
     pass: overall.pass,
     reasons: overall.reasons,
+  };
+}
+
+function summarizeMediaStages(ticks, inferMs) {
+  const first = ticks.find((tick) => tick.hardware?.accelerator)?.hardware?.accelerator;
+  const last = [...ticks].reverse().find((tick) => tick.hardware?.accelerator)?.hardware?.accelerator;
+  const counterAverage = (totalKey, countKey) => {
+    if (!first || !last) return null;
+    const count = Number(last[countKey]) - Number(first[countKey]);
+    const total = Number(last[totalKey]) - Number(first[totalKey]);
+    return count > 0 && total >= 0 ? round(total / count, 3) : null;
+  };
+  const counterDelta = (key) => {
+    if (!first || !last) return null;
+    const delta = Number(last[key]) - Number(first[key]);
+    return Number.isFinite(delta) && delta >= 0 ? delta : null;
+  };
+  const maxValue = (selector) => {
+    const values = ticks.map(selector).filter((value) => Number.isFinite(value));
+    return values.length ? Math.max(...values) : null;
+  };
+  const maxNonNegative = (selector) => {
+    const value = maxValue(selector);
+    return value != null && value >= 0 ? value : null;
+  };
+  const nodeStages = summarizeNodeStages(ticks);
+
+  return {
+    preprocessAvgMs: nodeStages.preprocess,
+    inferAvgMs: inferMs,
+    postprocessAvgMs: nodeStages.postprocess,
+    osdAvgMs: counterAverage('osdMs', 'osdFrames'),
+    publishAvgMs: counterAverage('publishMs', 'publishedFrames'),
+    firstFrameAvgMs: counterAverage('firstFrameMs', 'firstFrames'),
+    firstFrameMaxMs: maxNonNegative(
+      (tick) => Number(tick.hardware?.accelerator?.firstFrameMaxMs),
+    ),
+    osdFrames: counterDelta('osdFrames'),
+    publishedFrames: counterDelta('publishedFrames'),
+    firstFrames: counterDelta('firstFrames'),
+    activePreviewStreamsPeak: maxValue(
+      (tick) => Number(tick.hardware?.accelerator?.activePreviewStreams),
+    ),
+    activePreviewPublishersPeak: maxValue(
+      (tick) => Number(tick.hardware?.accelerator?.activePreviewPublishers),
+    ),
+    activeRawPreviewStreamsPeak: maxValue(
+      (tick) => Number(tick.hardware?.accelerator?.activeRawPreviewStreams),
+    ),
+    activeAlgorithmPreviewStreamsPeak: maxValue(
+      (tick) => Number(tick.hardware?.accelerator?.activeAlgorithmPreviewStreams),
+    ),
+    srsStreamsPeak: maxValue((tick) => Number(tick.preview?.srsStreams)),
+    srsClientsPeak: maxValue((tick) => Number(tick.preview?.srsClients)),
+    previewStartsDelta: counterDelta('previewStreamStarts'),
+    previewStopsDelta: counterDelta('previewStreamStops'),
+    previewFailuresDelta: counterDelta('previewStreamFailures'),
+  };
+}
+
+function summarizeNodeStages(ticks) {
+  const stages = { preprocess: [], postprocess: [] };
+  for (const tick of ticks) {
+    for (const channel of tick.channels ?? []) {
+      for (const node of channel.nodeDurationInfos ?? []) {
+        const name = String(node.name ?? '').toLowerCase();
+        const value = Number(node.durationAvgUs) / 1000;
+        if (!Number.isFinite(value)) continue;
+        if (/preprocess|resize|normaliz|color|padding|letterbox|crop/.test(name)) {
+          stages.preprocess.push(value);
+        } else if (/postprocess|tracker|tracking|nms|filter|judge|classifier/.test(name)) {
+          stages.postprocess.push(value);
+        }
+      }
+    }
+  }
+  return {
+    preprocess: stages.preprocess.length ? round(mean(stages.preprocess), 3) : null,
+    postprocess: stages.postprocess.length ? round(mean(stages.postprocess), 3) : null,
   };
 }
 

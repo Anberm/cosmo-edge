@@ -22,6 +22,7 @@ public:
 
 private:
     void HandleMsg(cosmo::MsgEnvelope& msg) override;
+    void ClearMsg(cosmo::MsgEnvelope& msg) override;
 
     /// Common retry-based upload logic shared by sync and async paths.
     /// @return 0 on success, -1 on failure.

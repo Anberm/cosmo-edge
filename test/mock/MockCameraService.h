@@ -12,6 +12,7 @@ namespace cosmo::test {
 
 class MockCameraService : public cosmo::service::ICameraService {
 public:
+    MAKE_MOCK0(Stop, void(), override);
     MAKE_MOCK2(Add, cosmo::util::ErrorEnum(cosmo::MsgCameraInfo&, std::string&), override);
     MAKE_MOCK1(Update, cosmo::util::ErrorEnum(cosmo::MsgCameraInfo&), override);
     MAKE_MOCK1(Delete, cosmo::util::ErrorEnum(const std::string&), override);

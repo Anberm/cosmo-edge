@@ -43,6 +43,10 @@ public:
     // Blocking event dispatch loop, call unInitialize() to stop
     void DispatchMsg();
 
+    // Request DispatchMsg() to return without releasing event-thread resources
+    // from the calling thread.
+    void RequestStop() noexcept;
+
     // Enqueue an ack result for the event loop to send
     template <typename T>
     void AckResult(HttpResponseCode hcode, HttpRequestToken request_token, T& t, const std::string& req_id) {
@@ -95,23 +99,42 @@ private:
         struct evhttp_connection* connection;
     };
 
+    struct MultipartSpoolReservation {
+        HttpServer* server{nullptr};
+        std::string owner;
+        std::uint64_t bytes{0};
+        bool active{false};
+
+        ~MultipartSpoolReservation();
+    };
+
     // libevent callbacks
     static void ComGenCb(struct evhttp_request* req, void* arg);
     static void RequestCompleteCb(struct evhttp_request* req, void* arg);
     static void ConnectionCloseCb(struct evhttp_connection* connection, void* arg);
 
-    void InsertHttpReqMsg(struct evhttp_request* req);
-    void InsertHttpOctetMsg(struct evhttp_request* req);
-    void InsertHttpMsg(struct evhttp_request* req, InnerMsgId msg_id);
+    void InsertHttpReqMsg(struct evhttp_request* req, const RequestDispatchContext& context);
+    void InsertHttpOctetMsg(struct evhttp_request* req, const RequestDispatchContext& context);
+    void InsertHttpMsg(struct evhttp_request* req, InnerMsgId msg_id, const RequestDispatchContext& context);
 
-    std::unique_ptr<HttpReqTask> BuildHttpReqTask(struct evhttp_request* req);
-    bool ExtractMultipartBody(HttpReqTask* task, struct evhttp_request* req, const std::string& content_type);
+    std::unique_ptr<HttpReqTask> BuildHttpReqTask(struct evhttp_request* req,
+                                                  const RequestDispatchContext& context,
+                                                  HttpResponseCode& error_code);
+    bool ExtractMultipartBody(HttpReqTask* task, struct evhttp_request* req, const std::string& content_type,
+                              HttpResponseCode& error_code);
+    bool PrepareRequestContext(struct evhttp_request* req, RequestDispatchContext& context,
+                               bool& is_log_request) const;
+    bool IsBodySizeAllowed(struct evhttp_request* req) const;
+    std::shared_ptr<void> TryReserveMultipartSpool(const RequestDispatchContext& context,
+                                                   std::uint64_t bytes);
+    void ReleaseMultipartSpool(const std::string& owner, std::uint64_t bytes);
 
     HttpRequestToken RegisterRequest(struct evhttp_request* req);
     struct evhttp_request* FindRequest(HttpRequestToken token) const;
     void CompleteRequest(HttpRequestToken token, const struct evhttp_request* req);
     void CloseRequest(HttpRequestToken token, struct evhttp_connection* connection);
 
+    void SendImmediateAuthError(struct evhttp_request* req);
     void SendImmediateError(struct evhttp_request* req, HttpResponseCode code);
     void StopAccepting();
     void ShutdownOnEventThread();
@@ -138,6 +161,12 @@ private:
     std::unordered_map<HttpRequestToken, std::unique_ptr<RequestContext>> active_requests_;
     HttpRequestToken next_request_token_{1};
 
+    std::mutex multipart_spool_mutex_;
+    std::unordered_map<std::string, std::size_t> multipart_spool_requests_by_owner_;
+    std::unordered_map<std::string, std::uint64_t> multipart_spool_bytes_by_owner_;
+    std::size_t multipart_spool_request_count_{0};
+    std::uint64_t multipart_spool_bytes_{0};
+
     LifecycleState lifecycle_state_{LifecycleState::kStopped};
     std::thread::id event_thread_id_;
     std::mutex lifecycle_mutex_;
@@ -147,6 +176,7 @@ private:
     std::string app_secret_;
 
     DispatcherFactory dispatcher_factory_;
+    std::unique_ptr<cosmo::IRequestDispatcher> request_inspector_;
     HttpServerCallbacks callbacks_;
 };
 

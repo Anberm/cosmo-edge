@@ -2,11 +2,22 @@
 
 #include "service/system/impl/SystemServiceImpl.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <cctype>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
+#include <iterator>
+#include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <shared_mutex>
+#include <string_view>
+#include <utility>
 
 #include "service/detail/ServiceRegistry.h"
 #include "service/event/IAlarmPushService.h"
@@ -20,13 +31,278 @@
 #include "service/system/dto/SystemParamDto.h"
 #include "service/system/dto/SystemTimeDto.h"
 #include "util/ErrorCode.h"
+#include "util/Exec.h"
 #include "util/FileUtil.h"
 #include "util/JsonStructUtil.h"
 #include "util/LimitedTypeJson.h"
 #include "util/Log.h"
 #include "util/PathUtil.h"
+#include "util/StringUtil.h"
+#include "util/UuidUtil.h"
 
 namespace cosmo::service {
+
+namespace {
+
+    constexpr size_t kMaxLogoBytes           = 1024 * 1024;
+    constexpr size_t kMaxEndpointBytes       = 2048;
+    constexpr size_t kMaxMqttHostBytes       = 253;
+    constexpr size_t kMaxMqttIdentityBytes   = 128;
+    constexpr size_t kMaxMqttCredentialBytes = 256;
+    constexpr size_t kMaxShieldedActions     = 256;
+    constexpr size_t kMaxActionIdBytes       = 128;
+
+    class ScopedFd {
+    public:
+        explicit ScopedFd(int fd = -1) noexcept : fd_(fd) {}
+        ~ScopedFd() {
+            if (fd_ >= 0) {
+                close(fd_);
+            }
+        }
+        ScopedFd(const ScopedFd&)            = delete;
+        ScopedFd& operator=(const ScopedFd&) = delete;
+
+        int Get() const noexcept {
+            return fd_;
+        }
+
+    private:
+        int fd_;
+    };
+
+    bool IsAllowedLogoName(const std::string& name) {
+        return name == "logo.png" || name == "logo.jpg" || name == "logo.jpeg";
+    }
+
+    bool ContainsControlCharacter(std::string_view value) {
+        return std::any_of(value.begin(), value.end(), [](char character) {
+            const auto byte = static_cast<unsigned char>(character);
+            return byte < 0x20 || byte == 0x7f;
+        });
+    }
+
+    bool IsValidMqttHost(const std::string& host) {
+        return !host.empty() && host.size() <= kMaxMqttHostBytes && !ContainsControlCharacter(host) &&
+               cosmo::util::IsHostnameSafe(host) && std::any_of(host.begin(), host.end(), [](char character) {
+                   return std::isalnum(static_cast<unsigned char>(character)) != 0;
+               });
+    }
+
+    bool IsValidHttpUrl(const std::string& url) {
+        if (url.empty() || url.size() > kMaxEndpointBytes || ContainsControlCharacter(url) ||
+            url.find('\\') != std::string::npos) {
+            return false;
+        }
+
+        constexpr std::string_view kHttpPrefix{"http://"};
+        constexpr std::string_view kHttpsPrefix{"https://"};
+        size_t authority_begin = 0;
+        if (url.compare(0, kHttpPrefix.size(), kHttpPrefix) == 0) {
+            authority_begin = kHttpPrefix.size();
+        } else if (url.compare(0, kHttpsPrefix.size(), kHttpsPrefix) == 0) {
+            authority_begin = kHttpsPrefix.size();
+        } else {
+            return false;
+        }
+
+        const auto authority_end = url.find_first_of("/?#", authority_begin);
+        const auto authority = std::string_view(url).substr(authority_begin, authority_end - authority_begin);
+        if (authority.empty() || authority.find('@') != std::string_view::npos) {
+            return false;
+        }
+        const bool syntax_valid = std::all_of(authority.begin(), authority.end(), [](char character) {
+            const auto byte = static_cast<unsigned char>(character);
+            return std::isalnum(byte) != 0 || character == '.' || character == '-' || character == '_' ||
+                   character == ':' || character == '[' || character == ']';
+        });
+        return syntax_valid && std::any_of(authority.begin(), authority.end(), [](char character) {
+                   return std::isalnum(static_cast<unsigned char>(character)) != 0;
+               });
+    }
+
+    bool IsValidMqttParam(const MqttParam& param) {
+        if (param.port < 1 || param.port > 65535 || param.authMode < 0 || param.authMode > 1 ||
+            (!param.url.empty() && !IsValidMqttHost(param.url)) ||
+            param.clientId.size() > kMaxMqttIdentityBytes ||
+            param.userName.size() > kMaxMqttCredentialBytes ||
+            param.passwd.size() > kMaxMqttCredentialBytes || ContainsControlCharacter(param.clientId) ||
+            ContainsControlCharacter(param.userName) || ContainsControlCharacter(param.passwd)) {
+            return false;
+        }
+        if (param.enable && !IsValidMqttHost(param.url)) {
+            return false;
+        }
+        return !param.enable || param.authMode == 0 ||
+               (!param.clientId.empty() && !param.userName.empty() && !param.passwd.empty());
+    }
+
+    bool IsValidShieldedActions(const std::vector<std::string>& actions) {
+        return actions.size() <= kMaxShieldedActions &&
+               std::all_of(actions.begin(), actions.end(), [](const std::string& action) {
+                   return !action.empty() && action.size() <= kMaxActionIdBytes &&
+                          !ContainsControlCharacter(action);
+               });
+    }
+
+    bool LogoContentMatches(const std::string& extension, const std::vector<uint8_t>& image) {
+        if (extension == ".png") {
+            constexpr uint8_t kPngSignature[] = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+            return image.size() >= sizeof(kPngSignature) &&
+                   std::equal(std::begin(kPngSignature), std::end(kPngSignature), image.begin());
+        }
+        if (extension == ".jpg" || extension == ".jpeg") {
+            return image.size() >= 3 && image[0] == 0xff && image[1] == 0xd8 && image[2] == 0xff;
+        }
+        return false;
+    }
+
+    bool IsValidBrandingText(const std::string& value) {
+        if (ContainsControlCharacter(value)) {
+            return false;
+        }
+        try {
+            return cosmo::util::UTF8Length(value) <= 64;
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    bool IsValidStoredMqtt(const cosmo::MqttUnitParam& stored) {
+        MqttParam param;
+        param.enable   = stored.bEnable;
+        param.url      = stored.ip;
+        param.port     = stored.port;
+        param.authMode = stored.authMode;
+        param.clientId = stored.clientId;
+        param.userName = stored.userName;
+        param.passwd   = stored.passwd;
+        return IsValidMqttParam(param);
+    }
+
+    bool IsValidStoredIot(const cosmo::CfgSystemInterfaceModeIotInfo& stored) {
+        const bool mqtt_valid = stored.mqttParam.port >= 1 && stored.mqttParam.port <= 65535 &&
+                                ((!stored.mqttParam.bEnable && stored.mqttParam.ip.empty()) ||
+                                 IsValidMqttHost(stored.mqttParam.ip));
+        const bool http_valid = (!stored.httpParam.bEnable && stored.httpParam.url.empty()) ||
+                                IsValidHttpUrl(stored.httpParam.url);
+        return mqtt_valid && http_valid;
+    }
+
+    class LogoFileTransaction {
+    public:
+        LogoFileTransaction(const std::string& directory, std::string file_name,
+                            const std::vector<uint8_t>& image)
+            : directory_(directory),
+              file_name_(std::move(file_name)),
+              directory_fd_(open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)) {
+            if (directory_fd_.Get() < 0) {
+                return;
+            }
+
+            temporary_name_ = ".logo-" + cosmo::util::GenerateUUID() + ".tmp";
+            ScopedFd temporary_fd(openat(directory_fd_.Get(), temporary_name_.c_str(),
+                                         O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600));
+            if (temporary_fd.Get() < 0) {
+                return;
+            }
+
+            size_t offset = 0;
+            while (offset < image.size()) {
+                const auto remaining =
+                    std::min(image.size() - offset, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+                const auto written = write(temporary_fd.Get(), image.data() + offset, remaining);
+                if (written < 0 && errno == EINTR) {
+                    continue;
+                }
+                if (written <= 0) {
+                    return;
+                }
+                offset += static_cast<size_t>(written);
+            }
+            prepared_ = fchmod(temporary_fd.Get(), 0644) == 0 && fsync(temporary_fd.Get()) == 0;
+        }
+
+        ~LogoFileTransaction() {
+            if (committed_ || directory_fd_.Get() < 0) {
+                return;
+            }
+            if (installed_) {
+                unlinkat(directory_fd_.Get(), file_name_.c_str(), 0);
+            }
+            if (!backup_name_.empty()) {
+                renameat(directory_fd_.Get(), backup_name_.c_str(), directory_fd_.Get(), file_name_.c_str());
+            }
+            if (!temporary_name_.empty()) {
+                unlinkat(directory_fd_.Get(), temporary_name_.c_str(), 0);
+            }
+            static_cast<void>(fsync(directory_fd_.Get()));
+        }
+
+        LogoFileTransaction(const LogoFileTransaction&)            = delete;
+        LogoFileTransaction& operator=(const LogoFileTransaction&) = delete;
+
+        bool Install() {
+            if (!prepared_) {
+                return false;
+            }
+
+            struct stat status {};
+            if (fstatat(directory_fd_.Get(), file_name_.c_str(), &status, AT_SYMLINK_NOFOLLOW) == 0) {
+                if (!S_ISREG(status.st_mode)) {
+                    return false;
+                }
+                backup_name_ = ".logo-backup-" + cosmo::util::GenerateUUID() + ".tmp";
+                if (renameat(directory_fd_.Get(), file_name_.c_str(), directory_fd_.Get(),
+                             backup_name_.c_str()) != 0) {
+                    backup_name_.clear();
+                    return false;
+                }
+            } else if (errno != ENOENT) {
+                return false;
+            }
+
+            if (renameat(directory_fd_.Get(), temporary_name_.c_str(), directory_fd_.Get(),
+                         file_name_.c_str()) != 0) {
+                if (!backup_name_.empty()) {
+                    if (renameat(directory_fd_.Get(), backup_name_.c_str(), directory_fd_.Get(),
+                                 file_name_.c_str()) == 0) {
+                        backup_name_.clear();
+                    }
+                }
+                return false;
+            }
+            temporary_name_.clear();
+            installed_ = true;
+            if (fsync(directory_fd_.Get()) != 0) {
+                LOG_WARN("Failed to sync logo directory {}: {}", directory_, strerror(errno));
+            }
+            return true;
+        }
+
+        void Commit() {
+            if (!backup_name_.empty()) {
+                unlinkat(directory_fd_.Get(), backup_name_.c_str(), 0);
+                backup_name_.clear();
+            }
+            if (fsync(directory_fd_.Get()) != 0) {
+                LOG_WARN("Failed to sync logo directory {}: {}", directory_, strerror(errno));
+            }
+            committed_ = true;
+        }
+
+    private:
+        std::string directory_;
+        std::string file_name_;
+        ScopedFd directory_fd_;
+        std::string temporary_name_;
+        std::string backup_name_;
+        bool prepared_{false};
+        bool installed_{false};
+        bool committed_{false};
+    };
+
+}  // namespace
 
 // Serialization envelope for alarmParam.json (migrated from CfgAlarmParam)
 struct CfgAlarmParamInfo {
@@ -44,39 +320,80 @@ struct SystemServiceImpl::SysConfigState {
 
     SysConfigState() {
         auto cfg_path = (std::filesystem::path(cosmo::path::GetCfgPath()) / conf_file_name).string();
-        static_cast<void>(cosmo::util::LoadStructFromJsonFile(cfg_path, config));
+        cosmo::CfgSystemParamInfo loaded;
+        if (cosmo::util::LoadStructFromJsonFile(cfg_path, loaded)) {
+            if ((loaded.popUpInfo.popUpSwitch != 0 && loaded.popUpInfo.popUpSwitch != 1) ||
+                (loaded.popUpInfo.audioPlay != 0 && loaded.popUpInfo.audioPlay != 1) ||
+                loaded.popUpInfo.popUpDuration < 1 || loaded.popUpInfo.popUpDuration > 30) {
+                LOG_WARN("{}", "Reject invalid persisted popup configuration");
+                loaded.popUpInfo = cosmo::CfgSystemPopUpInfo{};
+            }
+            if (!IsValidStoredMqtt(loaded.interfaceModeInfo.standAloneParam.mqttParam)) {
+                LOG_WARN("{}", "Reject invalid persisted standalone MQTT configuration");
+                loaded.interfaceModeInfo.standAloneParam.mqttParam = cosmo::MqttUnitParam{};
+            }
+            if (!IsValidStoredIot(loaded.interfaceModeInfo.iotParam)) {
+                LOG_WARN("{}", "Reject invalid persisted IoT endpoint configuration");
+                loaded.interfaceModeInfo.iotParam = cosmo::CfgSystemInterfaceModeIotInfo{};
+            }
+            if (!IsValidBrandingText(loaded.logoInfo.systemName) ||
+                !IsValidBrandingText(loaded.logoInfo.bigScreenName) ||
+                (!loaded.logoInfo.logoFileName.empty() && !IsAllowedLogoName(loaded.logoInfo.logoFileName))) {
+                LOG_WARN("{}", "Reject invalid persisted logo configuration");
+                loaded.logoInfo = cosmo::CfgSystemLogoInfo{};
+            }
+            config = std::move(loaded);
+        }
         LOG_INFO("{}", "SysConfigState: system config loaded");
     }
 
-    void SaveCfg(const cosmo::CfgSystemParamInfo& cfg) {
+    bool SaveCfg(const cosmo::CfgSystemParamInfo& cfg) {
         auto path = (std::filesystem::path(cosmo::path::GetCfgPath()) / conf_file_name).string();
-        static_cast<void>(cosmo::util::SaveStructToJsonFile(path, cfg));
+        return cosmo::util::SaveStructToJsonFile(path, cfg);
     }
 };
 
 SystemServiceImpl::SystemServiceImpl() : sys_config_state_(std::make_unique<SysConfigState>()) {
-    CfgAlarmParamInfo cfg;
     auto alarm_cfg_path = (std::filesystem::path(cosmo::path::GetCfgPath()) / alarm_cfg_file_).string();
-    static_cast<void>(cosmo::util::LoadStructFromJsonFile(alarm_cfg_path, cfg));
-    overview_config_     = cfg.overviewInfo;
-    video_record_config_ = cfg.videoRecordInfo;
+    CfgAlarmParamInfo alarm_config;
+    if (cosmo::util::LoadStructFromJsonFile(alarm_cfg_path, alarm_config)) {
+        if (alarm_config.overviewInfo.picQuality < 1 || alarm_config.overviewInfo.picQuality > 100) {
+            LOG_WARN("{}", "Reject invalid persisted picture quality configuration");
+            alarm_config.overviewInfo = cosmo::CfgAlarmParamOverviewInfo{};
+        }
+        if (alarm_config.videoRecordInfo.preDuration < 1 || alarm_config.videoRecordInfo.preDuration > 100 ||
+            alarm_config.videoRecordInfo.aftreDuration < 1 ||
+            alarm_config.videoRecordInfo.aftreDuration > 100) {
+            LOG_WARN("{}", "Reject invalid persisted alarm recording configuration");
+            alarm_config.videoRecordInfo = cosmo::CfgAlarmParamVideoRecordInfo{};
+        }
+        overview_config_     = alarm_config.overviewInfo;
+        video_record_config_ = alarm_config.videoRecordInfo;
+    }
     LOG_INFO("{}", "SystemServiceImpl: alarm config loaded");
 
     auto reboot_cfg_path = (std::filesystem::path(cosmo::path::GetCfgPath()) / reboot_cfg_file_).string();
-    static_cast<void>(cosmo::util::LoadStructFromJsonFile(reboot_cfg_path, reboot_config_));
+    cosmo::CfgRebootParamInfo reboot_config;
+    if (cosmo::util::LoadStructFromJsonFile(reboot_cfg_path, reboot_config) && reboot_config.weekDay >= 0 &&
+        reboot_config.weekDay <= 7 && reboot_config.restartTimeSec >= 0 &&
+        reboot_config.restartTimeSec < 24 * 60 * 60) {
+        reboot_config_ = reboot_config;
+    } else {
+        LOG_WARN("{}", "Reject invalid persisted reboot configuration");
+    }
     LOG_INFO("{}", "SystemServiceImpl: reboot config loaded");
 }
 
 SystemServiceImpl::~SystemServiceImpl() = default;
 
-void SystemServiceImpl::SaveAlarmCfg(const CfgAlarmParamInfo& cfg) {
+bool SystemServiceImpl::SaveAlarmCfg(const CfgAlarmParamInfo& cfg) {
     auto path = (std::filesystem::path(cosmo::path::GetCfgPath()) / alarm_cfg_file_).string();
-    static_cast<void>(cosmo::util::SaveStructToJsonFile(path, cfg));
+    return cosmo::util::SaveStructToJsonFile(path, cfg);
 }
 
-void SystemServiceImpl::SaveRebootCfg(const cosmo::CfgRebootParamInfo& cfg) {
+bool SystemServiceImpl::SaveRebootCfg(const cosmo::CfgRebootParamInfo& cfg) {
     auto path = (std::filesystem::path(cosmo::path::GetCfgPath()) / reboot_cfg_file_).string();
-    static_cast<void>(cosmo::util::SaveStructToJsonFile(path, cfg));
+    return cosmo::util::SaveStructToJsonFile(path, cfg);
 }
 
 cosmo::CfgAlarmParamOverviewInfo SystemServiceImpl::GetPictureQuality() {
@@ -88,36 +405,29 @@ cosmo::util::ErrorEnum SystemServiceImpl::SetPictureQuality(cosmo::CfgAlarmParam
     if ((info.picQuality <= 0) || (info.picQuality > 100)) {
         return cosmo::util::ErrorEnum::ParameterException;
     }
-    bool changed = false;
-    CfgAlarmParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
-        if ((info.picQuality != overview_config_.picQuality) ||
-            (info.alarmTypeOverview != overview_config_.alarmTypeOverview) ||
-            (info.areaOverview != overview_config_.areaOverview) ||
-            (info.targetBoxOverview != overview_config_.targetBoxOverview) ||
-            (info.targetSizeOverview != overview_config_.targetSizeOverview)) {
-            overview_config_         = info;
-            snapshot.overviewInfo    = overview_config_;
-            snapshot.videoRecordInfo = video_record_config_;
-            changed                  = true;
-        }
+    std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
+    if ((info.picQuality == overview_config_.picQuality) &&
+        (info.alarmTypeOverview == overview_config_.alarmTypeOverview) &&
+        (info.areaOverview == overview_config_.areaOverview) &&
+        (info.targetBoxOverview == overview_config_.targetBoxOverview) &&
+        (info.targetSizeOverview == overview_config_.targetSizeOverview)) {
+        return cosmo::util::ErrorEnum::Success;
     }
-    if (changed) {
-        SaveAlarmCfg(snapshot);
+    CfgAlarmParamInfo snapshot{info, video_record_config_};
+    if (!SaveAlarmCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
     }
+    overview_config_ = std::move(info);
     return cosmo::util::ErrorEnum::Success;
 }
 
 cosmo::util::ErrorEnum SystemServiceImpl::ResetPictureQuality() {
-    CfgAlarmParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
-        overview_config_         = cosmo::CfgAlarmParamOverviewInfo{};
-        snapshot.overviewInfo    = overview_config_;
-        snapshot.videoRecordInfo = video_record_config_;
+    std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
+    CfgAlarmParamInfo snapshot{cosmo::CfgAlarmParamOverviewInfo{}, video_record_config_};
+    if (!SaveAlarmCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
     }
-    SaveAlarmCfg(snapshot);
+    overview_config_ = snapshot.overviewInfo;
     return cosmo::util::ErrorEnum::Success;
 }
 
@@ -133,34 +443,27 @@ cosmo::util::ErrorEnum SystemServiceImpl::SetAlarmVideoDuration(cosmo::CfgAlarmP
     if ((info.aftreDuration <= 0) || (info.aftreDuration > 100)) {
         return cosmo::util::ErrorEnum::ParameterException;
     }
-    bool changed = false;
-    CfgAlarmParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
-        if ((info.bopen != video_record_config_.bopen) ||
-            (info.preDuration != video_record_config_.preDuration) ||
-            (info.aftreDuration != video_record_config_.aftreDuration)) {
-            video_record_config_     = info;
-            snapshot.overviewInfo    = overview_config_;
-            snapshot.videoRecordInfo = video_record_config_;
-            changed                  = true;
-        }
+    std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
+    if ((info.bopen == video_record_config_.bopen) &&
+        (info.preDuration == video_record_config_.preDuration) &&
+        (info.aftreDuration == video_record_config_.aftreDuration)) {
+        return cosmo::util::ErrorEnum::Success;
     }
-    if (changed) {
-        SaveAlarmCfg(snapshot);
+    CfgAlarmParamInfo snapshot{overview_config_, info};
+    if (!SaveAlarmCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
     }
+    video_record_config_ = std::move(info);
     return cosmo::util::ErrorEnum::Success;
 }
 
 cosmo::util::ErrorEnum SystemServiceImpl::ResetAlarmVideoDuration() {
-    CfgAlarmParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
-        video_record_config_     = cosmo::CfgAlarmParamVideoRecordInfo{};
-        snapshot.overviewInfo    = overview_config_;
-        snapshot.videoRecordInfo = video_record_config_;
+    std::lock_guard<std::shared_mutex> lock(alarm_mtx_);
+    CfgAlarmParamInfo snapshot{overview_config_, cosmo::CfgAlarmParamVideoRecordInfo{}};
+    if (!SaveAlarmCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
     }
-    SaveAlarmCfg(snapshot);
+    video_record_config_ = snapshot.videoRecordInfo;
     return cosmo::util::ErrorEnum::Success;
 }
 
@@ -170,42 +473,37 @@ cosmo::CfgRebootParamInfo SystemServiceImpl::GetRebootParam() {
 }
 
 cosmo::util::ErrorEnum SystemServiceImpl::SetRebootParam(cosmo::CfgRebootParamInfo info) {
-    if ((info.weekDay < 0) || (info.weekDay > 7)) {
+    if ((info.weekDay < 0) || (info.weekDay > 7) || info.restartTimeSec < 0 ||
+        info.restartTimeSec >= 24 * 60 * 60) {
         return cosmo::util::ErrorEnum::ParameterException;
     }
-    bool changed = false;
-    cosmo::CfgRebootParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(reboot_mtx_);
-        if ((info.isTimingRestart != reboot_config_.isTimingRestart) ||
-            (info.weekDay != reboot_config_.weekDay) ||
-            (info.restartTimeSec != reboot_config_.restartTimeSec)) {
-            reboot_config_ = info;
-            snapshot       = reboot_config_;
-            changed        = true;
-        }
+    std::lock_guard<std::shared_mutex> lock(reboot_mtx_);
+    if ((info.isTimingRestart == reboot_config_.isTimingRestart) &&
+        (info.weekDay == reboot_config_.weekDay) && (info.restartTimeSec == reboot_config_.restartTimeSec)) {
+        return cosmo::util::ErrorEnum::Success;
     }
-    if (changed) {
-        SaveRebootCfg(snapshot);
+    if (!SaveRebootCfg(info)) {
+        return cosmo::util::ErrorEnum::SysErr;
     }
+    reboot_config_ = std::move(info);
     return cosmo::util::ErrorEnum::Success;
 }
 
 cosmo::util::ErrorEnum SystemServiceImpl::ResetRebootParam() {
+    std::lock_guard<std::shared_mutex> lock(reboot_mtx_);
     cosmo::CfgRebootParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(reboot_mtx_);
-        reboot_config_ = cosmo::CfgRebootParamInfo{};
-        snapshot       = reboot_config_;
+    if (!SaveRebootCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
     }
-    SaveRebootCfg(snapshot);
+    reboot_config_ = snapshot;
     return cosmo::util::ErrorEnum::Success;
 }
 
 SystemLogoInfo SystemServiceImpl::GetSystemLogo() {
     SystemLogoInfo info;
     std::shared_lock<std::shared_mutex> lock(sys_config_state_->mtx);
-    if (sys_config_state_->config.logoInfo.bHaveSetLogo) {
+    if (sys_config_state_->config.logoInfo.bHaveSetLogo &&
+        IsAllowedLogoName(sys_config_state_->config.logoInfo.logoFileName)) {
         info.systemName = sys_config_state_->config.logoInfo.systemName;
         info.logoUrl    = (std::filesystem::path(cosmo::path::GetLogoWebPath()) /
                         sys_config_state_->config.logoInfo.logoFileName)
@@ -219,24 +517,42 @@ cosmo::util::ErrorEnum SystemServiceImpl::SetSystemLogo(const std::string& syste
                                                         const std::string& logoFileType,
                                                         const std::vector<uint8_t>& logo_img,
                                                         const std::string& bigScreenName) {
-    std::string logo_name = "logo" + logoFileType;
-    std::string logo_path;
-    cosmo::CfgSystemParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
-        sys_config_state_->config.logoInfo.systemName   = systemName;
-        sys_config_state_->config.logoInfo.logoFileName = logo_name;
-        sys_config_state_->config.logoInfo.bHaveSetLogo = true;
-        if (!bigScreenName.empty()) {
-            sys_config_state_->config.logoInfo.bigScreenName = bigScreenName;
-        }
-        snapshot  = sys_config_state_->config;
-        logo_path = (std::filesystem::path(cosmo::path::GetLogoPath()) / logo_name).string();
+    if (!IsValidBrandingText(systemName) || !IsValidBrandingText(bigScreenName) || logo_img.empty() ||
+        logo_img.size() > kMaxLogoBytes || !LogoContentMatches(logoFileType, logo_img)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
     }
-    sys_config_state_->SaveCfg(snapshot);
-    cosmo::util::WriteFile(logo_path, reinterpret_cast<const std::uint8_t*>(logo_img.data()),
-                           static_cast<int>(logo_img.size()));
-    return {};
+
+    const std::string logo_name = "logo" + logoFileType;
+    const std::string logo_dir  = cosmo::path::GetLogoPath();
+    if (!IsAllowedLogoName(logo_name)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+
+    std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
+    LogoFileTransaction logo_transaction(logo_dir, logo_name, logo_img);
+    if (!logo_transaction.Install()) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+
+    auto snapshot                  = sys_config_state_->config;
+    const auto old_logo_name       = snapshot.logoInfo.logoFileName;
+    snapshot.logoInfo.systemName   = systemName;
+    snapshot.logoInfo.logoFileName = logo_name;
+    snapshot.logoInfo.bHaveSetLogo = true;
+    if (!bigScreenName.empty()) {
+        snapshot.logoInfo.bigScreenName = bigScreenName;
+    }
+    if (!sys_config_state_->SaveCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+    sys_config_state_->config = std::move(snapshot);
+    logo_transaction.Commit();
+
+    if (old_logo_name != logo_name && IsAllowedLogoName(old_logo_name)) {
+        std::error_code remove_error;
+        std::filesystem::remove(std::filesystem::path(logo_dir) / old_logo_name, remove_error);
+    }
+    return cosmo::util::ErrorEnum::Success;
 }
 
 bool SystemServiceImpl::GetDebugMode() {
@@ -254,9 +570,13 @@ std::vector<std::string> SystemServiceImpl::GetShieldedActions() {
     return sys_config_state_->tmp.debugInfo.shieldActions;
 }
 
-void SystemServiceImpl::SetShieldedActions(const std::vector<std::string>& actions) {
+cosmo::util::ErrorEnum SystemServiceImpl::SetShieldedActions(const std::vector<std::string>& actions) {
+    if (!IsValidShieldedActions(actions)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
     sys_config_state_->tmp.debugInfo.shieldActions = actions;
+    return cosmo::util::ErrorEnum::Success;
 }
 
 void SystemServiceImpl::GetPopUpParam(int& pop_up_switch, int& audio_play, int& pop_up_duration) {
@@ -266,24 +586,27 @@ void SystemServiceImpl::GetPopUpParam(int& pop_up_switch, int& audio_play, int& 
     pop_up_duration = sys_config_state_->config.popUpInfo.popUpDuration;
 }
 
-void SystemServiceImpl::SetPopUpParam(int pop_up_switch, int audio_play, int pop_up_duration) {
-    bool changed = false;
-    cosmo::CfgSystemParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
-        if ((pop_up_switch != sys_config_state_->config.popUpInfo.popUpSwitch) ||
-            (pop_up_duration != sys_config_state_->config.popUpInfo.popUpDuration) ||
-            (audio_play != sys_config_state_->config.popUpInfo.audioPlay)) {
-            sys_config_state_->config.popUpInfo.popUpSwitch   = pop_up_switch;
-            sys_config_state_->config.popUpInfo.popUpDuration = pop_up_duration;
-            sys_config_state_->config.popUpInfo.audioPlay     = audio_play;
-            snapshot                                          = sys_config_state_->config;
-            changed                                           = true;
-        }
+cosmo::util::ErrorEnum SystemServiceImpl::SetPopUpParam(int pop_up_switch, int audio_play,
+                                                        int pop_up_duration) {
+    if ((pop_up_switch != 0 && pop_up_switch != 1) || (audio_play != 0 && audio_play != 1) ||
+        pop_up_duration < 1 || pop_up_duration > 30) {
+        return cosmo::util::ErrorEnum::InvalidParam;
     }
-    if (changed) {
-        sys_config_state_->SaveCfg(snapshot);
+    std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
+    if ((pop_up_switch == sys_config_state_->config.popUpInfo.popUpSwitch) &&
+        (pop_up_duration == sys_config_state_->config.popUpInfo.popUpDuration) &&
+        (audio_play == sys_config_state_->config.popUpInfo.audioPlay)) {
+        return cosmo::util::ErrorEnum::Success;
     }
+    auto snapshot                    = sys_config_state_->config;
+    snapshot.popUpInfo.popUpSwitch   = pop_up_switch;
+    snapshot.popUpInfo.popUpDuration = pop_up_duration;
+    snapshot.popUpInfo.audioPlay     = audio_play;
+    if (!sys_config_state_->SaveCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+    sys_config_state_->config = std::move(snapshot);
+    return cosmo::util::ErrorEnum::Success;
 }
 
 HttpPushParam SystemServiceImpl::GetHttpInterfaceParam() {
@@ -292,6 +615,9 @@ HttpPushParam SystemServiceImpl::GetHttpInterfaceParam() {
 }
 
 cosmo::util::ErrorEnum SystemServiceImpl::SetHttpInterfaceParam(const HttpPushParam& param) {
+    if ((param.enable || !param.url.empty()) && !IsValidHttpUrl(param.url)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     return service::ServiceRegistry::Instance().Get<service::IAlarmPushService>().SetPush(param.enable,
                                                                                           param.url);
 }
@@ -314,27 +640,33 @@ MqttParam SystemServiceImpl::GetMqttParam() {
 }
 
 cosmo::util::ErrorEnum SystemServiceImpl::SetMqttParam(const MqttParam& param) {
+    if (!IsValidMqttParam(param)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     bool changed = false;
-    cosmo::CfgSystemParamInfo snapshot;
     {
         std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
-        auto& mqtt = sys_config_state_->config.interfaceModeInfo.standAloneParam.mqttParam;
+        const auto& mqtt = sys_config_state_->config.interfaceModeInfo.standAloneParam.mqttParam;
         if ((param.enable != mqtt.bEnable) || (param.url != mqtt.ip) || (param.port != mqtt.port) ||
             (param.authMode != mqtt.authMode) || (param.clientId != mqtt.clientId) ||
             (param.userName != mqtt.userName) || (param.passwd != mqtt.passwd)) {
-            mqtt.bEnable  = param.enable;
-            mqtt.ip       = param.url;
-            mqtt.port     = param.port;
-            mqtt.authMode = param.authMode;
-            mqtt.clientId = param.clientId;
-            mqtt.userName = param.userName;
-            mqtt.passwd   = param.passwd;
-            snapshot      = sys_config_state_->config;
-            changed       = true;
+            auto snapshot      = sys_config_state_->config;
+            auto& candidate    = snapshot.interfaceModeInfo.standAloneParam.mqttParam;
+            candidate.bEnable  = param.enable;
+            candidate.ip       = param.url;
+            candidate.port     = param.port;
+            candidate.authMode = param.authMode;
+            candidate.clientId = param.clientId;
+            candidate.userName = param.userName;
+            candidate.passwd   = param.passwd;
+            if (!sys_config_state_->SaveCfg(snapshot)) {
+                return cosmo::util::ErrorEnum::SysErr;
+            }
+            sys_config_state_->config = std::move(snapshot);
+            changed                   = true;
         }
     }
     if (changed) {
-        sys_config_state_->SaveCfg(snapshot);
         if (param.enable) {
             service::ServiceRegistry::Instance().Get<service::INetworkService>().MqttStop();
             service::ServiceRegistry::Instance().Get<service::INetworkService>().MqttStart();
@@ -342,7 +674,7 @@ cosmo::util::ErrorEnum SystemServiceImpl::SetMqttParam(const MqttParam& param) {
             service::ServiceRegistry::Instance().Get<service::INetworkService>().MqttStop();
         }
     }
-    return {};
+    return cosmo::util::ErrorEnum::Success;
 }
 
 cosmo::RunMode SystemServiceImpl::GetRunMode() {
@@ -350,22 +682,28 @@ cosmo::RunMode SystemServiceImpl::GetRunMode() {
     return sys_config_state_->config.interfaceModeInfo.runMode;
 }
 
-void SystemServiceImpl::SetRunMode(cosmo::RunMode mode) {
+cosmo::util::ErrorEnum SystemServiceImpl::SetRunMode(cosmo::RunMode mode) {
+    if (mode != cosmo::RunMode::RunModeStandAlone && mode != cosmo::RunMode::RunModeIotNetwork) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     bool changed = false;
-    cosmo::CfgSystemParamInfo snapshot;
     {
         std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
         if (mode != sys_config_state_->config.interfaceModeInfo.runMode) {
-            sys_config_state_->config.interfaceModeInfo.runMode = mode;
-            snapshot                                            = sys_config_state_->config;
-            changed                                             = true;
+            auto snapshot                      = sys_config_state_->config;
+            snapshot.interfaceModeInfo.runMode = mode;
+            if (!sys_config_state_->SaveCfg(snapshot)) {
+                return cosmo::util::ErrorEnum::SysErr;
+            }
+            sys_config_state_->config = std::move(snapshot);
+            changed                   = true;
         }
     }
     if (changed) {
-        sys_config_state_->SaveCfg(snapshot);
         LOG_WARN("{}", "RunMode changed, rebooting device (face libraries will be cleared)");
         ServiceRegistry::Instance().Get<ISystemOperationService>().RebootDevice("RunModel Changed");
     }
+    return cosmo::util::ErrorEnum::Success;
 }
 
 IotNetworkParam SystemServiceImpl::GetIotNetworkParam() {
@@ -381,27 +719,29 @@ IotNetworkParam SystemServiceImpl::GetIotNetworkParam() {
     return result;
 }
 
-void SystemServiceImpl::SetIotNetworkParam(const std::string& httpUrl, const std::string& mqttIp,
-                                           int mqtt_port) {
-    bool changed = false;
-    cosmo::CfgSystemParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
-        auto& iot = sys_config_state_->config.interfaceModeInfo.iotParam;
-        if ((httpUrl != iot.httpParam.url) || (mqttIp != iot.mqttParam.ip) ||
-            (mqtt_port != iot.mqttParam.port)) {
-            iot.httpParam.url     = httpUrl;
-            iot.httpParam.bEnable = true;
-            iot.mqttParam.ip      = mqttIp;
-            iot.mqttParam.port    = mqtt_port;
-            iot.mqttParam.bEnable = true;
-            snapshot              = sys_config_state_->config;
-            changed               = true;
-        }
+cosmo::util::ErrorEnum SystemServiceImpl::SetIotNetworkParam(const std::string& httpUrl,
+                                                             const std::string& mqttIp, int mqtt_port) {
+    if (!IsValidHttpUrl(httpUrl) || !IsValidMqttHost(mqttIp) || mqtt_port < 1 || mqtt_port > 65535) {
+        return cosmo::util::ErrorEnum::InvalidParam;
     }
-    if (changed) {
-        sys_config_state_->SaveCfg(snapshot);
+    std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
+    const auto& iot = sys_config_state_->config.interfaceModeInfo.iotParam;
+    if ((httpUrl == iot.httpParam.url) && (mqttIp == iot.mqttParam.ip) && (mqtt_port == iot.mqttParam.port) &&
+        iot.httpParam.bEnable && iot.mqttParam.bEnable) {
+        return cosmo::util::ErrorEnum::Success;
     }
+    auto snapshot               = sys_config_state_->config;
+    auto& candidate             = snapshot.interfaceModeInfo.iotParam;
+    candidate.httpParam.url     = httpUrl;
+    candidate.httpParam.bEnable = true;
+    candidate.mqttParam.ip      = mqttIp;
+    candidate.mqttParam.port    = mqtt_port;
+    candidate.mqttParam.bEnable = true;
+    if (!sys_config_state_->SaveCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+    sys_config_state_->config = std::move(snapshot);
+    return cosmo::util::ErrorEnum::Success;
 }
 
 bool SystemServiceImpl::GetResourceLimit() {
@@ -409,20 +749,18 @@ bool SystemServiceImpl::GetResourceLimit() {
     return sys_config_state_->config.resourceInfo.bResourceLimitOpen;
 }
 
-void SystemServiceImpl::SetResourceLimit(bool enable) {
-    bool changed = false;
-    cosmo::CfgSystemParamInfo snapshot;
-    {
-        std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
-        if (enable != sys_config_state_->config.resourceInfo.bResourceLimitOpen) {
-            sys_config_state_->config.resourceInfo.bResourceLimitOpen = enable;
-            snapshot                                                  = sys_config_state_->config;
-            changed                                                   = true;
-        }
+cosmo::util::ErrorEnum SystemServiceImpl::SetResourceLimit(bool enable) {
+    std::lock_guard<std::shared_mutex> lock(sys_config_state_->mtx);
+    if (enable == sys_config_state_->config.resourceInfo.bResourceLimitOpen) {
+        return cosmo::util::ErrorEnum::Success;
     }
-    if (changed) {
-        sys_config_state_->SaveCfg(snapshot);
+    auto snapshot                            = sys_config_state_->config;
+    snapshot.resourceInfo.bResourceLimitOpen = enable;
+    if (!sys_config_state_->SaveCfg(snapshot)) {
+        return cosmo::util::ErrorEnum::SysErr;
     }
+    sys_config_state_->config = std::move(snapshot);
+    return cosmo::util::ErrorEnum::Success;
 }
 
 bool SystemServiceImpl::IsNetworkModel() {

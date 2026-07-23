@@ -54,6 +54,10 @@ public:
     /// @param info Network card configuration to apply.
     virtual void ApplyCardInfoAsync(const cosmo::platform::NetCardInfo& info) = 0;
 
+    /// Stop accepting asynchronous network-card updates and wait for any
+    /// in-flight update worker to finish. Safe to call more than once.
+    virtual void StopAsyncApply() = 0;
+
     /// Get currently configured DNS servers.
     /// @return Vector of DNS server IP addresses.
     virtual std::vector<std::string> GetCfgDns() = 0;

@@ -32,9 +32,9 @@ private:
     std::shared_mutex mtx_;
 
     // Parameter state
-    float box_confidence_{0.25f};
-    float text_confidence_{0.3f};
-    std::string prompt_{"detect objects"};
+    float box_confidence_{0.3f};
+    float text_confidence_{0.25f};
+    std::string prompt_{"person"};
 
     // Inference instance
     DinoDetectorUnifyPtr inst_{nullptr};

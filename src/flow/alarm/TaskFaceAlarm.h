@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <list>
 #include <memory>
 #include <shared_mutex>
@@ -23,9 +24,6 @@ public:
                   const std::string &algName, ActionNode &action);
     ~TaskFaceAlarm();
 
-    void Start() override;
-    void Stop() override;
-
     void QueueStatus(std::vector<AlgActionDataQueueStatus> &queStatus,
                      unsigned int durationSec = 30) override;
     void ActionInfo(std::vector<ActionRuntimeInfo> &actionInfo) override;
@@ -46,10 +44,6 @@ public:
         return m_taskId;
     };
 
-protected:
-    // Subclass overrides run for thread execution
-    virtual void run() override;
-
 private:
     void EventFaceRecord(const CMsgFaceEventReq &eventData);
 
@@ -67,14 +61,11 @@ private:
     std::string m_taskId;
     std::string m_algId;    // Business algorithm ID
     std::string m_algName;  // Business algorithm name
-    bool m_running{false};
     size_t m_filterFrames{0};
     size_t m_handleFrames{0};
-    size_t m_alarmCount{0};
+    std::atomic<size_t> m_alarmCount{0};
     // TaskFaceAlarmParam m_param;
     TaskBaseArea m_taskArea;
-    util::ErrorEnum m_actionStatus{util::ErrorEnum::Success};
-    AlgDataQueue<AlgDataPtr> m_msgQueue;
 };
 using TaskFaceAlarmPtr = std::shared_ptr<TaskFaceAlarm>;
 }  // namespace cosmo

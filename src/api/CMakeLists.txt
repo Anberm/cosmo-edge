@@ -24,6 +24,7 @@ add_library(cosmo_api OBJECT
     MessageSystemHandlerOps.cc
     MessageThingsLibHandler.cc      MessageThingsLibHandler.h
     MessageVideoTaskHandler.cc      MessageVideoTaskHandler.h
+    HttpUploadClaim.cc              HttpUploadClaim.h
 )
 
 # Project headers

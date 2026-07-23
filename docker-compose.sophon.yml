@@ -10,7 +10,7 @@ services:
       bash -lc "
       set -e;
       echo 'Starting cross-compilation...';
-      ./scripts/build.sh -m data/resource/aiboxresource;
+      ./scripts/build.sh -T -m data/resource/aiboxresource;
       mkdir -p /build_output;
       cp -f build/packages/* /build_output/ 2>/dev/null || echo 'Warning: No packages found to copy.';
       ls -lh /build_output;

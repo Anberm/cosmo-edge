@@ -40,28 +40,26 @@ void AuthServiceImpl::Load() {
 
     std::lock_guard<std::shared_mutex> lock(mtx_);
     user_passwd_ = std::move(data.userPasswd);
+    token_user_.clear();
+    token_time_.clear();
 
-    auto now = Clock::now();
-    for (auto& tp : data.token) {
-        token_user_.insert({tp.token, {tp.user, now}});
-        token_time_.emplace(now, tp.token);
+    // Rewrite legacy files without their persisted session tokens. Sessions are
+    // process-local credentials and must never survive a restart.
+    if (data.had_legacy_token) {
+        Save();
     }
 }
 
-void AuthServiceImpl::Save() {
+bool AuthServiceImpl::Save() {
     PersistData data;
     data.userPasswd = user_passwd_;
-    data.token.reserve(token_user_.size());
-    for (auto& [tok, entry] : token_user_) {
-        if (!tok.empty() && !entry.userName.empty()) {
-            data.token.push_back({entry.userName, tok});
-        }
-    }
 
     auto path = (std::filesystem::path(cosmo::path::GetCfgPath()) / config_name_).string();
     if (!cosmo::util::SaveStructToJsonFile(path, data)) {
         LOG_WARN("Failed to save auth config to {}", path);
+        return false;
     }
+    return true;
 }
 
 // ── Token helpers (caller must hold mtx_) ──
@@ -87,6 +85,25 @@ bool AuthServiceImpl::PurgeExpiredTokens(TimePoint now) {
     return true;
 }
 
+void AuthServiceImpl::RevokeUserTokens(const std::string& user_name) {
+    for (auto token_it = token_user_.begin(); token_it != token_user_.end();) {
+        if (token_it->second.userName != user_name) {
+            ++token_it;
+            continue;
+        }
+
+        const auto token = token_it->first;
+        for (auto time_it = token_time_.begin(); time_it != token_time_.end();) {
+            if (time_it->second == token) {
+                time_it = token_time_.erase(time_it);
+            } else {
+                ++time_it;
+            }
+        }
+        token_it = token_user_.erase(token_it);
+    }
+}
+
 std::string AuthServiceImpl::FindUserByToken(const std::string& token) const {
     auto it = token_user_.find(token);
     return (it != token_user_.end()) ? it->second.userName : std::string{};
@@ -106,13 +123,11 @@ std::pair<std::string, cosmo::util::ErrorEnum> AuthServiceImpl::Login(const std:
     if (token_time_.size() >= kMaxTokenCount) {
         PurgeExpiredTokens(Clock::now());
         if (token_time_.size() >= kMaxTokenCount) {
-            Save();
             return {{}, cosmo::util::ErrorEnum::LoginFrequence};
         }
     }
 
     auto token = CreateToken(user);
-    Save();
     return {token, cosmo::util::ErrorEnum::Success};
 }
 
@@ -131,18 +146,28 @@ cosmo::util::ErrorEnum AuthServiceImpl::ChangePasswd(const std::string& token,
         return cosmo::util::ErrorEnum::OldPasswdWrong;
     }
 
-    it->second = cosmo::util::ToUpper(passwdMd5New);
-    Save();
+    const auto old_password = it->second;
+    it->second              = cosmo::util::ToUpper(passwdMd5New);
+    if (!Save()) {
+        it->second = old_password;
+        return cosmo::util::ErrorEnum::FileOpenFailed;
+    }
+
+    RevokeUserTokens(user);
     return cosmo::util::ErrorEnum::Success;
 }
 
 bool AuthServiceImpl::IsValidToken(const std::string& token) {
+    std::string principal;
+    return ResolvePrincipal(token, principal);
+}
+
+bool AuthServiceImpl::ResolvePrincipal(const std::string& token, std::string& principal) {
+    principal.clear();
     auto now = Clock::now();
     std::lock_guard<std::shared_mutex> lock(mtx_);
 
-    if (PurgeExpiredTokens(now)) {
-        Save();
-    }
+    PurgeExpiredTokens(now);
 
     auto it = token_user_.find(token);
     if (it == token_user_.end()) {
@@ -159,6 +184,7 @@ bool AuthServiceImpl::IsValidToken(const std::string& token) {
     }
     token_time_.emplace(now, token);
     it->second.createdAt = now;
+    principal            = it->second.userName;
     return true;
 }
 
@@ -180,26 +206,12 @@ bool AuthServiceImpl::IsDefaultPassword() const {
 
 // Auto-generated JSON serialization
 namespace cosmo::service {
-void from_json(const nlohmann::json& j, AuthServiceImpl::TokenPair& v) {
-    if (j.contains("user") && !j["user"].is_null())
-        j.at("user").get_to(v.user);
-    if (j.contains("token") && !j["token"].is_null())
-        j.at("token").get_to(v.token);
-}
-
-void to_json(nlohmann::json& j, const AuthServiceImpl::TokenPair& v) {
-    j["user"]  = v.user;
-    j["token"] = v.token;
-}
-
 void to_json(nlohmann::json& j, const AuthServiceImpl::PersistData& v) {
-    j["token"]      = v.token;
     j["userPasswd"] = v.userPasswd;
 }
 
 void from_json(const nlohmann::json& j, AuthServiceImpl::PersistData& v) {
-    if (j.contains("token") && !j["token"].is_null())
-        j.at("token").get_to(v.token);
+    v.had_legacy_token = j.contains("token");
     if (j.contains("userPasswd") && !j["userPasswd"].is_null())
         j.at("userPasswd").get_to(v.userPasswd);
 }

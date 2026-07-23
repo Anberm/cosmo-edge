@@ -8,6 +8,7 @@ set(MEDIA_COMMON_SRC
     OsdTextRenderer.cc           OsdTextRenderer.h
     PixelFormat.h
     PixelFormatUtils.cc          PixelFormatUtils.h
+    PreviewPipelineMetrics.cc    PreviewPipelineMetrics.h
     RtspDemuxStrategy.cc         RtspDemuxStrategy.h
     UsbDemuxStrategy.cc          UsbDemuxStrategy.h
     VideoCodecType.h
@@ -45,10 +46,12 @@ set(MEDIA_CPU_SRC
     VideoFrameProcCpu.cc         VideoFrameProcCpu.h
 )
 
-if(COSMO_NN_USE_SOPHON_BACKEND)
+if(COSMO_MEDIA_USE_SOPHON_BACKEND)
     add_library(cosmo_media OBJECT ${MEDIA_COMMON_SRC} ${MEDIA_SOPHON_SRC})
-else()
+elseif(COSMO_MEDIA_USE_CPU_BACKEND)
     add_library(cosmo_media OBJECT ${MEDIA_COMMON_SRC} ${MEDIA_CPU_SRC})
+else()
+    message(FATAL_ERROR "No media backend selected")
 endif()
 
 # Project headers (media/, mem/, util/ via src/)
@@ -60,6 +63,6 @@ target_link_libraries(cosmo_media PRIVATE cosmo_common
     ffmpeg_avcodec ffmpeg_avdevice ffmpeg_avformat ffmpeg_avutil ffmpeg_swscale
     stb mp4v2
 )
-if(COSMO_NN_USE_SOPHON_BACKEND)
+if(COSMO_MEDIA_USE_SOPHON_BACKEND)
     target_link_libraries(cosmo_media PRIVATE bmlib bmcv bmvd bmvenc)
 endif()

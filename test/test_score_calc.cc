@@ -4,6 +4,9 @@
  *
  * Tests GPU health score calculation with various load scenarios.
  */
+#include <cmath>
+#include <limits>
+
 #include "util/ScoreCalc.h"
 
 using namespace cosmo;
@@ -43,4 +46,13 @@ TEST_CASE("CalcCustomScore: multiple GPU devices", "[score-calc]") {
     std::vector<GpuMemSnapshot> devs = {{4000, 2000}, {4000, 1000}};
     auto score                       = CalcCustomScore(0.7, 8000, 3000, devs, 0.1, 0);
     REQUIRE(score >= 0.0);
+}
+
+TEST_CASE("CalcCustomScore: malformed telemetry is clamped", "[score-calc]") {
+    std::vector<GpuMemSnapshot> devs = {{4000, 8000}, {4000, -1}};
+    const auto score = CalcCustomScore(std::numeric_limits<double>::quiet_NaN(), 8000, 16000, devs,
+                                       std::numeric_limits<double>::infinity(), 4);
+    REQUIRE(std::isfinite(score));
+    REQUIRE(score >= 0.0);
+    REQUIRE(score <= 100.0);
 }

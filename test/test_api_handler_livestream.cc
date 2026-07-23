@@ -4,6 +4,7 @@
  *
  * Tests for live stream request, keepalive, and stop.
  */
+#include "api/ApiRouterInternal.h"
 #include "api/MessageLiveStreamHandler.h"
 #include "mock/MockLiveStreamService.h"
 #include "mock/MockServiceRegistry.h"
@@ -118,6 +119,33 @@ TEST_CASE("MessageLiveStreamHandler: Stop stream", "[LiveStreamHandler]") {
     std::error_condition errc;
     auto rsp = handler.Handle(std::move(req), errc);
 
-    // Stop always succeeds (void-like)
-    REQUIRE(true);
+    (void)rsp;
+    REQUIRE(errc == util::ErrorEnum::Success);
+}
+
+TEST_CASE("MessageLiveStreamHandler: Stop stream propagates failure", "[LiveStreamHandler]") {
+    test::MockServiceRegistry mocks;
+    MessageLiveStreamHandler handler(mocks.liveStreamSvc);
+
+    ALLOW_CALL(mocks.liveStreamSvc, ViewerDelete("ch1", "alg1")).RETURN(false);
+
+    LiveStream::MsgStreamStopRecv req{};
+    req.channelId             = "ch1";
+    req.algorithmId           = "alg1";
+    std::error_condition errc = util::ErrorEnum::Success;
+    (void)handler.Handle(std::move(req), errc);
+
+    REQUIRE(errc == util::ErrorEnum::Failed);
+}
+
+TEST_CASE("ApiRouter: generic live stream exception is never serialized as Success", "[LiveStreamHandler]") {
+    std::error_condition errc = util::ErrorEnum::Success;
+    const auto payload        = nlohmann::json::parse(detail::ErroResult("Input/output error", errc));
+
+    REQUIRE(errc == util::ErrorEnum::InternalError);
+    REQUIRE(payload.at("resCode") == kServerRspFailed);
+    REQUIRE(payload.at("resMsg").at(0).at("msgCode") ==
+            std::to_string(static_cast<uint32_t>(util::ErrorEnum::InternalError)));
+    REQUIRE(payload.at("resMsg").at(0).at("messageKey") != "api.error.Success");
+    REQUIRE(payload.at("resMsg").at(0).at("msgText") == "Input/output error");
 }

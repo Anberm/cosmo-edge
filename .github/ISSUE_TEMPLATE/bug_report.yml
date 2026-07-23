@@ -44,6 +44,34 @@ body:
         Build path: x86 Docker / Sophon package / other
     validations:
       required: true
+  - type: input
+    id: baseline
+    attributes:
+      label: Baseline commit
+      description: Commit or tag used to establish whether this is a regression.
+      placeholder: Commit SHA, tag, or unknown with an explanation
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope boundaries
+      description: State what is in scope and explicitly out of scope for this issue.
+      placeholder: |
+        In scope:
+        Out of scope:
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risk tags and affected paths
+      description: Identify runtime, thread, memory, API, media, frontend, device, packaging, or compatibility risks.
+      placeholder: |
+        Risk tags:
+        Affected paths:
+    validations:
+      required: true
   - type: textarea
     id: steps
     attributes:
@@ -65,6 +93,23 @@ body:
     id: actual
     attributes:
       label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: initial_analysis
+    attributes:
+      label: Initial root-cause analysis
+      description: Optional at issue creation; update it before implementation when the root cause becomes known.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      description: List objective checks that must pass before this issue can be closed.
+      placeholder: |
+        - [ ] Parent baseline recorded
+        - [ ] Focused regression test passes
+        - [ ] Required build and device checks pass
+        - [ ] Temporary data and rollback state audited
     validations:
       required: true
   - type: textarea

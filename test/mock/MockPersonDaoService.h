@@ -29,6 +29,7 @@ public:
                     const std::vector<std::pair<std::string, std::vector<float>>>&),
                override);
     MAKE_MOCK1(RemovePerson, bool(const std::string&), override);
+    MAKE_MOCK2(RemovePersonFromFaceLib, bool(const std::string&, const std::string&), override);
     MAKE_MOCK1(QueryFaceLib, cosmo::db::FaceLibQueryResult(const cosmo::db::FaceLibQueryCondition&),
                override);
     MAKE_MOCK1(QueryPersons, cosmo::db::FacePersonQueryResult(const cosmo::db::FacePersonQueryCondition&),

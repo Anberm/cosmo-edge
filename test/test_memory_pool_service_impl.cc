@@ -6,33 +6,93 @@
  * Construction requires bmlib device init which only works on aarch64.
  * All tests tagged [.device].
  */
-#include "mock/MockServiceRegistry.h"
+#include <chrono>
+#include <memory>
+#include <stdexcept>
+#include <thread>
+
+#include "mem/DeviceContext.h"
+#include "mem/IDeviceContext.h"
+#include "service/detail/ServiceRegistry.h"
 #include "service/infra/impl/MemoryPoolServiceImpl.h"
 
 using namespace cosmo::service;
 
+namespace {
+
+using namespace std::chrono_literals;
+
+class ScopedDeviceContext {
+public:
+    ScopedDeviceContext() {
+        if (ServiceRegistry::Instance().Has<cosmo::mem::IDeviceContext>()) {
+            throw std::logic_error("device context already registered by another test");
+        }
+        device_context_ = std::make_unique<cosmo::mem::DeviceContext>();
+        ServiceRegistry::Instance().Set<cosmo::mem::IDeviceContext>(device_context_.get());
+    }
+
+    ~ScopedDeviceContext() {
+        ServiceRegistry::Instance().Set<cosmo::mem::IDeviceContext>(nullptr);
+    }
+
+    ScopedDeviceContext(const ScopedDeviceContext&)            = delete;
+    ScopedDeviceContext& operator=(const ScopedDeviceContext&) = delete;
+
+private:
+    std::unique_ptr<cosmo::mem::DeviceContext> device_context_;
+};
+
+class MemoryPoolFixture {
+public:
+    MemoryPoolFixture() = default;
+
+    MemoryPoolFixture(const MemoryPoolFixture&)            = delete;
+    MemoryPoolFixture& operator=(const MemoryPoolFixture&) = delete;
+
+    MemoryPoolServiceImpl& Service() {
+        return service_;
+    }
+
+private:
+    ScopedDeviceContext device_context_;
+    MemoryPoolServiceImpl service_;
+};
+
+}  // namespace
+
 TEST_CASE("MemoryPoolServiceImpl: construction and destruction", "[MemoryPoolService][.device]") {
-    REQUIRE_NOTHROW([]() { MemoryPoolServiceImpl sut; }());
+    REQUIRE_NOTHROW([]() { MemoryPoolFixture fixture; }());
 }
 
 TEST_CASE("MemoryPoolServiceImpl: Status returns pool info", "[MemoryPoolService][.device]") {
-    MemoryPoolServiceImpl sut;
+    MemoryPoolFixture fixture;
+    auto& sut   = fixture.Service();
     auto status = sut.Status();
     // Should return at least some pool buckets
     REQUIRE(!status.empty());
 }
 
 TEST_CASE("MemoryPoolServiceImpl: OutputMallocBuf returns non-empty string", "[MemoryPoolService][.device]") {
-    MemoryPoolServiceImpl sut;
-    auto buf = sut.OutputMallocBuf();
+    MemoryPoolFixture fixture;
+    auto& sut = fixture.Service();
+    auto buf  = sut.OutputMallocBuf();
     REQUIRE(!buf.empty());
 }
 
 TEST_CASE("MemoryPoolServiceImpl: Acquire and Recycle", "[MemoryPoolService][.device]") {
-    MemoryPoolServiceImpl sut;
+    MemoryPoolFixture fixture;
+    auto& sut = fixture.Service();
 
     SECTION("Acquire returns non-null block for valid size") {
-        auto* block = sut.Acquire(1024);
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        cosmo::mem::Block* block{nullptr};
+        while (block == nullptr && std::chrono::steady_clock::now() < deadline) {
+            block = sut.Acquire(1024);
+            if (block == nullptr) {
+                std::this_thread::sleep_for(10ms);
+            }
+        }
         REQUIRE(block != nullptr);
         sut.Recycle(block);
     }

@@ -2,11 +2,13 @@
 // channel management, and data recording for video analysis tasks.
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 
 // Forward declarations — full definitions in flow/task/TaskBase.h (included in .cc)
 namespace cosmo {
@@ -23,6 +25,8 @@ class TaskServiceImpl : public ITaskService {
 public:
     TaskServiceImpl();
     ~TaskServiceImpl() override;
+
+    void Shutdown() override;
 
     cosmo::util::ErrorEnum TaskCreate(const std::string& channelId, const std::string& channelName,
                                       const std::string& taskId, cosmo::ActionAlgPtr actionAlg) override;
@@ -100,6 +104,14 @@ public:
 private:
     std::string GetTaskAlgId(const std::string& taskId);
 
+    // Serializes create/start/stop/delete and action graph access.  These operations
+    // intentionally run without mtx_ held because starting/stopping actions may join
+    // worker threads.  A recursive mutex also permits synchronous action callbacks to
+    // query the service from the lifecycle thread without self-deadlocking.
+    mutable std::recursive_mutex lifecycle_mtx_;
+    std::mutex shutdown_mtx_;
+    std::atomic<bool> shutting_down_{false};
+    bool shutdown_complete_{false};
     std::shared_mutex mtx_;
     std::unique_ptr<cosmo::TaskBase> task_base_;
     std::map<std::string, cosmo::TaskElementPtr> tasks_;

@@ -70,7 +70,7 @@ public:
     virtual ~AlgActionBase();
 
     // Start
-    virtual void Start();
+    [[nodiscard]] virtual bool Start();
     // Stop
     virtual void Stop();
 

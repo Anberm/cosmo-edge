@@ -57,16 +57,22 @@ std::vector<cosmo::DataDetTrackClassify> TaskServiceImpl::GetTaskDetHistory(cons
                                                                             const std::string& taskId,
                                                                             int64_t from, int64_t timestamp,
                                                                             int64_t to) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     std::vector<cosmo::DataDetTrackClassify> history;
-    std::shared_lock<std::shared_mutex> lock(mtx_);
-    auto it = tasks_.find(taskId);
-    if (it == tasks_.end()) {
+    cosmo::TaskElementPtr task;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        auto it = tasks_.find(taskId);
+        if (it != tasks_.end()) {
+            task = it->second;
+        }
+    }
+    if (!task) {
         LOG_WARN("Channel:{} Task:{} Not In Pool, Cant GetParam.", channel_id, taskId);
         return {};
     }
-    auto task = it->second;
     // Task not started or already stopped
-    if (!task->is_started) {
+    if (!task->is_started.load(std::memory_order_acquire)) {
         return {};
     }
 
@@ -84,11 +90,18 @@ std::vector<cosmo::DataDetTrackClassify> TaskServiceImpl::GetTaskDetHistory(cons
 std::vector<cosmo::MsgOverviewMem> TaskServiceImpl::GetTaskLiveOverviewInfo(const std::string& taskId,
                                                                             int64_t stream_index,
                                                                             int64_t from, int64_t to) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     std::vector<cosmo::MsgOverviewMem> infos;
     int ai_data_cnt = 0, ai_frame_cnt = 0, ai_target_cnt = 0, alarm_data_cnt = 0;
-    std::shared_lock<std::shared_mutex> lock(mtx_);
-    auto it = tasks_.find(taskId);
-    if (it == tasks_.end()) {
+    cosmo::TaskElementPtr task;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        auto it = tasks_.find(taskId);
+        if (it != tasks_.end()) {
+            task = it->second;
+        }
+    }
+    if (!task) {
         // Live preview polls at high frequency when task does not exist; rate-limit by taskId to avoid log
         // flooding
         auto now      = cosmo::util::GetMilliseconds();
@@ -106,9 +119,8 @@ std::vector<cosmo::MsgOverviewMem> TaskServiceImpl::GetTaskLiveOverviewInfo(cons
         }
         return {};
     }
-    auto task = it->second;
     // Task not started or already stopped
-    if (!task->is_started) {
+    if (!task->is_started.load(std::memory_order_acquire)) {
         return {};
     }
 
@@ -146,14 +158,17 @@ std::vector<cosmo::MsgOverviewMem> TaskServiceImpl::GetTaskLiveOverviewInfo(cons
 }
 
 cosmo::TaskAlarmPtr TaskServiceImpl::GetAlarmInst(const std::string& channel_id, const std::string& taskId) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     return task_base_->GetAlarmInst(channel_id, taskId);
 }
 
 cosmo::AlgChannelPtr TaskServiceImpl::GetChannelInst(const std::string& channel_id) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     return task_base_->GetChannelInst(channel_id);
 }
 
 std::vector<std::string> TaskServiceImpl::GetChannelTasks(const std::string& channel_id) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     return task_base_->GetChannelTasks(channel_id);
 }
 
@@ -259,21 +274,25 @@ size_t TaskServiceImpl::TaskCount() {
 }
 
 void TaskServiceImpl::AddTaskChannel(const cosmo::MsgTaskCreateRecv& taskCreateRecv) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     task_base_->AddTaskChannel(taskCreateRecv);
 }
 
 void TaskServiceImpl::DeleteTaskChannel(const cosmo::MsgTaskCancleRecv& task_cancel_recv) {
     std::string channel_id   = GetTaskChannel(task_cancel_recv.taskId);
     std::string algorithm_id = GetTaskAlgId(task_cancel_recv.taskId);
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     task_base_->DeleteTaskChannel(task_cancel_recv, channel_id, algorithm_id);
 }
 
 void TaskServiceImpl::GetCameraInfo(std::vector<cosmo::MsgCameraInfo>& cameraInfos) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     task_base_->GetCameraInfo(cameraInfos);
 }
 
 std::vector<std::pair<std::string, cosmo::util::DurationStatInfo>> TaskServiceImpl::GetTaskActionDurations(
     const std::string& taskId, int duration_ms) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     static const std::map<std::string_view, std::string_view> name_map = {
         {cosmo::AADetect_Code, "Detect"},
         {cosmo::AATrack_Code, "Track"},
@@ -313,13 +332,19 @@ std::vector<std::pair<std::string, cosmo::util::DurationStatInfo>> TaskServiceIm
     };
 
     std::vector<std::pair<std::string, cosmo::util::DurationStatInfo>> result;
-    std::shared_lock<std::shared_mutex> lock(mtx_);
-    auto it = tasks_.find(taskId);
-    if (it == tasks_.end() || !it->second || !it->second->is_started) {
+    cosmo::TaskElementPtr task;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        auto it = tasks_.find(taskId);
+        if (it != tasks_.end()) {
+            task = it->second;
+        }
+    }
+    if (!task || !task->is_started.load(std::memory_order_acquire)) {
         return result;
     }
 
-    for (auto& action : it->second->actions) {
+    for (auto& action : task->actions) {
         if (action.actionInst) {
             // AlgChannel special case: return decode duration
             auto channel_inst = std::dynamic_pointer_cast<cosmo::AlgChannel>(action.actionInst);

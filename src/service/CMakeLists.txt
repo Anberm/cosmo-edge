@@ -25,5 +25,8 @@ if(COSMO_NN_USE_SOPHON_BACKEND)
 endif()
 
 if(COSMO_NN_USE_CPU_BACKEND)
-    target_compile_definitions(cosmo_service PRIVATE COSMO_NN_USE_CPU_BACKEND)
+    target_compile_definitions(cosmo_service PRIVATE
+        COSMO_NN_USE_CPU_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_ONNX_BACKEND)
 endif()

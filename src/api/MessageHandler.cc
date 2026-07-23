@@ -17,13 +17,48 @@
 #include "service/task/ITaskQuery.h"
 #include "util/CipherUtil.h"
 #include "util/ErrorCode.h"
+#include "util/Exception.h"
 #include "util/FileUtil.h"
 #include "util/FormatString.h"
 #include "util/JsonStructUtil.h"
 #include "util/Keys.h"
+#include "util/PathUtil.h"
 #include "util/TimeUtil.h"
 
 namespace cosmo {
+
+namespace {
+
+    void ValidateOverviewTaskId(const std::string& task_id) {
+        if (!cosmo::path::IsSafePathComponent(task_id)) {
+            throw util::ErrorMessage(util::ErrorEnum::ParameterException, "Invalid task ID");
+        }
+    }
+
+    std::string ResolveOverviewDirectory(const std::string& root, const std::string& task_id) {
+        std::string resolved;
+        if (!cosmo::path::ResolveExistingPathWithinRoot(root,
+                                                        (std::filesystem::path(root) / task_id).string(),
+                                                        cosmo::path::PathEntryType::kDirectory, resolved)) {
+            return {};
+        }
+        return resolved;
+    }
+
+    std::string ResolveOverviewFile(const std::string& directory, const std::string& file_name) {
+        if (!cosmo::path::IsSafePathComponent(file_name)) {
+            return {};
+        }
+        std::string resolved;
+        if (!cosmo::path::ResolveExistingPathWithinRoot(
+                directory, (std::filesystem::path(directory) / file_name).string(),
+                cosmo::path::PathEntryType::kRegularFile, resolved)) {
+            return {};
+        }
+        return resolved;
+    }
+
+}  // namespace
 
 // Test
 MsgInterfaceTestSend MessageHandler::Handle(MsgInterfaceTestRecv&& data, std::error_condition& errc) {
@@ -188,6 +223,7 @@ MsgLogicTestSend MessageHandler::Handle(MsgLogicTestRecv&& data, std::error_cond
 MsgQueryTaskOverviewFileSend MessageHandler::Handle(MsgQueryTaskOverviewFileRecv&& data,
                                                     std::error_condition& /*errc*/) {
     MsgQueryTaskOverviewFileSend retData{};
+    ValidateOverviewTaskId(data.taskId);
 
     // Live stream or VOD stream
     bool is_live_stream = false;
@@ -201,17 +237,24 @@ MsgQueryTaskOverviewFileSend MessageHandler::Handle(MsgQueryTaskOverviewFileRecv
             service::ServiceRegistry::Instance().Get<service::ITaskQuery>().GetTaskLiveOverviewInfo(
                 data.taskId);
     } else {
-        auto path =
+        const auto root =
             service::ServiceRegistry::Instance().Get<service::IAppInfoService>().GetTaskOverviewDataPath();
-        path = path + data.taskId;
+        const auto path = ResolveOverviewDirectory(root, data.taskId);
+        if (path.empty()) {
+            return retData;
+        }
 
         std::string filter;
         auto files = util::GetAllFileName(path, filter);
         LOG_INFO("Get File From :{} File Size:{}", path, files.size());
         for (auto& file : files) {
+            const auto file_path = ResolveOverviewFile(path, file);
+            if (file_path.empty()) {
+                continue;
+            }
             MsgOverviewFile msgFile;
             msgFile.fileName      = file;
-            auto content          = util::ReadFile((std::filesystem::path(path) / file).string());
+            auto content          = util::ReadFile(file_path);
             msgFile.base64Content = util::EncBase64(content);
             retData.files.push_back(msgFile);
         }
@@ -286,6 +329,7 @@ MsgQueryTaskInfoSend MessageHandler::Handle(MsgQueryTaskInfoRecv&& data, std::er
     if (data.taskId.empty()) {
         return retData;
     }
+    ValidateOverviewTaskId(data.taskId);
 
     bool is_live_stream = false;
     int64_t index;
@@ -294,18 +338,27 @@ MsgQueryTaskInfoSend MessageHandler::Handle(MsgQueryTaskInfoRecv&& data, std::er
     service::ServiceRegistry::Instance().Get<service::ITaskQuery>().GetTaskFrameInfo(
         data.taskId, is_live_stream, index, pts, frameSize, retData.streamUrl);
 
-    auto path =
+    const auto root =
         service::ServiceRegistry::Instance().Get<service::IAppInfoService>().GetTaskOverviewDataPath();
-    path = path + data.taskId;
+    const auto path = ResolveOverviewDirectory(root, data.taskId);
+    if (path.empty()) {
+        return retData;
+    }
 
     if (data.info) {
-        auto content = util::ReadFile(path + "/taskInfo.json");
-        (void)util::DecodeJson(content, retData.info);
+        const auto file_path = ResolveOverviewFile(path, "taskInfo.json");
+        if (!file_path.empty()) {
+            auto content = util::ReadFile(file_path);
+            (void)util::DecodeJson(content, retData.info);
+        }
     }
 
     if (data.action) {
-        auto content = util::ReadFile(path + "/taskAction.json");
-        (void)util::DecodeJson(content, retData.action);
+        const auto file_path = ResolveOverviewFile(path, "taskAction.json");
+        if (!file_path.empty()) {
+            auto content = util::ReadFile(file_path);
+            (void)util::DecodeJson(content, retData.action);
+        }
     }
 
     return retData;

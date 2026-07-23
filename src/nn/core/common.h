@@ -29,6 +29,13 @@ typedef enum {
     DEVICE_CPU        = 0x0010,
 } DeviceType;
 
+// Centralizes the graph's memory-boundary decision. New backends that consume
+// and produce host buffers extend this capability without duplicating CPU
+// checks throughout graph wiring and inference adapters.
+inline bool UsesHostMemory(DeviceType device_type) {
+    return device_type == DEVICE_NAIVE || device_type == DEVICE_CPU;
+}
+
 struct PUBLIC BackendConfig {
     DeviceType device_type = DEVICE_SOPHON_TPU;
     int device_id          = 0;

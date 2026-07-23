@@ -26,9 +26,10 @@ LiveStream::MsgStreamKeepAliveSend MessageLiveStreamHandler::Handle(LiveStream::
 }
 
 LiveStream::MsgStreamStopSend MessageLiveStreamHandler::Handle(LiveStream::MsgStreamStopRecv&& data,
-                                                               std::error_condition& /*errc*/) {
+                                                               std::error_condition& errc) {
     LiveStream::MsgStreamStopSend retData{};
-    live_stream_service_.ViewerDelete(data.channelId, data.algorithmId);
+    errc = live_stream_service_.ViewerDelete(data.channelId, data.algorithmId) ? util::ErrorEnum::Success
+                                                                               : util::ErrorEnum::Failed;
 
     return retData;
 }

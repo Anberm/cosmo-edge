@@ -11,7 +11,7 @@ namespace cosmo::linkage {
 LinkAgeTask::LinkAgeTask(const std::string& name, LinkageStrategyWorkflow& strategy) : task_name_(name) {
     std::vector<LinkAgeBasePtr> actions;
     for (auto& workflow : strategy.workflow) {
-        if (kLaAlarmDataCode == workflow.action_id) {
+        if (kLaAlarmDataCode == workflow.action_id || kLaAlarmDataLegacyCode == workflow.action_id) {
             auto action_inst = std::make_shared<LinkAgeAlarm>(workflow);
             if (key::alg::ACTION_ROOT_VALUE == workflow.preFlowActionId) {
                 task_.task = action_inst;
@@ -20,7 +20,8 @@ LinkAgeTask::LinkAgeTask(const std::string& name, LinkageStrategyWorkflow& strat
                 actions.push_back(action_inst);
             }
 
-        } else if (kLaAudioDeviceCode == workflow.action_id) {
+        } else if (kLaAudioDeviceCode == workflow.action_id ||
+                   kLaAudioDeviceLegacyCode == workflow.action_id) {
             auto action_inst = std::make_shared<LinkAgeAudioDevice>(workflow);
             if (key::alg::ACTION_ROOT_VALUE == workflow.preFlowActionId) {
                 task_.task = action_inst;

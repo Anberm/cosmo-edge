@@ -7,21 +7,148 @@
 // clang-format on
 
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <numeric>
 #include <regex>
 #include <sstream>
+#include <system_error>
 
 #include "nlohmann/json.hpp"
+#include "util/ArchiveListingValidator.h"
 #include "util/ErrorCode.h"
 #include "util/Exec.h"
 #include "util/NnBackendConstants.h"
 #include "util/PathUtil.h"
+#include "util/UuidUtil.h"
 
 namespace cosmo::service {
+
+namespace {
+
+    constexpr std::uintmax_t kMaxArchiveBytes   = 500ULL * 1024 * 1024;
+    constexpr std::uintmax_t kMaxExtractedBytes = 1024ULL * 1024 * 1024;
+    constexpr size_t kMaxArchiveEntries         = 10000;
+
+    enum class ArchiveKind {
+        kUnknown,
+        kZip,
+        kTarGzip,
+    };
+
+    ArchiveKind DetectArchiveKind(const std::string& path) {
+        std::ifstream stream(path, std::ios::binary);
+        std::array<unsigned char, 4> header{};
+        if (!stream.read(reinterpret_cast<char*>(header.data()), header.size())) {
+            return ArchiveKind::kUnknown;
+        }
+        if (header[0] == 'P' && header[1] == 'K' &&
+            ((header[2] == 3 && header[3] == 4) || (header[2] == 5 && header[3] == 6) ||
+             (header[2] == 7 && header[3] == 8))) {
+            return ArchiveKind::kZip;
+        }
+        if (header[0] == 0x1f && header[1] == 0x8b) {
+            return ArchiveKind::kTarGzip;
+        }
+        return ArchiveKind::kUnknown;
+    }
+
+    bool ValidateArchiveListing(const std::string& archive_path, bool is_zip) {
+        const util::ArchiveListingLimits limits{kMaxArchiveEntries, kMaxArchiveBytes, kMaxExtractedBytes};
+        const auto format =
+            is_zip ? util::ArchiveListingFormat::kZipVerbose : util::ArchiveListingFormat::kTarVerbose;
+        if (!util::ValidateArchiveListingFile(archive_path, format, limits)) {
+            LOG_WARN("[ImportModel] Failed to inspect archive member list: {}", archive_path);
+            return false;
+        }
+        return true;
+    }
+
+    bool ValidateExtractedTree(const std::string& root) {
+        namespace fs              = std::filesystem;
+        size_t entry_count        = 0;
+        std::uintmax_t total_size = 0;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(root, fs::directory_options::none, ec), end;
+             !ec && it != end; it.increment(ec)) {
+            if (++entry_count > kMaxArchiveEntries) {
+                return false;
+            }
+
+            const auto link_status = it->symlink_status(ec);
+            if (ec || fs::is_symlink(link_status) ||
+                (!fs::is_directory(link_status) && !fs::is_regular_file(link_status))) {
+                return false;
+            }
+
+            std::string resolved;
+            if (!cosmo::path::ResolveExistingPathWithinRoot(root, it->path().string(),
+                                                            cosmo::path::PathEntryType::kAny, resolved)) {
+                return false;
+            }
+            const auto relative = fs::relative(it->path(), root, ec);
+            if (ec || relative.empty()) {
+                return false;
+            }
+            for (const auto& component : relative) {
+                if (!cosmo::path::IsSafePathComponent(component.string())) {
+                    return false;
+                }
+            }
+            if (fs::is_regular_file(link_status)) {
+                const auto size = fs::file_size(it->path(), ec);
+                if (ec || size > kMaxArchiveBytes || size > kMaxExtractedBytes - total_size) {
+                    return false;
+                }
+                total_size += size;
+            }
+        }
+        return !ec;
+    }
+
+    bool ResolveModelDestination(const std::string& models_dir, const std::string& component,
+                                 std::string& destination) {
+        return cosmo::path::IsSafePathComponent(component, 200) &&
+               cosmo::path::ResolvePathWithinRoot(
+                   models_dir, (std::filesystem::path(models_dir) / component).string(), destination);
+    }
+
+    bool ResolveManagedModelUpload(const std::string& path, std::string& resolved) {
+        return cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetModelUploadTmpDir(), path,
+                                                          cosmo::path::PathEntryType::kRegularFile,
+                                                          resolved) ||
+               cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetUploadPath(), path,
+                                                          cosmo::path::PathEntryType::kRegularFile, resolved);
+    }
+
+    bool RemoveExistingModelDirectory(const std::string& models_dir, const std::string& destination) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const auto link_status = fs::symlink_status(destination, ec);
+        if (ec) {
+            if (ec == std::errc::no_such_file_or_directory) {
+                return true;
+            }
+            return false;
+        }
+        if (!fs::exists(link_status)) {
+            return true;
+        }
+        if (fs::is_symlink(link_status)) {
+            return false;
+        }
+        std::string resolved;
+        if (!cosmo::path::ResolveExistingPathWithinRoot(models_dir, destination,
+                                                        cosmo::path::PathEntryType::kDirectory, resolved)) {
+            return false;
+        }
+        fs::remove_all(resolved, ec);
+        return !ec;
+    }
+
+}  // namespace
 
 util::ErrorEnum ModelImportExporter::ImportFlatArchive(const std::string& temp_dir,
                                                        const std::string& models_dir) {
@@ -59,6 +186,15 @@ util::ErrorEnum ModelImportExporter::ImportFlatArchive(const std::string& temp_d
         LOG_WARN("[ImportModel] Failed to parse config.json: {}", e.what());
     }
 
+    static const std::regex kAlgorithmCodePattern("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$");
+    static const std::regex kVersionPattern("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+    if (!std::regex_match(alg_code, kAlgorithmCodePattern) || !std::regex_match(version, kVersionPattern) ||
+        !cosmo::path::IsSafePathComponent(modelName, 64)) {
+        LOG_WARN("{}", "[ImportModel] Reject unsafe model metadata components");
+        fs::remove_all(temp_dir, ec);
+        return util::ErrorEnum::InvalidParam;
+    }
+
     std::replace_if(
         modelName.begin(), modelName.end(),
         [](char c) {
@@ -69,19 +205,37 @@ util::ErrorEnum ModelImportExporter::ImportFlatArchive(const std::string& temp_d
 
     std::string dir_name =
         std::string(cosmo::util::kNewDirPrefix) + alg_code + "_" + modelName + "_" + version;
-    std::string dest_dir = (fs::path(models_dir) / dir_name).string();
+    std::string dest_dir;
+    if (!ResolveModelDestination(models_dir, dir_name, dest_dir)) {
+        fs::remove_all(temp_dir, ec);
+        return util::ErrorEnum::InvalidParam;
+    }
 
     // Remove existing if present
-    if (fs::exists(dest_dir))
-        fs::remove_all(dest_dir, ec);
+    if (!RemoveExistingModelDirectory(models_dir, dest_dir)) {
+        fs::remove_all(temp_dir, ec);
+        return util::ErrorEnum::InvalidParam;
+    }
 
     fs::rename(temp_dir, dest_dir, ec);
     if (ec) {
         // rename may fail across filesystems, fall back to copy
+        ec.clear();
         fs::create_directories(dest_dir, ec);
+        if (ec) {
+            fs::remove_all(temp_dir, ec);
+            return util::ErrorEnum::SysErr;
+        }
         for (const auto& entry : fs::directory_iterator(temp_dir)) {
+            ec.clear();
             fs::copy(entry.path(), fs::path(dest_dir) / entry.path().filename(),
-                     fs::copy_options::overwrite_existing, ec);
+                     fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                std::error_code cleanup_ec;
+                fs::remove_all(dest_dir, cleanup_ec);
+                fs::remove_all(temp_dir, cleanup_ec);
+                return util::ErrorEnum::SysErr;
+            }
         }
         fs::remove_all(temp_dir, ec);
     }
@@ -101,10 +255,19 @@ util::ErrorEnum ModelImportExporter::ImportDirectoryArchive(const std::string& t
     std::error_code ec;
 
     for (const auto& dirEntry : fs::directory_iterator(temp_dir)) {
-        if (!dirEntry.is_directory())
+        std::error_code status_ec;
+        if (dirEntry.is_symlink(status_ec) || !dirEntry.is_directory(status_ec))
             continue;
         std::string sub_dir      = dirEntry.path().string();
         std::string sub_dir_name = dirEntry.path().filename().string();
+        std::string resolved_sub_dir;
+        if (!cosmo::path::IsSafePathComponent(sub_dir_name, 200) ||
+            !cosmo::path::ResolveExistingPathWithinRoot(
+                temp_dir, sub_dir, cosmo::path::PathEntryType::kDirectory, resolved_sub_dir)) {
+            LOG_WARN("[ImportModel] Skipping unsafe model directory: {}", sub_dir_name);
+            continue;
+        }
+        sub_dir = std::move(resolved_sub_dir);
 
         // Validate: must have config.json
         if (!fs::exists(sub_dir + "/config.json")) {
@@ -126,11 +289,17 @@ util::ErrorEnum ModelImportExporter::ImportDirectoryArchive(const std::string& t
             continue;
         }
 
-        std::string dest_dir = (fs::path(models_dir) / sub_dir_name).string();
+        std::string dest_dir;
+        if (!ResolveModelDestination(models_dir, sub_dir_name, dest_dir)) {
+            LOG_WARN("[ImportModel] Skipping unsafe destination directory: {}", sub_dir_name);
+            continue;
+        }
 
         // Remove existing if present
-        if (fs::exists(dest_dir))
-            fs::remove_all(dest_dir, ec);
+        if (!RemoveExistingModelDirectory(models_dir, dest_dir)) {
+            LOG_WARN("[ImportModel] Refusing to replace unsafe model destination: {}", dest_dir);
+            continue;
+        }
 
         fs::rename(sub_dir, dest_dir, ec);
         if (ec) {
@@ -165,22 +334,27 @@ util::ErrorEnum ModelImportExporter::ImportDirectoryArchive(const std::string& t
 util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath) {
     namespace fs = std::filesystem;
 
-    if (archivePath.empty() || !fs::exists(archivePath)) {
-        LOG_WARN("[ImportModel] Archive file not found: {}", archivePath);
+    std::string managed_archive_path;
+    if (!ResolveManagedModelUpload(archivePath, managed_archive_path)) {
+        LOG_WARN("[ImportModel] Archive is not a managed upload: {}", archivePath);
         return util::ErrorEnum::FileNotExist;
     }
 
     size_t archive_size = 0;
     try {
-        archive_size = fs::file_size(archivePath);
+        archive_size = fs::file_size(managed_archive_path);
     } catch (const std::exception& e) {
         LOG_WARN("[ImportModel] Failed to get archive size: {}", e.what());
     }
-    LOG_INFO("[ImportModel] Starting import from: {}, size: {} bytes", archivePath, archive_size);
+    if (archive_size == 0 || archive_size > kMaxArchiveBytes) {
+        LOG_WARN("[ImportModel] Archive size is invalid: {}", archive_size);
+        return util::ErrorEnum::InvalidParam;
+    }
+    LOG_INFO("[ImportModel] Starting managed import, size: {} bytes", archive_size);
 
     // 1. Create temp extraction directory
-    std::string timestamp = std::to_string(time(nullptr));
-    std::string temp_dir  = cosmo::path::GetTemporaryDirPath() + "/model_import_" + timestamp;
+    std::string temp_dir =
+        (fs::path(cosmo::path::GetTemporaryDirPath()) / ("model_import_" + util::GenerateUUID())).string();
     std::error_code ec;
     fs::create_directories(temp_dir, ec);
     if (ec) {
@@ -190,16 +364,20 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
 
     // 2. Extract archive (detect format: tar.gz or zip)
     std::string out_str;
-    std::string lower_path = archivePath;
-    std::transform(lower_path.begin(), lower_path.end(), lower_path.begin(), ::tolower);
+    const auto archive_kind = DetectArchiveKind(managed_archive_path);
+    const bool is_zip       = archive_kind == ArchiveKind::kZip;
+    if (archive_kind == ArchiveKind::kUnknown || !ValidateArchiveListing(managed_archive_path, is_zip)) {
+        fs::remove_all(temp_dir, ec);
+        return util::ErrorEnum::InvalidParam;
+    }
 
     std::vector<std::string> extract_argv;
-    if (lower_path.find(".zip") != std::string::npos) {
-        LOG_INFO("[ImportModel] Extracting (unzip): {} -> {}", archivePath, temp_dir);
-        extract_argv = {"unzip", "-o", archivePath, "-d", temp_dir};
+    if (is_zip) {
+        LOG_INFO("{}", "[ImportModel] Extracting managed ZIP archive");
+        extract_argv = {"unzip", "-o", managed_archive_path, "-d", temp_dir};
     } else {
-        LOG_INFO("[ImportModel] Extracting (tar -xzf): {} -> {}", archivePath, temp_dir);
-        extract_argv = {"tar", "-xzf", archivePath, "-C", temp_dir};
+        LOG_INFO("{}", "[ImportModel] Extracting managed tar.gz archive");
+        extract_argv = {"tar", "-xzf", managed_archive_path, "-C", temp_dir};
     }
 
     int extract_ret = util::Exec(extract_argv, out_str);
@@ -207,6 +385,11 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
         LOG_WARN("[ImportModel] Extract failed (ret={}): {}", extract_ret, out_str);
         fs::remove_all(temp_dir, ec);
         return util::ErrorEnum::SysErr;
+    }
+    if (!ValidateExtractedTree(temp_dir)) {
+        LOG_WARN("{}", "[ImportModel] Extracted archive violates path, type, count, or size limits");
+        fs::remove_all(temp_dir, ec);
+        return util::ErrorEnum::InvalidParam;
     }
 
     // Log extracted contents for debugging
@@ -249,9 +432,9 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
 
     // Cleanup uploaded archive
     try {
-        fs::remove(archivePath);
+        fs::remove(managed_archive_path);
     } catch (const std::exception& e) {
-        LOG_WARN("[ImportModel] Failed to remove temp archive {}: {}", archivePath, e.what());
+        LOG_WARN("[ImportModel] Failed to remove managed temp archive: {}", e.what());
     }
 
     if (imported_count == 0) {

@@ -94,6 +94,8 @@ ${INSTALLPATH}/bin/cosmo-engine
 
 > 端口暴露说明：`8080 -> 80`、`1936`、`1985`、`18088` 是 x86 Docker 对**主机暴露**的端口。`8000`、`9000` 是容器内进程端口；其中 `8000` 在 `docker-compose.x86.yml` 中以 `8000:8000/udp` 形式映射到主机（用于设备发现等 UDP 场景），与后端 HTTP 的 TCP 监听不同。主机侧访问后端 HTTP/WebSocket API 通常经由 nginx（容器内 `80`，映射到主机 `8080`）反向代理，而不是直接访问主机的 `8000`。
 
+生产环境的 UDP 设备发现协议仅允许 `probe` 查询。修改网卡、写入硬件信息和授权码操作不再通过多播执行；只能通过已实现的身份验证管理 API 调用，尚未提供安全替代 API 的操作将被拒绝。
+
 运行脚本设置的流媒体环境变量：
 
 ```bash
@@ -149,4 +151,3 @@ ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
 
 - `web/staticfile/httpInterface.html`
 - `web/staticfile/mqttInterface.html`
-

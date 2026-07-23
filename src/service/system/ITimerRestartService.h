@@ -17,6 +17,10 @@ public:
 
     /// Start the scheduled restart timer.
     virtual void Start() = 0;
+
+    /// Stop the scheduled restart timer and wait for an in-flight callback.
+    /// Safe to call more than once.
+    virtual void Stop() = 0;
 };
 
 // Dependency injection methods

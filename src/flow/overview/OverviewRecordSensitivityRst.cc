@@ -33,7 +33,11 @@ void OverviewRecordSensitivityRst::OverviewRecordFrame(const MsgRecSensitity& re
     if (!is_overview_enabled_) {
         need_clear = true;
         // Local file create directory
-        auto path        = cosmo::path::GetTaskOverviewDataPath(task_id_);
+        auto path = cosmo::path::GetTaskOverviewDataPath(task_id_);
+        if (path.empty() || !cosmo::path::IsSafePathComponent(name_)) {
+            is_overview_enabled_ = false;
+            return;
+        }
         local_file_name_ = (std::filesystem::path(path) / (name_ + ".json")).string();
     }
 

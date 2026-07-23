@@ -9,8 +9,10 @@ const longTimeoutApi = [
   '/gtw/cwai/File/ImportFile',
   '/gtw/cwai/Camera/AddVideo',
   '/gtw/cwai/atomic/model/uploadTemp',
+  '/gtw/cwai/atomic/model/upload',
   '/gtw/cwai/atomic/model/add',
   '/gtw/cwai/atomic/model/importModel',
+  '/gtw/cwai/algorithm/Upload',
   '/gtw/cwai/algorithm/version/add'
 ]
 
@@ -23,7 +25,9 @@ const silentApi = [
   '/gtw/cwai/LiveStream/StreamKeepAlive',
   '/gtw/cwai/LiveStream/StreamStop',
   '/gtw/cwai/File/QueryImportStatus',
-  '/gtw/cwai/File/ImportFile'
+  '/gtw/cwai/File/ImportFile',
+  '/gtw/cwai/atomic/model/uploadTemp',
+  '/gtw/cwai/atomic/model/cancelUpload'
 ]
 
 const service = axios.create({
@@ -62,7 +66,8 @@ const clearLoginInfo = () => {
 
 export const request = params => {
   return new Promise((resolve, reject) => {
-    if (!silentApi.includes(params.url)) actions.setGlobalState({ loading: true }) // 开启过渡效果    
+    const isSilent = silentApi.includes(params.url)
+    if (!isSilent) actions.setGlobalState({ loading: true }) // 开启过渡效果
     service(params)
       .then(res => {
         const data = res?.data || {}
@@ -77,25 +82,29 @@ export const request = params => {
           if (msgCode === '10005') {
             message.error(t('api.loginExpired'))
             clearLoginInfo()
-          } else {
+          } else if (!params.silentError) {
             message.error(msgText)
           }
           reject(data)
         }
       })
       .catch(err => {
-        if (err?.status === 502 || err?.status === 500 || err?.status === 404 || err?.status === 400) {
-          if (params.url === '/gtw/cwai/System/QueryDeviceStatus') return reject(err)
-          message.error(t('api.networkError'))
-          return reject(err)
-        } else if (err?.response?.data?.resMsg?.[0]?.msgCode == '10005') {
+        const status = err?.response?.status ?? err?.status
+        const msgCode = err?.response?.data?.resMsg?.[0]?.msgCode
+        if (status === 401 || msgCode === '10005') {
           message.error(t('api.loginExpired'))
           clearLoginInfo()
+          return reject(err)
+        }
+        if (status === 502 || status === 500 || status === 404 || status === 400) {
+          if (params.url === '/gtw/cwai/System/QueryDeviceStatus') return reject(err)
+          if (!params.silentError) message.error(t('api.networkError'))
+          return reject(err)
         }
         return reject(err)
       })
       .finally(() => {
-        actions.setGlobalState({ loading: false }) // 始终关闭过渡效果
+        if (!isSilent) actions.setGlobalState({ loading: false })
       })
   })
 }

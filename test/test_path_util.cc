@@ -5,6 +5,7 @@
  * Tests path accessors after OverrideRootPathForTest().
  */
 #include <filesystem>
+#include <fstream>
 
 #include "util/PathUtil.h"
 
@@ -23,6 +24,7 @@ struct TestPathFixture {
     }
 
     ~TestPathFixture() {
+        OverrideRootPathForTest("/data/cwaiuserdata", "/appfs/cosmo_wander/cwai_data");
         std::filesystem::remove_all(test_dir);
     }
 };
@@ -59,6 +61,18 @@ TEST_CASE("PathUtil: GetUploadPath returns non-empty", "[path-util]") {
     REQUIRE(!upload.empty());
 }
 
+TEST_CASE("PathUtil: GetUploadTmpPath creates an owner-only directory", "[path-util][security]") {
+    TestPathFixture fix;
+    const auto upload_tmp = GetUploadTmpPath();
+    REQUIRE_FALSE(upload_tmp.empty());
+    REQUIRE(std::filesystem::is_directory(upload_tmp));
+
+    const auto permissions = std::filesystem::status(upload_tmp).permissions();
+    REQUIRE((permissions & std::filesystem::perms::owner_all) == std::filesystem::perms::owner_all);
+    REQUIRE((permissions & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) ==
+            std::filesystem::perms::none);
+}
+
 TEST_CASE("PathUtil: GetModelPath returns non-empty", "[path-util]") {
     TestPathFixture fix;
     auto model = GetModelPath();
@@ -83,6 +97,17 @@ TEST_CASE("PathUtil: GetEventPath creates directory", "[path-util]") {
     auto eventPath = GetEventPath(ts, true);
     REQUIRE(!eventPath.empty());
     REQUIRE(std::filesystem::exists(eventPath));
+}
+
+TEST_CASE("PathUtil: record root is stable across date partitions", "[path-util][FileService]") {
+    TestPathFixture fix;
+    const auto root = GetRecordRootPath();
+    REQUIRE(std::filesystem::is_directory(root));
+    REQUIRE(GetRecordJsonPath().find(root + "/") == 0);
+
+    const auto previous_partition = std::filesystem::path(root) / "2000/01/01";
+    std::filesystem::create_directories(previous_partition);
+    REQUIRE(IsWithinRoot(root, (previous_partition / "delayed.json").string()));
 }
 
 TEST_CASE("PathUtil: GetEventWebPath returns web-relative path", "[path-util]") {
@@ -179,4 +204,87 @@ TEST_CASE("PathUtil: IsWithinRoot with real filesystem", "[path-util]") {
     REQUIRE(IsWithinRoot(root, root + "/sub"));            // existing child
     REQUIRE(IsWithinRoot(root, root + "/sub/deep/none"));  // non-existent tail inside
     REQUIRE_FALSE(IsWithinRoot(root, outside));            // sibling dir
+}
+
+TEST_CASE("PathUtil: strict root resolution fails closed", "[path-util][security]") {
+    TestPathFixture fix;
+    const auto root    = fix.test_dir + "/strict-root";
+    const auto outside = fix.test_dir + "/outside";
+    std::filesystem::create_directories(root + "/child");
+    std::filesystem::create_directories(outside);
+    std::ofstream(root + "/child/file.txt") << "inside";
+    std::ofstream(outside + "/file.txt") << "outside";
+
+    std::string resolved;
+    REQUIRE(ResolvePathWithinRoot(root, root + "/child/new.txt", resolved));
+    REQUIRE(resolved == root + "/child/new.txt");
+    REQUIRE_FALSE(ResolvePathWithinRoot(root, root + "/../outside/file.txt", resolved));
+    REQUIRE_FALSE(ResolvePathWithinRoot(root + "/missing", root + "/missing/file.txt", resolved));
+
+    REQUIRE(
+        ResolveExistingPathWithinRoot(root, root + "/child/file.txt", PathEntryType::kRegularFile, resolved));
+    REQUIRE_FALSE(
+        ResolveExistingPathWithinRoot(root, root + "/child", PathEntryType::kRegularFile, resolved));
+
+    std::filesystem::create_symlink(outside + "/file.txt", root + "/child/outside-link");
+    REQUIRE_FALSE(ResolveExistingPathWithinRoot(root, root + "/child/outside-link",
+                                                PathEntryType::kRegularFile, resolved));
+}
+
+TEST_CASE("PathUtil: path component validation", "[path-util][security]") {
+    REQUIRE(IsSafePathComponent("task-01_中文"));
+    REQUIRE_FALSE(IsSafePathComponent(""));
+    REQUIRE_FALSE(IsSafePathComponent("."));
+    REQUIRE_FALSE(IsSafePathComponent(".."));
+    REQUIRE_FALSE(IsSafePathComponent("../task"));
+    REQUIRE_FALSE(IsSafePathComponent("dir/task"));
+    REQUIRE_FALSE(IsSafePathComponent("dir\\task"));
+    REQUIRE_FALSE(IsSafePathComponent(std::string("bad\0name", 8)));
+    REQUIRE_FALSE(IsSafePathComponent(std::string(129, 'a')));
+}
+
+TEST_CASE("PathUtil: extracted tree validation enforces type and size limits", "[path-util][security]") {
+    TestPathFixture fix;
+    const auto root    = std::filesystem::path(fix.test_dir) / "extracted";
+    const auto outside = std::filesystem::path(fix.test_dir) / "outside.txt";
+    std::filesystem::create_directories(root);
+
+    const auto create_sparse_file = [](const std::filesystem::path& path, std::streamoff size) {
+        std::ofstream stream(path, std::ios::binary);
+        REQUIRE(stream.is_open());
+        stream.seekp(size - 1);
+        stream.put('\0');
+        REQUIRE(stream.good());
+    };
+    create_sparse_file(root / "first.bin", 6);
+    create_sparse_file(root / "second.bin", 6);
+
+    REQUIRE(ValidateDirectoryTreeWithinRoot(root.string(), 2, 6, 12));
+    REQUIRE_FALSE(ValidateDirectoryTreeWithinRoot(root.string(), 1, 6, 12));
+    REQUIRE_FALSE(ValidateDirectoryTreeWithinRoot(root.string(), 2, 5, 12));
+    REQUIRE_FALSE(ValidateDirectoryTreeWithinRoot(root.string(), 2, 6, 11));
+
+    std::ofstream(outside) << "outside";
+    std::filesystem::create_symlink(outside, root / "outside-link");
+    REQUIRE_FALSE(ValidateDirectoryTreeWithinRoot(root.string(), 3, 16, 32));
+}
+
+TEST_CASE("PathUtil: task overview path rejects traversal without side effects", "[path-util][security]") {
+    TestPathFixture fix;
+    const auto expected_root = fix.test_dir + "/cwai/overview";
+
+    const auto read_only_path = GetTaskOverviewDataPath("read-only", false);
+    REQUIRE(read_only_path == expected_root + "/read-only");
+    REQUIRE_FALSE(std::filesystem::exists(read_only_path));
+
+    REQUIRE(GetTaskOverviewDataPath("task-01") == expected_root + "/task-01");
+    REQUIRE(std::filesystem::is_directory(expected_root + "/task-01"));
+    REQUIRE(GetTaskOverviewDataPath("../escape").empty());
+    REQUIRE(GetTaskOverviewDataPath("/absolute").empty());
+    REQUIRE_FALSE(std::filesystem::exists(fix.test_dir + "/cwai/escape"));
+
+    const auto outside = fix.test_dir + "/outside-overview";
+    std::filesystem::create_directories(outside);
+    std::filesystem::create_directory_symlink(outside, expected_root + "/linked-task");
+    REQUIRE(GetTaskOverviewDataPath("linked-task", false).empty());
 }

@@ -6,6 +6,7 @@
  * arithmetic, comparison, and edge cases.
  */
 #include "util/DateTimeFormat.h"
+#include "util/Exception.h"
 
 using namespace cosmo::util;
 
@@ -46,6 +47,19 @@ TEST_CASE("HMSTime: construct from string", "[datetime]") {
         REQUIRE(t.Hour() == 14);
         REQUIRE(t.Minute() == 30);
         REQUIRE(t.Second() == 15);
+    }
+
+    SECTION("Rejects signs, suffixes, and non-fixed-width fields") {
+        REQUIRE_THROWS_AS(HMSTime("-1:00"), Exception);
+        REQUIRE_THROWS_AS(HMSTime("1:00:"), Exception);
+        REQUIRE_THROWS_AS(HMSTime("12:34x"), Exception);
+        REQUIRE_THROWS_AS(HMSTime("12:34:5"), Exception);
+    }
+
+    SECTION("Rejects out-of-range fields") {
+        REQUIRE_THROWS_AS(HMSTime("24:00"), Exception);
+        REQUIRE_THROWS_AS(HMSTime("23:60"), Exception);
+        REQUIRE_THROWS_AS(HMSTime("23:59:60"), Exception);
     }
 
     SECTION("HH:MM format") {
@@ -123,6 +137,15 @@ TEST_CASE("YMDDate: construct from string", "[datetime]") {
         REQUIRE(d.Year() == 2025);
         REQUIRE(d.Month() == 12);
         REQUIRE(d.Day() == 31);
+    }
+
+    SECTION("Validates calendar dates and the complete timestamp suffix") {
+        REQUIRE_NOTHROW(YMDDate("2024-02-29"));
+        REQUIRE_THROWS_AS(YMDDate("2025-02-29"), Exception);
+        REQUIRE_THROWS_AS(YMDDate("2025-04-31"), Exception);
+        REQUIRE_THROWS_AS(YMDDate("0000-01-01"), Exception);
+        REQUIRE_THROWS_AS(YMDDate("2025-06-25x14:30:00"), Exception);
+        REQUIRE_THROWS_AS(YMDDate("2025-06-25 24:00:00"), Exception);
     }
 
     SECTION("YYYY-MM") {
@@ -223,6 +246,13 @@ TEST_CASE("DateTime: construct from string", "[datetime]") {
     REQUIRE(dt.Time().Second() == 45);
 }
 
+TEST_CASE("DateTime: rejects empty padded and normalized input", "[datetime]") {
+    REQUIRE_THROWS_AS(DateTime(""), Exception);
+    REQUIRE_THROWS_AS(DateTime(" 2025-06-25 14:30:45"), Exception);
+    REQUIRE_THROWS_AS(DateTime("2025-06-25  14:30:45"), Exception);
+    REQUIRE_THROWS_AS(DateTime("2025-02-29 12:00:00"), Exception);
+}
+
 TEST_CASE("DateTime: ToTimeStamp and back", "[datetime]") {
     DateTime dt("2025-06-25 12:00:00");
     auto ts = dt.ToTimeStamp();
@@ -245,6 +275,13 @@ TEST_CASE("DateTime: ToYMDHMSInt and back", "[datetime]") {
     REQUIRE(dt2.Time().Hour() == 14);
     REQUIRE(dt2.Time().Minute() == 30);
     REQUIRE(dt2.Time().Second() == 45);
+}
+
+TEST_CASE("DateTime: packed representation rejects invalid calendar values", "[datetime]") {
+    REQUIRE_THROWS_AS(TimeFromYMDHMSInt(20250229000000ULL), Exception);
+    REQUIRE_THROWS_AS(TimeFromYMDHMSInt(20250431000000ULL), Exception);
+    REQUIRE_THROWS_AS(TimeFromYMDHMSInt(20250101240000ULL), Exception);
+    REQUIRE_THROWS_AS(TimeFromYMDHMSInt(0), Exception);
 }
 
 TEST_CASE("DateTime: comparison operators", "[datetime]") {

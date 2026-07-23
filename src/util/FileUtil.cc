@@ -2,8 +2,13 @@
 
 #include "util/FileUtil.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -94,6 +99,69 @@ bool WriteFile(const std::string& file_name, const std::string& data) {
         return fwrite(data.c_str(), 1, data.size(), file.get()) == data.size();
     }
     return false;
+}
+
+bool WriteFileAtomically(const std::string& file_name, const std::string& data) {
+    if (file_name.empty()) {
+        return false;
+    }
+
+    const fs::path target(file_name);
+    const fs::path parent          = target.has_parent_path() ? target.parent_path() : fs::path(".");
+    std::string temporary_template = (parent / ("." + target.filename().string() + ".tmp-XXXXXX")).string();
+    std::vector<char> temporary_name(temporary_template.begin(), temporary_template.end());
+    temporary_name.push_back('\0');
+
+    const int descriptor = mkstemp(temporary_name.data());
+    if (descriptor < 0) {
+        return false;
+    }
+    const std::string temporary_path(temporary_name.data());
+    auto cleanup = [&]() {
+        close(descriptor);
+        unlink(temporary_path.c_str());
+    };
+
+    if (fcntl(descriptor, F_SETFD, FD_CLOEXEC) != 0 || fchmod(descriptor, 0644) != 0) {
+        cleanup();
+        return false;
+    }
+
+    size_t offset = 0;
+    while (offset < data.size()) {
+        const auto written = write(descriptor, data.data() + offset, data.size() - offset);
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+        if (written <= 0) {
+            cleanup();
+            return false;
+        }
+        offset += static_cast<size_t>(written);
+    }
+    if (fsync(descriptor) != 0) {
+        close(descriptor);
+        unlink(temporary_path.c_str());
+        return false;
+    }
+    if (close(descriptor) != 0) {
+        unlink(temporary_path.c_str());
+        return false;
+    }
+    if (rename(temporary_path.c_str(), file_name.c_str()) != 0) {
+        unlink(temporary_path.c_str());
+        return false;
+    }
+
+    const int parent_descriptor = open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parent_descriptor >= 0) {
+        if (fsync(parent_descriptor) != 0) {
+            LOG_WARN("Failed to sync directory {} after writing {}: {}", parent.string(), file_name,
+                     strerror(errno));
+        }
+        close(parent_descriptor);
+    }
+    return true;
 }
 
 bool WriteFileAppend(const std::string& file_name, const std::string& data) {

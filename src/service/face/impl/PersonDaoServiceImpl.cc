@@ -55,6 +55,11 @@ bool PersonDaoServiceImpl::RemovePerson(const std::string& personId) {
     return dao_.RemovePerson(personId);
 }
 
+bool PersonDaoServiceImpl::RemovePersonFromFaceLib(const std::string& personId,
+                                                   const std::string& faceLibId) {
+    return dao_.RemovePersonFromFaceLib(personId, faceLibId);
+}
+
 db::FaceLibQueryResult PersonDaoServiceImpl::QueryFaceLib(const db::FaceLibQueryCondition& cond) {
     return dao_.QueryFaceLib(cond);
 }

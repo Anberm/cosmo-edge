@@ -2,9 +2,10 @@
 
 #include "service/system/impl/AppInfoServiceImpl.h"
 
+#include <cctype>
 #include <filesystem>
-#include <iomanip>
-#include <sstream>
+#include <limits>
+#include <optional>
 
 #include "mem/MemoryPoolMng.h"
 #include "service/detail/ServiceRegistry.h"
@@ -12,7 +13,8 @@
 #include "service/model/IModelService.h"
 #include "service/system/IDeviceInfoService.h"
 #include "service/task/ITaskQuery.h"
-#include "util/FileUtil.h"
+#include "util/DateTimeFormat.h"
+#include "util/Exception.h"
 #include "util/FormatString.h"
 #include "util/PathUtil.h"
 #include "util/ScoreCalc.h"
@@ -21,32 +23,58 @@ namespace cosmo::service {
 
 namespace {
 
-    // Parse datetime from filename and convert to timestamp
-    time_t parseDateTime(const std::string& filename) {
-        std::istringstream iss(filename);
-        std::string part;
-        std::tm tm = {};
+    constexpr size_t kLogTimestampLength = 15;
+    constexpr int kMaxLogPageSize        = 1000;
 
-        // Extract datetime part (format: AAA.BBB.YYYYMMDD-HHMMSS...)
-        for (int i = 0; i < 2; ++i)
-            std::getline(iss, part, '.');  // Skip first two parts (AAE.ERROR)
+    std::optional<std::string> ExtractLogTimestamp(const std::string& filename) {
+        if (filename.size() < kLogTimestampLength) {
+            return std::nullopt;
+        }
 
-        std::getline(iss, part, '-');  // Extract date (YYYYMMDD)
-        std::string date = part;
-        std::getline(iss, part, '.');  // Extract time (HHMMSS)
-        std::string time = part;
+        for (size_t offset = 0; offset <= filename.size() - kLogTimestampLength; ++offset) {
+            const auto candidate = std::string_view(filename).substr(offset, kLogTimestampLength);
+            if (candidate[8] != '-') {
+                continue;
+            }
 
-        // Convert to tm struct
-        std::istringstream dt(date + time);
-        dt >> std::get_time(&tm, "%Y%m%d%H%M%S");
+            bool digits_only = true;
+            for (size_t index = 0; index < candidate.size(); ++index) {
+                if (index != 8 && !std::isdigit(static_cast<unsigned char>(candidate[index]))) {
+                    digits_only = false;
+                    break;
+                }
+            }
+            if (!digits_only) {
+                continue;
+            }
 
-        // Generate timestamp (local timezone)
-        return mktime(&tm);
+            try {
+                const std::string date = std::string(candidate.substr(0, 4)) + "-" +
+                                         std::string(candidate.substr(4, 2)) + "-" +
+                                         std::string(candidate.substr(6, 2));
+                const std::string time = std::string(candidate.substr(9, 2)) + ":" +
+                                         std::string(candidate.substr(11, 2)) + ":" +
+                                         std::string(candidate.substr(13, 2));
+                (void)cosmo::util::YMDDate(date);
+                (void)cosmo::util::HMSTime(time);
+                return std::string(candidate);
+            } catch (const cosmo::util::Exception&) {
+                continue;
+            }
+        }
+        return std::nullopt;
     }
 
-    // Custom descending sort comparator
-    bool compare_desc(const std::string& a, const std::string& b) {
-        return parseDateTime(a) > parseDateTime(b);
+    bool CompareLogNamesDescending(const std::string& lhs, const std::string& rhs) {
+        const auto lhs_timestamp = ExtractLogTimestamp(lhs);
+        const auto rhs_timestamp = ExtractLogTimestamp(rhs);
+        if (lhs_timestamp.has_value() != rhs_timestamp.has_value()) {
+            return lhs_timestamp.has_value();
+        }
+        if (lhs_timestamp != rhs_timestamp) {
+            return lhs_timestamp > rhs_timestamp;
+        }
+        return lhs > rhs;
     }
 
 }  // namespace
@@ -197,36 +225,47 @@ std::vector<PoolStatusDto> AppInfoServiceImpl::GetMemoryPoolStatus() {
 cosmo::MsgQueryLogsSend AppInfoServiceImpl::GetPagedLogs(const cosmo::MsgQueryLogsRecv& data,
                                                          std::error_condition& errc) {
     cosmo::MsgQueryLogsSend retData{};
-    if (data.pageNum < 1 || data.pageSize < 1) {
+    if (data.pageNum < 1 || data.pageSize < 1 || data.pageSize > kMaxLogPageSize) {
         errc = cosmo::util::ErrorEnum::ParameterException;
         return retData;
     }
 
-    std::string filter;
-    auto files = cosmo::util::GetAllFileName(LogPath(), filter);
+    std::vector<std::string> files;
+    std::error_code filesystem_error;
+    std::filesystem::directory_iterator entry(LogPath(), filesystem_error);
+    const std::filesystem::directory_iterator end;
+    while (!filesystem_error && entry != end) {
+        std::error_code status_error;
+        const auto status = entry->symlink_status(status_error);
+        if (!status_error && status.type() == std::filesystem::file_type::regular) {
+            files.push_back(entry->path().filename().string());
+        }
+        entry.increment(filesystem_error);
+    }
+    if (filesystem_error) {
+        LOG_WARN("Failed to enumerate log directory {}: {}", LogPath(), filesystem_error.message());
+    }
     LOG_INFO("Get File From :{} File Size:{}", LogPath(), files.size());
-    std::sort(files.begin(), files.end(), compare_desc);
+    std::sort(files.begin(), files.end(), CompareLogNamesDescending);
 
-    retData.resData.totalCount = static_cast<int>(files.size());
+    retData.resData.totalCount = files.size() > static_cast<size_t>(std::numeric_limits<int>::max())
+                                     ? std::numeric_limits<int>::max()
+                                     : static_cast<int>(files.size());
     retData.resData.path       = LogWebPath();
-    size_t index               = (data.pageNum - 1) * data.pageSize;
+    const auto page_index      = static_cast<size_t>(data.pageNum - 1);
+    const auto page_size       = static_cast<size_t>(data.pageSize);
+    if (page_index > std::numeric_limits<size_t>::max() / page_size) {
+        return retData;
+    }
+    const size_t index = page_index * page_size;
     if (index >= files.size()) {
         return retData;
     }
-    size_t index_max = index + data.pageSize;
-    index_max        = index_max >= files.size() ? files.size() : index_max;
-    size_t i         = 0;
-
-    for (const auto& file : files) {
-        i++;
-        if (i <= index) {
-            continue;
-        }
-        if (i > index_max) {
-            break;
-        }
-        retData.resData.logs.push_back(file);
+    if (page_size > std::numeric_limits<size_t>::max() - index) {
+        return retData;
     }
+    const size_t index_max = std::min(files.size(), index + page_size);
+    retData.resData.logs.insert(retData.resData.logs.end(), files.begin() + index, files.begin() + index_max);
     LOG_INFO("index:{} index_max:{} logs.size:{}", index, index_max, retData.resData.logs.size());
 
     return retData;

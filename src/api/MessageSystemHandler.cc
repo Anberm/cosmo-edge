@@ -2,12 +2,19 @@
 
 #include "api/MessageSystemHandler.h"
 
+#include <utility>
+
+#include "api/HttpUploadClaim.h"
+#include "media/PreviewPipelineMetrics.h"
+#include "service/detail/ServiceRegistry.h"
+#include "service/path/IUploadStagingService.h"
 #include "service/system/IConfigReadService.h"
 #include "service/system/IConfigWriteService.h"
 #include "service/system/IDeviceInfoService.h"
 #include "service/system/ISystemOperationService.h"
 #include "service/system/ITimeService.h"
 #include "util/CipherUtil.h"
+#include "util/DateTimeFormat.h"
 #include "util/ErrorCode.h"
 #include "util/FileUtil.h"
 #include "util/FormatString.h"
@@ -73,7 +80,24 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
         it.available   = item.available;
         retData.resData.itemList.push_back(std::move(it));
     }
-    retData.resData.customScore = COSMO_FORMAT("{:.4f}", customScore);
+    retData.resData.customScore               = COSMO_FORMAT("{:.4f}", customScore);
+    retData.resData.accelerator               = device_info_.GetGpuUtilization();
+    const auto preview                        = media::GetPreviewPipelineMetrics().Snapshot();
+    auto& accelerator                         = retData.resData.accelerator;
+    accelerator.activePreviewPublishers       = preview.active_publishers;
+    accelerator.activePreviewStreams          = preview.active_preview_streams;
+    accelerator.activeRawPreviewStreams       = preview.active_raw_preview_streams;
+    accelerator.activeAlgorithmPreviewStreams = preview.active_algorithm_preview_streams;
+    accelerator.previewStreamStarts           = preview.preview_stream_starts;
+    accelerator.previewStreamStops            = preview.preview_stream_stops;
+    accelerator.previewStreamFailures         = preview.preview_stream_failures;
+    accelerator.osdFrames                     = preview.osd_frames;
+    accelerator.osdMs                         = preview.osd_nanoseconds / 1000000.0;
+    accelerator.publishedFrames               = preview.published_frames;
+    accelerator.publishMs                     = preview.publish_nanoseconds / 1000000.0;
+    accelerator.firstFrames                   = preview.first_frames;
+    accelerator.firstFrameMs                  = preview.first_frame_nanoseconds / 1000000.0;
+    accelerator.firstFrameMaxMs               = preview.first_frame_max_nanoseconds / 1000000.0;
     return retData;
 }
 
@@ -120,6 +144,10 @@ System::MsgNTPDateSend MessageSystemHandler::Handle(System::MsgNTPDateRecv&& dat
         return retData;
     }
     if ((1 == data.ntpEnable || 2 == data.ntpEnable) && data.ntpServer.empty()) {
+        errc = util::ErrorEnum::ParameterException;
+        return retData;
+    }
+    if (data.ntpPort <= 0 || data.ntpPort > 65535) {
         errc = util::ErrorEnum::ParameterException;
         return retData;
     }
@@ -219,24 +247,29 @@ System::MsgModifyDevRestartParamSend MessageSystemHandler::Handle(System::MsgMod
                                                                   std::error_condition& errc) {
     System::MsgModifyDevRestartParamSend retData{};
     CfgRebootParamInfo info;
-    info.isTimingRestart = data.isTimingRestart;
-    info.weekDay         = data.weekDay;
+    info.isTimingRestart     = data.isTimingRestart;
+    info.weekDay             = data.weekDay;
+    const auto& restart_time = data.restartTime.ToRefString();
 
-    if (data.restartTime.empty()) {
+    if (restart_time.empty()) {
         LOG_WARN("{}", "[TimerRestart] Invalid empty restartTime");
         errc = util::ErrorEnum::ParameterException;
         return retData;
     }
 
-    unsigned int h{0}, m{0};
-    int ret = sscanf(data.restartTime.c_str(), "%02u:%02u", &h, &m);
-    if ((ret != 2) || (h >= 24) || (m >= 60)) {
-        LOG_WARN("[TimerRestart] Analysis invalid restartTime:{}", data.restartTime);
+    if (restart_time.size() != 5) {
+        LOG_WARN("[TimerRestart] Analysis invalid restartTime:{}", restart_time);
         errc = util::ErrorEnum::ParameterException;
         return retData;
     }
-    info.restartTimeSec = h * 3600 + m * 60;
-    errc                = config_write_.SetRebootParam(info);
+    try {
+        info.restartTimeSec = util::HMSTime(restart_time).ToInt();
+    } catch (const std::exception&) {
+        LOG_WARN("[TimerRestart] Analysis invalid restartTime:{}", restart_time);
+        errc = util::ErrorEnum::ParameterException;
+        return retData;
+    }
+    errc = config_write_.SetRebootParam(info);
     return retData;
 }
 
@@ -299,6 +332,33 @@ System::MsgUpgradeSend MessageSystemHandler::Handle(System::MsgUpgradeRecv&& dat
     }
     errc = system_op_.Upgrade(data.filePath);
     return retData;
+}
+
+System::MsgUpgradeSend MessageSystemHandler::Handle(System::MsgUpgradeRecv&& data,
+                                                    const RequestDispatchContext& context,
+                                                    std::error_condition& errc) {
+    System::MsgUpgradeSend result{};
+    if (context.transport != RequestTransport::kHttp || context.principal.empty()) {
+        errc = util::ErrorEnum::InvalidParam;
+        return result;
+    }
+
+    service::StagedFileLease lease;
+    if (!data.uploadId.empty()) {
+        errc = service::ServiceRegistry::Instance().Get<service::IUploadStagingService>().Consume(
+            context.principal, data.uploadId, service::UploadPurpose::kUpgrade, lease);
+    } else {
+        errc = detail::ClaimHttpUpload(context, data.filePath, service::UploadPurpose::kUpgrade, lease);
+    }
+    if (errc) {
+        return result;
+    }
+    if (!lease.Revalidate()) {
+        errc = util::ErrorEnum::FileAnalysisFailed;
+        return result;
+    }
+    data.filePath = lease.Path();
+    return Handle(std::move(data), errc);
 }
 
 }  // namespace cosmo

@@ -8,18 +8,24 @@
 #pragma once
 
 #include <arpa/inet.h>
+#include <event2/dns.h>
+#include <event2/event.h>
+#include <event2/util.h>
+#include <netdb.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <fstream>
-#include <nlohmann/json.hpp>
+#include <functional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "platform/SystemTime.h"
-#include "util/Exec.h"
 #include "util/Log.h"
 
 namespace cosmo::service {
@@ -33,6 +39,9 @@ namespace {
     constexpr double kFracPerMs       = 4.294967296E6;  // 2^32 / 1000
     constexpr int kNtpTimeoutMs       = 10000;          // send/recv timeout
     constexpr int kMinSyncIntervalSec = 60;
+    constexpr int kMaxSyncIntervalMin = 1440;
+    constexpr int kResolverPollMs     = 20;
+    constexpr int kResolverTimeoutMs  = 10000;
 
     // ---------------------------------------------------------------------------
     // NTP protocol structures
@@ -56,6 +65,8 @@ namespace {
         NtpTime receive_ts;
         NtpTime transmit_ts;
     };
+
+    static_assert(sizeof(NtpPacket) == 48, "NTP wire packet must be exactly 48 bytes");
 
     // ---------------------------------------------------------------------------
     // Byte-order conversion
@@ -148,44 +159,197 @@ namespace {
         pkt.root_dispersion        = (1 << 16);
     }
 
+    inline bool SameNtpTime(const NtpTime& lhs, const NtpTime& rhs) {
+        return lhs.seconds == rhs.seconds && lhs.fraction == rhs.fraction;
+    }
+
+    // Validate the response fields that bind the server reply to this request.
+    // The packet must already be converted to host byte order.
+    inline bool ValidateNtpResponse(const NtpPacket& response, const NtpTime& request_transmit_ts) {
+        const auto flags   = static_cast<uint8_t>(response.li_vn_mode);
+        const auto leap    = static_cast<uint8_t>((flags >> 6) & 0x03);
+        const auto version = static_cast<uint8_t>((flags >> 3) & 0x07);
+        const auto mode    = static_cast<uint8_t>(flags & 0x07);
+
+        if (leap == 3 || (version != 3 && version != 4) || mode != 4 || response.stratum == 0 ||
+            response.stratum > 15) {
+            return false;
+        }
+        if (!SameNtpTime(response.originate_ts, request_transmit_ts)) {
+            return false;
+        }
+        if (response.receive_ts.seconds < kJan1970 || response.transmit_ts.seconds < kJan1970) {
+            return false;
+        }
+        return TimestampToNs100(response.transmit_ts) >= TimestampToNs100(response.receive_ts);
+    }
+
     // ---------------------------------------------------------------------------
     // Socket helpers
     // ---------------------------------------------------------------------------
 
     // Set socket send/recv timeout
-    inline void SetSocketTimeout(int sockfd, int timeout_ms) {
+    inline bool SetSocketTimeout(int sockfd, int timeout_ms) {
         struct timeval tv {};
         tv.tv_sec  = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
-        setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        return setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == 0 &&
+               setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0;
     }
 
-    // Resolve hostname to IP via shell ping (non-blocking, avoids gethostbyname thread issues)
-    inline std::string ResolveDomain(const std::string& host) {
-        if (host.empty()) {
-            LOG_ERRO("{}", "host is empty");
+    inline bool IsValidNtpHost(const std::string& host) {
+        if (host.empty() || host.size() > 253 || host.front() == '.' || host.back() == '.') {
+            return false;
+        }
+
+        in_addr numeric_address{};
+        if (inet_pton(AF_INET, host.c_str(), &numeric_address) == 1) {
+            return true;
+        }
+        if (host.find_first_not_of("0123456789.") == std::string::npos) {
+            return false;
+        }
+
+        size_t label_size = 0;
+        for (size_t index = 0; index < host.size(); ++index) {
+            const auto value = static_cast<unsigned char>(host[index]);
+            if (host[index] == '.') {
+                if (label_size == 0 || host[index - 1] == '-') {
+                    return false;
+                }
+                label_size = 0;
+                continue;
+            }
+            if ((!std::isalnum(value) && host[index] != '-') || (label_size == 0 && host[index] == '-') ||
+                ++label_size > 63) {
+                return false;
+            }
+        }
+        return label_size != 0 && host.back() != '-';
+    }
+
+    // Resolve an IPv4 address without invoking a shell or creating an untracked
+    // resolver thread. libevent performs DNS over non-blocking sockets owned by this
+    // worker, so cancellation and destruction remain deterministic.
+    inline std::string ResolveDomain(const std::string& host, const std::function<bool()>& is_cancelled = {},
+                                     const std::function<void(std::chrono::milliseconds)>& wait = {}) {
+        if (!IsValidNtpHost(host)) {
+            LOG_ERRO("Invalid NTP host: [{}]", host);
             return "";
         }
-        // Already an IP address
-        if (inet_addr(host.c_str()) != INADDR_NONE) {
+
+        in_addr address{};
+        if (inet_pton(AF_INET, host.c_str(), &address) == 1) {
             return host;
         }
 
-        auto ip = cosmo::util::PingResolveIp(host);
-        if (ip.empty()) {
-            LOG_ERRO("PingResolveIp failed for host: [{}]", host);
+        struct ResolutionState {
+            bool complete{false};
+            int result{EVUTIL_EAI_FAIL};
+            std::string ip;
+        };
+
+        event_base* event_base = event_base_new();
+        if (event_base == nullptr) {
+            LOG_ERRO("Failed to create NTP DNS event base for [{}]", host);
+            return "";
         }
-        return ip;
+        evdns_base* dns_base = evdns_base_new(event_base, EVDNS_BASE_INITIALIZE_NAMESERVERS);
+        if (dns_base == nullptr) {
+            event_base_free(event_base);
+            LOG_ERRO("Failed to initialize NTP DNS resolver for [{}]", host);
+            return "";
+        }
+
+        ResolutionState state;
+        evutil_addrinfo hints{};
+        hints.ai_family   = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_protocol = IPPROTO_UDP;
+        auto* request     = evdns_getaddrinfo(
+            dns_base, host.c_str(), nullptr, &hints,
+            [](int result, evutil_addrinfo* addresses, void* context) {
+                auto& resolution  = *static_cast<ResolutionState*>(context);
+                resolution.result = result;
+                if (result == 0 && addresses != nullptr) {
+                    char value[INET_ADDRSTRLEN] = {};
+                    const auto* socket_address  = reinterpret_cast<const sockaddr_in*>(addresses->ai_addr);
+                    if (inet_ntop(AF_INET, &socket_address->sin_addr, value, sizeof(value)) != nullptr) {
+                        resolution.ip = value;
+                    }
+                }
+                if (addresses != nullptr) {
+                    evutil_freeaddrinfo(addresses);
+                }
+                resolution.complete = true;
+            },
+            &state);
+
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(kResolverTimeoutMs);
+        bool loop_failed = false;
+        while (!state.complete && (!is_cancelled || !is_cancelled()) &&
+               std::chrono::steady_clock::now() < deadline) {
+            if (event_base_loop(event_base, EVLOOP_NONBLOCK) < 0) {
+                loop_failed = true;
+                break;
+            }
+            // event_base_loop may synchronously update state through the callback.
+            // cppcheck-suppress knownConditionTrueFalse
+            if (!state.complete) {
+                if (wait) {
+                    wait(std::chrono::milliseconds(kResolverPollMs));
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(kResolverPollMs));
+                }
+            }
+        }
+        const bool stopped   = is_cancelled && is_cancelled();
+        const bool timed_out = !state.complete && !loop_failed && !stopped;
+        if (!state.complete && request != nullptr) {
+            evdns_getaddrinfo_cancel(request);
+        }
+        evdns_base_free(dns_base, 0);
+        event_base_free(event_base);
+
+        if (stopped) {
+            return "";
+        }
+        if (loop_failed) {
+            LOG_ERRO("DNS event loop failed for NTP host [{}]", host);
+            return "";
+        }
+        if (timed_out) {
+            LOG_ERRO("Timed out resolving NTP host [{}]", host);
+            return "";
+        }
+        if (state.result != 0 || state.ip.empty()) {
+            LOG_ERRO("Failed to resolve NTP host [{}]: {}", host,
+                     state.result == 0 ? "no address" : evutil_gai_strerror(state.result));
+            return "";
+        }
+        return state.ip;
     }
 
     // Connect UDP socket to NTP server, returns sockfd or -1
-    inline int ConnectNtpServer(const std::string& host, int port) {
+    inline int ConnectNtpServer(const std::string& host, int port,
+                                const std::function<bool()>& is_cancelled                  = {},
+                                const std::function<void(std::chrono::milliseconds)>& wait = {}) {
         LOG_INFO("NTP connecting to host=[{}] port=[{}]", host, port);
 
-        std::string ip = ResolveDomain(host);
+        if (port <= 0 || port > 65535) {
+            LOG_ERRO("Invalid NTP port: {}", port);
+            return -1;
+        }
+
+        std::string ip = ResolveDomain(host, is_cancelled, wait);
         if (ip.empty()) {
-            LOG_ERRO("Cannot resolve host: {}", host);
+            if (!is_cancelled || !is_cancelled()) {
+                LOG_ERRO("Cannot resolve host: {}", host);
+            }
+            return -1;
+        }
+        if (is_cancelled && is_cancelled()) {
             return -1;
         }
 
@@ -194,7 +358,11 @@ namespace {
             LOG_ERRO("{}", "socket() failed");
             return -1;
         }
-        SetSocketTimeout(sockfd, kNtpTimeoutMs);
+        if (!SetSocketTimeout(sockfd, kNtpTimeoutMs)) {
+            close(sockfd);
+            LOG_ERRO("{}", "setsockopt() failed");
+            return -1;
+        }
 
         struct sockaddr_in src {};
         src.sin_family      = AF_INET;
@@ -208,9 +376,13 @@ namespace {
         }
 
         struct sockaddr_in dst {};
-        dst.sin_family      = AF_INET;
-        dst.sin_port        = htons(port);
-        dst.sin_addr.s_addr = inet_addr(ip.c_str());
+        dst.sin_family = AF_INET;
+        dst.sin_port   = htons(port);
+        if (inet_pton(AF_INET, ip.c_str(), &dst.sin_addr) != 1) {
+            close(sockfd);
+            LOG_ERRO("Resolved NTP address is invalid: [{}]", ip);
+            return -1;
+        }
 
         if (connect(sockfd, reinterpret_cast<struct sockaddr*>(&dst), sizeof(dst)) < 0) {
             close(sockfd);
@@ -249,40 +421,6 @@ namespace {
     }
 
     // ---------------------------------------------------------------------------
-    // JSON read/write helpers
-    // ---------------------------------------------------------------------------
-
-    template <typename T>
-    bool WriteJson(const T& t, const std::string& fileName) {
-        std::ofstream ofile(fileName);
-        if (!ofile.is_open()) {
-            LOG_ERRO("open file {} failed.", fileName);
-            return false;
-        }
-        auto jsonStr = nlohmann::json(t).dump(2);
-        ofile.write(jsonStr.data(), jsonStr.size());
-        ofile.close();
-        return true;
-    }
-
-    template <typename T>
-    bool ReadJson(T& t, const std::string& fileName) {
-        try {
-            std::ifstream infile(fileName);
-            if (!infile.is_open()) {
-                LOG_WARN("ReadJson: cannot open {}", fileName);
-                return false;
-            }
-            auto doc = nlohmann::json::parse(infile);
-            t        = doc.get<T>();
-            return true;
-        } catch (const std::exception& e) {
-            LOG_ERRO("load json failed: {}", e.what());
-            return false;
-        }
-    }
-
-    // ---------------------------------------------------------------------------
     // Timezone parsing
     // ---------------------------------------------------------------------------
 
@@ -291,8 +429,15 @@ namespace {
         if (tz.length() != 6 || (tz[0] != '+' && tz[0] != '-') || tz[3] != ':') {
             return false;
         }
-        int h = 0, m = 0;
-        if (sscanf(tz.c_str() + 1, "%d:%d", &h, &m) != 2) {
+        if (!std::isdigit(static_cast<unsigned char>(tz[1])) ||
+            !std::isdigit(static_cast<unsigned char>(tz[2])) ||
+            !std::isdigit(static_cast<unsigned char>(tz[4])) ||
+            !std::isdigit(static_cast<unsigned char>(tz[5]))) {
+            return false;
+        }
+        const int h = (tz[1] - '0') * 10 + (tz[2] - '0');
+        const int m = (tz[4] - '0') * 10 + (tz[5] - '0');
+        if (h > 14 || m > 59 || (h == 14 && m != 0)) {
             return false;
         }
         is_west = (tz[0] == '-') ? 1 : 0;

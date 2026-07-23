@@ -10,8 +10,11 @@ import {
 } from './task-strategies.js';
 
 export class ReportWriter {
-  constructor(outputDir) {
+  constructor(outputDir, { partialWriteIntervalMs = 30_000, now = () => Date.now() } = {}) {
     this.outputDir = path.resolve(outputDir);
+    this.partialWriteIntervalMs = partialWriteIntervalMs;
+    this.now = now;
+    this.lastPartialWriteAt = null;
   }
 
   async write(runResult) {
@@ -32,11 +35,19 @@ export class ReportWriter {
     return { jsonPath, summaryPath, htmlPath };
   }
 
-  async writePartial(runResult) {
+  async writePartial(runResult, { force = false } = {}) {
+    const now = this.now();
+    if (!force && this.lastPartialWriteAt != null
+        && now - this.lastPartialWriteAt < this.partialWriteIntervalMs) {
+      return { jsonPath: null, skipped: true };
+    }
     fs.mkdirSync(this.outputDir, { recursive: true });
     const jsonPath = path.join(this.outputDir, 'metrics.partial.json');
-    fs.writeFileSync(jsonPath, JSON.stringify(runResult, null, 2), 'utf8');
-    return { jsonPath };
+    const temporaryPath = `${jsonPath}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify(runResult, null, 2), 'utf8');
+    fs.renameSync(temporaryPath, jsonPath);
+    this.lastPartialWriteAt = now;
+    return { jsonPath, skipped: false };
   }
 
   _summarizeSteps(r) {
@@ -104,6 +115,7 @@ export class ReportWriter {
       tasks: r.tasks ?? [],
       targetFps: r.targetFps,
       videoMode: r.videoMode,
+      previewProfile: r.previewProfile ?? { mode: 'none' },
       profileMode: r.profileMode ?? 'configured',
       status: r.status,
       overallPass,
@@ -131,6 +143,7 @@ export class ReportWriter {
       startedAt: r.startedAt,
       endedAt: r.endedAt,
       sampleCount: (r.samples ?? []).length,
+      mediaStages: stepSummaries.map((step) => ({ channels: step.channels, ...step.mediaStages })),
     };
   }
 
@@ -157,6 +170,7 @@ export class ReportWriter {
       ['任务策略', formatTaskStrategies(r.tasks)],
       ['编排设定 FPS（参考）', formatTargetFps(r.tasks, r.targetFps)],
       ['视频模式', r.videoMode],
+      ['预览负载', formatPreviewProfile(r.previewProfile)],
       ['设备', `${r.device?.model ?? ''} / ${r.device?.sn ?? ''}`],
       ['软件版本', r.device?.softwareVersion ?? ''],
       ['开始时间', r.startedAt],
@@ -199,6 +213,7 @@ export class ReportWriter {
         <td>${s.avgDiscard != null ? s.avgDiscard : '-'}</td>
         <td>${s.maxDiscard != null ? s.maxDiscard : '-'}</td>
         <td class="${s.maxNpu >= 90 ? 'fail' : ''}">${s.maxNpu != null ? s.maxNpu + '%' : '-'}</td>
+        <td class="${s.maxAcceleratorMem >= 90 ? 'fail' : ''}">${s.maxAcceleratorMem != null ? s.maxAcceleratorMem + '%' : '-'}</td>
         <td class="${s.maxCpu >= 90 ? 'fail' : ''}">${s.maxCpu != null ? s.maxCpu + '%' : '-'}</td>
         <td class="${s.maxMem >= 90 ? 'fail' : ''}">${s.maxMem != null ? s.maxMem + '%' : '-'}</td>
         <td class="${status.className}">${status.label}</td>
@@ -236,6 +251,23 @@ export class ReportWriter {
         </tr>`),
     ).join('');
 
+    const mediaRows = stepSummaries.map((s) => {
+      const m = s.mediaStages ?? {};
+      return `<tr>
+        <td>${s.channels}ch</td>
+        <td>${metric(m.preprocessAvgMs)}</td>
+        <td>${metric(m.inferAvgMs)}</td>
+        <td>${metric(m.postprocessAvgMs)}</td>
+        <td>${metric(m.osdAvgMs)}</td>
+        <td>${metric(m.publishAvgMs)}</td>
+        <td>${metric(m.firstFrameAvgMs)}/${metric(m.firstFrameMaxMs)}</td>
+        <td>${m.activePreviewStreamsPeak ?? '-'}/${m.activePreviewPublishersPeak ?? '-'}</td>
+        <td>${m.activeRawPreviewStreamsPeak ?? '-'}/${m.activeAlgorithmPreviewStreamsPeak ?? '-'}</td>
+        <td>${m.srsStreamsPeak ?? '-'}/${m.srsClientsPeak ?? '-'}</td>
+        <td>${m.previewStartsDelta ?? '-'}/${m.previewStopsDelta ?? '-'}/${m.previewFailuresDelta ?? '-'}</td>
+      </tr>`;
+    }).join('');
+
     return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -264,8 +296,13 @@ ${bottleneckBanner}
 <table>${baseRows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>路数结果</h2>
 <table>
-  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>NPU峰值</th><th>CPU峰值</th><th>内存峰值</th><th>结果</th><th>失败原因</th></tr>
+  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>结果</th><th>失败原因</th></tr>
   ${stepRows}
+</table>
+<h2>媒体与预览分阶段指标</h2>
+<table>
+  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
+  ${mediaRows}
 </table>
 <h2>分任务汇总</h2>
 <table>
@@ -302,6 +339,15 @@ function formatTaskStrategies(tasks) {
   return tasks
     .map((task) => `${task.id}=${strategyForTaskType(task.type).id}`)
     .join('; ');
+}
+
+function formatPreviewProfile(profile) {
+  if (!profile || profile.mode === 'none') return 'none（后台推理）';
+  return `${profile.mode}; streams=${profile.streamLimit ?? 'all'}; clients/stream=${profile.clientsPerStream ?? 1}`;
+}
+
+function metric(value, suffix = '') {
+  return typeof value === 'number' && Number.isFinite(value) ? `${round(value, 3)}${suffix}` : '-';
 }
 
 function isContinuousChannelProfile(stepSummaries) {

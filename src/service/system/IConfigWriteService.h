@@ -79,7 +79,7 @@ public:
 
     /// Set the list of shielded (disabled) action IDs.
     /// @param actions List of action IDs to disable.
-    virtual void SetShieldedActions(const std::vector<std::string>& actions) = 0;
+    virtual cosmo::util::ErrorEnum SetShieldedActions(const std::vector<std::string>& actions) = 0;
 
     // ── Popup Parameters ──
 
@@ -87,17 +87,17 @@ public:
     /// @param popUpSwitch   Popup enabled (1) or disabled (0).
     /// @param audioPlay     Audio play enabled (1) or disabled (0).
     /// @param popUpDuration Popup display duration in seconds.
-    virtual void SetPopUpParam(int popUpSwitch, int audioPlay, int popUpDuration) = 0;
+    virtual cosmo::util::ErrorEnum SetPopUpParam(int popUpSwitch, int audioPlay, int popUpDuration) = 0;
 
     // ── Run Mode & Resource ──
 
     /// Set the device run mode.
     /// @param mode Target run mode (standalone / IoT managed).
-    virtual void SetRunMode(cosmo::RunMode mode) = 0;
+    virtual cosmo::util::ErrorEnum SetRunMode(cosmo::RunMode mode) = 0;
 
     /// Enable or disable resource limiting.
     /// @param enable true to enable resource limits.
-    virtual void SetResourceLimit(bool enable) = 0;
+    virtual cosmo::util::ErrorEnum SetResourceLimit(bool enable) = 0;
 };
 
 }  // namespace cosmo::service

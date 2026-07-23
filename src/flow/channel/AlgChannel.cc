@@ -179,19 +179,21 @@ bool AlgChannel::RecordMp4(RecordParam& record_param) {
 }
 
 // Start channel: launch demuxer and decoder.
-void AlgChannel::Start() {
+bool AlgChannel::Start() {
     std::lock_guard<std::shared_mutex> lock(mtx_);
     // AlgChannel inherits AlgActionBase, but this Start() only manages demux/decode.
     // If external code still writes to AlgChannel::GetQueue() (e.g. queue named "-flow-channel--1"),
     // the base-class thread must be started to consume data_queue, otherwise queue fills up with Proc:0.
     bool was_started = is_started_;
-    AlgActionBase::Start();
+    if (!AlgActionBase::Start()) {
+        return false;
+    }
 
     if (was_started) {
         LOG_INFO("Channel:{} Url:{} Alread Started", channel, url_);
         // Restart VoD stream from the beginning.
         demuxer_.SetForStartTask();
-        return;
+        return true;
     }
     is_started_ = true;
     LOG_INFO("Channel:{} Url:{} Start", channel, url_);
@@ -204,6 +206,7 @@ void AlgChannel::Start() {
     // otherwise short video files may finish before queue Resume, dropping all frames.
     decoder_.Start();
     demuxer_.Start();
+    return true;
 }
 
 // Quit channel: stop demuxer and decoder completely.

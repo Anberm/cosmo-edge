@@ -35,7 +35,7 @@ The core AI Host APIs are located under:
 /gtw/cwai/aihost/...
 ```
 
-This group of routes is marked as `kNoAuth` (no authentication) and is registered in `RegisterCoreRoutes()` in `src/api/ApiRouter.cc`. There are 19 endpoints under `/v1/cwai/aihost/`:
+These routes are registered by `RegisterCoreRoutes()` in `src/api/ApiRouter.cc`. The minimal liveness endpoint `Probe` is `kNoAuth`; every other endpoint is `kAuth` and requires a valid `mtk` for HTTP calls. There are 19 endpoints under `/v1/cwai/aihost/`:
 
 ```text
 InterfaceTest             TaskCreate                TaskCancle
@@ -47,13 +47,13 @@ QueryTaskStatus           QueryTaskInfo             QueryDeviceMemStatus
 QueryLogs
 ```
 
-In addition, 3 compatibility routes are provided under `/gtw/cwai/aihost/` for the unified frontend prefix: `PTaskCreate`, `PTaskCancle`, and `PTaskDetectPic` (also `kNoAuth`).
+In addition, 3 authenticated compatibility routes are provided under `/gtw/cwai/aihost/` for the unified frontend prefix: `PTaskCreate`, `PTaskCancle`, and `PTaskDetectPic`.
 
 ## API Categories
 
 | Category | Route Prefix | Description |
 | --- | --- | --- |
-| Login | `/gtw/cwai/login/` | Login and password change |
+| Login | `/gtw/cwai/login/` | Login is anonymous; password changes require the header `mtk` and revoke every session for that user |
 | Network | `/gtw/cwai/network/` | Network adapters, DNS, network quality, and connectivity checks |
 | Algorithm | `/gtw/cwai/Algorithm/` | Algorithm pagination, upload, add, update, delete, and passenger-flow algorithm list |
 | Algorithm layout | `/gtw/cwai/algorithm/layout/` | Algorithm layout save, detail, list, export single algorithm (`exportSingleAlg`, zip), and export all (`export`, tar.gz) |
@@ -74,7 +74,7 @@ In addition, 3 compatibility routes are provided under `/gtw/cwai/aihost/` for t
 
 ## Authentication
 
-There are two kinds of markers in route registration: `kAuth` and `kNoAuth`. HTTP requests validate the `mtk` token; MQTT-dispatched requests go through the `ApiRouter` with an empty `mtk` and do not go through the HTTP token validation.
+There are two kinds of markers in route registration: `kAuth` and `kNoAuth`. HTTP requests validate the `mtk` token. MQTT requests enter the same router with a trusted internal transport context only after the configured client connection and device registration have completed; HTTP `mtk` validation is not repeated for that transport.
 
 The public API documentation still needs to be supplemented with:
 

@@ -34,6 +34,8 @@ void to_json(nlohmann::json& j, const MsgAddVideoRecv& v) {
     j["contentLength"] = v.contentLength;
     j["fileName"]      = v.fileName;
     j["filePath"]      = v.filePath;
+    j["uploadId"]      = v.uploadId;
+    j["channelCode"]   = v.channelCode;
     j["channelName"]   = v.channelName;
 }
 
@@ -42,7 +44,17 @@ void from_json(const nlohmann::json& j, MsgAddVideoRecv& v) {
     JSON_OPT(j, v, contentLength);
     JSON_OPT(j, v, fileName);
     JSON_OPT(j, v, filePath);
+    JSON_OPT(j, v, uploadId);
+    JSON_OPT(j, v, channelCode);
     JSON_OPT(j, v, channelName);
+    if (j.contains("externalChannelNo") && !j["externalChannelNo"].is_null()) {
+        const auto external_channel_no = j["externalChannelNo"].get<std::string>();
+        if (!v.channelCode.empty() && v.channelCode != external_channel_no) {
+            v.channelCodeConflict = true;
+        } else {
+            v.channelCode = external_channel_no;
+        }
+    }
 }
 
 void to_json(nlohmann::json& j, const MsgAddVideoSend& v) {

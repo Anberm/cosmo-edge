@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "service/camera/dto/CameraDto.h"
+#include "util/IRequestDispatcher.h"
 
 namespace cosmo::service {
 class ICameraDeviceCrud;
@@ -26,6 +27,8 @@ public:
     camera::MsgDeleteSend Handle(camera::MsgDeleteRecv&& data, std::error_condition& errc);
     camera::MsgBatchDeleteSend Handle(camera::MsgBatchDeleteRecv&& data, std::error_condition& errc);
     camera::MsgAddVideoSend Handle(camera::MsgAddVideoRecv&& data, std::error_condition& errc);
+    camera::MsgAddVideoSend Handle(camera::MsgAddVideoRecv&& data, const RequestDispatchContext& context,
+                                   std::error_condition& errc);
     camera::MsgGetPictureSend Handle(camera::MsgGetPictureRecv&& data, std::error_condition& errc);
     camera::MsgQueryUsbCameraListSend Handle(camera::MsgQueryUsbCameraListRecv&& data,
                                              std::error_condition& errc);

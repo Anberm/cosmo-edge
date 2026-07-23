@@ -57,6 +57,7 @@ public:
     MAKE_MOCK0(LoadFaceData, void(), override);
     MAKE_MOCK0(ReleaseFaceModels, void(), override);
     // IFaceImport
+    MAKE_MOCK0(Stop, void(), override);
     MAKE_MOCK2(ImportFile, void(const std::string&, const std::string&), override);
     MAKE_CONST_MOCK0(GetImportStatus, (std::pair<int, int>)(), override);
     MAKE_CONST_MOCK0(ImportComplete, bool(), override);

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iterator>
 #include <mutex>
+#include <vector>
 
 #include "flow/channel/AlgChannel.h"
 #include "flow/common/AlgDataRecord.h"
@@ -27,12 +28,55 @@ TaskServiceImpl::TaskServiceImpl() : task_base_(std::make_unique<cosmo::TaskBase
 }
 
 TaskServiceImpl::~TaskServiceImpl() {
+    TaskServiceImpl::Shutdown();
     LOG_INFO("{}", "TaskServiceImpl Delete");
+}
+
+void TaskServiceImpl::Shutdown() {
+    std::lock_guard<std::mutex> shutdown_lock(shutdown_mtx_);
+    if (shutdown_complete_) {
+        return;
+    }
+    shutting_down_.store(true, std::memory_order_release);
+
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    std::vector<cosmo::TaskElementPtr> tasks;
+    {
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        tasks.reserve(tasks_.size());
+        for (auto& [id, task] : tasks_) {
+            (void)id;
+            tasks.push_back(std::move(task));
+        }
+        tasks_.clear();
+    }
+    auto stop_and_delete = [this, &tasks](bool channel_tasks) {
+        for (auto& task : tasks) {
+            if (!task || (task->GetAlgId() == "Channel") != channel_tasks) {
+                continue;
+            }
+            if (task->is_started.load(std::memory_order_acquire)) {
+                (void)task_base_->TaskStop(task);
+            }
+            (void)task_base_->TaskDelete(task);
+            task.reset();
+        }
+    };
+    // Algorithm tasks may reference the channel task, so release them first.
+    stop_and_delete(false);
+    stop_and_delete(true);
+
+    {
+        std::lock_guard<std::mutex> lock(log_throttle_mtx_);
+        not_in_pool_log_ts_.clear();
+        last_overview_log_ts_ = 0;
+    }
+    shutdown_complete_ = true;
 }
 
 void TaskServiceImpl::QueueStatus(std::vector<cosmo::AlgActionDataQueueStatus>& queStatus,
                                   unsigned int duration_sec) {
-    std::shared_lock<std::shared_mutex> lock(mtx_);
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     task_base_->QueueStatus(queStatus, duration_sec);
 }
 
@@ -66,7 +110,7 @@ void TaskServiceImpl::PacketStatus(size_t& total, size_t& proc, size_t& discard,
 }
 
 void TaskServiceImpl::ActionInfo(std::vector<cosmo::ActionRuntimeInfo>& actionInfo) {
-    std::shared_lock<std::shared_mutex> lock(mtx_);
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     task_base_->ActionInfo(actionInfo);
 }
 
@@ -77,13 +121,18 @@ cosmo::util::ErrorEnum TaskServiceImpl::TaskCreate(const std::string& channelId,
         LOG_INFO("Channel:{} Or Task:{} Empty", channelId, taskId);
         return cosmo::util::ErrorEnum::InvalidParam;
     }
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        LOG_WARN("Reject task creation during service shutdown: {}", taskId);
+        return cosmo::util::ErrorEnum::SysErr;
+    }
     LOG_INFO("Task:{} TaskCreate begin", taskId);
-    std::lock_guard<std::shared_mutex> lock(mtx_);
-    LOG_INFO("Task:{} TaskCreate end", taskId);
-    auto it = tasks_.find(taskId);
-    if (it != tasks_.end()) {
-        LOG_WARN("Task:{} In Pool, Cant Repeat.", taskId);
-        return cosmo::util::ErrorEnum::Created;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        if (tasks_.find(taskId) != tasks_.end()) {
+            LOG_WARN("Task:{} In Pool, Cant Repeat.", taskId);
+            return cosmo::util::ErrorEnum::Created;
+        }
     }
 
     auto task_el = task_base_->TaskCreate(channelId, channel_name, taskId, actionAlg);
@@ -92,7 +141,11 @@ cosmo::util::ErrorEnum TaskServiceImpl::TaskCreate(const std::string& channelId,
         return cosmo::util::ErrorEnum::ActionFailed;
     }
 
-    tasks_[taskId] = task_el;
+    {
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        tasks_.emplace(taskId, task_el);
+    }
+    LOG_INFO("Task:{} TaskCreate end", taskId);
     return cosmo::util::ErrorEnum::Success;
 }
 
@@ -102,25 +155,33 @@ cosmo::util::ErrorEnum TaskServiceImpl::TaskDelete(const std::string& taskId) {
         return cosmo::util::ErrorEnum::InvalidParam;
     }
 
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     cosmo::TaskElementPtr task_el = nullptr;
     {
-        std::lock_guard<std::shared_mutex> lock(mtx_);
+        std::shared_lock<std::shared_mutex> lock(mtx_);
         auto it = tasks_.find(taskId);
         if (it != tasks_.end()) {
             task_el = it->second;
-            tasks_.erase(it);
         } else {
             LOG_WARN("Task:{} Not Found", taskId);
             return cosmo::util::ErrorEnum::NotInit;
         }
     }
     // Ensure task is fully stopped before deletion (thread terminated, queue unregistered)
-    if (task_el->is_started) {
-        task_base_->TaskStop(task_el);
+    if (task_el->is_started.load(std::memory_order_acquire) && !task_base_->TaskStop(task_el)) {
+        LOG_WARN("Stop {} Before Delete Failed", taskId);
+        return cosmo::util::ErrorEnum::Failed;
     }
     if (!task_base_->TaskDelete(task_el)) {
         LOG_WARN("Delete {} Failed", taskId);
         return cosmo::util::ErrorEnum::Failed;
+    }
+    {
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        auto it = tasks_.find(taskId);
+        if (it != tasks_.end() && it->second == task_el) {
+            tasks_.erase(it);
+        }
     }
     // Clean up stale entries in log rate-limiting map
     {
@@ -131,6 +192,11 @@ cosmo::util::ErrorEnum TaskServiceImpl::TaskDelete(const std::string& taskId) {
 }
 
 bool TaskServiceImpl::TaskStart(const std::string& channelId, const std::string& taskId) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        LOG_WARN("Reject task start during service shutdown: {}", taskId);
+        return false;
+    }
     // --- Phase 1: Collect refresh info inside lock, no slow operations ------
     cosmo::TaskElementPtr task_el  = nullptr;
     cosmo::TaskElementPtr old_task = nullptr;
@@ -141,36 +207,35 @@ bool TaskServiceImpl::TaskStart(const std::string& channelId, const std::string&
     std::string new_version;
     cosmo::ActionAlgPtr latest_alg;
     {
-        std::lock_guard<std::shared_mutex> lock(mtx_);
+        std::shared_lock<std::shared_mutex> lock(mtx_);
         auto it = tasks_.find(taskId);
         if (it == tasks_.end()) {
             LOG_WARN("Channel:{} Task:{} Not In Pool, Cant Start.", channelId, taskId);
             return false;
         }
 
-        // Task not running; before starting, check if algorithm has been updated; if so, rebuild task
-        // instance to use latest orchestration/prompts.
-        auto task = it->second;
-        if (task && !task->is_started) {
-            const auto algorithm_id = task->GetAlgId();
-            if (!algorithm_id.empty() && algorithm_id != "Channel") {
-                latest_alg = ServiceRegistry::Instance().Get<IAlgorithmQuery>().GetAlgorithm(algorithm_id);
-                if (latest_alg && task->GetVersion() != latest_alg->algorithmUpdateTime) {
-                    cached_param = task->params;
-                    channel_name = task->channelName;
-                    old_version  = task->GetVersion();
-                    new_version  = latest_alg->algorithmUpdateTime;
-                    old_task     = task;
-                    need_refresh = true;
-                }
-            }
-        }
-
-        if (!need_refresh) {
-            task_el = it->second;
-        }
+        auto task    = it->second;
+        task_el      = task;
+        old_task     = task;
+        old_version  = task ? task->GetVersion() : std::string{};
+        channel_name = task ? task->channelName : std::string{};
+        cached_param = task ? task->params : cosmo::MsgTaskConfig{};
     }
     // --- Lock released ---
+
+    if (!task_el) {
+        return false;
+    }
+    if (!task_el->is_started.load(std::memory_order_acquire)) {
+        const auto algorithm_id = task_el->GetAlgId();
+        if (!algorithm_id.empty() && algorithm_id != "Channel") {
+            latest_alg = ServiceRegistry::Instance().Get<IAlgorithmQuery>().GetAlgorithm(algorithm_id);
+            if (latest_alg && old_version != latest_alg->algorithmUpdateTime) {
+                new_version  = latest_alg->algorithmUpdateTime;
+                need_refresh = true;
+            }
+        }
+    }
 
     // No algorithm refresh needed; start current task directly
     if (!need_refresh) {
@@ -180,17 +245,31 @@ bool TaskServiceImpl::TaskStart(const std::string& channelId, const std::string&
     // --- Phase 2: Perform slow Delete(old) -> Create(new) outside lock ---
     // Must delete old instance first: action manager keys by channel+task; not deleting old causes new
     // registration to fail
+    const auto old_action_alg = old_task->action_alg;
     if (!task_base_->TaskDelete(old_task)) {
         LOG_WARN("Channel:{} Task:{} Refresh Before Start Failed On Delete. version:{}->{}", channelId,
                  taskId, old_version, new_version);
         return false;
     }
-    old_task.reset();
-
     auto new_task = task_base_->TaskCreate(channelId, channel_name, taskId, latest_alg);
     if (!new_task) {
         LOG_WARN("Channel:{} Task:{} Refresh Before Start Failed On Create. version:{}->{}", channelId,
                  taskId, old_version, new_version);
+        auto rollback_task = task_base_->TaskCreate(channelId, channel_name, taskId, old_action_alg);
+        if (rollback_task) {
+            rollback_task->params = cached_param;
+            if (!cached_param.params.empty() || !cached_param.areas.empty() ||
+                !cached_param.shieldedAreas.empty()) {
+                (void)task_base_->ModifyTaskParam(rollback_task, cached_param);
+            }
+            std::lock_guard<std::shared_mutex> lock(mtx_);
+            auto it = tasks_.find(taskId);
+            if (it != tasks_.end() && it->second == old_task) {
+                it->second = std::move(rollback_task);
+            }
+        } else {
+            LOG_ERRO("Channel:{} Task:{} Refresh rollback failed; task remains stopped", channelId, taskId);
+        }
         return false;
     }
     new_task->params = cached_param;
@@ -225,6 +304,7 @@ bool TaskServiceImpl::TaskStart(const std::string& channelId, const std::string&
 }
 
 bool TaskServiceImpl::TaskStop(const std::string& taskId) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     cosmo::TaskElementPtr task_el = nullptr;
     {
         std::lock_guard<std::shared_mutex> lock(mtx_);
@@ -234,7 +314,7 @@ bool TaskServiceImpl::TaskStop(const std::string& taskId) {
             return false;
         }
         task_el = it->second;
-        if (!task_el->is_started) {
+        if (!task_el->is_started.load(std::memory_order_acquire)) {
             return true;
         }
         // Do not set is_started = false here; TaskBase::TaskStop manages that
@@ -286,7 +366,7 @@ bool TaskServiceImpl::TaskIsStart(const std::string& taskId) {
 }
 
 bool TaskServiceImpl::LogicTest(const std::string& taskId, cosmo::MsgTarget& target) {
-    std::shared_lock<std::shared_mutex> lock(mtx_);
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     return task_base_->LogicTest(taskId, target);
 }
 
@@ -297,7 +377,7 @@ std::vector<std::string> TaskServiceImpl::QueryTasks(bool started) {
         if (task) {
             // Already started algorithm
             if (started) {
-                if (task->is_started) {
+                if (task->is_started.load(std::memory_order_acquire)) {
                     tasks.push_back(id);
                 }
             } else {
@@ -310,13 +390,17 @@ std::vector<std::string> TaskServiceImpl::QueryTasks(bool started) {
 
 bool TaskServiceImpl::SetTaskParam(const std::string& channelId, const std::string& taskId,
                                    cosmo::MsgTaskConfig& param) {
-    std::lock_guard<std::shared_mutex> lock(mtx_);
-    auto it = tasks_.find(taskId);
-    if (it == tasks_.end()) {
-        LOG_WARN("Channel:{} Task:{} Not In Pool, Cant SetParam.", channelId, taskId);
-        return false;
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    cosmo::TaskElementPtr task;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        auto it = tasks_.find(taskId);
+        if (it == tasks_.end()) {
+            LOG_WARN("Channel:{} Task:{} Not In Pool, Cant SetParam.", channelId, taskId);
+            return false;
+        }
+        task = it->second;
     }
-    auto task = it->second;
 
     for (auto& action_key_param : param.params) {
         auto keys = cosmo::util::Split(action_key_param.key.ToRefString(), ".");
@@ -326,7 +410,10 @@ bool TaskServiceImpl::SetTaskParam(const std::string& channelId, const std::stri
     cosmo::AreaToLocal(param);
 
     // Algorithm parameter settings
-    task->params = param;
+    {
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        task->params = param;
+    }
 
     // Sync algorithm params to algorithm instance
     return task_base_->ModifyTaskParam(task, param);
@@ -346,10 +433,18 @@ bool TaskServiceImpl::GetTaskParam(const std::string& channelId, const std::stri
 
 std::vector<cosmo::TaskStatus> TaskServiceImpl::GetTaskStatus(const std::vector<std::string>& tasks,
                                                               unsigned int duration_sec) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
     std::vector<cosmo::TaskStatus> task_statuses;
-    std::shared_lock<std::shared_mutex> lock(mtx_);
-    for (const auto& kv : tasks_) {
-        const auto& task = kv.second;
+    std::vector<cosmo::TaskElementPtr> task_snapshot;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        task_snapshot.reserve(tasks_.size());
+        for (const auto& [id, task] : tasks_) {
+            (void)id;
+            task_snapshot.push_back(task);
+        }
+    }
+    for (const auto& task : task_snapshot) {
         cosmo::TaskStatus task_status_el;
         if (!task)  // Skip tasks that failed to create
         {
@@ -446,6 +541,11 @@ void TaskServiceImpl::QueueStatusDto(std::vector<cosmo::AlgActionDataQueueStatus
 cosmo::MsgTaskCreateSend TaskServiceImpl::ProcessTaskCreate(cosmo::MsgTaskCreateRecv& data,
                                                             std::error_condition& errc) {
     cosmo::MsgTaskCreateSend ret_data{};
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        errc = cosmo::util::ErrorEnum::SysErr;
+        LOG_WARN("Reject task create request during service shutdown: {}", data.taskId);
+        return ret_data;
+    }
     LOG_INFO("[TaskOP] :{}/{} Create. Running {} Tasks", data.videoChannelId, data.taskId, TaskCount());
 
     if ((data.mvDebug != cosmo::key::DEBUG_STRING) &&

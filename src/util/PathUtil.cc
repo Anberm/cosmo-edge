@@ -189,10 +189,45 @@ std::string GetUploadPath() {
 }
 
 std::string GetUploadTmpPath() {
-    std::string uuid = cosmo::util::GenerateUUID();
-    std::string p    = (fs::path(UploadPath()) / uuid).string();
-    EnsureDir(p);
-    return p;
+    const auto upload_root = GetUploadPath();
+    std::error_code ec;
+    if (!fs::is_directory(upload_root, ec) || ec) {
+        LOG_ERRO("Cannot create upload temporary directory: invalid upload root {}", upload_root);
+        return {};
+    }
+
+    constexpr size_t kMaxCreateAttempts = 4;
+    for (size_t attempt = 0; attempt < kMaxCreateAttempts; ++attempt) {
+        const auto candidate = fs::path(upload_root) / cosmo::util::GenerateUUID();
+        ec.clear();
+        if (!fs::create_directory(candidate, ec)) {
+            if (ec) {
+                LOG_ERRO("Cannot create upload temporary directory {}: {}", candidate.string(), ec.message());
+                return {};
+            }
+            continue;
+        }
+
+        fs::permissions(candidate, fs::perms::owner_all, fs::perm_options::replace, ec);
+        if (ec) {
+            LOG_ERRO("Cannot secure upload temporary directory {}: {}", candidate.string(), ec.message());
+            std::error_code cleanup_ec;
+            fs::remove(candidate, cleanup_ec);
+            return {};
+        }
+
+        std::string resolved;
+        if (!ResolveExistingPathWithinRoot(upload_root, candidate.string(), PathEntryType::kDirectory,
+                                           resolved)) {
+            std::error_code cleanup_ec;
+            fs::remove(candidate, cleanup_ec);
+            return {};
+        }
+        return resolved;
+    }
+
+    LOG_ERRO("Cannot allocate a unique upload temporary directory under {}", upload_root);
+    return {};
 }
 
 std::string GetUpgradePath() {
@@ -232,17 +267,143 @@ std::string GetBaseDir() {
         std::error_code ec;
         auto p = fs::weakly_canonical(fs::path(s), ec);
         if (ec) {
-            p = fs::absolute(fs::path(s), ec);
+            return fs::path{};
         }
         return p.lexically_normal();  // strip trailing separators / empty tail components
     };
     const fs::path root_path = canonicalize(root);
     const fs::path cand_path = canonicalize(candidate);
+    if (root_path.empty() || cand_path.empty()) {
+        return false;
+    }
     // Must use the 4-arg overload: the 3-arg std::mismatch is UB when cand_path
     // is shorter than root_path.
     const auto mismatch_result =
         std::mismatch(root_path.begin(), root_path.end(), cand_path.begin(), cand_path.end());
     return mismatch_result.first == root_path.end();
+}
+
+[[nodiscard]] bool ResolvePathWithinRoot(const std::string& root, const std::string& candidate,
+                                         std::string& resolved) {
+    resolved.clear();
+    if (root.empty() || candidate.empty()) {
+        return false;
+    }
+
+    std::error_code ec;
+    const fs::path root_path = fs::canonical(fs::path(root), ec);
+    if (ec || !fs::is_directory(root_path, ec) || ec) {
+        return false;
+    }
+
+    const fs::path candidate_path = fs::weakly_canonical(fs::path(candidate), ec);
+    if (ec || candidate_path.empty()) {
+        return false;
+    }
+
+    const auto mismatch_result =
+        std::mismatch(root_path.begin(), root_path.end(), candidate_path.begin(), candidate_path.end());
+    if (mismatch_result.first != root_path.end()) {
+        return false;
+    }
+
+    resolved = candidate_path.lexically_normal().string();
+    return true;
+}
+
+[[nodiscard]] bool ResolveExistingPathWithinRoot(const std::string& root, const std::string& candidate,
+                                                 PathEntryType expected_type, std::string& resolved) {
+    resolved.clear();
+
+    std::error_code ec;
+    const fs::file_status link_status = fs::symlink_status(fs::path(candidate), ec);
+    if (ec || !fs::exists(link_status) || fs::is_symlink(link_status)) {
+        return false;
+    }
+
+    if (!ResolvePathWithinRoot(root, candidate, resolved)) {
+        return false;
+    }
+
+    const fs::file_status status = fs::status(fs::path(resolved), ec);
+    if (ec || !fs::exists(status)) {
+        resolved.clear();
+        return false;
+    }
+    if ((expected_type == PathEntryType::kRegularFile && !fs::is_regular_file(status)) ||
+        (expected_type == PathEntryType::kDirectory && !fs::is_directory(status))) {
+        resolved.clear();
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool IsSafePathComponent(const std::string& value, size_t max_length) {
+    if (value.empty() || value.size() > max_length || value == "." || value == "..") {
+        return false;
+    }
+    for (const unsigned char ch : value) {
+        if (ch == '\0' || ch == '/' || ch == '\\' || ch < 0x20 || ch == 0x7f) {
+            return false;
+        }
+    }
+    return fs::path(value).filename() == fs::path(value);
+}
+
+[[nodiscard]] bool ValidateDirectoryTreeWithinRoot(const std::string& root, size_t max_entries,
+                                                   std::uintmax_t max_file_bytes,
+                                                   std::uintmax_t max_total_bytes) {
+    std::string resolved_root;
+    if (!ResolveExistingPathWithinRoot(root, root, PathEntryType::kDirectory, resolved_root)) {
+        return false;
+    }
+
+    size_t entry_count        = 0;
+    std::uintmax_t total_size = 0;
+    std::error_code ec;
+    fs::recursive_directory_iterator it(resolved_root, fs::directory_options::none, ec);
+    const fs::recursive_directory_iterator end;
+    if (ec) {
+        return false;
+    }
+
+    for (; it != end; it.increment(ec)) {
+        if (ec || ++entry_count > max_entries) {
+            return false;
+        }
+
+        const auto link_status = it->symlink_status(ec);
+        if (ec || fs::is_symlink(link_status) ||
+            (!fs::is_directory(link_status) && !fs::is_regular_file(link_status))) {
+            return false;
+        }
+
+        std::string resolved_entry;
+        if (!ResolveExistingPathWithinRoot(resolved_root, it->path().string(), PathEntryType::kAny,
+                                           resolved_entry)) {
+            return false;
+        }
+
+        const auto relative = fs::relative(resolved_entry, resolved_root, ec);
+        if (ec || relative.empty()) {
+            return false;
+        }
+        for (const auto& component : relative) {
+            if (!IsSafePathComponent(component.string())) {
+                return false;
+            }
+        }
+
+        if (fs::is_regular_file(link_status)) {
+            const auto file_size = fs::file_size(resolved_entry, ec);
+            if (ec || file_size > max_file_bytes || file_size > max_total_bytes ||
+                total_size > max_total_bytes - file_size) {
+                return false;
+            }
+            total_size += file_size;
+        }
+    }
+    return !ec;
 }
 
 // ── Event / recording paths ───────────────────────────────────────────────────
@@ -402,19 +563,54 @@ std::string GetLogoWebPath() {
 
 // ── Task record paths ─────────────────────────────────────────────────────────
 
+std::string GetRecordRootPath(bool autoCreate) {
+    std::string p = (fs::path(g_dataPath) / kCwaiRuntimeDir / "record").string();
+    if (autoCreate) {
+        EnsureDir(p);
+    }
+    return p;
+}
+
 std::string GetRecordJsonPath() {
     auto dataTime        = cosmo::util::GetCurrentDateTime();
     std::string datePath = COSMO_FORMAT("{:04}/{:02}/{:02}", dataTime.Date().Year(), dataTime.Date().Month(),
                                         dataTime.Date().Day());
-    std::string p        = (fs::path(g_dataPath) / kCwaiRuntimeDir / "record" / datePath).string();
+    std::string p        = (fs::path(GetRecordRootPath()) / datePath).string();
     fs::create_directories(p);
     return p;
 }
 
-std::string GetTaskOverviewDataPath(const std::string& taskId) {
-    std::string p = (fs::path(g_dataPath) / kCwaiRuntimeDir / "overview" / taskId).string();
-    fs::create_directories(p);
-    return p;
+std::string GetTaskOverviewDataPath(const std::string& taskId, bool autoCreate) {
+    if (!IsSafePathComponent(taskId)) {
+        return {};
+    }
+
+    const fs::path root = fs::path(g_dataPath) / kCwaiRuntimeDir / "overview";
+    std::error_code ec;
+    fs::create_directories(root, ec);
+    if (ec) {
+        return {};
+    }
+
+    const fs::path candidate = root / taskId;
+    std::string resolved;
+    if (!ResolvePathWithinRoot(root.string(), candidate.string(), resolved)) {
+        return {};
+    }
+
+    const fs::file_status link_status = fs::symlink_status(candidate, ec);
+    if (!ec && fs::is_symlink(link_status)) {
+        return {};
+    }
+    ec.clear();
+    if (autoCreate) {
+        fs::create_directories(candidate, ec);
+        if (ec || !ResolveExistingPathWithinRoot(root.string(), candidate.string(), PathEntryType::kDirectory,
+                                                 resolved)) {
+            return {};
+        }
+    }
+    return resolved;
 }
 
 }  // namespace cosmo::path

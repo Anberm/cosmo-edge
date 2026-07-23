@@ -4,6 +4,9 @@
 
 #include <algorithm>
 
+#include "media/PreviewPipelineMetrics.h"
+#include "util/ErrorCode.h"
+#include "util/Exception.h"
 #include "util/FormatString.h"
 #include "util/Log.h"
 
@@ -33,19 +36,86 @@ RtmpStreamPusher::RtmpStreamPusher(media::VideoCodecType origin_type, const std:
 
     int ret = InitOutput();
     if (ret < 0) {
-        throw util::Exception(COSMO_FORMAT("{}", GetAvErr(ret)));
+        throw util::ErrorMessage(util::make_error_condition(util::ErrorEnum::LiveStreamPublishFailed),
+                                 COSMO_FORMAT("RTMP publisher connect failed: {}", GetAvErr(ret)).c_str());
     }
+    publisher_registered_ = true;
+    media::GetPreviewPipelineMetrics().PublisherOpened();
 }
 
 RtmpStreamPusher::~RtmpStreamPusher() {
-    LOG_INFO("{}", "closing RTMP stream pusher");
-    CloseOutput();
-    LOG_INFO("{}", "RTMP stream pusher closed");
+    Stop();
 }
 
 bool RtmpStreamPusher::WaitReady(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(ready_mtx_);
-    return ready_cv_.wait_for(lock, timeout, [this] { return stream_ready_; });
+    const bool state_changed = ready_cv_.wait_for(
+        lock, timeout, [this] { return stream_ready_ || stopping_.load(std::memory_order_acquire); });
+    return state_changed && stream_ready_;
+}
+
+void RtmpStreamPusher::SetCodecParamsFromExtradata(const std::vector<uint8_t>& extradata) {
+    if (extradata.empty() || stopping_.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(output_mtx_);
+    if (!stopping_.load(std::memory_order_relaxed)) {
+        codec_config_->SetParameters(extradata);
+    }
+}
+
+bool RtmpStreamPusher::SetStreamReady(bool ready) {
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(ready_mtx_);
+        changed       = stream_ready_ != ready;
+        stream_ready_ = ready;
+        if (ready) {
+            last_error_.clear();
+        }
+    }
+    if (changed) {
+        ready_cv_.notify_all();
+    }
+    return changed;
+}
+
+bool RtmpStreamPusher::IsReady() const {
+    std::lock_guard<std::mutex> lock(ready_mtx_);
+    return stream_ready_ && !stopping_.load(std::memory_order_acquire) && !output_failed_.load();
+}
+
+void RtmpStreamPusher::Stop() {
+    if (stopping_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    LOG_INFO("RTMP publisher stopping: url={}", push_url_);
+    {
+        std::lock_guard<std::mutex> lock(output_mtx_);
+        CloseOutput();
+    }
+    if (publisher_registered_.exchange(false)) {
+        media::GetPreviewPipelineMetrics().PublisherClosed();
+    }
+    ready_cv_.notify_all();
+    LOG_INFO("RTMP publisher stopped and released: url={}", push_url_);
+}
+
+std::string RtmpStreamPusher::LastError() const {
+    std::lock_guard<std::mutex> lock(ready_mtx_);
+    return last_error_;
+}
+
+void RtmpStreamPusher::RecordFailure(const char* stage, int error_no) {
+    const std::string detail = COSMO_FORMAT("{}: {}", stage, GetAvErr(error_no));
+    {
+        std::lock_guard<std::mutex> lock(ready_mtx_);
+        last_error_   = detail;
+        stream_ready_ = false;
+    }
+    ready_cv_.notify_all();
+    LOG_ERRO("RTMP publisher failure: stage={} error={} url={}", stage, GetAvErr(error_no), push_url_);
 }
 
 int RtmpStreamPusher::InitOutput() {
@@ -57,7 +127,7 @@ int RtmpStreamPusher::InitOutput() {
 
     outstream_ = avformat_new_stream(outctx_, nullptr);
     if (!outstream_) {
-        ret = AVERROR(errno);
+        ret = AVERROR(ENOMEM);
         LOG_ERRO("avformat_new_stream failed: [{}]", GetAvErr(ret));
         CloseOutput();
         return ret;
@@ -65,7 +135,10 @@ int RtmpStreamPusher::InitOutput() {
 
     ret = avio_open(&outctx_->pb, push_url_.c_str(), AVIO_FLAG_WRITE);
     if (ret < 0 || !outctx_->pb) {
-        LOG_ERRO("avio_open failed: [{}] url={}", GetAvErr(ret), push_url_);
+        if (ret >= 0) {
+            ret = AVERROR(EIO);
+        }
+        RecordFailure("connect", ret);
         CloseOutput();
         return ret;
     }
@@ -88,19 +161,19 @@ void RtmpStreamPusher::CloseOutput() {
     outctx_    = nullptr;
     outstream_ = nullptr;
     outindex_  = 0;
+    SetStreamReady(false);
 }
 
 bool RtmpStreamPusher::ReopenOutput() {
     CloseOutput();
-    stream_ready_  = false;
-    output_failed_ = false;
+    output_failed_.store(false);
     first_frame_flag_.clear();
     packet_writer_->ResetCounter();
 
     int ret = InitOutput();
     if (ret < 0) {
         LOG_ERRO("reopen RTMP output failed: [{}]", GetAvErr(ret));
-        output_failed_ = true;
+        output_failed_.store(true);
         return false;
     }
 
@@ -108,9 +181,9 @@ bool RtmpStreamPusher::ReopenOutput() {
     return true;
 }
 
-void RtmpStreamPusher::PushHeader() {
+bool RtmpStreamPusher::PushHeader() {
     if (!outctx_ || !outstream_) {
-        return;
+        return false;
     }
 
     codec_config_->ConfigureStream(outstream_);
@@ -124,27 +197,37 @@ void RtmpStreamPusher::PushHeader() {
     av_dict_free(&options);
 
     if (ret < 0) {
-        LOG_ERRO("avformat_write_header failed: [{}] url={}", GetAvErr(ret), push_url_);
-        output_failed_ = true;
+        RecordFailure("write-header", ret);
+        output_failed_.store(true);
         CloseOutput();
         first_frame_flag_.clear();
+        return false;
     } else {
         LOG_INFO("{}", "avformat_write_header success");
     }
+    return true;
 }
 
 void RtmpStreamPusher::DoPushFrame(const uint8_t* data, size_t size) {
+    if (!data || size == 0) {
+        LOG_WARN("{}", "DoPushFrame: empty frame");
+        return;
+    }
+    if (stopping_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> output_lock(output_mtx_);
+    if (stopping_.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const auto publish_started_at = std::chrono::steady_clock::now();
     debug_info_.recvFrames += 1;
 
     // Diagnostic: log frame header bytes for first 5 frames
     if (debug_info_.recvFrames <= 5 && size >= 5) {
         LOG_INFO("DoPushFrame #{} size:{} bytes:{:02X} {:02X} {:02X} {:02X} {:02X}", debug_info_.recvFrames,
                  size, data[0], data[1], data[2], data[3], data[4]);
-    }
-
-    if (size == 0) {
-        LOG_WARN("{}", "DoPushFrame: empty frame");
-        return;
     }
 
     // Parse NALUs, extract codec params, and prepare output data
@@ -162,9 +245,14 @@ void RtmpStreamPusher::DoPushFrame(const uint8_t* data, size_t size) {
         }
         return;
     }
+    if (!out_data || out_size == 0) {
+        LOG_WARN("DoPushFrame skip: parser returned empty video payload at frame #{}",
+                 debug_info_.recvFrames);
+        return;
+    }
 
     // Wait for I-frame during error recovery
-    if (output_failed_) {
+    if (output_failed_.load()) {
         if (main_type != media::HFrameType::I) {
             return;
         }
@@ -194,7 +282,9 @@ void RtmpStreamPusher::DoPushFrame(const uint8_t* data, size_t size) {
         }
 
         LOG_INFO("{}", "first I-frame received, pushing header");
-        PushHeader();
+        if (!PushHeader()) {
+            return;
+        }
     }
 
     // Only push I and P frames
@@ -203,23 +293,22 @@ void RtmpStreamPusher::DoPushFrame(const uint8_t* data, size_t size) {
             bool is_key_frame = (main_type == media::HFrameType::I);
             int ret = packet_writer_->WriteFrame(outctx_, outindex_, out_data, out_size, is_key_frame);
             if (ret < 0) {
-                LOG_ERRO("WriteFrame failed, url={}", push_url_);
-                output_failed_ = true;
+                RecordFailure("write-frame", ret);
+                output_failed_.store(true);
                 CloseOutput();
                 first_frame_flag_.clear();
             } else {
                 debug_info_.sendFrames += 1;
-                if (!stream_ready_) {
-                    {
-                        std::lock_guard<std::mutex> lock(ready_mtx_);
-                        stream_ready_ = true;
-                    }
-                    ready_cv_.notify_all();
+                if (SetStreamReady(true)) {
                     LOG_INFO("{}", "Stream ready: first frame written to RTMP/SRS");
                 }
                 if (outctx_ && outctx_->pb) {
                     avio_flush(outctx_->pb);
                 }
+                media::GetPreviewPipelineMetrics().RecordPublishedFrame(
+                    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                              std::chrono::steady_clock::now() - publish_started_at)
+                                              .count()));
             }
         } else {
             first_frame_flag_.clear();

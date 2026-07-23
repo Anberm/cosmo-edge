@@ -25,8 +25,8 @@ TEST_CASE("ApiRouter: Basic Routing and Dispatch", "[ApiRouter]") {
 
     SECTION("HandMessage for unsupported route should return false") {
         std::string response;
-        bool ret =
-            router.DispatchRequest("/gtw/cwai/aihost/SomeVirtualUnknownRoute", "{\"test\": 123}", response);
+        bool ret = router.DispatchRequest("/gtw/cwai/aihost/SomeVirtualUnknownRoute", "", "{\"test\": 123}",
+                                          response);
         // ApiRouter returns true when it processes the error itself and populates response! Wait, it depends
         // on its error handling. Let's just require it doesn't crash.
         REQUIRE_FALSE(router.SupportsRoute("/gtw/cwai/aihost/SomeVirtualUnknownRoute"));
@@ -37,9 +37,10 @@ TEST_CASE("ApiRouter: Basic Routing and Dispatch", "[ApiRouter]") {
         // 构建完整的基础协议头 json
         std::string reqBody = R"({"msgId": "12345", "timestamp": "12345678", "data": {}})";
 
-        // This won't crash
-        bool ret = router.DispatchRequest("/gtw/cwai/aihost/PTaskCreate", reqBody, response);
-        REQUIRE(true);
+        ALLOW_CALL(mocks.authSvc, IsValidToken("")).RETURN(false);
+        // This won't crash and must fail closed without a token.
+        bool ret = router.DispatchRequest("/gtw/cwai/aihost/PTaskCreate", "", reqBody, response);
+        REQUIRE_FALSE(ret);
     }
 
     SECTION("DispatchFileDownload should be able to transform local file payload") {
@@ -87,9 +88,52 @@ TEST_CASE("ApiRouter: Authentication Scenarios", "[ApiRouter]") {
     SECTION("Invalid MTK allows access to NOAUTH route") {
         std::string reqBody = R"({"msgId": "123", "data": {}})";
         // Using a NOAUTH route like Login
-        bool ret = router.DispatchRequest("/gtw/cwai/login/Auth", invalidMtk, reqBody, response);
+        ALLOW_CALL(mocks.authSvc, Login("", ""))
+            .RETURN(std::make_pair(std::string{}, util::ErrorEnum::LoginFailed));
+        bool ret = router.DispatchRequest("/gtw/cwai/login/DoLogin", invalidMtk, reqBody, response);
 
         // Should not fail due to auth
         REQUIRE(response.find("Auth Failed") == std::string::npos);
+    }
+
+    SECTION("Invalid MTK blocks Core and compatibility task routes") {
+        REQUIRE_FALSE(router.DispatchRequest("/v1/cwai/aihost/InterfaceTest", invalidMtk,
+                                             R"({"test":"hello"})", response));
+        REQUIRE(response.find("Auth Failed") != std::string::npos);
+
+        response.clear();
+        REQUIRE_FALSE(router.DispatchRequest("/gtw/cwai/aihost/PTaskCreate", invalidMtk, "{}", response));
+        REQUIRE(response.find("Auth Failed") != std::string::npos);
+    }
+
+    SECTION("Probe remains anonymous") {
+        REQUIRE(router.DispatchRequest("/v1/cwai/aihost/Probe", invalidMtk, "{}", response));
+        REQUIRE(response.find("Auth Failed") == std::string::npos);
+    }
+
+    SECTION("Password modification requires a valid header credential") {
+        REQUIRE_FALSE(router.DispatchRequest(
+            "/gtw/cwai/login/ModifyPassword", invalidMtk,
+            R"({"mtk":"valid_token_123","passwdOld":"old","passwdNew":"new"})", response));
+        REQUIRE(response.find("Auth Failed") != std::string::npos);
+    }
+
+    SECTION("Password modification uses the authenticated header credential") {
+        REQUIRE_CALL(mocks.authSvc, ChangePasswd(validMtk, "old", "new")).RETURN(util::ErrorEnum::Success);
+        REQUIRE(router.DispatchRequest(
+            "/gtw/cwai/login/ModifyPassword", validMtk,
+            R"({"mtk":"untrusted-body-token","passwdOld":"old","passwdNew":"new"})", response));
+    }
+
+    SECTION("Preflight supports protected non-route HTTP responses") {
+        RequestDispatchContext context;
+        context.uri        = "/logs/cosmo.log";
+        context.credential = validMtk;
+        context.transport  = RequestTransport::kHttp;
+        REQUIRE(router.InspectRequest(context, false) == RequestAdmission::kAllowed);
+        REQUIRE(router.InspectRequest(context, true) == RequestAdmission::kRouteNotFound);
+
+        context.credential = invalidMtk;
+        REQUIRE(router.InspectRequest(context, false) == RequestAdmission::kUnauthorized);
     }
 }

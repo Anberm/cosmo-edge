@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <mutex>
 #include <nlohmann/json_fwd.hpp>
 #include <shared_mutex>
 #include <string>
@@ -33,6 +35,7 @@ public:
     std::vector<cosmo::platform::NetCardInfo> GetCardRealInfos() override;
     bool SetCardInfo(const cosmo::platform::NetCardInfo& info) override;
     void ApplyCardInfoAsync(const cosmo::platform::NetCardInfo& info) override;
+    void StopAsyncApply() override;
     std::vector<std::string> GetCfgDns() override;
     bool SetDnss(std::vector<std::string> dnss) override;
     bool SearchSetNewInfo(cosmo::platform::NetCardInfo& netCard, const std::string& dns1,
@@ -52,6 +55,8 @@ private:
 
 private:
     std::thread apply_thread_;
+    std::mutex apply_lifecycle_mtx_;
+    std::atomic<bool> stop_async_apply_{false};
     std::shared_mutex mtx_;
     std::string conf_file_name_{"netCradConf.json"};           // Local network config
     std::string conf_search_file_name_{"netCardSearch.json"};  // LAN search config

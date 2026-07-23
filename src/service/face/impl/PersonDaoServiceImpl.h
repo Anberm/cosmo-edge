@@ -32,6 +32,7 @@ public:
     bool UpdatePerson(const db::PersonCondition& person,
                       const std::vector<std::pair<std::string, std::vector<float>>>& face) override;
     bool RemovePerson(const std::string& personId) override;
+    bool RemovePersonFromFaceLib(const std::string& personId, const std::string& faceLibId) override;
 
     // ── Queries ──
     db::FaceLibQueryResult QueryFaceLib(const db::FaceLibQueryCondition& cond) override;

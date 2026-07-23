@@ -9,6 +9,7 @@
 /// no ServiceRegistry registration needed.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -66,12 +67,48 @@ std::string GetBaseDir();
 /// @p root (both canonicalized identically). Neither path is required to exist.
 ///
 /// Canonicalization uses weakly_canonical (resolves symlinks and normalizes the
-/// non-existent tail); on OS error it falls back to absolute().lexically_normal()
-/// (textual only, does not resolve symlinks). Comparison is component-aware, not a
-/// string prefix: /data/a does NOT contain /data/ab. Symlinks under @p root that
-/// resolve outside @p root are rejected because their canonical form is no longer
-/// a prefix of @p root's canonical form. Returns false if either argument is empty.
+/// non-existent tail) and fails closed on filesystem errors. Comparison is
+/// component-aware, not a string prefix: /data/a does NOT contain /data/ab.
+/// Symlinks under @p root that resolve outside @p root are rejected because their
+/// canonical form is no longer a prefix of @p root's canonical form. Returns false
+/// if either argument is empty.
 [[nodiscard]] bool IsWithinRoot(const std::string& root, const std::string& candidate);
+
+/// Expected type for a path resolved by ResolveExistingPathWithinRoot().
+enum class PathEntryType {
+    kAny,
+    kRegularFile,
+    kDirectory,
+};
+
+/// Resolve @p candidate without permitting it to escape @p root.
+///
+/// Unlike IsWithinRoot(), this security-sensitive variant requires @p root to
+/// exist and be a directory, never falls back to lexical-only normalization,
+/// and returns the canonical/weakly-canonical path to be used by the caller.
+/// The candidate itself need not exist.
+[[nodiscard]] bool ResolvePathWithinRoot(const std::string& root, const std::string& candidate,
+                                         std::string& resolved);
+
+/// Resolve an existing filesystem entry beneath @p root and validate its type.
+/// The final path component must not be a symbolic link. Ancestor symlinks are
+/// resolved and accepted only when their target remains beneath @p root.
+[[nodiscard]] bool ResolveExistingPathWithinRoot(const std::string& root, const std::string& candidate,
+                                                 PathEntryType expected_type, std::string& resolved);
+
+/// Return whether @p value is safe to use as one filesystem path component.
+/// Empty values, dot components, separators, NUL/control bytes, and values
+/// longer than @p max_length bytes are rejected.
+[[nodiscard]] bool IsSafePathComponent(const std::string& value, size_t max_length = 128);
+
+/// Validate every entry in an extracted directory tree without following
+/// symbolic links. The root and every descendant must remain beneath @p root;
+/// only directories and regular files are accepted. Path components, entry
+/// count, per-file size, and aggregate regular-file size are checked. Returns
+/// false on any filesystem error or limit violation.
+[[nodiscard]] bool ValidateDirectoryTreeWithinRoot(const std::string& root, size_t max_entries,
+                                                   std::uintmax_t max_file_bytes,
+                                                   std::uintmax_t max_total_bytes);
 
 // ── Event / recording paths (formerly IPathEvent) ────────────────────────────
 
@@ -113,8 +150,9 @@ std::string GetTemporaryDirPath();
 std::string GetModelPath();
 
 /// Preset (built-in, device-bound) model storage directory. Models here ship
-/// with the product and are encrypted — they must not be exported to other
-/// machines. Counterpart to GetModelPath(); GetModelSearchPaths() returns both.
+/// with the product and are encrypted — they must not be deleted or exported
+/// to other machines, but their configuration remains editable. Counterpart to
+/// GetModelPath(); GetModelSearchPaths() returns both.
 std::string GetPresetModelPath();
 
 /// All directories to search for model files (user + preset).
@@ -170,10 +208,14 @@ std::string GetLogoWebPath();
 
 // ── Task record paths (formerly IPathService) ─────────────────────────────────
 
+/// Stable root directory containing all date-partitioned task records.
+/// @param autoCreate Create the directory if absent (default: true).
+std::string GetRecordRootPath(bool autoCreate = true);
+
 /// Path to the daily task record JSON directory.
 std::string GetRecordJsonPath();
 
 /// Task overview data directory for @p taskId.
-std::string GetTaskOverviewDataPath(const std::string& taskId);
+std::string GetTaskOverviewDataPath(const std::string& taskId, bool autoCreate = true);
 
 }  // namespace cosmo::path

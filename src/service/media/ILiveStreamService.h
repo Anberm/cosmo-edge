@@ -21,6 +21,10 @@ class ILiveStreamService {
 public:
     virtual ~ILiveStreamService() = default;
 
+    /// Permanently stop the watchdog and all viewer workers. Safe to call
+    /// repeatedly; no new viewer work is accepted afterwards.
+    virtual void Stop() = 0;
+
     /// Create a new live viewer session and populate stream connection info.
     /// @param channelId   Camera channel identifier.
     /// @param algCode     Algorithm code for the overlay stream (empty for raw).

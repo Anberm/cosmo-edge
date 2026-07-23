@@ -7,6 +7,10 @@
 namespace cosmo::network::http {
 
 size_t HttpStringHandler::AppendData(const char* data, size_t size) {
+    if (size > max_size_ || data_.size() > max_size_ - size) {
+        LOG_WARN("HTTP string response exceeds {} bytes", max_size_);
+        return 0;
+    }
     data_.append(data, size);
     return size;
 }
@@ -26,6 +30,10 @@ void HttpFileHandler::Flush() {
 }
 
 size_t HttpImageHandler::AppendData(const char* data, size_t size) {
+    if (size > max_size_ || data_.size() > max_size_ - size) {
+        LOG_WARN("HTTP image response exceeds {} bytes", max_size_);
+        return 0;
+    }
     data_.insert(data_.end(), data, data + size);
     return size;
 }

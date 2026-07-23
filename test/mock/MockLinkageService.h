@@ -12,6 +12,7 @@ namespace cosmo::test {
 
 class MockLinkageService : public cosmo::service::ILinkageService {
 public:
+    MAKE_MOCK0(Stop, void(), override);
     MAKE_MOCK3(Add, cosmo::util::ErrorEnum(const std::string&, const std::string&, std::string&), override);
     MAKE_MOCK1(Delete, cosmo::util::ErrorEnum(std::string&), override);
     MAKE_MOCK3(Update, cosmo::util::ErrorEnum(const std::string&, const std::string&, const std::string&),

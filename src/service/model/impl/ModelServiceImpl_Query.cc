@@ -62,14 +62,15 @@ void ModelServiceImpl::QueryModels(const std::string& modelName, const std::stri
             // Update time from directory modification time
             struct stat st;
             if (::stat(model_dir.c_str(), &st) == 0) {
-                auto date        = cosmo::util::GetDateTime(static_cast<int64_t>(st.st_mtime));
+                auto date        = cosmo::util::DateTime(st.st_mtime);
                 model.updateTime = date.Date().ToYMD() + " " + date.Time().ToHMS();
             }
 
             model.gpuCode = cfg.chip_type.empty() ? cosmo::util::kEngineType : cfg.chip_type;
 
             // Preset (built-in) models live under the preset search path and are
-            // encrypted / read-only — not deletable / updatable / exportable.
+            // encrypted / device-bound. They remain configurable, but cannot be
+            // deleted or exported.
             model.isExportable = (models_dir != preset_path);
 
             // Convert parsed labels to MsgModelLabel and serialize to JSON string

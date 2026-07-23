@@ -83,7 +83,7 @@ public:
     DateTime() = default;
     explicit DateTime(const YMDDate&, const HMSTime& = {});
     explicit DateTime(std::time_t timestamp);
-    /// Parses "YYYY-MM-DD HH:MM:SS" format string.
+    /// Parses "YYYY-MM-DD HH:MM:SS", a date-only value, or a time-only value.
     explicit DateTime(std::string_view str);
 
     time_t ToTimeStamp() const;

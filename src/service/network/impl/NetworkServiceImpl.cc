@@ -26,6 +26,10 @@ void NetworkServiceImpl::RunHttpLoop() {
     http_lifecycle_->RunHttpLoop();
 }
 
+void NetworkServiceImpl::RequestHttpStop() noexcept {
+    http_lifecycle_->RequestHttpStop();
+}
+
 void NetworkServiceImpl::StopHttpServer() {
     http_lifecycle_->StopHttpServer();
 }
@@ -48,6 +52,10 @@ void NetworkServiceImpl::MqttStart() {
     mqtt_lifecycle_->MqttStart();
 }
 
+void NetworkServiceImpl::MqttShutdown() {
+    mqtt_lifecycle_->MqttShutdown();
+}
+
 // ---- NIC configuration ----
 
 void NetworkServiceImpl::Init() {
@@ -68,6 +76,10 @@ bool NetworkServiceImpl::SetCardInfo(const platform::NetCardInfo& info) {
 
 void NetworkServiceImpl::ApplyCardInfoAsync(const platform::NetCardInfo& info) {
     network_config_->ApplyCardInfoAsync(info);
+}
+
+void NetworkServiceImpl::StopAsyncApply() {
+    network_config_->StopAsyncApply();
 }
 
 std::vector<std::string> NetworkServiceImpl::GetCfgDns() {

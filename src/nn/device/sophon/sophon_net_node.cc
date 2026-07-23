@@ -1,56 +1,183 @@
 #include "nn/device/sophon/sophon_net_node.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
-#include <iostream>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <map>
+#include <memory>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "bmruntime_interface.h"
 #include "nn/device/sophon/sophon_node.h"
+#include "nn/utils/blob_memory_size_info.h"
+#include "nn/utils/blob_memory_size_utils.h"
 #include "nn/utils/string_format.h"
 
 namespace cosmo::nn {
 
 namespace {
+    constexpr size_t kMaxOutputTensorBytes = 512U * 1024 * 1024;
+
+    struct NetworkNamesDeleter {
+        void operator()(const char** names) const noexcept {
+            std::free(names);
+        }
+    };
+
+    bool GetTensorByteSize(const bm_shape_t& shape, bm_data_type_t dtype, size_t* byte_size) {
+        if (byte_size == nullptr || shape.num_dims <= 0 || shape.num_dims > BM_MAX_DIMS_NUM) {
+            return false;
+        }
+
+        const int element_bytes = bmruntime::ByteSize(dtype);
+        if (element_bytes <= 0) {
+            return false;
+        }
+
+        size_t count = 1;
+        for (int i = 0; i < shape.num_dims; ++i) {
+            const int dim = shape.dims[i];
+            if (dim <= 0 || count > kMaxOutputTensorBytes / static_cast<size_t>(dim)) {
+                return false;
+            }
+            count *= static_cast<size_t>(dim);
+        }
+        if (count > kMaxOutputTensorBytes / static_cast<size_t>(element_bytes)) {
+            return false;
+        }
+
+        *byte_size = count * static_cast<size_t>(element_bytes);
+        return *byte_size > 0 && *byte_size <= kMaxOutputTensorBytes;
+    }
+
+    float Float16ToFloat(uint16_t value) {
+        const uint32_t sign     = static_cast<uint32_t>(value & 0x8000U) << 16U;
+        const uint32_t exponent = (value >> 10U) & 0x1fU;
+        const uint32_t mantissa = value & 0x03ffU;
+        uint32_t bits           = 0;
+        if (exponent == 0) {
+            if (mantissa == 0) {
+                bits = sign;
+            } else {
+                uint32_t normalized_mantissa = mantissa;
+                int shift                    = 0;
+                while ((normalized_mantissa & 0x0400U) == 0U) {
+                    normalized_mantissa <<= 1U;
+                    ++shift;
+                }
+                normalized_mantissa &= 0x03ffU;
+                const uint32_t normalized_exponent = static_cast<uint32_t>(127 - 14 - shift);
+                bits = sign | (normalized_exponent << 23U) | (normalized_mantissa << 13U);
+            }
+        } else if (exponent == 0x1fU) {
+            bits = sign | 0x7f800000U | (mantissa << 13U);
+        } else {
+            bits = sign | ((exponent + (127U - 15U)) << 23U) | (mantissa << 13U);
+        }
+
+        float result = 0.0F;
+        std::memcpy(&result, &bits, sizeof(result));
+        return result;
+    }
+
+    float BFloat16ToFloat(uint16_t value) {
+        const uint32_t bits = static_cast<uint32_t>(value) << 16U;
+        float result        = 0.0F;
+        std::memcpy(&result, &bits, sizeof(result));
+        return result;
+    }
+
+    template <typename T, typename Converter>
+    void ConvertToFloat(const uint8_t* source, size_t count, float scale, float* destination,
+                        Converter converter) {
+        for (size_t i = 0; i < count; ++i) {
+            T value{};
+            std::memcpy(&value, source + i * sizeof(T), sizeof(T));
+            destination[i] = static_cast<float>(converter(value)) * scale;
+        }
+    }
+
+    void DestroyBmRuntime(void** runtime) noexcept {
+        if (runtime == nullptr || *runtime == nullptr) {
+            return;
+        }
+        try {
+            bmrt_destroy(*runtime);
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[SophonNetNode] bmrt_destroy exception caught: %s\n", e.what());
+        } catch (...) {
+            fprintf(stderr, "[SophonNetNode] bmrt_destroy unknown exception caught\n");
+        }
+        *runtime = nullptr;
+    }
+
     // Copy net output to CPU blob. For int8/uint8, dequantize to float using output_scale.
-    Status CopyOutputToCpu(bm_handle_t pbmhandle, void* dst, const bm_device_mem_t& tensor_mem, size_t sz,
-                           bm_data_type_t dtype, float scale) {
+    Status CopyOutputToCpu(bm_handle_t pbmhandle, void* dst, size_t dst_size,
+                           const bm_device_mem_t& tensor_mem, size_t sz, bm_data_type_t dtype, float scale) {
+        if (dst == nullptr || sz == 0 || bm_mem_get_device_size(tensor_mem) < sz) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon output buffer is invalid");
+        }
         if (dtype == BM_FLOAT32) {
-            if (bm_memcpy_d2s_partial(pbmhandle, dst, tensor_mem, sz) != BM_SUCCESS) {
+            if (dst_size < sz) {
+                return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon CPU output buffer is too small");
+            }
+            if (bm_memcpy_d2s_partial(pbmhandle, dst, tensor_mem, static_cast<unsigned int>(sz)) !=
+                BM_SUCCESS) {
                 return Status(COSMO_NN_ERR_SOPHON_MEMCPY_ERR, "Sophon memcpy d2s failed");
             }
             return COSMO_NN_OK;
         }
-        if (dtype == BM_INT8) {
-            std::vector<int8_t> tmp(sz);
-            if (bm_memcpy_d2s_partial(pbmhandle, tmp.data(), tensor_mem, sz) != BM_SUCCESS) {
-                return Status(COSMO_NN_ERR_SOPHON_MEMCPY_ERR, "Sophon memcpy d2s failed");
-            }
-            float* out = reinterpret_cast<float*>(dst);
-            for (size_t i = 0; i < sz; ++i) {
-                out[i] = tmp[i] * scale;
-            }
-            return COSMO_NN_OK;
+
+        const size_t source_element_size = static_cast<size_t>(bmruntime::ByteSize(dtype));
+        if (source_element_size == 0 || (sz % source_element_size) != 0) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon output data type is unsupported");
         }
-        if (dtype == BM_UINT8) {
-            std::vector<uint8_t> tmp(sz);
-            if (bm_memcpy_d2s_partial(pbmhandle, tmp.data(), tensor_mem, sz) != BM_SUCCESS) {
-                return Status(COSMO_NN_ERR_SOPHON_MEMCPY_ERR, "Sophon memcpy d2s failed");
-            }
-            float* out = reinterpret_cast<float*>(dst);
-            for (size_t i = 0; i < sz; ++i) {
-                out[i] = tmp[i] * scale;
-            }
-            return COSMO_NN_OK;
+        const size_t element_count = sz / source_element_size;
+        if (element_count > std::numeric_limits<size_t>::max() / sizeof(float) ||
+            dst_size < element_count * sizeof(float)) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon CPU output buffer is too small");
         }
-        // Fallback for float16/bf16: direct copy (may need proper conversion in future)
-        if (bm_memcpy_d2s_partial(pbmhandle, dst, tensor_mem, sz) != BM_SUCCESS) {
+
+        std::vector<uint8_t> tmp;
+        try {
+            tmp.resize(sz);
+        } catch (const std::bad_alloc&) {
+            return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "Sophon CPU output conversion allocation failed");
+        }
+        if (bm_memcpy_d2s_partial(pbmhandle, tmp.data(), tensor_mem, static_cast<unsigned int>(sz)) !=
+            BM_SUCCESS) {
             return Status(COSMO_NN_ERR_SOPHON_MEMCPY_ERR, "Sophon memcpy d2s failed");
         }
-        return COSMO_NN_OK;
+
+        auto* out = static_cast<float*>(dst);
+        switch (dtype) {
+            case BM_FLOAT16:
+                ConvertToFloat<uint16_t>(tmp.data(), element_count, 1.0F, out, Float16ToFloat);
+                return COSMO_NN_OK;
+            case BM_BFLOAT16:
+                ConvertToFloat<uint16_t>(tmp.data(), element_count, 1.0F, out, BFloat16ToFloat);
+                return COSMO_NN_OK;
+            case BM_INT8:
+                ConvertToFloat<int8_t>(tmp.data(), element_count, scale, out,
+                                       [](int8_t value) { return value; });
+                return COSMO_NN_OK;
+            case BM_UINT8:
+                ConvertToFloat<uint8_t>(tmp.data(), element_count, scale, out,
+                                        [](uint8_t value) { return value; });
+                return COSMO_NN_OK;
+            case BM_INT32:
+                ConvertToFloat<int32_t>(tmp.data(), element_count, scale, out,
+                                        [](int32_t value) { return value; });
+                return COSMO_NN_OK;
+            default:
+                return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon output data type is unsupported");
+        }
     }
 }  // namespace
 
@@ -67,18 +194,21 @@ SophonNetNode::~SophonNetNode() {
         // Use cached m_output_num instead of m_netinfo->output_num because
         // m_netinfo becomes a dangling pointer after bmrt_destroy.
         if (!output_tensors.empty() && pbmhandle != nullptr) {
-            for (int i = 0; i < m_output_num; ++i) {
+            const int output_count = std::min(m_output_num, static_cast<int>(output_tensors.size()));
+            for (int i = 0; i < output_count; ++i) {
                 if (output_tensors[i].device_mem.size != 0) {
-                    bm_free_device(pbmhandle, output_tensors[i].device_mem);
+                    (void)bm_free_device(pbmhandle, output_tensors[i].device_mem);
+                    output_tensors[i].device_mem = bm_mem_null();
                 }
             }
         }
         output_tensors.clear();
+        tensor_size_vec.clear();
+        m_output_num = 0;
 
         // Then destroy bmrt (releases bmodel weight memory on device).
         if (m_bmrt != NULL) {
-            bmrt_destroy(m_bmrt);
-            m_bmrt = NULL;
+            DestroyBmRuntime(&m_bmrt);
         }
         input_tensors.clear();
     } catch (const std::exception& e) {
@@ -101,6 +231,8 @@ void SophonNetNode::ModelDescInfo(const bm_net_info_t* modelDesc) {
 
     size_t inputNum  = modelDesc->input_num;
     size_t outputNum = modelDesc->output_num;
+    netInfo_.inPuts.clear();
+    netInfo_.outPuts.clear();
 
     for (size_t i = 0; i < inputNum; ++i) {
         const char* name = modelDesc->input_names[i];
@@ -138,9 +270,10 @@ void SophonNetNode::ModelDescInfo(const bm_net_info_t* modelDesc) {
 
     output_tensors.resize(m_netinfo->output_num);
     for (int i = 0; i < m_netinfo->output_num; ++i) {
-        output_tensors[i].dtype   = m_netinfo->output_dtypes[i];
-        output_tensors[i].shape   = m_netinfo->stages[0].output_shapes[i];
-        output_tensors[i].st_mode = BM_STORE_1N;
+        output_tensors[i].dtype      = m_netinfo->output_dtypes[i];
+        output_tensors[i].shape      = m_netinfo->stages[0].output_shapes[i];
+        output_tensors[i].st_mode    = BM_STORE_1N;
+        output_tensors[i].device_mem = bm_mem_null();
     }
 
     showInfo();
@@ -151,26 +284,31 @@ void SophonNetNode::showInfo() {
 }
 
 Status SophonNetNode::AllocateOutputDeviceMemory() {
-    static constexpr size_t kMaxOutputTensorBytes = 512U * 1024 * 1024;
+    if (m_netinfo == nullptr || m_netinfo->stage_num <= 0 || m_netinfo->stages == nullptr ||
+        m_netinfo->output_num <= 0 || output_tensors.size() != static_cast<size_t>(m_netinfo->output_num)) {
+        return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon network output metadata is invalid");
+    }
+
+    tensor_size_vec.clear();
+    tensor_size_vec.reserve(static_cast<size_t>(m_netinfo->output_num));
     for (int i = 0; i < m_netinfo->output_num; i++) {
         size_t output_tensor_size = 0;
-        for (int j = 0; j < m_netinfo->stage_num; j++) {
-            output_tensor_size += bmrt_shape_count(&m_netinfo->stages[j].output_shapes[i]);
-        }
-
-        output_tensor_size *= bmruntime::ByteSize(m_netinfo->output_dtypes[i]);
-        if (output_tensor_size == 0 || output_tensor_size > kMaxOutputTensorBytes) {
+        // input_tensors use stage 0 shapes, so the active output is also stage 0. Summing all
+        // stages here makes the later copy overrun the stage-0 top blob for multi-stage bmodels.
+        if (!GetTensorByteSize(m_netinfo->stages[0].output_shapes[i], m_netinfo->output_dtypes[i],
+                               &output_tensor_size)) {
             // Roll back: free already-allocated output tensors [0..i-1]
             for (int k = 0; k < i; k++) {
                 if (output_tensors[k].device_mem.size != 0) {
-                    bm_free_device(pbmhandle, output_tensors[k].device_mem);
+                    (void)bm_free_device(pbmhandle, output_tensors[k].device_mem);
                     output_tensors[k].device_mem = bm_mem_null();
                 }
             }
-            return Status(COSMO_NN_ERR_SOPHON_ALLOC_MEM_FAILED, "output tensor size invalid (0 or > 512MB)");
+            tensor_size_vec.clear();
+            return Status(COSMO_NN_ERR_SOPHON_ALLOC_MEM_FAILED, "output tensor size is invalid");
         }
         bm_status_t ret = bm_malloc_device_byte_heap(pbmhandle, &output_tensors[i].device_mem, USE_MEM_HEAP0,
-                                                     output_tensor_size);
+                                                     static_cast<unsigned int>(output_tensor_size));
         if (ret != BM_SUCCESS) {
             // Roll back: free already-allocated output tensors [0..i-1]
             for (int k = 0; k < i; k++) {
@@ -179,29 +317,68 @@ Status SophonNetNode::AllocateOutputDeviceMemory() {
                     output_tensors[k].device_mem = bm_mem_null();
                 }
             }
+            tensor_size_vec.clear();
             return Status(COSMO_NN_ERR_SOPHON_ALLOC_MEM_FAILED, "sophon alloc memory failed");
         }
-        tensor_size_vec.push_back(output_tensor_size);
+        tensor_size_vec.push_back(static_cast<uint32_t>(output_tensor_size));
     }
     return COSMO_NN_OK;
 }
 
 Status SophonNetNode::SetupNetworkAfterBmrt() {
+    if (m_bmrt == nullptr) {
+        return Status(COSMO_NN_ERR_SOPHON_NET_CREATE_FAILED, "Sophon runtime is null");
+    }
+
     const char** names = nullptr;
     int num            = bmrt_get_network_number(m_bmrt);
-    bmrt_get_network_names(m_bmrt, &names);
-    for (int i = 0; i < num; ++i) {
-        m_network_names.push_back(names[i]);
+    if (num <= 0) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon model has no network");
     }
-    // Do not free(names): some BMLib builds return a non-malloc'd pointer.
+    bmrt_get_network_names(m_bmrt, &names);
+    if (names == nullptr) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon network names are unavailable");
+    }
+    std::unique_ptr<const char*, NetworkNamesDeleter> names_guard(names);
+    m_network_names.clear();
+    for (int i = 0; i < num; ++i) {
+        if (names[i] != nullptr && names[i][0] != '\0') {
+            m_network_names.emplace_back(names[i]);
+        }
+    }
+    if (m_network_names.empty()) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon model has no valid network name");
+    }
 
-    m_netinfo = bmrt_get_network_info(m_bmrt, m_network_names.at(0).c_str());
+    m_netinfo = bmrt_get_network_info(m_bmrt, m_network_names.front().c_str());
+    if (m_netinfo == nullptr || m_netinfo->stages == nullptr || m_netinfo->stage_num <= 0 ||
+        m_netinfo->input_num <= 0 || m_netinfo->output_num <= 0 || m_netinfo->input_names == nullptr ||
+        m_netinfo->output_names == nullptr || m_netinfo->input_dtypes == nullptr ||
+        m_netinfo->output_dtypes == nullptr || m_netinfo->name == nullptr ||
+        m_netinfo->stages[0].input_shapes == nullptr || m_netinfo->stages[0].output_shapes == nullptr ||
+        m_netinfo->stages[0].input_mems == nullptr || m_netinfo->stages[0].output_mems == nullptr) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon network metadata is invalid");
+    }
+    for (int i = 0; i < m_netinfo->input_num; ++i) {
+        const auto& shape = m_netinfo->stages[0].input_shapes[i];
+        if (m_netinfo->input_names[i] == nullptr || shape.num_dims <= 0 || shape.num_dims > BM_MAX_DIMS_NUM) {
+            return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon input metadata is invalid");
+        }
+    }
+    for (int i = 0; i < m_netinfo->output_num; ++i) {
+        const auto& shape = m_netinfo->stages[0].output_shapes[i];
+        if (m_netinfo->output_names[i] == nullptr || shape.num_dims <= 0 ||
+            shape.num_dims > BM_MAX_DIMS_NUM) {
+            return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon output metadata is invalid");
+        }
+    }
 
     bottom_count = m_netinfo->input_num;
     top_count    = m_netinfo->output_num;
 
     if (m_netinfo->input_num > 0) {
-        shared_resource->model_input_scale = m_netinfo->input_scales[0];
+        shared_resource->model_input_scale =
+            m_netinfo->input_scales != nullptr ? m_netinfo->input_scales[0] : 1.0F;
     }
 
     ModelDescInfo(m_netinfo);
@@ -215,11 +392,21 @@ Status SophonNetNode::SetupNetworkAfterBmrt() {
 }
 
 Status SophonNetNode::LoadWeight(const char* data, size_t size) {
+    if (shared_resource == nullptr) {
+        return Status(COSMO_NN_ERR_GRAPH_NOT_INIT, "Sophon shared resource is null");
+    }
     pbmhandle = shared_resource->m_handle;
     if (nullptr == pbmhandle)
         return Status(COSMO_NN_ERR_SOPHON_HANDLE_FAILED, "bm_handle_t is null !");
 
     std::unique_lock<std::mutex> lck(sophon_net_mutex);
+    if (data == nullptr || size == 0) {
+        return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon model data is empty");
+    }
+    if (m_bmrt != nullptr) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon model is already loaded");
+    }
+
     char* data_ = const_cast<char*>(data);  // Sophon BMLib C API requires non-const char*
     m_bmrt      = bmrt_create(pbmhandle);
     if (NULL == m_bmrt) {
@@ -227,30 +414,75 @@ Status SophonNetNode::LoadWeight(const char* data, size_t size) {
     }
 
     if (!bmrt_load_bmodel_data(m_bmrt, data_, size)) {
+        DestroyBmRuntime(&m_bmrt);
         return Status(COSMO_NN_ERR_LOAD_MODEL, "SOPHON load model failed !");
     }
 
-    return SetupNetworkAfterBmrt();
+    try {
+        Status status = SetupNetworkAfterBmrt();
+        if (!bool(status)) {
+            DestroyBmRuntime(&m_bmrt);
+            m_netinfo = nullptr;
+        }
+        return status;
+    } catch (const std::bad_alloc&) {
+        DestroyBmRuntime(&m_bmrt);
+        m_netinfo = nullptr;
+        return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "Sophon model setup ran out of memory");
+    } catch (const std::exception& error) {
+        DestroyBmRuntime(&m_bmrt);
+        m_netinfo = nullptr;
+        return Status(COSMO_NN_ERR_LOAD_MODEL, error.what());
+    }
 }
 
 Status SophonNetNode::AttachBmrt(void* bmrt_handle) {
     if (!bmrt_handle)
         return Status(COSMO_NN_ERR_LOAD_MODEL, "AttachBmrt: bmrt handle is null");
 
+    if (shared_resource == nullptr) {
+        return Status(COSMO_NN_ERR_GRAPH_NOT_INIT, "Sophon shared resource is null");
+    }
     pbmhandle = shared_resource->m_handle;
     if (nullptr == pbmhandle)
         return Status(COSMO_NN_ERR_SOPHON_HANDLE_FAILED, "bm_handle_t is null!");
 
     std::unique_lock<std::mutex> lck(sophon_net_mutex);
 
+    if (m_bmrt != nullptr) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "AttachBmrt: runtime is already attached");
+    }
+
     // Take ownership of the externally-created bmrt.
     // The .so has already completed bmrt_create + bmrt_load_bmodel_data.
     m_bmrt = bmrt_handle;
 
-    return SetupNetworkAfterBmrt();
+    try {
+        Status status = SetupNetworkAfterBmrt();
+        if (!bool(status)) {
+            DestroyBmRuntime(&m_bmrt);
+            m_netinfo = nullptr;
+        }
+        return status;
+    } catch (const std::bad_alloc&) {
+        DestroyBmRuntime(&m_bmrt);
+        m_netinfo = nullptr;
+        return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "Sophon model setup ran out of memory");
+    } catch (const std::exception& error) {
+        DestroyBmRuntime(&m_bmrt);
+        m_netinfo = nullptr;
+        return Status(COSMO_NN_ERR_LOAD_MODEL, error.what());
+    }
 }
 
 Status SophonNetNode::InferTopShapes() {
+    if (m_netinfo == nullptr || m_netinfo->stages == nullptr || m_netinfo->stage_num <= 0) {
+        return Status(COSMO_NN_ERR_GRAPH_NOT_INIT, "Sophon network metadata is unavailable");
+    }
+
+    top_blob_shapes.clear();
+    top_blob_data_types.clear();
+
     // get output dims
     size_t outputNum = m_netinfo->output_num;
     for (size_t i = 0; i < outputNum; ++i) {
@@ -264,8 +496,14 @@ Status SophonNetNode::InferTopShapes() {
         top_blob_shapes.push_back(outPutDims);
         // When output_to_cpu_, host postprocess (e.g. yolov8_decode) expects float.
         // Force float type so blob is allocated for float; int8/uint8 will be dequantized in Forward.
-        DataType out_type =
-            output_to_cpu_ ? DATA_TYPE_FLOAT : FromTensorDataType(m_netinfo->output_dtypes[i]);
+        const auto output_dtype    = m_netinfo->output_dtypes[i];
+        const bool supported_dtype = output_dtype == BM_FLOAT32 || output_dtype == BM_FLOAT16 ||
+                                     output_dtype == BM_BFLOAT16 || output_dtype == BM_INT8 ||
+                                     output_dtype == BM_UINT8 || output_dtype == BM_INT32;
+        if (!supported_dtype) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon output data type is unsupported");
+        }
+        DataType out_type = output_to_cpu_ ? DATA_TYPE_FLOAT : FromTensorDataType(output_dtype);
         top_blob_data_types.push_back(out_type);
     }
 
@@ -289,11 +527,13 @@ DataType SophonNetNode::FromTensorDataType(bm_data_type_t data_type) {
         case BM_FLOAT32:
             return DATA_TYPE_FLOAT;
         case BM_FLOAT16:
-            return DATA_TYPE_FLOAT;
+            return DATA_TYPE_HALF;
         case BM_INT8:
             return DATA_TYPE_INT8;
         case BM_UINT8:
             return DATA_TYPE_UINT8;
+        case BM_INT32:
+            return DATA_TYPE_INT32;
 
         case BM_BFLOAT16:
             return DATA_TYPE_BFP16;
@@ -303,18 +543,32 @@ DataType SophonNetNode::FromTensorDataType(bm_data_type_t data_type) {
 }
 
 Status SophonNetNode::CopyOutputToBlob(const std::shared_ptr<Blob>& top_blob, int tensor_idx) {
+    if (!top_blob || tensor_idx < 0 || tensor_idx >= m_output_num ||
+        static_cast<size_t>(tensor_idx) >= tensor_size_vec.size() ||
+        static_cast<size_t>(tensor_idx) >= output_tensors.size()) {
+        return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon output tensor index is invalid");
+    }
+
     auto top_handle            = top_blob->GetHandle();
     auto top_desc              = top_blob->GetBlobDesc();
     size_t sz                  = tensor_size_vec.at(tensor_idx);
     bm_device_mem_t tensor_mem = output_tensors[tensor_idx].device_mem;
-    float scale                = (m_netinfo->output_scales && tensor_idx < m_netinfo->output_num)
-                                     ? m_netinfo->output_scales[tensor_idx]
-                                     : 1.0f;
+    auto top_size_info         = Calculate1DMemorySize(top_desc);
+    const int64_t top_size     = GetBlobMemoryBytesSize(top_size_info);
+    if (top_handle.base == nullptr || top_size <= 0) {
+        return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon top blob is invalid");
+    }
+    float scale = (m_netinfo->output_scales && tensor_idx < m_netinfo->output_num)
+                      ? m_netinfo->output_scales[tensor_idx]
+                      : 1.0f;
     if (top_desc.device_type == DEVICE_NAIVE) {
-        RETURN_ON_FAIL(CopyOutputToCpu(pbmhandle, top_handle.base, tensor_mem, sz,
-                                       m_netinfo->output_dtypes[tensor_idx], scale));
+        RETURN_ON_FAIL(CopyOutputToCpu(pbmhandle, top_handle.base, static_cast<size_t>(top_size), tensor_mem,
+                                       sz, m_netinfo->output_dtypes[tensor_idx], scale));
     } else {
         bm_device_mem_t* dst_dev_mem = reinterpret_cast<bm_device_mem_t*>(top_handle.base);
+        if (static_cast<size_t>(top_size) < sz || bm_mem_get_device_size(*dst_dev_mem) < sz) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon device output buffer is too small");
+        }
         if (bm_memcpy_d2d_byte(pbmhandle, *dst_dev_mem, 0, tensor_mem, 0, sz) != BM_SUCCESS) {
             return Status(COSMO_NN_ERR_SOPHON_MEMCPY_ERR, "Sophon memcpy d2d failed");
         }
@@ -332,7 +586,22 @@ Status SophonNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     if (nullptr == pbmhandle)
         return Status(COSMO_NN_ERR_SOPHON_HANDLE_FAILED, "bm_handle_t is null !");
 
-    const int current_batch = bottom_blobs.at(0)->GetBlobDesc().dims.at(0);
+    if (m_bmrt == nullptr || m_netinfo == nullptr || m_netinfo->stages == nullptr ||
+        m_netinfo->stage_num <= 0) {
+        return Status(COSMO_NN_ERR_GRAPH_NOT_INIT, "Sophon network is not initialized");
+    }
+
+    if (top_blobs.size() != static_cast<size_t>(m_netinfo->output_num)) {
+        return Status(COSMO_NN_ERR_INVALID_INPUT, "top_blobs size (" + std::to_string(top_blobs.size()) +
+                                                      ") does not match model output num (" +
+                                                      std::to_string(m_netinfo->output_num) + ")");
+    }
+
+    const auto& first_dims = bottom_blobs.at(0)->GetBlobDesc().dims;
+    if (first_dims.empty() || first_dims.front() <= 0) {
+        return Status(COSMO_NN_ERR_INVALID_INPUT, "batch size is invalid");
+    }
+    const int current_batch = first_dims.front();
     if (current_batch > max_batch)
         return Status(COSMO_NN_ERR_INVALID_INPUT, "batch size is bigger than max_batch size");
 
@@ -388,9 +657,19 @@ Status SophonNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     }
 
     for (int i = 0; i < m_netinfo->input_num; i++) {
-        auto bottom_blob             = bottom_blobs.at(i);
+        auto bottom_blob = bottom_blobs.at(i);
+        if (!bottom_blob || bottom_blob->GetHandle().base == nullptr) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon input blob is invalid");
+        }
         auto bottom_handle           = bottom_blob->GetHandle();
         bm_device_mem_t* src_dev_mem = reinterpret_cast<bm_device_mem_t*>(bottom_handle.base);
+
+        size_t required_input_size = 0;
+        if (!GetTensorByteSize(m_netinfo->stages[0].input_shapes[i], m_netinfo->input_dtypes[i],
+                               &required_input_size) ||
+            bm_mem_get_device_size(*src_dev_mem) < required_input_size) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "Sophon input tensor buffer is too small");
+        }
 
         input_tensors[i].device_mem = *src_dev_mem;
     }
@@ -431,17 +710,11 @@ Status SophonNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         }
         if (high_res_0_bm >= 0 && high_res_1_bm >= 0 && image_embed_bm >= 0 && idx_hr0 >= 0 && idx_hr1 >= 0 &&
             idx_emb >= 0) {
-            auto copy_to = [this, &top_blobs](int top_idx, int bm_idx) {
-                auto h               = top_blobs.at(top_idx)->GetHandle();
-                bm_device_mem_t* dst = reinterpret_cast<bm_device_mem_t*>(h.base);
-                return bm_memcpy_d2d_byte(pbmhandle, *dst, 0, output_tensors[bm_idx].device_mem, 0,
-                                          this->tensor_size_vec.at(bm_idx)) == BM_SUCCESS;
-            };
-            if (copy_to(idx_hr0, high_res_0_bm) && copy_to(idx_hr1, high_res_1_bm) &&
-                copy_to(idx_emb, image_embed_bm)) {
-                timer.Stop();
-                return COSMO_NN_OK;
-            }
+            RETURN_ON_FAIL(CopyOutputToBlob(top_blobs.at(idx_hr0), high_res_0_bm));
+            RETURN_ON_FAIL(CopyOutputToBlob(top_blobs.at(idx_hr1), high_res_1_bm));
+            RETURN_ON_FAIL(CopyOutputToBlob(top_blobs.at(idx_emb), image_embed_bm));
+            timer.Stop();
+            return COSMO_NN_OK;
         }
     }
 
@@ -460,16 +733,8 @@ Status SophonNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                 scores_bmodel_idx = i;
         }
         if (masks_bmodel_idx >= 0 && scores_bmodel_idx >= 0) {
-            auto t0             = top_blobs.at(0)->GetHandle();
-            auto t1             = top_blobs.at(1)->GetHandle();
-            bm_device_mem_t* d0 = reinterpret_cast<bm_device_mem_t*>(t0.base);
-            bm_device_mem_t* d1 = reinterpret_cast<bm_device_mem_t*>(t1.base);
-            if (bm_memcpy_d2d_byte(pbmhandle, *d0, 0, output_tensors[masks_bmodel_idx].device_mem, 0,
-                                   tensor_size_vec.at(masks_bmodel_idx)) != BM_SUCCESS ||
-                bm_memcpy_d2d_byte(pbmhandle, *d1, 0, output_tensors[scores_bmodel_idx].device_mem, 0,
-                                   tensor_size_vec.at(scores_bmodel_idx)) != BM_SUCCESS) {
-                return Status(COSMO_NN_ERR_SOPHON_MEMCPY_ERR, "Sophon memcpy d2d failed");
-            }
+            RETURN_ON_FAIL(CopyOutputToBlob(top_blobs.at(0), masks_bmodel_idx));
+            RETURN_ON_FAIL(CopyOutputToBlob(top_blobs.at(1), scores_bmodel_idx));
             timer.Stop();
             return COSMO_NN_OK;
         }

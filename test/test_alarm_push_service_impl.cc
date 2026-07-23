@@ -64,6 +64,17 @@ TEST_CASE("AlarmPushService: default state when no config file exists", "[alarm-
     }
 }
 
+TEST_CASE("AlarmPushService: Stop is safe and idempotent before Init", "[alarm-push][lifecycle]") {
+    TempDir tmpDir;
+    MockServiceRegistry mocks;
+    tmpDir.Setup();
+
+    service::AlarmPushServiceImpl sut;
+    REQUIRE_NOTHROW(sut.Stop());
+    REQUIRE_NOTHROW(sut.Stop());
+    REQUIRE_NOTHROW(sut.Init());
+}
+
 TEST_CASE("AlarmPushService: loads existing config on construction", "[alarm-push]") {
     TempDir tmpDir;
     MockServiceRegistry mocks;
@@ -82,6 +93,17 @@ TEST_CASE("AlarmPushService: loads existing config on construction", "[alarm-pus
     SECTION("GetUrl reflects config file") {
         REQUIRE(sut.GetUrl() == "http://example.com/alarm");
     }
+}
+
+TEST_CASE("AlarmPushService: rejects invalid persisted endpoint", "[alarm-push]") {
+    TempDir tmpDir;
+    MockServiceRegistry mocks;
+    tmpDir.Setup();
+    WriteConfigFile(tmpDir.cfgPath, true, "file:///etc/passwd");
+
+    service::AlarmPushServiceImpl sut;
+    REQUIRE_FALSE(sut.IsEnabled());
+    REQUIRE(sut.GetUrl().empty());
 }
 
 TEST_CASE("AlarmPushService: SetPush updates config", "[alarm-push]") {
@@ -130,6 +152,24 @@ TEST_CASE("AlarmPushService: SetPush updates config", "[alarm-push]") {
         sut.SetPush(true, "http://test.com");
         auto result = sut.SetPush(true, "http://test.com");
         REQUIRE(result == cosmo::util::ErrorEnum::Success);
+    }
+
+    SECTION("Invalid URLs are rejected without changing state") {
+        REQUIRE(sut.SetPush(true, "file:///etc/passwd") == cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(sut.SetPush(true, "http://user@example.com/push") == cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE_FALSE(sut.IsEnabled());
+        REQUIRE(sut.GetUrl().empty());
+    }
+
+    SECTION("Persistence failure does not change in-memory state") {
+        std::filesystem::remove_all(tmpDir.cfgPath);
+        std::ofstream blocker(tmpDir.cfgPath);
+        blocker << "not-a-directory";
+        blocker.close();
+
+        REQUIRE(sut.SetPush(true, "http://example.com/push") == cosmo::util::ErrorEnum::SysErr);
+        REQUIRE_FALSE(sut.IsEnabled());
+        REQUIRE(sut.GetUrl().empty());
     }
 }
 

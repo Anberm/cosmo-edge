@@ -49,7 +49,7 @@ void AlgActionBase::RegisterTaskContext(const std::string& /*taskId*/, ActionAlg
     action_alg = alg;
 }
 
-void AlgActionBase::Start() {
+bool AlgActionBase::Start() {
     std::lock_guard<std::mutex> lock(lifecycle_mtx_);
     bool expected = false;
     if (running.compare_exchange_strong(expected, true)) {
@@ -74,12 +74,13 @@ void AlgActionBase::Start() {
             running       = false;
             action_status = util::ErrorEnum::ActionStop;
             LOG_ERRO("[{}] Action [{}] start failed: worker thread is still joinable", task_id, Name());
-            return;
+            return false;
         }
         action_status = util::ErrorEnum::ActionStart;
     } else {
         LOG_INFO("[{}] Action [{}] already running, skip Start", task_id, Name());
     }
+    return true;
 }
 
 void AlgActionBase::Stop() {

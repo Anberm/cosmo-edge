@@ -4,8 +4,10 @@
 //   1. HTTP API feature extraction:  face detect -> quality/angle -> landmark -> feature
 //   2. Local feature extraction:     landmark -> feature
 
+#include <atomic>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <vector>
@@ -30,6 +32,9 @@ public:
     FaceFeatureExtractor();
     ~FaceFeatureExtractor();
 
+    /// Permanently stop and join the initialization worker, then release all
+    /// model instances. Safe to call repeatedly and concurrently.
+    void Stop();
     void ServiceEnable();
 
     MsgGetFeaturesSend HandMsg(const MsgGetFeaturesRecv &data, std::error_condition &errc);
@@ -71,10 +76,12 @@ private:
                          float quality);
 
     std::shared_mutex mtx_;
+    std::mutex stop_mutex_;
     std::string name_;
-    bool is_running_{false};
-    bool is_service_enabled_{true};
-    bool is_ready_{false};
+    std::atomic<bool> is_running_{false};
+    std::atomic<bool> is_service_enabled_{true};
+    std::atomic<bool> is_ready_{false};
+    std::atomic<bool> stopped_{false};
 
     float default_face_quality_{60.0f};
     AiDetectorUnifyPtr face_det_inst_{nullptr};        // Face detection

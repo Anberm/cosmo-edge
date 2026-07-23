@@ -3,6 +3,7 @@
 #include "service/camera/impl/CameraTaskUnit.h"
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 
 #include "service/algorithm/IAlgorithmQuery.h"
@@ -30,9 +31,24 @@ CameraTaskUnit::CameraTaskUnit(const std::string& cameraCfgPath, const std::stri
 }
 
 CameraTaskUnit::~CameraTaskUnit() {
-    // Stop then delete the task
-    service::ServiceRegistry::Instance().Get<cosmo::service::ITaskLifecycle>().TaskStop(task_id_);
-    service::ServiceRegistry::Instance().Get<cosmo::service::ITaskLifecycle>().TaskDelete(task_id_);
+    // Stop/delete only the task created by this unit.  In particular, TaskCreate
+    // can return Created when a duplicate unit is constructed concurrently; that
+    // failed unit must not tear down the original owner's task.
+    auto& registry = service::ServiceRegistry::Instance();
+    if (task_created_) {
+        try {
+            if (registry.GetLifecycleState() != service::ServiceRegistry::LifecycleState::kShuttingDown &&
+                registry.Has<cosmo::service::ITaskLifecycle>()) {
+                registry.Get<cosmo::service::ITaskLifecycle>().TaskStop(task_id_);
+                registry.Get<cosmo::service::ITaskLifecycle>().TaskDelete(task_id_);
+            }
+        } catch (const std::exception& error) {
+            // Destructors must not terminate shutdown if the registry began
+            // tearing down between the state check and the service lookup.
+            LOG_WARN("[{}_{}] Skip task cleanup during registry shutdown: {}", channel_id_, algorithm_code_,
+                     error.what());
+        }
+    }
     LOG_INFO("[{}_{}] CameraTaskUnit Delete", channel_id_, algorithm_code_);
 }
 
@@ -130,6 +146,7 @@ void CameraTaskUnit::LoadConfig() {
         task_status_ = util::ErrorEnum::TaskCreateFailed;
         return;
     }
+    task_created_ = true;
     TaskEnableParam();
     task_status_ = util::ErrorEnum::Success;
 }
@@ -155,9 +172,12 @@ void CameraTaskUnit::TaskEnableParam() {
              param.areas.size());
     EnableParamConfidences(param);
 
-    service::ServiceRegistry::Instance().Get<cosmo::service::ITaskLifecycle>().SetTaskParam(channel_id_,
-                                                                                            task_id_, param);
-    enable_sign_ = modify_sign_;
+    if (service::ServiceRegistry::Instance().Get<cosmo::service::ITaskLifecycle>().SetTaskParam(
+            channel_id_, task_id_, param)) {
+        enable_sign_ = modify_sign_;
+    } else {
+        LOG_WARN("[{}_{}] Set task parameters failed; keep change pending for retry", channel_id_, task_id_);
+    }
 }
 
 util::ErrorEnum CameraTaskUnit::GetStatus() const {

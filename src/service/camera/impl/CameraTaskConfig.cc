@@ -47,12 +47,15 @@ namespace {
 // ============================================================
 
 std::string CameraServiceImpl::GetChannelName(const std::string& channelId) const {
-    auto camera = GetCamera(channelId);
-    if (!camera) {
-        LOG_INFO("{} Not Exist", channelId);
-        return "";
+    std::shared_lock<std::shared_mutex> lock(mtx_);
+    auto it = std::find_if(cameras_.begin(), cameras_.end(), [&](const CameraEntityPtr& camera) {
+        return camera && camera->videoChannelId == channelId;
+    });
+    if (it != cameras_.end()) {
+        return (*it)->channelName;
     }
-    return camera->channelName;
+    LOG_INFO("{} Not Exist", channelId);
+    return "";
 }
 
 util::ErrorEnum CameraServiceImpl::ModifyTaskParam(const std::string& cameraId,
@@ -226,9 +229,7 @@ util::ErrorEnum CameraServiceImpl::SwitchTask(const std::string& cameraId, const
             std::vector<GpuMemSnapshot> devs;
             devs.reserve(gpu_info.gpudevusage.size());
             std::transform(gpu_info.gpudevusage.begin(), gpu_info.gpudevusage.end(), std::back_inserter(devs),
-                           [](const auto& d) {
-                               return GpuMemSnapshot{d.gpumemtotal, d.gpumemavailable};
-                           });
+                           [](const auto& d) { return GpuMemSnapshot{d.gpumemtotal, d.gpumemavailable}; });
             auto score = CalcCustomScore(gpu_info.gpuusage, gpu_info.gpumemtotal, gpu_info.gpumemavailable,
                                          devs, discard_percent, continues_discard_sec);
             if (score > 100.0) {
@@ -240,6 +241,11 @@ util::ErrorEnum CameraServiceImpl::SwitchTask(const std::string& cameraId, const
     auto camera = GetCamera(cameraId);
     if (!camera) {
         LOG_INFO("{} Not Exist", cameraId);
+        return util::ErrorEnum::CameraNotExist;
+    }
+
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
         return util::ErrorEnum::CameraNotExist;
     }
 
@@ -297,14 +303,29 @@ VideoFramePtr CameraServiceImpl::CaptureImage(const std::string& cameraId, int t
         return nullptr;
     }
 
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
+        return nullptr;
+    }
+    camera->WaitForSwitchThread();
+
     camera->is_capturing_image_.store(true);
+    struct CaptureFlagGuard {
+        std::atomic<bool>& flag;
+        ~CaptureFlagGuard() {
+            flag.store(false, std::memory_order_release);
+        }
+    } capture_guard{camera->is_capturing_image_};
     bool was_channel_running =
         ServiceRegistry::Instance().Get<ITaskLifecycle>().TaskIsStart(camera->channel_task_);
 
     int actualTimeOutMs = timeOutMs;
     if (!was_channel_running) {
         LOG_INFO("[{}] Temporarily auto-starting ChannelTask for CaptureImage", cameraId);
-        ServiceRegistry::Instance().Get<ITaskLifecycle>().TaskStart(cameraId, camera->channel_task_);
+        if (!ServiceRegistry::Instance().Get<ITaskLifecycle>().TaskStart(cameraId, camera->channel_task_)) {
+            LOG_WARN("[{}] Failed to auto-start ChannelTask for CaptureImage", cameraId);
+            return nullptr;
+        }
 
         // Cold starts require ffmpeg avformat_open_input and stream probing,
         // which can take several seconds for some files/streams.
@@ -333,30 +354,43 @@ VideoFramePtr CameraServiceImpl::CaptureImage(const std::string& cameraId, int t
         if (channel)
             channel->Quit();
     }
-    camera->is_capturing_image_.store(false);
     return image;
 }
 
 util::ErrorEnum CameraServiceImpl::DeleteTask(const std::string& cameraId, const std::string& algorithmId) {
     return WithCamera(cameraId, [&](const CameraEntityPtr& camera) {
-        std::lock_guard<std::shared_mutex> lock(camera->task_mtx_);
+        camera->WaitForSwitchThread();
+        CameraTaskUnitPtr task_unit;
+        {
+            std::lock_guard<std::shared_mutex> lock(camera->task_mtx_);
 
-        auto it = std::find_if(camera->tasks_.begin(), camera->tasks_.end(),
-                               [&](const CameraTaskPtr& cfg) { return cfg->algorithm_code_ == algorithmId; });
-        if (it != camera->tasks_.end()) {
+            auto it =
+                std::find_if(camera->tasks_.begin(), camera->tasks_.end(),
+                             [&](const CameraTaskPtr& cfg) { return cfg->algorithm_code_ == algorithmId; });
+            if (it == camera->tasks_.end()) {
+                LOG_INFO("[{}/{}] Not Exist", cameraId, algorithmId);
+                return util::ErrorEnum::TaskNotExist;
+            }
+            (*it)->is_enabled_.store(false, std::memory_order_release);
+            task_unit = std::move((*it)->task_);
             camera->tasks_.erase(it);
             SaveCameraTaskList(camera);
-            return util::ErrorEnum::Success;
         }
-
-        LOG_INFO("[{}/{}] Not Exist", cameraId, algorithmId);
-        return util::ErrorEnum::TaskNotExist;
+        // Camera task destruction stops/deletes the flow task.  No task_mtx_ is
+        // held while worker threads are joined.
+        task_unit.reset();
+        UpdateChannelState(camera);
+        return util::ErrorEnum::Success;
     });
 }
 
 std::vector<service::camera::CameraTaskDto> CameraServiceImpl::GetTasks(const std::string& cameraId) {
     auto camera = GetCamera(cameraId);
     if (!camera) {
+        return {};
+    }
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
         return {};
     }
     std::vector<service::camera::CameraTaskDto> taskInfos;
@@ -392,6 +426,11 @@ void CameraServiceImpl::NotifyAlgorithmsChanged(const std::vector<std::string>& 
 
     if (!restartRunning) {
         for (const auto& camera : cameraSnapshot) {
+            std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+            if (camera->deleting_) {
+                continue;
+            }
+            camera->WaitForSwitchThread();
             for (const auto& algorithmId : algorithmIds) {
                 // Update algorithm config under write lock, collect model-derived param refreshes
                 struct RefreshRequest {
@@ -433,25 +472,24 @@ void CameraServiceImpl::NotifyAlgorithmsChanged(const std::vector<std::string>& 
         return;
     }
 
-    std::vector<std::pair<CameraEntityPtr, std::vector<std::string>>> tasks_to_restart;
     for (const auto& camera : cameraSnapshot) {
+        std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+        if (camera->deleting_) {
+            continue;
+        }
+        camera->WaitForSwitchThread();
+
+        std::vector<std::vector<std::string>> tasks_to_restart;
+        tasks_to_restart.reserve(algorithmIds.size());
         for (const auto& algorithmId : algorithmIds) {
             auto stopped_task_ids = StopAlgorithmForReload(camera, algorithmId);
-            if (!stopped_task_ids.empty()) {
-                tasks_to_restart.push_back({camera, std::move(stopped_task_ids)});
-            }
+            tasks_to_restart.push_back(std::move(stopped_task_ids));
         }
-    }
-
-    for (const auto& camera : cameraSnapshot) {
         for (const auto& algorithmId : algorithmIds) {
             RebuildAlgorithmForReload(camera, algorithmId);
         }
-    }
-
-    for (const auto& restart : tasks_to_restart) {
-        if (restart.first) {
-            StartTasksAfterReload(restart.first, restart.second);
+        for (const auto& task_ids : tasks_to_restart) {
+            StartTasksAfterReload(camera, task_ids);
         }
     }
 }
@@ -542,8 +580,17 @@ void CameraServiceImpl::NotifyAlgorithmsDeleted(const std::vector<std::string>& 
     if (algorithmIds.empty()) {
         return;
     }
-    std::shared_lock<std::shared_mutex> lock(mtx_);
-    for (const auto& camera : cameras_) {
+    std::vector<CameraEntityPtr> camera_snapshot;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        camera_snapshot = cameras_;
+    }
+    for (const auto& camera : camera_snapshot) {
+        std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+        if (camera->deleting_) {
+            continue;
+        }
+        camera->WaitForSwitchThread();
         for (const auto& algorithmId : algorithmIds) {
             // Phase 1: Mark status and collect taskIds to stop under write lock
             std::vector<std::string> taskIdsToStop;
@@ -591,6 +638,10 @@ util::ErrorEnum CameraServiceImpl::BindTaskLibPara(const std::string& cameraId,
                                                    const std::string& paramKey) {
     auto camera = GetCamera(cameraId);
     if (!camera) {
+        return util::ErrorEnum::NoSuchId;
+    }
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
         return util::ErrorEnum::NoSuchId;
     }
 

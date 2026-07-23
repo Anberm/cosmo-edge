@@ -42,16 +42,20 @@ Lib::MsgModifyFaceLibSend MessageFaceLibHandler::Handle(Lib::MsgModifyFaceLibRec
             data.faceLib.id = newLibId;
 
             db::TransactionGuard<service::IPersonDaoService> guard(dao_svc_);
-            dao_svc_.AddFaceLib(ToDbLibInfo(data.faceLib));
+            if (!dao_svc_.AddFaceLib(ToDbLibInfo(data.faceLib))) {
+                throw util::ErrorMessage(util::ErrorEnum::DatabaseFailed);
+            }
             errc = lib_repo_.AddFaceLib(faceLib);
             if (errc == util::ErrorEnum::Success) {
                 guard.Commit();
+                retData.resData.faceLibId = newLibId;
             }
-            retData.resData.faceLibId = newLibId;
         } break;
         case Operation::Update: {
             db::TransactionGuard<service::IPersonDaoService> guard(dao_svc_);
-            dao_svc_.UpdateFaceLib(ToDbLibInfo(data.faceLib));
+            if (!dao_svc_.UpdateFaceLib(ToDbLibInfo(data.faceLib))) {
+                throw util::ErrorMessage(util::ErrorEnum::DatabaseFailed);
+            }
             errc = lib_repo_.UpdateFaceLib(data.faceLib.id, std::move(data.faceLib));
             if (errc == util::ErrorEnum::Success) {
                 guard.Commit();

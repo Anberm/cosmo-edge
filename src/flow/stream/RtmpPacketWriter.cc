@@ -2,6 +2,9 @@
 
 #include "flow/stream/RtmpPacketWriter.h"
 
+#include <cmath>
+#include <limits>
+
 #include "util/Log.h"
 
 namespace cosmo {
@@ -14,11 +17,14 @@ namespace {
     }
 }  // namespace
 
-RtmpPacketWriter::RtmpPacketWriter(float fps) : fps_(fps) {}
+RtmpPacketWriter::RtmpPacketWriter(float fps)
+    : fps_(std::isfinite(fps) && fps > 0.0F && fps <= 240.0F ? fps : 25.0F) {}
 
 int RtmpPacketWriter::WriteFrame(AVFormatContext* ctx, int stream_index, const uint8_t* data, size_t size,
                                  bool is_key_frame) {
-    if (!ctx || !ctx->pb || stream_index < 0 || static_cast<unsigned>(stream_index) >= ctx->nb_streams) {
+    if (!ctx || !ctx->pb || !data || size == 0 ||
+        size > static_cast<size_t>(std::numeric_limits<int>::max()) || stream_index < 0 ||
+        static_cast<unsigned>(stream_index) >= ctx->nb_streams) {
         return AVERROR(EINVAL);
     }
 

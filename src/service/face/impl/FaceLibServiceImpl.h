@@ -2,7 +2,10 @@
 
 #pragma once
 
+#include <condition_variable>
+#include <cstddef>
 #include <memory>
+#include <mutex>
 
 #include "service/face/IFaceLibService.h"
 
@@ -69,6 +72,7 @@ public:
     void ReleaseFaceModels() override;
 
     // ---- Person import ----
+    void Stop() override;
     void ImportFile(const std::string& filePath, const std::string& faceLibId) override;
     std::pair<int, int> GetImportStatus() const override;
     bool ImportComplete() const override;
@@ -76,8 +80,31 @@ public:
     std::string GetImportFailedUrl() const override;
 
 private:
-    cosmo::FaceFeatureExtractor& EnsureFaceFeature();
-    std::unique_ptr<cosmo::FaceFeatureExtractor> face_feature_;
+    class OperationGuard {
+    public:
+        explicit OperationGuard(FaceLibServiceImpl& owner);
+        ~OperationGuard();
+
+        OperationGuard(const OperationGuard&)            = delete;
+        OperationGuard& operator=(const OperationGuard&) = delete;
+
+        explicit operator bool() const noexcept;
+
+    private:
+        FaceLibServiceImpl* owner_;
+    };
+
+    std::shared_ptr<cosmo::FaceFeatureExtractor> EnsureFaceFeature();
+    void EndOperation() noexcept;
+    void StopImpl();
+
+    std::mutex stop_mutex_;
+    std::mutex operation_mutex_;
+    std::condition_variable operation_cv_;
+    bool stopped_{false};
+    size_t active_operations_{0};
+    std::mutex face_feature_mutex_;
+    std::shared_ptr<cosmo::FaceFeatureExtractor> face_feature_;
     std::unique_ptr<cosmo::PersonImport> person_import_;
     std::unique_ptr<cosmo::FaceManager> face_manager_;
 };

@@ -4,8 +4,10 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <exception>
 #include <memory>
 #include <string_view>
+#include <utility>
 
 #include "api/ApiRouter.h"
 #include "app/AppConstants.h"
@@ -44,6 +46,7 @@
 #include "service/face/impl/PersonDaoServiceImpl.h"
 #include "service/face/impl/PersonRecogDaoServiceImpl.h"
 #include "service/infra/IDbService.h"
+#include "service/infra/ILinkageService.h"
 #include "service/infra/IMemoryPoolService.h"
 #include "service/infra/impl/DbServiceImpl.h"
 #include "service/infra/impl/LinkageServiceImpl.h"
@@ -72,7 +75,9 @@
 #include "service/network/impl/NetworkServiceImpl.h"
 #include "service/onboarding/IOnboardingService.h"
 #include "service/onboarding/impl/OnboardingServiceImpl.h"
+#include "service/path/IUploadStagingService.h"
 #include "service/path/impl/FileServiceImpl.h"
+#include "service/path/impl/UploadStagingServiceImpl.h"
 #include "service/system/IConfigNetworkService.h"
 #include "service/system/IConfigReadService.h"
 #include "service/system/IConfigWriteService.h"
@@ -109,6 +114,8 @@ static void RegisterInfrastructureServices() {
     auto& registry = cosmo::service::ServiceRegistry::Instance();
 
     registry.Register<cosmo::service::IFileService>(std::make_unique<cosmo::service::FileServiceImpl>());
+    registry.Register<cosmo::service::IUploadStagingService>(
+        std::make_unique<cosmo::service::UploadStagingServiceImpl>());
 
     auto eventNotifier = std::make_unique<cosmo::service::EventNotifierImpl>();
     registry.Register<cosmo::service::IEventNotifier>(std::move(eventNotifier));
@@ -338,9 +345,81 @@ static void InitializeExternalComponents() {
 #endif
 }
 
+static void StopExternalComponents() {
+    auto& registry = cosmo::service::ServiceRegistry::Instance();
+    auto stop      = [](const char* name, auto&& callback) {
+        try {
+            callback();
+        } catch (const std::exception& ex) {
+            LOG_ERRO("Failed to stop {}: {}", name, ex.what());
+        } catch (...) {
+            LOG_ERRO("Failed to stop {}: unknown error", name);
+        }
+    };
+
+    // Stop every external caller before ServiceRegistry::ShutdownAll(). Get()
+    // returns non-owning references, so registry destruction is only safe after
+    // ingress and background producers have joined their worker threads.
+    if (registry.Has<cosmo::service::IWatchDogService>()) {
+        stop("hardware watchdog",
+             [&registry]() { static_cast<void>(registry.Get<cosmo::service::IWatchDogService>().Stop()); });
+    }
+    if (registry.Has<cosmo::service::INetworkService>()) {
+        stop("HTTP server",
+             [&registry]() { registry.Get<cosmo::service::INetworkService>().StopHttpServer(); });
+        stop("MQTT client",
+             [&registry]() { registry.Get<cosmo::service::INetworkService>().MqttShutdown(); });
+        stop("network configuration worker",
+             [&registry]() { registry.Get<cosmo::service::INetworkService>().StopAsyncApply(); });
+    }
+    if (registry.Has<cosmo::service::IDeviceDiscoveryService>()) {
+        stop("device discovery",
+             [&registry]() { registry.Get<cosmo::service::IDeviceDiscoveryService>().Stop(); });
+    }
+    if (registry.Has<cosmo::service::ITimerRestartService>()) {
+        stop("scheduled restart timer",
+             [&registry]() { registry.Get<cosmo::service::ITimerRestartService>().Stop(); });
+    }
+    if (registry.Has<cosmo::service::ILiveStreamService>()) {
+        stop("live stream workers",
+             [&registry]() { registry.Get<cosmo::service::ILiveStreamService>().Stop(); });
+    }
+    if (registry.Has<cosmo::service::ICameraService>()) {
+        stop("camera background workers",
+             [&registry]() { registry.Get<cosmo::service::ICameraService>().Stop(); });
+    }
+    if (registry.Has<cosmo::service::IPicTaskLifecycle>()) {
+        stop("picture task workers",
+             [&registry]() { registry.Get<cosmo::service::IPicTaskLifecycle>().TaskDeleteAll(); });
+    }
+    if (registry.Has<cosmo::service::ITaskLifecycle>()) {
+        stop("task workers", [&registry]() { registry.Get<cosmo::service::ITaskLifecycle>().Shutdown(); });
+    }
+    if (registry.Has<cosmo::service::ILinkageService>()) {
+        stop("linkage workers", [&registry]() { registry.Get<cosmo::service::ILinkageService>().Stop(); });
+    }
+    if (registry.Has<cosmo::service::IFaceImport>()) {
+        stop("face import and feature workers",
+             [&registry]() { registry.Get<cosmo::service::IFaceImport>().Stop(); });
+    }
+    if (registry.Has<cosmo::service::IAlarmPushService>()) {
+        stop("alarm push workers",
+             [&registry]() { registry.Get<cosmo::service::IAlarmPushService>().Stop(); });
+    }
+    if (registry.Has<cosmo::service::IEventNotifier>()) {
+        stop("WebSocket server",
+             [&registry]() { registry.Get<cosmo::service::IEventNotifier>().ShutdownWebSocket(); });
+    }
+    if (registry.Has<cosmo::service::IStorageCleanService>()) {
+        stop("storage cleaner",
+             [&registry]() { registry.Get<cosmo::service::IStorageCleanService>().Stop(); });
+    }
+}
+
 void SwDeviceInit() {
     RegisterInfrastructureServices();
     RegisterBusinessServices();
+    cosmo::service::ServiceRegistry::Instance().CompleteRegistration();
     InitializeServices();
     InitializeExternalComponents();
 }
@@ -350,13 +429,10 @@ void SwDeviceRun() {
 }
 
 void SwDeviceDestroy() {
-    // Full mode: shutdown WebSocket before destroying EventNotifier
-    if (cosmo::service::ServiceRegistry::Instance().Has<cosmo::service::IEventNotifier>()) {
-        cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IEventNotifier>().ShutdownWebSocket();
-    }
+    StopExternalComponents();
 
-    // Destroy all owned services in reverse registration order.
-    // AlarmPushServiceImpl is destroyed here as part of ServiceRegistry shutdown.
+    // All externally driven work has stopped. It is now safe to invalidate
+    // registry lookups and destroy owned services in reverse registration order.
     cosmo::service::ServiceRegistry::Instance().ShutdownAll();
 }
 

@@ -19,14 +19,18 @@ public:
 
     virtual ~MsgThread() = default;
 
+    // Start or restart the message loop after a completed stop.
+    bool start();
+
     // Stop the message-loop thread and join.
     void Stop();
 
     // Process all queued messages, then stop the message-loop thread and join.
     void DrainAndStop();
 
-    // Enqueue a message. Returns current queue size.
-    size_t Put(MsgEnvelope&& msg, bool push_back = true);
+    // Enqueue a message. Returns the current queue size when accepted, or -1
+    // when the worker is stopping or the bounded queue is full.
+    int Put(MsgEnvelope&& msg, bool push_back = true);
 
     // Current pending message count.
     size_t MsgSize() const;
@@ -67,10 +71,12 @@ protected:
     size_t max_count_;  // Max queue capacity
     size_t msg_size_;   // Cached queue size
 
-    std::atomic<bool> is_exit_{false};  // Shutdown flag (cross-thread)
-    std::atomic<bool> is_wait_{false};  // Whether worker is waiting on condvar
+    std::atomic<bool> is_exit_{false};   // Shutdown flag (cross-thread)
+    std::atomic<bool> is_wait_{false};   // Whether worker is waiting on condvar
+    std::atomic<bool> accepting_{true};  // Reject producers once shutdown starts
 
-    std::mutex mtx_;
+    mutable std::mutex mtx_;
+    std::mutex stop_mtx_;
     std::condition_variable cond_;
 };
 

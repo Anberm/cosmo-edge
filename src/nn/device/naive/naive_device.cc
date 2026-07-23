@@ -21,20 +21,22 @@ BlobMemorySizeInfo NaiveDevice::Calculate(BlobDesc& desc) {
 }
 
 Status NaiveDevice::Allocate(void** handle, unsigned long* phy, BlobMemorySizeInfo& size_info_) {
-    if (handle) {
-        auto size = GetBlobMemoryBytesSize(size_info_);
-        if (size > 0) {
-            *handle = malloc(static_cast<size_t>(size));
-            if (*handle && size > 0) {
-                memset(*handle, 0, static_cast<size_t>(size));
-            }
-        } else if (size == 0) {
-            *handle = NULL;
-        } else {
-            return Status(COSMO_NN_ERR_PARAM,
-                          "NaiveDevice::Allocate invalid blob size (negative or > 512MB)");
-        }
+    if (handle == nullptr || phy == nullptr) {
+        return Status(COSMO_NN_ERR_NULL_PARAM, "NaiveDevice::Allocate invalid handle");
     }
+    *handle = nullptr;
+    *phy    = 0;
+
+    const auto size = GetBlobMemoryBytesSize(size_info_);
+    if (size <= 0) {
+        return Status(COSMO_NN_ERR_PARAM, "NaiveDevice::Allocate invalid blob size");
+    }
+
+    *handle = malloc(static_cast<size_t>(size));
+    if (*handle == nullptr) {
+        return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "NaiveDevice::Allocate host allocation failed");
+    }
+    memset(*handle, 0, static_cast<size_t>(size));
 
     return COSMO_NN_OK;
 }
@@ -47,18 +49,32 @@ Status NaiveDevice::Free(void* handle, unsigned long phy) {
 }
 
 Status NaiveDevice::CopyToDevice(BlobHandle* dst, const BlobHandle* src, BlobDesc& desc, void* queue) {
-    auto size_info       = Calculate(desc);
-    size_t size_in_bytes = GetBlobMemoryBytesSize(size_info);
+    if (dst == nullptr || src == nullptr || dst->base == nullptr || src->base == nullptr) {
+        return Status(COSMO_NN_ERR_NULL_PARAM, "NaiveDevice::CopyToDevice invalid handle");
+    }
+    auto size_info              = Calculate(desc);
+    const int64_t size_in_bytes = GetBlobMemoryBytesSize(size_info);
+    if (size_in_bytes <= 0) {
+        return Status(COSMO_NN_ERR_PARAM, "NaiveDevice::CopyToDevice invalid size");
+    }
 
-    memcpy(reinterpret_cast<char*>(dst->base), reinterpret_cast<char*>(src->base), size_in_bytes);
+    memcpy(reinterpret_cast<char*>(dst->base), reinterpret_cast<char*>(src->base),
+           static_cast<size_t>(size_in_bytes));
     return COSMO_NN_OK;
 }
 
 Status NaiveDevice::CopyFromDevice(BlobHandle* dst, const BlobHandle* src, BlobDesc& desc, void* queue) {
-    auto size_info       = Calculate(desc);
-    size_t size_in_bytes = GetBlobMemoryBytesSize(size_info);
+    if (dst == nullptr || src == nullptr || dst->base == nullptr || src->base == nullptr) {
+        return Status(COSMO_NN_ERR_NULL_PARAM, "NaiveDevice::CopyFromDevice invalid handle");
+    }
+    auto size_info              = Calculate(desc);
+    const int64_t size_in_bytes = GetBlobMemoryBytesSize(size_info);
+    if (size_in_bytes <= 0) {
+        return Status(COSMO_NN_ERR_PARAM, "NaiveDevice::CopyFromDevice invalid size");
+    }
 
-    memcpy(reinterpret_cast<char*>(dst->base), reinterpret_cast<char*>(src->base), size_in_bytes);
+    memcpy(reinterpret_cast<char*>(dst->base), reinterpret_cast<char*>(src->base),
+           static_cast<size_t>(size_in_bytes));
     return COSMO_NN_OK;
 }
 

@@ -13,6 +13,11 @@
 #include "nn/utils/default_component.h"
 
 namespace cosmo {
+struct DinoDetectionOptions {
+    float text_threshold{0.25f};
+    float box_threshold{0.3f};
+};
+
 class DinoDetectorUnify {
 public:
     DinoDetectorUnify(const std::string& atomicCode, const std::string& jsonPath,
@@ -23,6 +28,7 @@ public:
 
     // Detect with a text prompt, returns detection results
     util::ErrorEnum Detect(const std::vector<VideoFramePtr>& images, const std::string& prompt,
+                           const DinoDetectionOptions& options,
                            std::vector<std::vector<AiDetectRstEl>>& results);
 
     std::vector<std::string> GetLabels();
@@ -31,6 +37,7 @@ public:
 
 private:
     util::ErrorEnum Forward(const std::vector<VideoFramePtr>& images, const std::string& prompt,
+                            const DinoDetectionOptions& options,
                             std::vector<std::vector<AiDetectRstEl>>& results);
 
 private:

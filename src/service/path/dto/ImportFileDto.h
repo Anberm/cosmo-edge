@@ -25,6 +25,7 @@ namespace service {
     struct MsgImportFileRecv : public MsgRecvHead {
         int importType{-1};
         std::string filePath;
+        std::string uploadId;
         std::string filename;
         std::string faceLibId;
         std::string contentLength;

@@ -10,12 +10,13 @@
 #include "util/JsonStructUtil.h"
 #include "util/Keys.h"
 #include "util/Log.h"
+#include "util/PathUtil.h"
 
 namespace cosmo::service::detail {
 
 cosmo::util::ErrorEnum AlgorithmValidator::ValidateAlgorithmName(const std::string& algorithmName) {
-    if (algorithmName.find('_') != std::string::npos) {
-        LOG_WARN("Algorithm name contains underscore: {}", algorithmName);
+    if (!cosmo::path::IsSafePathComponent(algorithmName) || algorithmName.find('_') != std::string::npos) {
+        LOG_WARN("Invalid algorithm name: {}", algorithmName);
         return cosmo::util::ErrorEnum::InvalidParam;
     }
     return cosmo::util::ErrorEnum::Success;

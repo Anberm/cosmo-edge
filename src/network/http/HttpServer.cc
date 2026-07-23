@@ -4,19 +4,30 @@
 
 #include <event2/keyvalq_struct.h>
 #include <event2/util.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
+#include <optional>
+#include <string_view>
+#include <utility>
 
 #include "event2/http.h"
 #include "network/http/HttpCommon.h"
 #include "network/http/MultipartStreamParser.h"
 #include "util/CipherUtil.h"
+#include "util/ErrorCode.h"
 #include "util/FileUtil.h"
 #include "util/JsonStructUtil.h"
 #include "util/Log.h"
+#include "util/MsgBaseTypes.h"
 #include "util/UuidUtil.h"
 
 namespace chrono = std::chrono;
@@ -25,7 +36,33 @@ namespace cosmo::network::http {
 
 namespace {
 
-    constexpr auto kShutdownDrainTimeout = chrono::seconds(5);
+    constexpr auto kShutdownDrainTimeout                         = chrono::seconds(5);
+    constexpr std::size_t kMaxRequestTargetBytes                 = 2048;
+    constexpr std::size_t kMaxJsonBodyBytes                      = 1 * 1024 * 1024;
+    constexpr std::size_t kMaxHttpBodyBytes                      = 10 * 1024 * 1024;
+    constexpr std::size_t kMaxHttpHeaderBytes                    = 32 * 1024;
+    constexpr std::size_t kMaxMultipartSpoolRequests             = 8;
+    constexpr std::size_t kMaxMultipartSpoolRequestsPerPrincipal = 2;
+    constexpr std::uint64_t kMaxMultipartSpoolBytes = kMaxMultipartSpoolRequests * kMaxHttpBodyBytes;
+    constexpr std::uint64_t kMaxMultipartSpoolBytesPerPrincipal =
+        kMaxMultipartSpoolRequestsPerPrincipal * kMaxHttpBodyBytes;
+    constexpr std::string_view kLogPrefix{"/logs/"};
+
+    std::string_view Trim(std::string_view value) {
+        const auto begin = value.find_first_not_of(" \t");
+        if (begin == std::string_view::npos) {
+            return {};
+        }
+        const auto end = value.find_last_not_of(" \t");
+        return value.substr(begin, end - begin + 1);
+    }
+
+    std::string ToLower(std::string_view value) {
+        std::string result(value);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return result;
+    }
 
     const char* FindHeader(struct evkeyvalq* headers, const char* name) {
         if (headers == nullptr) {
@@ -34,10 +71,106 @@ namespace {
         return evhttp_find_header(headers, name);
     }
 
+    int HexValue(unsigned char value) {
+        if (value >= '0' && value <= '9') {
+            return value - '0';
+        }
+        value = static_cast<unsigned char>(std::tolower(value));
+        return value >= 'a' && value <= 'f' ? value - 'a' + 10 : -1;
+    }
+
+    bool DecodeRequestPath(const std::string& request_target, std::string& decoded_path) {
+        decoded_path.clear();
+        if (request_target.empty() || request_target.size() > kMaxRequestTargetBytes ||
+            request_target.front() != '/' || request_target.find('#') != std::string::npos) {
+            return false;
+        }
+
+        const auto query_pos = request_target.find('?');
+        const auto path_size = query_pos == std::string::npos ? request_target.size() : query_pos;
+        decoded_path.reserve(path_size);
+        for (std::size_t i = 0; i < path_size; ++i) {
+            unsigned char value = static_cast<unsigned char>(request_target[i]);
+            if (value == '%') {
+                if (i + 2 >= path_size) {
+                    return false;
+                }
+                const int high = HexValue(static_cast<unsigned char>(request_target[i + 1]));
+                const int low  = HexValue(static_cast<unsigned char>(request_target[i + 2]));
+                if (high < 0 || low < 0) {
+                    return false;
+                }
+                value = static_cast<unsigned char>((high << 4) | low);
+                i += 2;
+            }
+            if (value == 0 || value < 0x20 || value == 0x7f) {
+                return false;
+            }
+            decoded_path.push_back(static_cast<char>(value));
+        }
+        return !decoded_path.empty();
+    }
+
+    bool IsMultipartContentType(const char* content_type) {
+        if (content_type == nullptr) {
+            return false;
+        }
+        const std::string_view value(content_type);
+        const auto separator = value.find(';');
+        return ToLower(Trim(value.substr(0, separator))) == "multipart/form-data";
+    }
+
+    std::optional<std::string> ParseMultipartBoundary(std::string_view content_type) {
+        const auto first_separator = content_type.find(';');
+        if (ToLower(Trim(content_type.substr(0, first_separator))) != "multipart/form-data" ||
+            first_separator == std::string_view::npos) {
+            return std::nullopt;
+        }
+
+        std::optional<std::string> boundary;
+        std::size_t begin = first_separator + 1;
+        while (begin <= content_type.size()) {
+            auto end = content_type.find(';', begin);
+            if (end == std::string_view::npos) {
+                end = content_type.size();
+            }
+            const auto parameter = Trim(content_type.substr(begin, end - begin));
+            const auto equals    = parameter.find('=');
+            if (equals != std::string_view::npos &&
+                ToLower(Trim(parameter.substr(0, equals))) == "boundary") {
+                if (boundary) {
+                    return std::nullopt;
+                }
+                auto raw = Trim(parameter.substr(equals + 1));
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                    raw = raw.substr(1, raw.size() - 2);
+                }
+                if (raw.empty() || raw.size() > 200 || raw.front() == ' ' || raw.back() == ' ' ||
+                    std::any_of(raw.begin(), raw.end(), [](unsigned char c) {
+                        return c < 0x20 || c > 0x7e || c == '"' || c == '\\' || c == ';';
+                    })) {
+                    return std::nullopt;
+                }
+                boundary = std::string(raw);
+            }
+            if (end == content_type.size()) {
+                break;
+            }
+            begin = end + 1;
+        }
+        return boundary;
+    }
+
 }  // namespace
 
 HttpServer::~HttpServer() {
     UnInitialize();
+}
+
+HttpServer::MultipartSpoolReservation::~MultipartSpoolReservation() {
+    if (active && server != nullptr) {
+        server->ReleaseMultipartSpool(owner, bytes);
+    }
 }
 
 void HttpServer::ComGenCb(struct evhttp_request* req, void* arg) {
@@ -49,22 +182,44 @@ void HttpServer::ComGenCb(struct evhttp_request* req, void* arg) {
     if (http_server == nullptr) {
         return;
     }
+    // Libevent clears the URI before invoking the generic callback when its
+    // transport-level body limit is exceeded, while preserving response_code.
+    // Inspect that condition before parsing the request target so a valid 413
+    // is not accidentally rewritten as 400.
+    if (evhttp_request_get_response_code(req) == static_cast<int>(HttpResponseCode::kPayloadTooLarge)) {
+        http_server->SendImmediateError(req, HttpResponseCode::kPayloadTooLarge);
+        return;
+    }
     if (!http_server->is_accepting_requests_) {
         http_server->SendImmediateError(req, HttpResponseCode::kServiceUnavailable);
         return;
     }
 
-    auto uri = evhttp_request_get_uri(req);
-    if (uri == nullptr) {
+    RequestDispatchContext context;
+    bool is_log_request = false;
+    if (!http_server->PrepareRequestContext(req, context, is_log_request)) {
         http_server->SendImmediateError(req, HttpResponseCode::kBadRequest);
         return;
     }
-    if (strncmp(uri, "/v1/cwai/aihost/", strlen("/v1/cwai/aihost/")) == 0) {
-        http_server->InsertHttpReqMsg(req);
-    } else if (strncmp(uri, "/logs/", strlen("/logs/")) == 0) {
-        http_server->InsertHttpOctetMsg(req);
+
+    const auto admission = http_server->request_inspector_->InspectRequest(context, !is_log_request);
+    if (admission == RequestAdmission::kUnauthorized) {
+        http_server->SendImmediateAuthError(req);
+        return;
+    }
+    if (admission == RequestAdmission::kRouteNotFound) {
+        http_server->SendImmediateError(req, HttpResponseCode::kBadRequest);
+        return;
+    }
+    if (!http_server->IsBodySizeAllowed(req)) {
+        http_server->SendImmediateError(req, HttpResponseCode::kPayloadTooLarge);
+        return;
+    }
+
+    if (is_log_request) {
+        http_server->InsertHttpOctetMsg(req, context);
     } else {
-        http_server->InsertHttpReqMsg(req);
+        http_server->InsertHttpReqMsg(req, context);
     }
 }
 
@@ -88,20 +243,35 @@ void HttpServer::ConnectionCloseCb(struct evhttp_connection* connection, void* a
     server->CloseRequest(token, connection);
 }
 
-void HttpServer::InsertHttpReqMsg(struct evhttp_request* req) {
-    InsertHttpMsg(req, InnerMsgId::kHttpReq);
+void HttpServer::InsertHttpReqMsg(struct evhttp_request* req, const RequestDispatchContext& context) {
+    InsertHttpMsg(req, InnerMsgId::kHttpReq, context);
 }
 
-void HttpServer::InsertHttpOctetMsg(struct evhttp_request* req) {
-    InsertHttpMsg(req, InnerMsgId::kHttpOctetReq);
+void HttpServer::InsertHttpOctetMsg(struct evhttp_request* req, const RequestDispatchContext& context) {
+    InsertHttpMsg(req, InnerMsgId::kHttpOctetReq, context);
 }
 
-void HttpServer::InsertHttpMsg(struct evhttp_request* req, InnerMsgId msg_id) {
-    auto task = BuildHttpReqTask(req);
+void HttpServer::InsertHttpMsg(struct evhttp_request* req, InnerMsgId msg_id,
+                               const RequestDispatchContext& context) {
+    std::shared_ptr<void> spool_reservation;
+    const auto* content_type = FindHeader(evhttp_request_get_input_headers(req), "Content-Type");
+    if (IsMultipartContentType(content_type)) {
+        spool_reservation =
+            TryReserveMultipartSpool(context, evbuffer_get_length(evhttp_request_get_input_buffer(req)));
+        if (!spool_reservation) {
+            LOG_WARN("Reject multipart request for {} because the spool quota is full", context.uri);
+            SendImmediateError(req, HttpResponseCode::kServiceUnavailable);
+            return;
+        }
+    }
+
+    auto error_code = HttpResponseCode::kBadRequest;
+    auto task       = BuildHttpReqTask(req, context, error_code);
     if (!task) {
-        SendImmediateError(req, HttpResponseCode::kBadRequest);
+        SendImmediateError(req, error_code);
         return;
     }
+    task->multipart_spool_reservation = std::move(spool_reservation);
 
     auto token = RegisterRequest(req);
     if (token == kInvalidHttpRequestToken) {
@@ -127,28 +297,23 @@ void HttpServer::InsertHttpMsg(struct evhttp_request* req, InnerMsgId msg_id) {
     LOG_INFO("Put request {} token {} to HTTP pool", static_cast<int>(msg_id), token);
 }
 
-std::unique_ptr<HttpReqTask> HttpServer::BuildHttpReqTask(struct evhttp_request* req) {
-    auto* uri = evhttp_request_get_uri(req);
-    if (uri == nullptr) {
-        LOG_WARN("{}", "Cannot get request URI");
-        return nullptr;
-    }
-
+std::unique_ptr<HttpReqTask> HttpServer::BuildHttpReqTask(struct evhttp_request* req,
+                                                          const RequestDispatchContext& context,
+                                                          HttpResponseCode& error_code) {
+    error_code         = HttpResponseCode::kBadRequest;
     auto task          = std::make_unique<HttpReqTask>();
     task->request_time = chrono::steady_clock::now();
-    task->interface    = uri;
+    task->interface    = context.uri;
+    task->mtk          = context.credential;
+    task->principal    = context.principal;
 
     auto* input_headers = evhttp_request_get_input_headers(req);
     if (const auto* forwarded_for = FindHeader(input_headers, "x-forwarded-for")) {
         task->x_forwarded_for = forwarded_for;
     }
-    if (const auto* mtk = FindHeader(input_headers, "mtk")) {
-        task->mtk = mtk;
-    }
-
     const auto* content_type = FindHeader(input_headers, "Content-Type");
-    if (content_type != nullptr && strstr(content_type, "multipart/form-data") != nullptr) {
-        if (!ExtractMultipartBody(task.get(), req, content_type)) {
+    if (IsMultipartContentType(content_type)) {
+        if (!ExtractMultipartBody(task.get(), req, content_type, error_code)) {
             return nullptr;
         }
         return task;
@@ -163,6 +328,7 @@ std::unique_ptr<HttpReqTask> HttpServer::BuildHttpReqTask(struct evhttp_request*
     auto* body_data = evbuffer_pullup(input_buffer, -1);
     if (body_data == nullptr) {
         LOG_ERRO("Failed to copy request body for URI {}", task->interface);
+        error_code = HttpResponseCode::kInternalError;
         return nullptr;
     }
     task->body.resize(body_length);
@@ -170,46 +336,126 @@ std::unique_ptr<HttpReqTask> HttpServer::BuildHttpReqTask(struct evhttp_request*
     return task;
 }
 
+bool HttpServer::PrepareRequestContext(struct evhttp_request* req, RequestDispatchContext& context,
+                                       bool& is_log_request) const {
+    context                    = {};
+    is_log_request             = false;
+    const auto* request_target = evhttp_request_get_uri(req);
+    if (request_target == nullptr || !DecodeRequestPath(request_target, context.uri)) {
+        return false;
+    }
+
+    context.transport = RequestTransport::kHttp;
+    auto* headers     = evhttp_request_get_input_headers(req);
+    if (const auto* mtk = FindHeader(headers, "mtk")) {
+        context.credential = mtk;
+    }
+    is_log_request = context.uri.compare(0, kLogPrefix.size(), kLogPrefix) == 0;
+    return true;
+}
+
+bool HttpServer::IsBodySizeAllowed(struct evhttp_request* req) const {
+    const auto* content_type = FindHeader(evhttp_request_get_input_headers(req), "Content-Type");
+    const auto limit         = IsMultipartContentType(content_type) ? kMaxHttpBodyBytes : kMaxJsonBodyBytes;
+    return evbuffer_get_length(evhttp_request_get_input_buffer(req)) <= limit;
+}
+
+std::shared_ptr<void> HttpServer::TryReserveMultipartSpool(const RequestDispatchContext& context,
+                                                           std::uint64_t bytes) {
+    const std::string owner = context.principal.empty() ? std::string("<anonymous>") : context.principal;
+    auto reservation        = std::make_shared<MultipartSpoolReservation>();
+    reservation->server     = this;
+    reservation->owner      = owner;
+    reservation->bytes      = bytes;
+
+    std::lock_guard<std::mutex> lock(multipart_spool_mutex_);
+    const auto owner_requests_it = multipart_spool_requests_by_owner_.find(owner);
+    const auto owner_bytes_it    = multipart_spool_bytes_by_owner_.find(owner);
+    const auto owner_requests =
+        owner_requests_it == multipart_spool_requests_by_owner_.end() ? 0 : owner_requests_it->second;
+    const auto owner_bytes =
+        owner_bytes_it == multipart_spool_bytes_by_owner_.end() ? 0 : owner_bytes_it->second;
+    if (multipart_spool_request_count_ >= kMaxMultipartSpoolRequests ||
+        owner_requests >= kMaxMultipartSpoolRequestsPerPrincipal ||
+        bytes > kMaxMultipartSpoolBytes - multipart_spool_bytes_ ||
+        bytes > kMaxMultipartSpoolBytesPerPrincipal - owner_bytes) {
+        return {};
+    }
+
+    ++multipart_spool_request_count_;
+    ++multipart_spool_requests_by_owner_[owner];
+    multipart_spool_bytes_ += bytes;
+    multipart_spool_bytes_by_owner_[owner] += bytes;
+    reservation->active = true;
+    return reservation;
+}
+
+void HttpServer::ReleaseMultipartSpool(const std::string& owner, std::uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(multipart_spool_mutex_);
+    const auto requests    = multipart_spool_requests_by_owner_.find(owner);
+    const auto owner_bytes = multipart_spool_bytes_by_owner_.find(owner);
+    if (multipart_spool_request_count_ == 0 || multipart_spool_bytes_ < bytes ||
+        requests == multipart_spool_requests_by_owner_.end() || requests->second == 0 ||
+        owner_bytes == multipart_spool_bytes_by_owner_.end() || owner_bytes->second < bytes) {
+        LOG_ERRO("{}", "Multipart spool accounting underflow for authenticated owner");
+        return;
+    }
+
+    --multipart_spool_request_count_;
+    multipart_spool_bytes_ -= bytes;
+    if (--requests->second == 0) {
+        multipart_spool_requests_by_owner_.erase(requests);
+    }
+    owner_bytes->second -= bytes;
+    if (owner_bytes->second == 0) {
+        multipart_spool_bytes_by_owner_.erase(owner_bytes);
+    }
+}
+
 bool HttpServer::ExtractMultipartBody(HttpReqTask* task, struct evhttp_request* req,
-                                      const std::string& content_type) {
+                                      const std::string& content_type, HttpResponseCode& error_code) {
     auto* input_headers = evhttp_request_get_input_headers(req);
     LOG_INFO("Receive uri:{}, handle multipart/form-data", task->interface);
     if (const auto* content_length = FindHeader(input_headers, "Content-Length")) {
         LOG_INFO("Content-Length:{}", content_length);
     }
 
-    auto boundary_start = content_type.find("boundary=");
-    if (boundary_start == std::string::npos) {
+    auto boundary = ParseMultipartBoundary(content_type);
+    if (!boundary) {
         LOG_WARN("Receive uri:{}, multipart boundary is missing", task->interface);
-        return false;
-    }
-    boundary_start += strlen("boundary=");
-    auto boundary_end = content_type.find(';', boundary_start);
-    auto boundary     = content_type.substr(boundary_start, boundary_end - boundary_start);
-    if (boundary.size() >= 2 && boundary.front() == '"' && boundary.back() == '"') {
-        boundary = boundary.substr(1, boundary.size() - 2);
-    }
-    if (boundary.empty()) {
-        LOG_WARN("Receive uri:{}, multipart boundary is empty", task->interface);
         return false;
     }
 
     if (!callbacks_.get_upload_tmp_path) {
         LOG_ERRO("{}", "Upload temporary path callback is not configured");
+        error_code = HttpResponseCode::kInternalError;
         return false;
     }
     task->tmp_file_path = callbacks_.get_upload_tmp_path();
-    task->has_tmp_path  = true;
+    std::error_code path_error;
+    if (task->tmp_file_path.empty() || !std::filesystem::is_directory(task->tmp_file_path, path_error) ||
+        path_error) {
+        LOG_ERRO("Upload temporary directory is unavailable: {}", task->tmp_file_path);
+        task->tmp_file_path.clear();
+        error_code = HttpResponseCode::kInternalError;
+        return false;
+    }
+    task->has_tmp_path = true;
 
-    MultipartStreamParser parser(std::move(boundary));
-    auto result = parser.ParseToFile(evhttp_request_get_input_buffer(req), [&](const std::string& filename) {
-        return (std::filesystem::path(task->tmp_file_path) / filename).string();
+    MultipartStreamParser parser(std::move(*boundary));
+    auto result = parser.ParseToFile(evhttp_request_get_input_buffer(req), [&]() {
+        return (std::filesystem::path(task->tmp_file_path) / cosmo::util::GenerateUUID()).string();
     });
     if (!result.ok) {
         LOG_ERRO("Parse multipart request failed: {}", result.err);
         cosmo::util::RemovePath(task->tmp_file_path);
         task->has_tmp_path = false;
         task->tmp_file_path.clear();
+        if (result.error == MultipartParseError::kPayloadTooLarge) {
+            error_code = HttpResponseCode::kPayloadTooLarge;
+        } else if (result.error == MultipartParseError::kIo) {
+            error_code = HttpResponseCode::kInternalError;
+        }
         return false;
     }
     if (!cosmo::util::EncodeJson(result.fields, task->body)) {
@@ -217,8 +463,12 @@ bool HttpServer::ExtractMultipartBody(HttpReqTask* task, struct evhttp_request* 
         cosmo::util::RemovePath(task->tmp_file_path);
         task->has_tmp_path = false;
         task->tmp_file_path.clear();
+        error_code = HttpResponseCode::kInternalError;
         return false;
     }
+    task->multipart_file_path = std::move(result.uploaded_path);
+    task->multipart_file_name = std::move(result.uploaded_name);
+    task->multipart_file_size = result.uploaded_size;
     return true;
 }
 
@@ -239,6 +489,20 @@ bool HttpServer::Initialize(const std::string& host_ip, int port, DispatcherFact
 
     dispatcher_factory_ = std::move(factory);
     callbacks_          = std::move(callbacks);
+    if (!dispatcher_factory_) {
+        LOG_ERRO("{}", "HTTP request dispatcher factory is not configured");
+        return false;
+    }
+    try {
+        request_inspector_ = dispatcher_factory_();
+    } catch (const std::exception& e) {
+        LOG_ERRO("Cannot create HTTP request inspector: {}", e.what());
+        return false;
+    }
+    if (!request_inspector_) {
+        LOG_ERRO("{}", "HTTP request inspector factory returned null");
+        return false;
+    }
     if (!(event_base_ = event_base_new())) {
         LOG_ERRO("{}", "event_base_new return NULL");
         return false;
@@ -249,6 +513,10 @@ bool HttpServer::Initialize(const std::string& host_ip, int port, DispatcherFact
         CleanupEventResources();
         return false;
     }
+    // Enforce the absolute transport limits while libevent is receiving the
+    // request, before it can buffer an oversized body or header block.
+    evhttp_set_max_body_size(event_http_, static_cast<ev_ssize_t>(kMaxHttpBodyBytes));
+    evhttp_set_max_headers_size(event_http_, static_cast<ev_ssize_t>(kMaxHttpHeaderBytes));
 
     // 5ms tick: ensures max response latency is bounded, while blocking to yield CPU when idle
     if (!tick_event_) {
@@ -275,13 +543,6 @@ bool HttpServer::Initialize(const std::string& host_ip, int port, DispatcherFact
             return false;
         }
     }
-
-    // IMPORTANT: libevent caches the entire request body in memory by default.
-    // For multipart uploads, allowing oversized bodies can easily trigger OOM.
-    // The frontend allows 500MB file uploads (bulk face import zip), plus multipart encoding overhead,
-    // so the limit must be >= 500MB. Otherwise libevent closes the connection without HTTP response,
-    // causing nginx to return 502 Bad Gateway.
-    evhttp_set_max_body_size(event_http_, 600LL * 1024 * 1024);  // 600MB
 
     // generic cb
     evhttp_set_gencb(event_http_, ComGenCb, this);
@@ -316,8 +577,7 @@ bool HttpServer::Initialize(const std::string& host_ip, int port, DispatcherFact
 }
 
 void HttpServer::UnInitialize() {
-    is_accepting_requests_ = false;
-    is_running_            = false;
+    RequestStop();
 
     std::unique_lock<std::mutex> lock(lifecycle_mutex_);
     if (lifecycle_state_ == LifecycleState::kStopped) {
@@ -337,6 +597,11 @@ void HttpServer::UnInitialize() {
     lock.unlock();
     ShutdownOnEventThread();
     MarkStopped();
+}
+
+void HttpServer::RequestStop() noexcept {
+    is_accepting_requests_.store(false, std::memory_order_release);
+    is_running_.store(false, std::memory_order_release);
 }
 
 void HttpServer::StopAccepting() {
@@ -390,6 +655,7 @@ void HttpServer::CleanupEventResources() {
         event_base_free(event_base_);
         event_base_ = nullptr;
     }
+    request_inspector_.reset();
 }
 
 void HttpServer::MarkStopped() {
@@ -446,6 +712,42 @@ void HttpServer::CloseRequest(HttpRequestToken token, struct evhttp_connection* 
     active_requests_.erase(it);
 }
 
+void HttpServer::SendImmediateAuthError(struct evhttp_request* req) {
+    MsgSendHead response;
+    response.resCode = kServerRspFailed;
+
+    MsgResBase message;
+    message.msgCode    = std::to_string(static_cast<int>(util::ErrorEnum::AuthFailed));
+    message.messageKey = "api.error." + util::ErrorEnumName(util::ErrorEnum::AuthFailed);
+    message.msgText    = "Auth Failed";
+    response.resMsg.push_back(std::move(message));
+
+    std::string response_body;
+    if (!cosmo::util::EncodeJson(response, response_body)) {
+        SendImmediateError(req, HttpResponseCode::kNeedAuthenticate);
+        return;
+    }
+
+    struct evbuffer* buffer = evbuffer_new();
+    if (buffer == nullptr) {
+        SendImmediateError(req, HttpResponseCode::kNeedAuthenticate);
+        return;
+    }
+    if (!AddHttpHeader(req, "")) {
+        evbuffer_free(buffer);
+        SendImmediateError(req, HttpResponseCode::kNeedAuthenticate);
+        return;
+    }
+    evbuffer_add(buffer, response_body.data(), response_body.size());
+
+    const auto& code_messages = GetHttpResCodeMsg();
+    const auto code_value     = static_cast<int>(HttpResponseCode::kNeedAuthenticate);
+    const auto it             = code_messages.find(code_value);
+    const char* reason        = it == code_messages.end() ? "NEED AUTHENTICATE" : it->second.c_str();
+    evhttp_send_reply(req, code_value, reason, buffer);
+    evbuffer_free(buffer);
+}
+
 void HttpServer::SendImmediateError(struct evhttp_request* req, HttpResponseCode code) {
     const auto& code_messages = GetHttpResCodeMsg();
     auto code_value           = static_cast<int>(code);
@@ -492,8 +794,13 @@ int HttpServer::DispatchFileMsg(HttpAckTask* task) {
         return 0;
     }
 
-    FILE* fp = fopen(task->file_path.c_str(), "rb");
-    if (!fp) {
+    const int file_fd = open(task->file_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    struct stat file_status {};
+    if (file_fd < 0 || fstat(file_fd, &file_status) != 0 || !S_ISREG(file_status.st_mode) ||
+        file_status.st_size < 0) {
+        if (file_fd >= 0) {
+            close(file_fd);
+        }
         struct evbuffer* buf = evbuffer_new();
         evbuffer_add_printf(buf, "File not found: %s", task->file_name.c_str());
         evhttp_send_reply(ev_http_req, HTTP_NOTFOUND, "File Not Found", buf);
@@ -502,9 +809,18 @@ int HttpServer::DispatchFileMsg(HttpAckTask* task) {
         return 0;
     }
 
-    fseek(fp, 0L, SEEK_END);
-    long fsize = ftell(fp);
-    fseek(fp, 0L, SEEK_SET);
+    FILE* fp = fdopen(file_fd, "rb");
+    if (fp == nullptr) {
+        close(file_fd);
+        SendImmediateError(ev_http_req, HttpResponseCode::kInternalError);
+        return 0;
+    }
+    if (file_status.st_size > std::numeric_limits<long>::max()) {
+        fclose(fp);
+        SendImmediateError(ev_http_req, HttpResponseCode::kInternalError);
+        return 0;
+    }
+    const auto fsize = static_cast<long>(file_status.st_size);
 
     if (!AddHttpOctetHeader(ev_http_req, task->request_id, task->file_name, fsize)) {
         fclose(fp);

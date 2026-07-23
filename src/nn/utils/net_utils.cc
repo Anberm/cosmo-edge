@@ -1,13 +1,19 @@
 #include "nn/utils/net_utils.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <utility>
 #include <vector>
 
 #include "Eigen/Dense"
+#ifdef COSMO_NN_USE_HOST_BACKEND
+#include "nn/device/cpu/cpu_dino_encode_node.h"
+#else
 #include "nn/device/sophon/sophon_dino_encode_node.h"
+#endif
 #include "nn/utils/dims_vector_utils.h"
 #include "tokenizers_c.h"
 
@@ -644,120 +650,144 @@ std::string NetUtils::TokenizerDecode(void* handle, std::vector<int>& ids) {
     return std::string(data, len);
 }
 
+namespace {
+
+    template <typename Tokenizer>
+    bool IsDinoSpecialToken(const Tokenizer* tokenizer, int id) {
+        if (!tokenizer)
+            return id == 0 || id == 101 || id == 102;
+        const auto found = tokenizer->idx2token.find(id);
+        if (found == tokenizer->idx2token.end())
+            return true;
+        const auto& token = found->second;
+        return token == "[PAD]" || token == "[CLS]" || token == "[SEP]" || token == "[MASK]";
+    }
+
+    bool DinoTokenNeedsSpace(const std::string& token) {
+        if (token.empty())
+            return false;
+        const unsigned char first = static_cast<unsigned char>(token.front());
+        return first >= 128U || std::ispunct(first) == 0;
+    }
+
+    template <typename Tokenizer>
+    std::string DecodeDinoWordPieces(const Tokenizer* tokenizer, const std::vector<int>& ids) {
+        if (!tokenizer)
+            return {};
+        std::string phrase;
+        for (const int id : ids) {
+            if (IsDinoSpecialToken(tokenizer, id))
+                continue;
+            const auto found = tokenizer->idx2token.find(id);
+            if (found == tokenizer->idx2token.end())
+                continue;
+            const auto& token = found->second;
+            if (token.rfind("##", 0) == 0) {
+                phrase += token.substr(2);
+            } else {
+                if (!phrase.empty() && DinoTokenNeedsSpace(token))
+                    phrase.push_back(' ');
+                phrase += token;
+            }
+        }
+        return phrase;
+    }
+
+}  // namespace
+
 Status NetUtils::ParseDINOOutput(std::vector<std::shared_ptr<Blob>>& blobs, void* tokenizer_handle,
                                  std::vector<Size>& input_sizes, std::vector<int>& padding_input_ids,
                                  float text_threshold, float box_threshold,
                                  std::vector<std::vector<ObjectInfoV1>>& detects) {
+    detects.clear();
+    if (blobs.size() < 2 || !blobs[0] || !blobs[1])
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO output requires logits and boxes");
+    if (!std::isfinite(text_threshold) || !std::isfinite(box_threshold) || text_threshold < 0.0f ||
+        text_threshold > 1.0f || box_threshold < 0.0f || box_threshold > 1.0f) {
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO thresholds must be finite values in [0,1]");
+    }
     auto logits = blobs.at(0);
     auto box    = blobs.at(1);
 
-    auto logits_dims = logits->GetBlobDesc().dims;
-
-    const int h = logits_dims.at(1);
-    const int w = logits_dims.at(2);
-
-    std::vector<int> indexes;
+    const auto logits_desc  = logits->GetBlobDesc();
+    const auto boxes_desc   = box->GetBlobDesc();
+    const auto& logits_dims = logits_desc.dims;
+    const auto& boxes_dims  = boxes_desc.dims;
+    if (logits_desc.data_type != DATA_TYPE_FLOAT || boxes_desc.data_type != DATA_TYPE_FLOAT ||
+        logits_dims.size() != 3 || boxes_dims.size() != 3 || logits_dims.at(0) <= 0 ||
+        logits_dims.at(1) <= 0 || logits_dims.at(2) <= 2 || boxes_dims.at(0) != logits_dims.at(0) ||
+        boxes_dims.at(1) != logits_dims.at(1) || boxes_dims.at(2) != 4) {
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO output tensor contract mismatch");
+    }
+    const int batch = logits_dims.at(0);
+    const int h     = logits_dims.at(1);
+    const int w     = logits_dims.at(2);
+    if (input_sizes.size() < static_cast<std::size_t>(batch) ||
+        padding_input_ids.size() < static_cast<std::size_t>(w)) {
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO parse metadata does not match output tensors");
+    }
     auto logits_data = reinterpret_cast<float*>(logits->GetHandle().base);
+    auto boxes_data  = reinterpret_cast<float*>(box->GetHandle().base);
+    if (!logits_data || !boxes_data)
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO output buffer is null");
 
-    // Calculate max sigmoid value per box for filtering
-    // Note: logits_data is already sigmoid-transformed by dino_decode_node
-    std::vector<float> max_per_box;
-    std::vector<float> scores;
-    max_per_box.resize(h);
-    for (int i = 0; i < h; i++) {
-        float max_data = 0.0f;
-        for (int j = 0; j < w; j++) {
-            float x = logits_data[i * w + j];  // Already sigmoid-transformed
-            if (max_data < x) {
-                max_data = x;
+    for (int batch_index = 0; batch_index < batch; ++batch_index) {
+        std::vector<ObjectInfoV1> objects;
+        const auto size = input_sizes.at(static_cast<std::size_t>(batch_index));
+        if (size.width <= 0 || size.height <= 0)
+            return Status(COSMO_NN_ERR_PARAM, "GroundingDINO input size is invalid");
+        for (int query = 0; query < h; ++query) {
+            auto* logit_data = logits_data + (batch_index * h + query) * w;
+            auto* box_data   = boxes_data + (batch_index * h + query) * 4;
+            float score      = -std::numeric_limits<float>::infinity();
+            for (int token_index = 0; token_index < w; ++token_index)
+                score = std::max(score, logit_data[token_index]);
+            if (!std::isfinite(score) || score <= box_threshold)
+                continue;
+
+            std::vector<int> ids;
+            for (int token_index = 1; token_index < w; ++token_index) {
+                if (logit_data[token_index] <= text_threshold)
+                    continue;
+                const int token_id = padding_input_ids.at(static_cast<std::size_t>(token_index));
+#ifdef COSMO_NN_USE_HOST_BACKEND
+                auto* tokenizer = reinterpret_cast<CpuTokenizer*>(tokenizer_handle);
+#else
+                auto* tokenizer = reinterpret_cast<SophonTokenizer*>(tokenizer_handle);
+#endif
+                if (!IsDinoSpecialToken(tokenizer, token_id))
+                    ids.push_back(token_id);
             }
+            if (ids.empty())
+                continue;
+
+#ifdef COSMO_NN_USE_HOST_BACKEND
+            auto* tokenizer = reinterpret_cast<CpuTokenizer*>(tokenizer_handle);
+#else
+            auto* tokenizer = reinterpret_cast<SophonTokenizer*>(tokenizer_handle);
+#endif
+            std::string phrase = DecodeDinoWordPieces(tokenizer, ids);
+            if (phrase.empty())
+                continue;
+
+            const float cx     = Clamp(box_data[0], 0.f, 1.f);
+            const float cy     = Clamp(box_data[1], 0.f, 1.f);
+            const float width  = Clamp(box_data[2], 0.f, 1.f);
+            const float height = Clamp(box_data[3], 0.f, 1.f);
+            ObjectInfoV1 object;
+            object.x1 = Clamp(size.width * (cx - width / 2.0f), 0.f, static_cast<float>(size.width - 1));
+            object.x2 = Clamp(size.width * (cx + width / 2.0f), 0.f, static_cast<float>(size.width - 1));
+            object.y1 = Clamp(size.height * (cy - height / 2.0f), 0.f, static_cast<float>(size.height - 1));
+            object.y2 = Clamp(size.height * (cy + height / 2.0f), 0.f, static_cast<float>(size.height - 1));
+
+            ClassifyInfo info;
+            info.confidence = score;
+            info.class_name = std::move(phrase);
+            object.infos.push_back(std::move(info));
+            objects.push_back(std::move(object));
         }
-        max_per_box[i] = max_data;
-        if (max_data > box_threshold) {
-            indexes.push_back(i);
-            scores.push_back(max_data);
-        }
+        detects.push_back(std::move(objects));
     }
-
-    auto boxes_data = reinterpret_cast<float*>(box->GetHandle().base);
-
-    std::vector<int> ids;
-    std::vector<ObjectInfoV1> objs;
-    // Adjust the right_idx to exclude [SEP] token at the end
-    const int left_idx  = 0;
-    const int right_idx = w - 1;
-
-    for (int i = 0; i < indexes.size(); i++) {
-        auto index      = indexes.at(i);
-        auto logit_data = logits_data + index * w;
-        auto box_data   = boxes_data + index * 4;
-
-        // Find first matching token (skip [CLS] at idx 0 and [SEP] at idx w-1)
-        // This matches the demo's behavior: only use the first token that exceeds text_threshold
-        ids.clear();
-        bool found_token = false;
-        // Start from left_idx + 1 to skip [CLS], end at right_idx to skip [SEP]
-        for (int j = left_idx + 1; j < right_idx; j++) {
-            float x = logit_data[j];  // Already sigmoid-transformed
-            if (x > text_threshold) {
-                ids.push_back(padding_input_ids.at(j));
-                found_token = true;
-                break;  // Only use the first matching token, like the demo
-            }
-        }
-
-        // Skip this box if no valid token found
-        if (!found_token || ids.empty()) {
-            continue;
-        }
-
-        float cx     = Clamp(*(box_data), 0.f, 1.f);
-        float cy     = Clamp(*(box_data + 1), 0.f, 1.f);
-        float width  = Clamp(*(box_data + 2), 0.f, 1.f);
-        float height = Clamp(*(box_data + 3), 0.f, 1.f);
-
-        auto size = input_sizes.at(0);
-        ObjectInfoV1 obj;
-        // Convert normalized box to pixel coordinates
-        // boxes format: [cx, cy, w, h] (normalized)
-        // Use precise conversion to match demo behavior
-        obj.x1 = size.width * (cx - width / 2.0f);
-        obj.x2 = size.width * (cx + width / 2.0f);
-        obj.y1 = size.height * (cy - height / 2.0f);
-        obj.y2 = size.height * (cy + height / 2.0f);
-
-        // Apply clamping to ensure coordinates stay within image bounds
-        obj.x1 = Clamp(obj.x1, 0.f, size.width - 1.f);
-        obj.x2 = Clamp(obj.x2, 0.f, size.width - 1.f);
-        obj.y1 = Clamp(obj.y1, 0.f, size.height - 1.f);
-        obj.y2 = Clamp(obj.y2, 0.f, size.height - 1.f);
-
-        ClassifyInfo info;
-        // Use the score calculated during filtering (max sigmoid value per box)
-        info.confidence = scores[i];
-
-        // Try to use SophonTokenizer's idx2token mapping first (for Sophon device)
-        // Otherwise fall back to TokenizerDecode (for CUDA device)
-        if (tokenizer_handle) {
-            SophonTokenizer* sophon_tokenizer = reinterpret_cast<SophonTokenizer*>(tokenizer_handle);
-            if (sophon_tokenizer && !ids.empty() &&
-                sophon_tokenizer->idx2token.find(ids[0]) != sophon_tokenizer->idx2token.end()) {
-                // Use idx2token mapping directly, matching demo behavior
-                info.class_name = sophon_tokenizer->idx2token[ids[0]];
-            } else {
-                // Fall back to TokenizerDecode for other tokenizer types
-                info.class_name = TokenizerDecode(tokenizer_handle, ids);
-            }
-        } else {
-            info.class_name = "unknown";
-        }
-
-        obj.infos.push_back(info);
-
-        objs.push_back(obj);
-    }
-
-    detects.push_back(objs);
     return COSMO_NN_OK;
 }
 

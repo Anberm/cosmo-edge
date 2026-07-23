@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <regex>
@@ -256,23 +257,59 @@ CameraServiceImpl::CameraServiceImpl() {
 }
 
 CameraServiceImpl::~CameraServiceImpl() {
+    CameraServiceImpl::Stop();
+    LOG_INFO("{}", "CameraServiceImpl Delete");
+}
+
+void CameraServiceImpl::Stop() {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+    if (stopping_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+
     if (task_monitor_task_id_ != kInvalidTaskId) {
-        timer_->Cancel(task_monitor_task_id_);
+        if (timer_) {
+            timer_->Cancel(task_monitor_task_id_);
+        }
         task_monitor_task_id_ = kInvalidTaskId;
     }
     if (mem_gc_task_id_ != kInvalidTaskId) {
-        timer_->Cancel(mem_gc_task_id_);
+        if (timer_) {
+            timer_->Cancel(mem_gc_task_id_);
+        }
         mem_gc_task_id_ = kInvalidTaskId;
     }
     if (timer_) {
         timer_->Destroy();
+        timer_.reset();
     }
-    for (auto& camera : cameras_) {
-        if (camera) {
-            camera->WaitForSwitchThread();
+
+    std::vector<CameraEntityPtr> cameras;
+    {
+        // Wait for a CRUD operation that was already in flight before taking
+        // ownership of every remaining camera. Add() observes stopping_ while
+        // holding the same mutex, so no camera can appear after this swap.
+        std::lock_guard<std::mutex> crud_lock(camera_crud_mtx_);
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        cameras.swap(cameras_);
+    }
+    for (auto& camera : cameras) {
+        if (!camera) {
+            continue;
+        }
+        try {
+            // DestroyCameraChannel joins the per-camera switch thread, releases
+            // all algorithm task units, then removes the channel task while the
+            // task service is still registered.
+            DestroyCameraChannel(camera);
+        } catch (const std::exception& error) {
+            // Stop() is also reused by the destructor, which must not terminate
+            // if an earlier partial initialization left a dependency absent.
+            LOG_ERRO("[{}] Camera shutdown failed: {}", camera->videoChannelId, error.what());
+        } catch (...) {
+            LOG_ERRO("[{}] Camera shutdown failed: unknown error", camera->videoChannelId);
         }
     }
-    LOG_INFO("{}", "CameraServiceImpl Delete");
 }
 
 // ============================================================
@@ -299,22 +336,34 @@ void CameraServiceImpl::InitCameraChannel(CameraEntityPtr camera) {
 }
 
 void CameraServiceImpl::DestroyCameraChannel(CameraEntityPtr camera) {
-    // 1. Wait for async switch thread to complete, preventing use-after-free
+    std::vector<CameraTaskUnitPtr> task_units;
+    {
+        // Prevent a caller that obtained the CameraEntity just before Delete()
+        // from scheduling work after the join below. Release command_mtx_
+        // before joining: command callers also wait for switch_thread_, and no
+        // worker being joined should ever need this admission lock.
+        std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+        camera->deleting_ = true;
+    }
+
+    // 1. Wait for async switch thread to complete, preventing use-after-free.
     camera->WaitForSwitchThread();
 
-    // 2. Explicitly stop/delete all algorithm tasks (do not rely on implicit vector destruction).
-    //    Must be done before channel task deletion to ensure AlgChannel refcount decrements correctly.
     {
+        // 2. Move task units out under the data lock. Destructing a unit stops
+        //    and joins task workers, so do that after releasing this lock.
         std::lock_guard<std::shared_mutex> lock(camera->task_mtx_);
+        task_units.reserve(camera->tasks_.size());
         for (auto& task : camera->tasks_) {
             if (task && task->task_) {
                 LOG_INFO("[{}] DestroyCameraChannel: Destroying algo task {}", camera->videoChannelId,
                          task->algorithm_code_);
-                task->task_.reset();
+                task_units.push_back(std::move(task->task_));
             }
         }
         camera->tasks_.clear();
     }
+    task_units.clear();
 
     // 3. Finally stop/delete the channel task (all algorithm tasks are cleaned up)
     ServiceRegistry::Instance().Get<ITaskLifecycle>().TaskStop(camera->channel_task_);
@@ -355,7 +404,9 @@ void CameraServiceImpl::LoadCameraTaskList(CameraEntityPtr camera) {
 // ============================================================
 
 util::ErrorEnum CameraServiceImpl::MakeCameraTask(const CameraEntityPtr& camera, CameraTaskPtr task) {
-    if (camera->tasks_.size() >= camera->max_task_count_) {
+    const bool is_existing_task =
+        std::find(camera->tasks_.begin(), camera->tasks_.end(), task) != camera->tasks_.end();
+    if (!is_existing_task && camera->tasks_.size() >= camera->max_task_count_) {
         return util::ErrorEnum::TaskTooMuch;
     }
     auto algData = ServiceRegistry::Instance().Get<IAlgorithmQuery>().GetAlgorithm(task->algorithm_code_);
@@ -440,9 +491,15 @@ void CameraServiceImpl::SwitchCameraTask(const CameraEntityPtr& camera, CameraTa
 }
 
 void CameraServiceImpl::SwitchCameraTaskAsync(CameraEntityPtr camera, CameraTaskPtr task) {
+    if (stopping_.load(std::memory_order_acquire)) {
+        return;
+    }
     std::lock_guard<std::mutex> lock(camera->switch_mtx_);
     if (camera->switch_thread_.joinable()) {
         camera->switch_thread_.join();
+    }
+    if (stopping_.load(std::memory_order_acquire)) {
+        return;
     }
 
     std::string channelId  = camera->videoChannelId;
@@ -478,6 +535,13 @@ void CameraServiceImpl::CameraTaskMonitor() {
 }
 
 void CameraServiceImpl::MonitorCameraEntity(const CameraEntityPtr& camera, bool isAuthed) {
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
+        return;
+    }
+    // Do not race the monitor's TaskStart/TaskStop/status writes against a user
+    // switch that is still completing in the background.
+    camera->WaitForSwitchThread();
     std::vector<CameraTaskPtr> snapshot;
     {
         std::shared_lock<std::shared_mutex> lock(camera->task_mtx_);
@@ -781,6 +845,10 @@ constexpr int kTaskMonitorIntervalMs = 5000;
 constexpr int kMemGcIntervalMs       = 60000 * 30;  // 30min GC interval
 
 void CameraServiceImpl::InitCameraEntities() {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+    if (stopping_.load(std::memory_order_acquire) || timer_) {
+        return;
+    }
     LOG_INFO("{}", "CameraServiceImpl InitCameraEntities");
     LoadConfig();
     timer_ = std::make_unique<PeriodicTimer>("CameraMngTimer");

@@ -23,7 +23,7 @@ struct MsgQueryTimeSend : public MsgSendHead {
         int enable{0};
         std::string server;
         int interval{60};
-        short port{123};
+        int port{123};
         friend void to_json(nlohmann::json& j, const Ntp& v);
         friend void from_json(const nlohmann::json& j, Ntp& v);
     };
@@ -53,7 +53,7 @@ void from_json(const nlohmann::json& j, MsgQueryTimeSend& v);
 struct MsgNTPDateRecv : public MsgRecvHead {
     int ntpEnable{-1};
     std::string ntpServer;
-    short ntpPort{123};
+    int ntpPort{123};
     int interval{60};
     int timeZoneId{75};
 };

@@ -15,6 +15,10 @@ ExternalProject_Add(
         -DOPENSSL_ROOT_DIR=${THIRDPARTY_INSTALL_PREFIX}/openssl
         -DBUILD_SHARED_LIBS=ON
         -DCURL_USE_LIBPSL=OFF
+        # Cross-compilation skips curl's host CA auto-detection. This path is
+        # resolved on the target at runtime and must be provided by the image.
+        -DCURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+        -DCURL_CA_PATH=none
         -DBUILD_LIBCURL_DOCS=OFF
         -DBUILD_MISC_DOCS=OFF
         -DENABLE_CURL_MANUAL=OFF

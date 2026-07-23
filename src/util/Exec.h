@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,12 @@ namespace cosmo::util {
 // (127) if argv is empty, fork()/pipe() fails, or the program cannot be exec'd.
 // This is the preferred entry point: arguments are never interpreted by a shell.
 int Exec(const std::vector<std::string>& argv, std::string& out);
+
+// Execute argv while capturing at most max_output_bytes from combined
+// stdout+stderr. If the child produces more output, it is terminated and
+// reaped, no more than max_output_bytes are appended to out, and 0x7F is
+// returned. The limit applies only to bytes appended by this invocation.
+int ExecWithOutputLimit(const std::vector<std::string>& argv, std::string& out, size_t max_output_bytes);
 
 // Same as above, but appends the captured output to `out` split into lines. If
 // remove_newline is true, each line's trailing '\n' is stripped.

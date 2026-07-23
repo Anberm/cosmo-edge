@@ -27,20 +27,23 @@ export class CosmoClient {
   /**
    * @param {object} opts
    * @param {string} opts.base   Device base URL, e.g. http://192.168.1.10:8080
-   * @param {string} opts.user   Login account.
-   * @param {string} opts.password Plain-text password (hashed internally).
+   * @param {string} [opts.user] Login account.
+   * @param {string} [opts.password] Plain-text password (hashed internally).
+   * @param {string} [opts.token] Existing short-lived device token.
    * @param {string} [opts.lang] Accept-Language header value, default zh-CN.
    */
-  constructor({ base, user, password, lang = 'zh-CN' }) {
+  constructor({ base, user, password, token = null, lang = 'zh-CN' }) {
     this.base = base.replace(/\/+$/, '');
     this.user = user;
     this.password = password;
     this.lang = lang;
-    this.mtk = null;
+    this.mtk = token;
   }
 
   /** Log in and store the mtk token. Returns the login response resData. */
   async login() {
+    if (this.mtk) return { mtk: this.mtk };
+    if (!this.user || !this.password) throw new Error('login requires user/password or an existing token');
     const res = await this._post('/login/dologin', {
       account: this.user,
       pwd: hashPassword(this.password),
@@ -71,14 +74,35 @@ export class CosmoClient {
    * The final chunk returns resData.filePath on the device.
    * @param {Buffer} chunkBuf  raw chunk bytes
    * @param {string} fileName  original file name (used for extension + naming)
-   * @param {object} meta { uploadId, chunkIndex, totalChunks, totalSize, chunkSize }
-   * @returns {Promise<object>} wire response; resData.filePath present on the last chunk
+   * @param {object} meta upload session and chunk metadata
+   * @returns {Promise<object>} wire response with the canonical resData.uploadId
    */
-  async uploadTempChunk(chunkBuf, fileName, { uploadId, chunkIndex, totalChunks, totalSize, chunkSize }) {
-    return this._postMultipart(
-      '/atomic/model/uploadTemp',
-      { file: { value: chunkBuf, filename: fileName }, uploadId, chunkIndex: String(chunkIndex), totalChunks: String(totalChunks), totalSize: String(totalSize), chunkSize: String(chunkSize) },
-    );
+  async uploadTempChunk(chunkBuf, fileName, {
+    uploadId,
+    clientRequestId,
+    purpose,
+    chunkIndex,
+    totalChunks,
+    totalSize,
+    chunkSize,
+  }) {
+    const fields = {
+      file: { value: chunkBuf, filename: fileName },
+      purpose,
+      clientRequestId,
+      chunkIndex: String(chunkIndex),
+      totalChunks: String(totalChunks),
+      totalSize: String(totalSize),
+      chunkSize: String(chunkSize),
+    };
+    // The first chunk creates the server-side session. Later chunks must use
+    // the opaque upload ID returned by that first response.
+    if (uploadId) fields.uploadId = uploadId;
+    return this._postMultipart('/atomic/model/uploadTemp', fields);
+  }
+
+  async cancelUpload(uploadId) {
+    return this._post('/atomic/model/cancelUpload', { uploadId });
   }
 
   /** Add an RTSP camera channel. */
@@ -129,7 +153,11 @@ export class CosmoClient {
 
   /** Batch switch tasks on/off. tasks = [{ id, channelId, algorithmId, enable }]. */
   async taskBatchSwitch(tasks) {
-    const res = await this._post('/Task/BatchSwitchTask', { tasks });
+    const wireTasks = tasks.map(({ enable, ...task }) => ({
+      ...task,
+      switch: enable,
+    }));
+    const res = await this._post('/Task/BatchSwitchTask', { tasks: wireTasks });
     return { failedList: res.resData?.failedList ?? [] };
   }
 
@@ -140,6 +168,19 @@ export class CosmoClient {
 
   async eventPage(payload) {
     return (await this._post('/event/page', payload)).resData;
+  }
+
+  /** Start or join a live preview and wait until its first frame reaches SRS. */
+  async requestLiveStream({ channelId, algorithmId = '' }) {
+    return (await this._post('/LiveStream/RequestLiveStream', { channelId, algorithmId })).resData?.stream;
+  }
+
+  async streamKeepAlive({ channelId, algorithmId = '' }) {
+    return this._post('/LiveStream/StreamKeepAlive', { channelId, algorithmId });
+  }
+
+  async streamStop({ channelId, algorithmId = '' }) {
+    return this._post('/LiveStream/StreamStop', { channelId, algorithmId });
   }
 
   /**

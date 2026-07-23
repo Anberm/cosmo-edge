@@ -214,10 +214,8 @@ void PTaskBase::UploadImage(std::vector<uint8_t>& data, const std::string& url, 
                 LOG_WARN("{} Upload {} Failed", taskId, fileName);
             } else {
                 LOG_INFO("{} Upload {} Success!", taskId, fileName);
+                remove(fileName.c_str());
             }
-
-            // Delete file after upload
-            remove(fileName.c_str());
         },
         nullptr, "jpg", fileName, bucket, url);
 }

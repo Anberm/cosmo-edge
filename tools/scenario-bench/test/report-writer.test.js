@@ -1,7 +1,38 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { ReportWriter } from '../src/report-writer.js';
+
+test('partial reports are checkpointed at a bounded interval', async () => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'scenario-report-writer-'));
+  let now = 1_000;
+  try {
+    const writer = new ReportWriter(output, { partialWriteIntervalMs: 30_000, now: () => now });
+    const first = await writer.writePartial({ samples: [1] });
+    assert.equal(first.skipped, false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(first.jsonPath, 'utf8')).samples, [1]);
+
+    now += 10_000;
+    const skipped = await writer.writePartial({ samples: [1, 2] });
+    assert.equal(skipped.skipped, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(first.jsonPath, 'utf8')).samples, [1]);
+
+    now += 20_000;
+    const checkpoint = await writer.writePartial({ samples: [1, 2, 3] });
+    assert.equal(checkpoint.skipped, false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(first.jsonPath, 'utf8')).samples, [1, 2, 3]);
+
+    now += 1;
+    const forced = await writer.writePartial({ samples: [1, 2, 3, 4] }, { force: true });
+    assert.equal(forced.skipped, false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(first.jsonPath, 'utf8')).samples, [1, 2, 3, 4]);
+  } finally {
+    fs.rmSync(output, { recursive: true, force: true });
+  }
+});
 
 test('capacity conclusion uses bottleneck step when an earlier step has a report failure', () => {
   const writer = new ReportWriter('.');
@@ -162,7 +193,7 @@ test('HTML rendering splits ramp-only bottleneck samples by observed channels', 
   assert.equal(summary.bottleneck.targetChannels, 16);
 
   const html = writer._renderHtml(runResult, stepSummaries, summary);
-  const routeTable = html.match(/<h2>路数结果<\/h2>[\s\S]*?<h2>分任务汇总<\/h2>/)[0];
+  const routeTable = html.match(/<h2>路数结果<\/h2>[\s\S]*?<h2>媒体与预览分阶段指标<\/h2>/)[0];
   assert.equal((routeTable.match(/<tr>/g) ?? []).length - 1, 7);
   assert.match(routeTable, /<td>7<\/td>[\s\S]*<td class="warn">STOPPED<\/td>/);
   assert.doesNotMatch(routeTable, /<td>16<\/td>/);

@@ -1,3 +1,5 @@
+#include <stdexcept>
+
 #include "catch_amalgamated.hpp"
 /*
  * test_http_lifecycle_service_impl.cc — HttpLifecycleServiceImpl unit tests
@@ -18,7 +20,11 @@ public:
     bool SupportsRoute(const std::string& /*uri*/) override {
         return false;
     }
-    bool DispatchRequest(const std::string& /*uri*/, const std::string& /*mtk*/, const std::string& /*body*/,
+    cosmo::RequestAdmission InspectRequest(cosmo::RequestDispatchContext& /*context*/,
+                                           bool /*require_known_route*/) override {
+        return cosmo::RequestAdmission::kRouteNotFound;
+    }
+    bool DispatchRequest(const cosmo::RequestDispatchContext& /*context*/, const std::string& /*body*/,
                          std::string& /*response*/) override {
         return false;
     }
@@ -33,11 +39,18 @@ TEST_CASE("HttpLifecycleServiceImpl: construction and destruction", "[http-lifec
 
 TEST_CASE("HttpLifecycleServiceImpl: StopHttpServer without Init is safe", "[http-lifecycle]") {
     HttpLifecycleServiceImpl sut([]() { return std::make_unique<StubDispatcher>(); });
+    REQUIRE_NOTHROW(sut.RequestHttpStop());
     REQUIRE_NOTHROW(sut.StopHttpServer());
 }
 
 TEST_CASE("HttpLifecycleServiceImpl: double StopHttpServer is safe", "[http-lifecycle]") {
     HttpLifecycleServiceImpl sut([]() { return std::make_unique<StubDispatcher>(); });
     REQUIRE_NOTHROW(sut.StopHttpServer());
+    REQUIRE_NOTHROW(sut.StopHttpServer());
+}
+
+TEST_CASE("HttpLifecycleServiceImpl: initialization failure is reported", "[http-lifecycle]") {
+    HttpLifecycleServiceImpl sut([]() { return std::unique_ptr<cosmo::IRequestDispatcher>{}; });
+    REQUIRE_THROWS_AS(sut.InitHttpServer("127.0.0.1", 0), std::runtime_error);
     REQUIRE_NOTHROW(sut.StopHttpServer());
 }

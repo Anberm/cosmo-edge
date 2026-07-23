@@ -188,7 +188,7 @@ bool AlgMp4Record::RecodeFrame(VideoPacketPtr frame) {
 
             // Strip the 00 00 00 01 start-code prefix
             size_t moved_size = 0;
-            auto frame_data   = media::RemoveHFrameSeparator(data + offset, moved_size);
+            auto frame_data   = media::RemoveHFrameSeparator(data + offset, sz, moved_size);
             if (moved_size >= sz) {
                 LOG_WARN("[MP4 TASK] {} {} Frame:{} size:{} offset:{} sz:{} < movedSize:{} ", task_id_,
                          event_name_, seq, size, offset, sz, moved_size);
@@ -197,7 +197,7 @@ bool AlgMp4Record::RecodeFrame(VideoPacketPtr frame) {
             const size_t frame_size = sz - moved_size;
 
             // Dispatch by NALU type
-            switch (media::GetFrameType(source_type_, data + offset)) {
+            switch (media::GetFrameType(source_type_, data + offset, sz)) {
                 case media::HFrameType::VPS:
                     HandleVps(frame_data, frame_size, seq, is_iframe);
                     break;
@@ -257,7 +257,7 @@ std::string AlgMp4Record::GetEventName() {
 
 std::vector<uint8_t> AlgMp4Record::TransformFrame(const uint8_t* data, size_t size) {
     size_t movedHead = 0;
-    auto dataBeg     = media::RemoveHFrameSeparator(data, movedHead);
+    auto dataBeg     = media::RemoveHFrameSeparator(data, size, movedHead);
     if (nullptr == dataBeg) {
         LOG_WARN("[MP4 TASK] {} {} FindHeard Failed, data Size:{}.", task_id_, event_name_, size);
         return {};

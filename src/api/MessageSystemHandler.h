@@ -13,6 +13,7 @@
 #include "service/system/dto/SystemNetworkDto.h"
 #include "service/system/dto/SystemParamDto.h"
 #include "service/system/dto/SystemTimeDto.h"
+#include "util/IRequestDispatcher.h"
 
 namespace cosmo::service {
 class IConfigReadService;
@@ -68,6 +69,8 @@ public:
     System::MsgExportFileSend Handle(System::MsgExportFileRecv&& data, std::error_condition& errc);  //
 
     System::MsgUpgradeSend Handle(System::MsgUpgradeRecv&& data, std::error_condition& errc);  //
+    System::MsgUpgradeSend Handle(System::MsgUpgradeRecv&& data, const RequestDispatchContext& context,
+                                  std::error_condition& errc);
 
     System::MsgQuerySystemLogoSend Handle(System::MsgQuerySystemLogoRecv&& data,
                                           std::error_condition& errc);                                     //

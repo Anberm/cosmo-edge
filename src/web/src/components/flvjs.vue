@@ -65,6 +65,9 @@ const isShowLoading = ref(false)
 const flvRetryCount = ref(0)
 const flvRetryTimer = ref(null)
 let _onCanPlay = null
+let activeViewerChannelId = null
+let requestGeneration = 0
+let isUnmounted = false
 
 // Computed
 const streamType = computed(() => {
@@ -246,11 +249,39 @@ const destroyVideo = () => {
   }
 }
 
+const releaseViewer = async (channelId) => {
+  if (channelId === null || channelId === undefined || channelId === '') {
+    return true
+  }
+  try {
+    await proxy.$API.boxStreamStop({
+      channelId,
+      algorithmId: ''
+    })
+    return true
+  } catch (error) {
+    console.warn('[Video] Failed to release backend viewer:', channelId, error)
+    return false
+  }
+}
+
+const stopRequest = async () => {
+  const channelId = activeViewerChannelId
+  activeViewerChannelId = null
+  const released = await releaseViewer(channelId)
+  if (!released && activeViewerChannelId === null) {
+    activeViewerChannelId = channelId
+  }
+  return released
+}
+
 const stop = () => {
+  requestGeneration++
   isShowLoading.value = false
   isShowStopPreview.value = true
   clearInterval(timers.value)
   destroyVideo()
+  void stopRequest()
 }
 
 const stopPreview = () => {
@@ -259,43 +290,52 @@ const stopPreview = () => {
 }
 
 // 视频预览
-const getrequestLiveStream = () => {
-  let params = {
-    channelId: props.channelId
+const getrequestLiveStream = async () => {
+  const generation = ++requestGeneration
+  const requestedChannelId = props.channelId
+
+  if (!(await stopRequest()) || isUnmounted || generation !== requestGeneration || !requestedChannelId) {
+    return
   }
 
-  proxy.$API
-    .boxRequestLiveStream(params)
-    .then((res) => {
-      if (res) {
-        const stream = res.resData.stream
-        const domain = window.location.hostname
-        const streamScheme = window.location.protocol === 'https:' ? 'https' : 'http'
-        playbackProtocol.value = stream.protocol || 'httpflv'
-        fallbackFlvUrl.value = stream.flvUrl
-          ? `${streamScheme}://${domain}:${stream.httpPort || 8080}${stream.flvUrl}`
-          : stream.url
-        sourceUrl.value = stream.protocol === 'webrtc'
-          ? `${streamScheme}://${domain}:${stream.rtcApiPort || stream.port || 1985}${stream.webrtcUrl || stream.url}`
-          : (stream.flvUrl || stream.url).endsWith('.flv')
-            ? `${streamScheme}://${domain}:${stream.httpPort || stream.port || 8080}${stream.flvUrl || stream.url}`
-            : stream.url
-        console.log('视频预览地址==>', sourceUrl.value)
-        sendHeartBeat(
-          stream.keepAliveInterval * 1000,
-          stream.keepAliveUrl
-        ) // 维持心跳
-      }
-    })
-    .catch(() => {
-      // loading.value = false
-    })
+  try {
+    const res = await proxy.$API.boxRequestLiveStream({ channelId: requestedChannelId })
+    if (!res) {
+      return
+    }
+    if (isUnmounted || generation !== requestGeneration) {
+      await releaseViewer(requestedChannelId)
+      return
+    }
+
+    activeViewerChannelId = requestedChannelId
+    const stream = res.resData.stream
+    const domain = window.location.hostname
+    const streamScheme = window.location.protocol === 'https:' ? 'https' : 'http'
+    playbackProtocol.value = stream.protocol || 'httpflv'
+    fallbackFlvUrl.value = stream.flvUrl
+      ? `${streamScheme}://${domain}:${stream.httpPort || 8080}${stream.flvUrl}`
+      : stream.url
+    sourceUrl.value = stream.protocol === 'webrtc'
+      ? `${streamScheme}://${domain}:${stream.rtcApiPort || stream.port || 1985}${stream.webrtcUrl || stream.url}`
+      : (stream.flvUrl || stream.url).endsWith('.flv')
+        ? `${streamScheme}://${domain}:${stream.httpPort || stream.port || 8080}${stream.flvUrl || stream.url}`
+        : stream.url
+    console.log('视频预览地址==>', sourceUrl.value)
+    sendHeartBeat(stream.keepAliveInterval * 1000, stream.keepAliveUrl)
+  } catch (error) {
+    console.warn('[Video] Failed to request live stream:', requestedChannelId, error)
+  }
 }
 
 // 视频心跳接口
 const getstreamkeepalive = () => {
+  if (activeViewerChannelId === null) {
+    return
+  }
   const param = {
-    channelId: props.channelId
+    channelId: activeViewerChannelId,
+    algorithmId: ''
     // algorithmId: algorithmId.value
     // streamType: streamType.value
   }
@@ -387,6 +427,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  isUnmounted = true
   stop()
   document.onvisibilitychange = null
 })

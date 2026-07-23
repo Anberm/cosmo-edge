@@ -22,7 +22,7 @@
 #include "bmruntime_interface.h"
 #endif
 
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_ONNX_BACKEND
 #include "onnxruntime_cxx_api.h"
 #endif
 
@@ -189,7 +189,7 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
 
     return info;
 }
-#elif defined(COSMO_NN_USE_CPU_BACKEND)
+#elif defined(COSMO_NN_USE_ONNX_BACKEND)
 
 static int ConvertOnnxDataType(ONNXTensorElementDataType onnxType) {
     switch (onnxType) {
@@ -301,7 +301,7 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
     LOG_INFO("{}", "[BmodelTool] No inference backend enabled, returning SDK_NOT_AVAILABLE");
     return info;
 }
-#endif  // COSMO_NN_USE_SOPHON_BACKEND / COSMO_NN_USE_CPU_BACKEND
+#endif  // COSMO_NN_USE_SOPHON_BACKEND / COSMO_NN_USE_ONNX_BACKEND
 
 std::string BmodelTool::ConvertToNn(const std::vector<std::string>& bmodelPaths,
                                     const std::string& outputPath) {

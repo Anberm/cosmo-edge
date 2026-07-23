@@ -6,6 +6,7 @@
 #include "flow/face/PersonImport.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/face/impl/FaceFeatureExtractor.h"
+#include "util/Exception.h"
 #include "util/Log.h"
 
 namespace cosmo::service {
@@ -14,14 +15,43 @@ FaceLibServiceImpl::FaceLibServiceImpl()
     : person_import_(std::make_unique<cosmo::PersonImport>()),
       face_manager_(std::make_unique<cosmo::FaceManager>()) {}
 
-cosmo::FaceFeatureExtractor& FaceLibServiceImpl::EnsureFaceFeature() {
-    if (!face_feature_) {
-        face_feature_ = std::make_unique<cosmo::FaceFeatureExtractor>();
+FaceLibServiceImpl::OperationGuard::OperationGuard(FaceLibServiceImpl& owner) : owner_(&owner) {
+    std::lock_guard<std::mutex> lock(owner.operation_mutex_);
+    if (owner.stopped_) {
+        owner_ = nullptr;
+        return;
     }
-    return *face_feature_;
+    ++owner.active_operations_;
 }
 
-FaceLibServiceImpl::~FaceLibServiceImpl() = default;
+FaceLibServiceImpl::OperationGuard::~OperationGuard() {
+    if (owner_ != nullptr) {
+        owner_->EndOperation();
+    }
+}
+
+FaceLibServiceImpl::OperationGuard::operator bool() const noexcept {
+    return owner_ != nullptr;
+}
+
+void FaceLibServiceImpl::EndOperation() noexcept {
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    if (--active_operations_ == 0) {
+        operation_cv_.notify_all();
+    }
+}
+
+std::shared_ptr<cosmo::FaceFeatureExtractor> FaceLibServiceImpl::EnsureFaceFeature() {
+    std::lock_guard<std::mutex> lock(face_feature_mutex_);
+    if (!face_feature_) {
+        face_feature_ = std::make_shared<cosmo::FaceFeatureExtractor>();
+    }
+    return face_feature_;
+}
+
+FaceLibServiceImpl::~FaceLibServiceImpl() {
+    StopImpl();
+}
 
 // ---- FaceManager: face lib management ----
 std::vector<cosmo::FaceLibPtr> FaceLibServiceImpl::GetAllFaceLibs() {
@@ -154,20 +184,36 @@ cosmo::FacePicPtr FaceLibServiceImpl::CreateFacePic(const std::string& id, const
 cosmo::util::ErrorEnum FaceLibServiceImpl::ExtractFaceFeature(VideoFramePtr& image, float quality,
                                                               cosmo::AiFeature& feature,
                                                               VideoFramePtr& cutImage) {
-    auto ec = EnsureFaceFeature().HandFeatureImage(image, quality, feature, cutImage);
+    OperationGuard operation(*this);
+    if (!operation) {
+        return cosmo::util::ErrorEnum::ServiceNotInit;
+    }
+    auto ec = EnsureFaceFeature()->HandFeatureImage(image, quality, feature, cutImage);
     return static_cast<cosmo::util::ErrorEnum>(ec.value());
 }
 
 float FaceLibServiceImpl::CalculateFaceScore(const cosmo::AiFeature& f1, const cosmo::AiFeature& f2) {
-    return EnsureFaceFeature().CalculateScore(f1, f2);
+    OperationGuard operation(*this);
+    if (!operation) {
+        return 0.0F;
+    }
+    return EnsureFaceFeature()->CalculateScore(f1, f2);
 }
 
 float FaceLibServiceImpl::GetFaceScore(float distance) {
-    return EnsureFaceFeature().GetScore(distance);
+    OperationGuard operation(*this);
+    if (!operation) {
+        return 0.0F;
+    }
+    return EnsureFaceFeature()->GetScore(distance);
 }
 
 bool FaceLibServiceImpl::FaceCompare(std::vector<std::string> sets, cosmo::AiFeature& feature,
                                      cosmo::AiDetectMatchHighScoreInfo& info, float param_limit_score) {
+    OperationGuard operation(*this);
+    if (!operation) {
+        return false;
+    }
     return face_manager_->FaceCompare(std::move(sets), feature, info, param_limit_score);
 }
 
@@ -176,15 +222,61 @@ void FaceLibServiceImpl::LoadFaceData() {
 }
 
 void FaceLibServiceImpl::ReleaseFaceModels() {
-    if (face_feature_) {
+    OperationGuard operation(*this);
+    if (!operation) {
+        return;
+    }
+    std::shared_ptr<cosmo::FaceFeatureExtractor> feature;
+    {
+        std::lock_guard<std::mutex> lock(face_feature_mutex_);
+        feature = std::move(face_feature_);
+    }
+    if (feature) {
         LOG_INFO("{}", "FaceLibServiceImpl: releasing face feature models to free VRAM");
-        face_feature_.reset();
+        feature->Stop();
     }
 }
 
 // ---- Person import ----
+void FaceLibServiceImpl::Stop() {
+    StopImpl();
+}
+
+void FaceLibServiceImpl::StopImpl() {
+    std::lock_guard<std::mutex> stop_lock(stop_mutex_);
+    {
+        std::lock_guard<std::mutex> lock(operation_mutex_);
+        stopped_ = true;
+    }
+
+    // PersonImport may call IFaceFeature while completing. Do not hold the
+    // operation mutex while waiting for it.
+    person_import_->Stop();
+
+    {
+        std::unique_lock<std::mutex> lock(operation_mutex_);
+        operation_cv_.wait(lock, [this]() { return active_operations_ == 0; });
+    }
+
+    std::shared_ptr<cosmo::FaceFeatureExtractor> feature;
+    {
+        std::lock_guard<std::mutex> lock(face_feature_mutex_);
+        feature = std::move(face_feature_);
+    }
+    if (feature) {
+        feature->Stop();
+    }
+}
+
 void FaceLibServiceImpl::ImportFile(const std::string& filePath, const std::string& faceLibId) {
-    person_import_->ImportFile(filePath, faceLibId);
+    OperationGuard operation(*this);
+    if (!operation) {
+        throw util::ErrorMessage(util::ErrorEnum::ServiceNotInit, "Face service is shutting down");
+    }
+    if (!person_import_->ImportFile(filePath, faceLibId)) {
+        throw util::ErrorMessage(util::ErrorEnum::ResourceLimit,
+                                 "A person import operation is already in progress");
+    }
 }
 
 std::pair<int, int> FaceLibServiceImpl::GetImportStatus() const {

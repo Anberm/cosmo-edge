@@ -3,6 +3,8 @@
 
 #include <malloc.h>
 
+#include <algorithm>
+
 #include "api/MessageSystemHandler.h"
 #include "service/system/IConfigNetworkService.h"
 #include "service/system/IConfigReadService.h"
@@ -50,7 +52,7 @@ System::MsgSetSystemLogoSend MessageSystemHandler::Handle(System::MsgSetSystemLo
         errc = util::ErrorEnum::Failed;
         return result;
     }
-    config_write_.SetSystemLogo(data.systemName, data.logoFileType, logoImg, data.bigScreenName);
+    errc = config_write_.SetSystemLogo(data.systemName, data.logoFileType, logoImg, data.bigScreenName);
     return result;
 }
 
@@ -80,9 +82,9 @@ System::MsgQueryDebugModeSend MessageSystemHandler::Handle(System::MsgQueryDebug
 
 // Mask action setting
 System::MsgModifyShiledActionsSend MessageSystemHandler::Handle(System::MsgModifyShiledActionsRecv&& data,
-                                                                std::error_condition& /*errc*/) {
+                                                                std::error_condition& errc) {
     System::MsgModifyShiledActionsSend retData{};
-    config_write_.SetShieldedActions(data.shiledActions);
+    errc = config_write_.SetShieldedActions(data.shiledActions);
     return retData;
 }
 
@@ -113,9 +115,9 @@ System::MsgQueryPopUpParamSend MessageSystemHandler::Handle(System::MsgQueryPopU
 
 // Popup parameter setting
 System::MsgSetPopUpParamSend MessageSystemHandler::Handle(System::MsgSetPopUpParamRecv&& data,
-                                                          std::error_condition& /*errc*/) {
+                                                          std::error_condition& errc) {
     System::MsgSetPopUpParamSend result{};
-    config_write_.SetPopUpParam(data.popUpSwitch, data.audioPlay, data.popUpDuration);
+    errc = config_write_.SetPopUpParam(data.popUpSwitch, data.audioPlay, data.popUpDuration);
     return result;
 }
 
@@ -180,9 +182,9 @@ System::MsgQueryRunModeParamSend MessageSystemHandler::Handle(System::MsgQueryRu
 
 // Running mode setting
 System::MsgModifyRunModeParamSend MessageSystemHandler::Handle(System::MsgModifyRunModeParamRecv&& data,
-                                                               std::error_condition& /*errc*/) {
+                                                               std::error_condition& errc) {
     System::MsgModifyRunModeParamSend result{};
-    config_write_.SetRunMode(data.runMode);
+    errc = config_write_.SetRunMode(data.runMode);
     return result;
 }
 
@@ -200,9 +202,9 @@ System::MsgQueryIotNetworkParamSend MessageSystemHandler::Handle(
 
 // Network mode parameter setting
 System::MsgModifyIotNetworkParamSend MessageSystemHandler::Handle(System::MsgModifyIotNetworkParamRecv&& data,
-                                                                  std::error_condition& /*errc*/) {
+                                                                  std::error_condition& errc) {
     System::MsgModifyIotNetworkParamSend result{};
-    config_network_.SetIotNetworkParam(data.httpUrl, data.mqttIp, data.mqttPort);
+    errc = config_network_.SetIotNetworkParam(data.httpUrl, data.mqttIp, data.mqttPort);
     return result;
 }
 
@@ -230,9 +232,9 @@ System::MsgQueryResourceLimitParamSend MessageSystemHandler::Handle(
 
 // Resource limit setting
 System::MsgSetResourceLimitParamSend MessageSystemHandler::Handle(System::MsgSetResourceLimitParamRecv&& data,
-                                                                  std::error_condition& /*errc*/) {
+                                                                  std::error_condition& errc) {
     System::MsgSetResourceLimitParamSend result{};
-    config_write_.SetResourceLimit(data.enable);
+    errc = config_write_.SetResourceLimit(data.enable);
     return result;
 }
 
@@ -254,9 +256,23 @@ System::MsgDebugSystemMemSend MessageSystemHandler::Handle(System::MsgDebugSyste
 }
 
 // Dictionary query
-System::MsgDictSend MessageSystemHandler::Handle(System::MsgDictRecv&& data, std::error_condition& /*errc*/) {
+System::MsgDictSend MessageSystemHandler::Handle(System::MsgDictRecv&& data, std::error_condition& errc) {
     System::MsgDictSend result{};
+    constexpr size_t kMaxDictionaryKeys     = 32;
+    constexpr size_t kMaxDictionaryKeyBytes = 64;
+    if (data.keys.size() > kMaxDictionaryKeys) {
+        errc = util::ErrorEnum::InvalidParam;
+        return result;
+    }
     for (auto& key : data.keys) {
+        if (key.empty() || key.size() > kMaxDictionaryKeyBytes ||
+            std::any_of(key.begin(), key.end(), [](char character) {
+                const auto byte = static_cast<unsigned char>(character);
+                return byte < 0x20 || byte == 0x7f;
+            })) {
+            errc = util::ErrorEnum::InvalidParam;
+            return {};
+        }
         auto lowerKey = util::ToLower(key);
         System::MsgDictUnit unit;
         unit.key = key;

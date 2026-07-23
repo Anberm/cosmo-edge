@@ -14,7 +14,6 @@
 #include "service/media/IVideoFrameOSD.h"
 #include "service/media/IVideoFrameTransform.h"
 #include "service/path/IFileService.h"
-#include "service/system/IConfigReadService.h"
 #include "util/CipherUtil.h"
 #include "util/FileUtil.h"
 #include "util/Keys.h"
@@ -30,7 +29,7 @@ static constexpr const char* kTag = "TaskFaceAlarm ";
 namespace cosmo {
 TaskFaceAlarm::~TaskFaceAlarm() {
     LOG_INFO("{}Task:{} Stop", kTag, m_taskId);
-    TaskFaceAlarm::Stop();
+    AlgActionBase::Stop();
     LOG_INFO("{}Task:{} Delete", kTag, m_taskId);
 }
 
@@ -39,23 +38,16 @@ TaskFaceAlarm::TaskFaceAlarm(const std::string& channelId, const std::string& ta
     : AlgActionBase(AlgActionType::AlgActionBATaskFaceAlarm, action, channelId, taskId),
       m_taskId(taskId),
       m_algId(algId),
-      m_algName(algName),
-      m_msgQueue(taskId + "-" + action.actionName + "-" + action.flowActionId) {
-    m_actionStatus = util::ErrorEnum::ActionReady;
-
+      m_algName(algName) {
     LOG_INFO("{}Task:{} Init ", kTag, m_taskId);
 }
 
 void TaskFaceAlarm::QueueStatus(std::vector<AlgActionDataQueueStatus>& queStatus, unsigned int durationSec) {
-    AlgActionDataQueueStatus status;
-    if (m_msgQueue.Status(status.queueStatus, durationSec)) {
-        status.actionId = GetActionId();
-        status.taskIds.push_back(m_taskId);
-        status.actionStatus = m_actionStatus;
-        status.alarmCount   = m_alarmCount;
-        queStatus.push_back(status);
+    const auto previous_size = queStatus.size();
+    AlgActionBase::QueueStatus(queStatus, durationSec);
+    if (queStatus.size() > previous_size) {
+        queStatus.back().alarmCount = m_alarmCount.load(std::memory_order_relaxed);
     }
-    return;
 }
 
 void TaskFaceAlarm::ActionInfo(std::vector<ActionRuntimeInfo>& actionInfos) {
@@ -153,34 +145,13 @@ bool TaskFaceAlarm::SetArea(const std::string& /*channelId*/, const std::string&
     return true;
 }
 
-void TaskFaceAlarm::Start() {
-    if (!m_running) {
-        m_running = true;
-        if (!start()) {
-            m_running      = false;
-            m_actionStatus = util::ErrorEnum::ActionStop;
-            LOG_ERRO("{}Task:{} Start failed: previous thread still joinable", kTag, m_taskId);
-            return;
-        }
-        m_actionStatus = util::ErrorEnum::ActionStart;
-    }
-}
-
-void TaskFaceAlarm::Stop() {
-    if (m_running) {
-        m_running = false;
-        stop();
-        m_actionStatus = util::ErrorEnum::ActionStop;
-    }
-}
-
 void TaskFaceAlarm::HandFrame(AlgDataPtr algData) {
     if (!algData) {
         m_filterFrames += 1;
         if (0 == m_filterFrames % 100) {
             LOG_WARN("{}[{}] Filter {} Frames", kTag, m_taskId, m_filterFrames);
         }
-        m_actionStatus = util::ErrorEnum::FlowDataInvalid;
+        action_status = util::ErrorEnum::FlowDataInvalid;
         return;
     }
     if (!algData->taskDataAlarm.alarmData) {
@@ -192,24 +163,6 @@ void TaskFaceAlarm::HandFrame(AlgDataPtr algData) {
     LOG_INFO("{}[{}] Handle {} Frames", kTag, m_taskId, m_handleFrames);
 
     return;
-}
-
-void TaskFaceAlarm::run() {
-    while (m_running) {
-        if (m_msgQueue.RestSize() > 0) {
-            auto decData = m_msgQueue.Pop();
-            if (decData) {
-                if (service::ServiceRegistry::Instance().Get<service::IConfigReadService>().GetActionSwitch(
-                        GetActionId())) {
-                    HandFrame(decData);
-                }
-            }
-        } else {
-            std::this_thread::sleep_for(timing::kMediumPollInterval);
-        }
-    }
-
-    LOG_INFO("[{}] THREAD [{}] Stop ", m_taskId, Name());
 }
 
 bool TaskFaceAlarm::FillAlarmData(AlgDataPtr algData) {
@@ -236,8 +189,8 @@ bool TaskFaceAlarm::FillAlarmData(AlgDataPtr algData) {
 
         LOG_INFO("{}[{}] Alarm Push {}/{} Area:{}", kTag, m_taskId, eventData.messageId, eventData.recordId,
                  alarmUnit.areaId);
-        m_actionStatus = util::ErrorEnum::Success;
-        m_alarmCount += 1;
+        action_status = util::ErrorEnum::Success;
+        m_alarmCount.fetch_add(1, std::memory_order_relaxed);
         std::this_thread::sleep_for(
             timing::kOneSecondInterval);  // Sleep first; sync feature upload needed later
         EventFaceRecord(eventData);
@@ -275,7 +228,7 @@ void TaskFaceAlarm::HandPicture(CMsgFaceEventReq& msg, AlgDataPtr algData, DataA
     }
     LOG_INFO("{}.{} {}x{}  {}x{} BoxCount:{}", alarmUnit.box.x, alarmUnit.box.y, alarmUnit.box.width,
              alarmUnit.box.height, cropBox.width, cropBox.height, alarmUnit.boxs.size());
-    if (cropBox.width * cropBox.height > 0) {
+    if (!cropBox.empty()) {
         auto cutImg =
             service::ServiceRegistry::Instance().Get<service::IVideoFrameTransform>().Crop(origImg, cropBox);
         auto cutJpeg =

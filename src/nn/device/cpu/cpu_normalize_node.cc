@@ -1,4 +1,4 @@
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
 
 #include "nn/device/cpu/cpu_normalize_node.h"
 
@@ -138,4 +138,4 @@ Status CpuNormalizeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob
 
 }  // namespace cosmo::nn
 
-#endif  // COSMO_NN_USE_CPU_BACKEND
+#endif  // COSMO_NN_USE_HOST_BACKEND

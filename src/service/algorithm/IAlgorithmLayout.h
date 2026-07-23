@@ -27,7 +27,7 @@ public:
 
     /// Retrieve detailed layout configuration by ID.
     /// @param id        Layout ID.
-    /// @param filePath  Path to the algorithm directory for resolution.
+    /// @param filePath  Managed algorithm or algorithm-template directory (empty selects algorithm).
     /// @param outResult [out] Populated layout detail.
     /// @return ErrorEnum::kSuccess on success.
     virtual cosmo::util::ErrorEnum GetLayoutDetail(const std::string& id, const std::string& filePath,
@@ -36,7 +36,7 @@ public:
     /// List all layouts matching the given filters.
     /// @param supplier  Supplier name filter (empty for all).
     /// @param usage     Usage type filter.
-    /// @param filePath  Path to the algorithm directory.
+    /// @param filePath  Managed algorithm or algorithm-template directory (empty selects algorithm).
     /// @param outResult [out] Populated layout list.
     /// @return ErrorEnum::kSuccess on success.
     virtual cosmo::util::ErrorEnum GetLayoutList(const std::string& supplier, int usage,
@@ -74,7 +74,7 @@ public:
 
     /// List available atomic actions for a given usage type.
     /// @param actionUsage Usage type code.
-    /// @param filePath    Path to the actions directory.
+    /// @param filePath    Managed actions.json path (empty selects the managed file).
     /// @param outResult   [out] Populated action list.
     /// @return ErrorEnum::kSuccess on success.
     virtual cosmo::util::ErrorEnum GetAtomicActionList(int actionUsage, const std::string& filePath,

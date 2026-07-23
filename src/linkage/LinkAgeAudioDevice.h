@@ -15,8 +15,8 @@ constexpr bool IsValidOperation(int value) {
            static_cast<LinkAgeAudioDeviceOperation>(value) <= LinkAgeAudioDeviceOperation::kTextPlay;
 }
 enum class LinkAgeAudioDeviceTone {
-    kMale   = 0,
-    kFemale = 1,
+    kMale   = 1,
+    kFemale = 2,
 };
 constexpr bool IsValidTone(int value) {
     return static_cast<LinkAgeAudioDeviceTone>(value) >= LinkAgeAudioDeviceTone::kMale &&
@@ -54,9 +54,9 @@ constexpr bool IsValidTimes(int value) {
     return value >= kAudioDeviceTimesMin && value <= kAudioDeviceTimesMax;
 }
 
-constexpr int kAudioDeviceGapDefault = 60;
-constexpr int kAudioDeviceGapMin     = 60;
-constexpr int kAudioDeviceGapMax     = 600;
+constexpr int kAudioDeviceGapDefault = 2;
+constexpr int kAudioDeviceGapMin     = 1;
+constexpr int kAudioDeviceGapMax     = 60;
 constexpr bool IsValidGap(int value) {
     return value >= kAudioDeviceGapMin && value <= kAudioDeviceGapMax;
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <mutex>
 
 #ifdef __cplusplus
@@ -37,8 +38,8 @@ namespace media {
         bool AttachOutputFrame(bm_image* image, BMVidFrame* frame, VideoFramePtr frame_ptr);
 
     private:
-        bm_handle_t bm_handle_;
-        BMVidCodHandle code_handle_;
+        bm_handle_t bm_handle_      = nullptr;
+        BMVidCodHandle code_handle_ = nullptr;
 
         BmVpuDecStreamFormat stream_format_;
 
@@ -46,9 +47,12 @@ namespace media {
 
         size_t cache_size_ = 5;
 
-        std::mutex close_mutex_;
-        bool stop_   = true;
-        bool opened_ = false;
+        unsigned int output_warmup_attempts_remaining_ = 0;
+        int64_t last_input_frame_index_                = -1;
+
+        std::mutex operation_mutex_;
+        std::atomic_bool stop_{true};
+        std::atomic_bool opened_{false};
     };
 
 }  // namespace media

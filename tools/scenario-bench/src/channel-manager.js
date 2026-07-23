@@ -15,6 +15,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 
+const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+
 export class ChannelManager {
   /**
    * @param {import('./cosmo-client.js').CosmoClient} client
@@ -81,26 +83,24 @@ export class ChannelManager {
       // Two ways to source a local video:
       //   - file:     a path on THIS machine → uploaded to the device temp store first.
       //   - filePath: a path already staged on the device → used directly (skip upload).
-      let filePath;
-      let contentLength;
+      let videoPayload;
       if (src.file) {
-        // NOTE: AddVideo CONSUMES (moves) the temp file, so the same uploaded
-        // filePath cannot be reused across channels — each channel needs its own
-        // upload. See MessageCameraHandler / CameraDeviceCrud (code 17 文件不存在).
-        filePath = await this._uploadLocalVideo(src);
-        contentLength = this._localSize(src);
+        // AddVideo consumes the upload session, so every channel needs its own
+        // upload even when all channels use the same local source.
+        videoPayload = { uploadId: await this._uploadLocalVideo(src) };
       } else if (src.filePath) {
-        filePath = src.filePath;
-        contentLength = Number(src.contentLength ?? 0);
+        // Compatibility path for a caller-managed device-side fixture.
+        videoPayload = {
+          filePath: src.filePath,
+          contentLength: String(Number(src.contentLength ?? 0)),
+        };
       } else {
         throw new Error(`scenario.yml channels: local source must define 'file' or 'filePath'`);
       }
-      // Backend (MessageCameraHandler.cc:44) reads only {filePath, channelName, contentLength}
-      // from AddVideo; channelCode is NOT consumed there, so we omit it.
       const res = await this.client.cameraAddVideo({
         channelName: this._channelNameForSource(name, src),
-        filePath,
-        contentLength: String(contentLength),
+        channelCode: code,
+        ...videoPayload,
       });
       const id = res?.resData?.id;
       if (!id) throw new Error(`AddVideo for ${code} returned no id`);
@@ -130,51 +130,64 @@ export class ChannelManager {
 
   /**
    * Upload a local video file to the device temp store in chunks, returning the
-   * device-side filePath to pass to AddVideo. Mirrors the frontend
-   * uploadVideoByChunk (CHUNK_SIZE = 32 MiB). The returned filePath comes from the
-   * LAST chunk's response (when all chunks are merged).
+   * canonical upload ID to pass to AddVideo. Mirrors the frontend
+   * uploadFileInChunks (CHUNK_SIZE = 8 MiB). Chunk zero creates a server-side
+   * session; later chunks use the returned opaque upload ID. The completed
+   * session is consumed by Camera/AddVideo.
    */
   async _uploadLocalVideo(src) {
     const localPath = src.file;
     if (!localPath) throw new Error(`scenario.yml channels: local source missing 'file' path`);
     const stat = fs.statSync(localPath);
     const totalSize = stat.size;
-    const CHUNK_SIZE = 32 * 1024 * 1024;
-    const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE));
-    const uploadId = `bench_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const totalChunks = Math.max(1, Math.ceil(totalSize / UPLOAD_CHUNK_SIZE));
+    const clientRequestId = `bench_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const fileName = path.basename(localPath);
     const fd = fs.openSync(localPath, 'r');
-    let filePath = null;
+    let uploadId = '';
     try {
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const start = chunkIndex * CHUNK_SIZE;
-        const chunkSize = Math.min(CHUNK_SIZE, totalSize - start);
+        const start = chunkIndex * UPLOAD_CHUNK_SIZE;
+        const chunkSize = Math.min(UPLOAD_CHUNK_SIZE, totalSize - start);
         const chunkBuf = Buffer.alloc(chunkSize);
         fs.readSync(fd, chunkBuf, 0, chunkSize, start);
         const res = await this.client.uploadTempChunk(chunkBuf, fileName, {
           uploadId,
+          clientRequestId,
+          purpose: 'video',
           chunkIndex,
           totalChunks,
           totalSize,
           chunkSize,
         });
-        if (chunkIndex === totalChunks - 1) {
-          filePath = res?.resData?.filePath ?? null;
+        const responseUploadId = res?.resData?.uploadId ?? '';
+        if (!responseUploadId) {
+          throw new Error(`uploadTemp returned no uploadId for ${fileName} chunk ${chunkIndex}`);
+        }
+        if (uploadId && responseUploadId !== uploadId) {
+          throw new Error(`uploadTemp changed uploadId for ${fileName}`);
+        }
+        uploadId = responseUploadId;
+        const nextChunkIndex = Number(res?.resData?.nextChunkIndex);
+        if (!Number.isInteger(nextChunkIndex) || nextChunkIndex !== chunkIndex + 1) {
+          throw new Error(`uploadTemp returned invalid nextChunkIndex for ${fileName}`);
+        }
+        if (chunkIndex === totalChunks - 1 && res?.resData?.complete !== true) {
+          throw new Error(`uploadTemp did not complete ${fileName}`);
         }
       }
+    } catch (error) {
+      if (uploadId) {
+        try {
+          await this.client.cancelUpload(uploadId);
+        } catch { /* preserve the upload failure */ }
+      }
+      throw error;
     } finally {
       fs.closeSync(fd);
     }
-    if (!filePath) throw new Error(`uploadTemp returned no filePath for ${fileName}`);
-    this.log?.debug?.(`uploaded ${fileName} → ${filePath}`);
-    return filePath;
-  }
-
-  /** Cached local-file size, used for AddVideo contentLength. */
-  _localSize(src) {
-    if (src._size != null) return src._size;
-    const s = fs.statSync(src.file);
-    return (src._size = s.size);
+    this.log?.debug?.(`uploaded ${fileName} → ${uploadId}`);
+    return uploadId;
   }
 
   /**

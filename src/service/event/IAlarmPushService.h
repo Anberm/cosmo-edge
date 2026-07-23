@@ -16,6 +16,10 @@ public:
     /// Initialize the alarm push subsystem (timers, event queue binding).
     virtual void Init() = 0;
 
+    /// Stop the timer and async delivery queue, waiting for active callbacks.
+    /// Safe to call more than once.
+    virtual void Stop() = 0;
+
     /// Check whether alarm push is currently enabled.
     virtual bool IsEnabled() = 0;
 

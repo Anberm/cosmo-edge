@@ -7,7 +7,7 @@
 
 namespace cosmo {
 
-void TaskBase::TaskRegist(TaskElementPtr task) {
+bool TaskBase::TaskRegist(TaskElementPtr task) {
     // Register task queues with parent actions
     for (auto& taNode : task->actions) {
         if (taNode.fatherAction) {
@@ -23,10 +23,16 @@ void TaskBase::TaskRegist(TaskElementPtr task) {
                 LOG_INFO("[{}-{} Create {}] Action: {} Regist To {}, Fps:{}", task->channelId, task->taskId,
                          task->GetAlgName(), taNode.action.actionId, taNode.fatherAction->GetName(),
                          param.fps);
-                taNode.fatherAction->RegistTaskQueue(param);
+                if (!taNode.fatherAction->RegistTaskQueue(param)) {
+                    LOG_ERRO("[{}-{} Create {}] Action: {} Regist To {} Failed", task->channelId,
+                             task->taskId, task->GetAlgName(), taNode.action.actionId,
+                             taNode.fatherAction->GetName());
+                    return false;
+                }
             } else {
                 LOG_ERRO("[{}-{} Create {}] Action: {} Regist To {} Failed", task->channelId, task->taskId,
                          task->GetAlgName(), taNode.action.actionId, taNode.fatherAction->GetName());
+                return false;
             }
         } else {
             task->flowActionId = taNode.action.flowActionId;
@@ -34,6 +40,7 @@ void TaskBase::TaskRegist(TaskElementPtr task) {
                      task->taskId, task->GetAlgName(), taNode.action.actionId, taNode.action.flowActionId);
         }
     }
+    return true;
 }
 
 void TaskBase::TaskUnRegist(TaskElementPtr task) {
@@ -149,31 +156,81 @@ void TaskBase::ActionInfo(std::vector<ActionRuntimeInfo>& actionInfos) {
 }
 
 bool TaskBase::TaskStart(TaskElementPtr task) {
-    if (task->is_started) {
+    if (!task) {
+        LOG_ERRO("{}", "Start Task Failed. Task Is Empty");
+        return false;
+    }
+    if (task->is_started.load(std::memory_order_acquire)) {
         LOG_INFO("[{}-{} {}] Alread Started", task->channelId, task->taskId, task->GetAlgName());
         return true;
     }
 
+    // Validate the whole graph before changing any active-task counts.  Failing
+    // halfway through the loop would otherwise leave already visited actions
+    // running while the task still reports "stopped".
+    for (const auto& taNode : task->actions) {
+        if (!taNode.actionInst) {
+            LOG_ERRO("[{}-{} {}] Start failed: action {} is not initialized", task->channelId, task->taskId,
+                     task->GetAlgName(), taNode.action.actionId);
+            return false;
+        }
+    }
+
+    size_t started_action_count = 0;
     for (auto& taNode : task->actions) {
         LOG_DEBUG("[{}-{} {}] {} root:{} task:{}", task->channelId, task->taskId, task->GetAlgName(),
                   taNode.action.actionName, task->flowActionId, taNode.action.flowActionId);
         taNode.actionInst->AddActiveTask();
         LOG_INFO("[{}-{} {}] Start {} (activeTaskCount={})", task->channelId, task->taskId,
                  task->GetAlgName(), taNode.action.actionName, taNode.actionInst->GetActiveTaskCount());
-        taNode.actionInst->Start();
+        if (!taNode.actionInst->Start()) {
+            LOG_ERRO("[{}-{} {}] Start {} failed, rolling back {} actions", task->channelId, task->taskId,
+                     task->GetAlgName(), taNode.action.actionName, started_action_count);
+            taNode.actionInst->RemoveActiveTask();
+            for (size_t rollback_index = started_action_count; rollback_index > 0; --rollback_index) {
+                auto& started_node = task->actions[rollback_index - 1];
+                started_node.actionInst->RemoveActiveTask();
+                if (started_node.actionInst->GetActiveTaskCount() <= 0) {
+                    started_node.actionInst->Stop();
+                }
+            }
+            return false;
+        }
+        ++started_action_count;
     }
-    TaskRegist(task);
-    task->is_started = true;
+    if (!TaskRegist(task)) {
+        // Remove any queues registered before the failing edge, then undo the
+        // active-task references and workers in reverse start order.
+        TaskUnRegist(task);
+        for (size_t rollback_index = started_action_count; rollback_index > 0; --rollback_index) {
+            auto& started_node = task->actions[rollback_index - 1];
+            started_node.actionInst->RemoveActiveTask();
+            if (started_node.actionInst->GetActiveTaskCount() <= 0) {
+                started_node.actionInst->Stop();
+            }
+        }
+        return false;
+    }
+    task->is_started.store(true, std::memory_order_release);
     return true;
 }
 
 bool TaskBase::TaskStop(TaskElementPtr task) {
-    if (!task->is_started) {
+    if (!task) {
+        LOG_ERRO("{}", "Stop Task Failed. Task Is Empty");
+        return false;
+    }
+    if (!task->is_started.load(std::memory_order_acquire)) {
         LOG_INFO("[{}-{} {}] Not started, skip stop", task->channelId, task->taskId, task->GetAlgName());
         return true;
     }
     TaskUnRegist(task);
     for (auto& taNode : task->actions) {
+        if (!taNode.actionInst) {
+            LOG_WARN("[{}-{} {}] Stop skipped for uninitialized action {}", task->channelId, task->taskId,
+                     task->GetAlgName(), taNode.action.actionId);
+            continue;
+        }
         LOG_DEBUG("[{}-{} {}] {} root:{} task:{}", task->channelId, task->taskId, task->GetAlgName(),
                   taNode.action.actionName, task->flowActionId, taNode.action.flowActionId);
         taNode.actionInst->RemoveActiveTask();
@@ -187,12 +244,12 @@ bool TaskBase::TaskStop(TaskElementPtr task) {
                      task->GetAlgName(), taNode.action.actionName, remaining);
         }
     }
-    task->is_started = false;
+    task->is_started.store(false, std::memory_order_release);
     return true;
 }
 
 bool TaskBase::TaskIsStart(TaskElementPtr task) {
-    return task->is_started;
+    return task && task->is_started.load(std::memory_order_acquire);
 }
 
 bool TaskBase::LogicTest(const std::string& taskId, const MsgTarget& target) {

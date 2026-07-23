@@ -1887,7 +1887,12 @@ SrsLiveSource::SrsLiveSource()
     mix_queue = new SrsMixQueue();
     
     can_publish_ = true;
-    stream_die_at_ = 0;
+    // A freshly-created source is visible in the manager before the RTMP
+    // publisher finishes its (yielding) startup path. Give that reservation
+    // the normal cleanup grace period; otherwise the manager timer can erase
+    // it between fetch_or_create() and on_publish(), leaving the publisher on
+    // an orphan source while HTTP-FLV viewers attach to a new empty source.
+    stream_die_at_ = srs_get_system_time();
     publisher_idle_at_ = 0;
 
     handler = NULL;
@@ -2806,4 +2811,3 @@ string SrsLiveSource::get_curr_origin()
 {
     return play_edge->get_curr_origin();
 }
-

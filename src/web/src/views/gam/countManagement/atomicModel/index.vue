@@ -332,6 +332,11 @@ import {
 import { useRouter } from 'vue-router'
 import { Search, Plus, Upload } from '@element-plus/icons-vue'
 import { t, localeColon, currentLocale } from '@/i18n'
+import {
+  uploadFileInChunks,
+  UploadPurpose,
+  UPLOAD_MAX_TOTAL_SIZE
+} from '@/utils/chunkUpload'
 
 const SearchIcon = Search
 
@@ -1006,13 +1011,18 @@ const sureUploadAlgorithmic = () => {
     return proxy.$message.warning(t('validate.uploadFileFirst'))
   }
   const uploadResults = uploadAlgorithmicData.value.map(async (file) => {
-    const fileSize = file.raw ? file.raw.size : file.size
-    const fileName = file.raw ? file.raw.name : file.name
-    if (fileSize > 3 * 1024 * 1024 * 1024) {
-      return { fileName, success: false, message: t('validate.fileSizeExceed3GB') }
+    const rawFile = file.raw || file
+    const fileSize = rawFile.size
+    const fileName = rawFile.name
+    if (fileSize > UPLOAD_MAX_TOTAL_SIZE) {
+      return {
+        fileName,
+        success: false,
+        message: t('validate.fileMaxSize', { n: 500 })
+      }
     }
     try {
-      const resData = await uploadFile({ file: file.raw })
+      const resData = await uploadFile({ file: rawFile })
       if (resData?.resCode == 1) {
         return { fileName, success: true, message: t('validate.uploadSucceeded') }
       } else {
@@ -1041,10 +1051,30 @@ const sureUploadAlgorithmic = () => {
   })
 }
 
-const uploadFile = (params) => {
-  const formData = new FormData()
-  formData.append('file', params.file)
-  return proxy.$API.uploadAtomicModel(formData).then((res) => res)
+const uploadFile = async (params) => {
+  let stagedUpload
+  try {
+    stagedUpload = await uploadFileInChunks(params.file, {
+      purpose: UploadPurpose.MODEL_ARCHIVE,
+      uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+    })
+    if (!stagedUpload.uploadId) {
+      throw new Error(t('validate.cannotGetFilePath'))
+    }
+    return await proxy.$API.uploadAtomicModel({
+      uploadId: stagedUpload.uploadId
+    })
+  } catch (error) {
+    if (stagedUpload?.uploadId) {
+      try {
+        await proxy.$API.cancelAtomicModelUpload({ uploadId: stagedUpload.uploadId })
+      } catch (_) {
+        // The staging service also expires abandoned sessions by TTL.
+      }
+    }
+    throw error
+  }
 }
 const handleChange = (file, fileList) => {
   if (!isMultiple.value) {
@@ -1069,8 +1099,8 @@ const handleImportFileChange = (file) => {
     proxy.$message.warning(t('validate.selectTarGzOrZip'))
     return
   }
-  if (rawFile.size > 3 * 1024 * 1024 * 1024) {
-    proxy.$message.warning(t('validate.fileSizeExceed3GB'))
+  if (rawFile.size <= 0 || rawFile.size > UPLOAD_MAX_TOTAL_SIZE) {
+    proxy.$message.warning(t('validate.fileMaxSize', { n: 500 }))
     return
   }
   importModelFileName.value = name
@@ -1087,13 +1117,17 @@ const sureImportModel = async () => {
     proxy.$message.warning(t('validate.selectFile'))
     return
   }
+  let stagedUpload
+  let consumerSucceeded = false
   try {
     importModelLoading.value = true
-    // Upload file using existing chunked upload
-    const filePath = await uploadSingleFile(importModelFile.value)
-    // Call import API
-    const res = await proxy.$API.importModel({ filePath })
+    stagedUpload = await uploadSingleFile(
+      importModelFile.value,
+      UploadPurpose.MODEL_ARCHIVE
+    )
+    const res = await proxy.$API.importModel({ uploadId: stagedUpload.uploadId })
     if (res && res.resCode === 1) {
+      consumerSucceeded = true
       proxy.$message.success(t('validate.importSucceeded'))
       importModelDialogVisible.value = false
       searchList()
@@ -1110,6 +1144,9 @@ const sureImportModel = async () => {
       proxy.$message.error(t('validate.importFailed') + localeColon + (err.message || t('validate.networkError')))
     }
   } finally {
+    if (stagedUpload && !consumerSucceeded) {
+      await cancelStagedUploads([stagedUpload])
+    }
     importModelLoading.value = false
   }
 }
@@ -1235,54 +1272,49 @@ const handleTokenizerFileRemove = (file, fileList) => {
   addModelFormRef.value && addModelFormRef.value.validateField('tokenizerFile')
 }
 
-const uploadSingleFile = async (file) => {
-  const CHUNK_SIZE = 32 * 1024 * 1024
-  const totalSize = file.size || 0
-  const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE))
-  const uploadId = `${Date.now()}_${Math.random().toString(16).slice(2)}`
-  let lastResp = null
-  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-    const start = chunkIndex * CHUNK_SIZE
-    const end = Math.min(totalSize, start + CHUNK_SIZE)
-    const blob = file.slice(start, end)
-    const uploadFormData = new FormData()
-    uploadFormData.append('file', blob, file.name)
-    uploadFormData.append('uploadId', uploadId)
-    uploadFormData.append('chunkIndex', String(chunkIndex))
-    uploadFormData.append('totalChunks', String(totalChunks))
-    uploadFormData.append('totalSize', String(totalSize))
-    uploadFormData.append('chunkSize', String(end - start))
-    lastResp = await proxy.$API.uploadAtomicModelTemp(uploadFormData)
-    const respData = lastResp?.resData || lastResp?.data
-    if (!respData) {
-      throw new Error(t('validate.uploadNoResponse'))
-    }
-    const resCode = respData?.resCode ?? respData?.resData?.resCode
-    if (resCode !== undefined && resCode !== 1) {
-      const msg =
-        (respData.resMsg && respData.resMsg[0] && respData.resMsg[0].msgText) ||
-        (respData.resData &&
-          respData.resData.resMsg &&
-          respData.resData.resMsg[0] &&
-          respData.resData.resMsg[0].msgText) ||
-        t('validate.tempUploadFailed')
-      throw new Error(msg)
-    }
-  }
-  const finalData = lastResp?.resData || lastResp?.data
-  let tempFilePath = ''
-  if (finalData?.resData?.filePath) {
-    tempFilePath = finalData.resData.filePath
-  } else if (finalData?.filePath) {
-    tempFilePath = finalData.filePath
-  }
-  if (!tempFilePath) {
+const uploadSingleFile = async (file, purpose = UploadPurpose.MODEL_COMPONENT) => {
+  const result = await uploadFileInChunks(file, {
+    purpose,
+    uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+    cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+  })
+  if (!result.uploadId) {
     throw new Error(t('validate.cannotGetFilePath'))
   }
-  return tempFilePath
+  return result
+}
+
+const assertModelComponentFileSize = (file) => {
+  const size = Number(file?.size)
+  if (!Number.isSafeInteger(size) || size <= 0) {
+    throw new RangeError(t('api.error.UpLoadDataEmpty'))
+  }
+  if (size > UPLOAD_MAX_TOTAL_SIZE) {
+    throw new RangeError(t('validate.fileMaxSize', { n: 500 }))
+  }
+}
+
+const cancelStagedUploads = async (uploads) => {
+  await Promise.all(
+    uploads
+      .filter(upload => upload?.uploadId)
+      .map(upload =>
+        proxy.$API
+          .cancelAtomicModelUpload({ uploadId: upload.uploadId })
+          .catch(() => undefined)
+      )
+  )
 }
 
 const sureAddModel = async () => {
+  const stagedUploads = []
+  let consumerSucceeded = false
+  const stageForAdd = async (file) => {
+    assertModelComponentFileSize(file)
+    const upload = await uploadSingleFile(file)
+    stagedUploads.push(upload)
+    return upload.uploadId
+  }
   try {
     const valid = await new Promise((resolve) => {
       addModelFormRef.value.validate((isValid) => {
@@ -1351,19 +1383,17 @@ const sureAddModel = async () => {
         addModelForm.encoderFileList[0].raw || addModelForm.encoderFileList[0]
       const decoderFile =
         addModelForm.decoderFileList[0].raw || addModelForm.decoderFileList[0]
-      const [encoderPath, decoderPath] = await Promise.all([
-        uploadSingleFile(encoderFile),
-        uploadSingleFile(decoderFile)
-      ])
+      const encoderUploadId = await stageForAdd(encoderFile)
+      const decoderUploadId = await stageForAdd(decoderFile)
       addModelParams.bmodelFiles = [
-        { role: 'encoder', filePath: encoderPath },
-        { role: 'decoder', filePath: decoderPath }
+        { role: 'encoder', uploadId: encoderUploadId },
+        { role: 'decoder', uploadId: decoderUploadId }
       ]
     } else {
       const file =
         addModelForm.modelFileList[0].raw || addModelForm.modelFileList[0]
-      const filePath = await uploadSingleFile(file)
-      addModelParams.bmodelFiles = [{ role: 'main', filePath }]
+      const uploadId = await stageForAdd(file)
+      addModelParams.bmodelFiles = [{ role: 'main', uploadId }]
     }
     if (addModelForm.modelType === 'dino') {
       if (
@@ -1381,7 +1411,7 @@ const sureAddModel = async () => {
         addModelLoading.value = false
         return
       }
-      addModelParams.vocabFilePath = await uploadSingleFile(vocabFile)
+      addModelParams.vocabUploadId = await stageForAdd(vocabFile)
     }
     if (addModelForm.modelType === 'ocr') {
       if (!addModelForm.characterTableFileList || addModelForm.characterTableFileList.length === 0) {
@@ -1396,8 +1426,8 @@ const sureAddModel = async () => {
         addModelLoading.value = false
         return
       }
-      addModelParams.characterTableFilePath = await uploadSingleFile(characterTableFile)
-      if (!addModelParams.characterTableFilePath) {
+      addModelParams.characterTableUploadId = await stageForAdd(characterTableFile)
+      if (!addModelParams.characterTableUploadId) {
         proxy.$message.error(t('validate.characterTableUploadFailed'))
         addModelLoading.value = false
         return
@@ -1423,8 +1453,8 @@ const sureAddModel = async () => {
         addModelLoading.value = false
         return
       }
-      addModelParams.tokenizerFilePath = await uploadSingleFile(tokenizerFile)
-      if (!addModelParams.tokenizerFilePath) {
+      addModelParams.tokenizerUploadId = await stageForAdd(tokenizerFile)
+      if (!addModelParams.tokenizerUploadId) {
         proxy.$message.error(t('validate.tokenizerUploadFailed'))
         addModelLoading.value = false
         return
@@ -1438,6 +1468,7 @@ const sureAddModel = async () => {
     }
     const d = res
     if (d.resCode === 1) {
+      consumerSucceeded = true
       proxy.$message.success(t('common.addSucceeded'))
       uploadAlgorithmicVisible.value = false
       pageData.pageNum = 1
@@ -1448,8 +1479,15 @@ const sureAddModel = async () => {
       const msg = (d.resMsg && d.resMsg[0] && d.resMsg[0].msgText) || t('common.addFailed')
       proxy.$message.error(msg)
     }
-    addModelLoading.value = false
   } catch (err) {
+    if (err instanceof RangeError) {
+      proxy.$message.error(err.message || t('validate.uploadFailed'))
+    }
+    // The request interceptor owns server and network error messages.
+  } finally {
+    if (!consumerSucceeded) {
+      await cancelStagedUploads(stagedUploads)
+    }
     addModelLoading.value = false
   }
 }

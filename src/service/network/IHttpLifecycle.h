@@ -17,6 +17,10 @@ public:
     /// Blocking HTTP event dispatch loop. Call from main thread.
     virtual void RunHttpLoop() = 0;
 
+    /// Request the event loop to stop. Safe to call from a control thread;
+    /// resource cleanup remains on the event thread.
+    virtual void RequestHttpStop() = 0;
+
     /// Shutdown the HTTP server (break the event loop).
     virtual void StopHttpServer() = 0;
 };

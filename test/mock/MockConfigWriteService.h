@@ -23,10 +23,10 @@ public:
                                       const std::string&),
                override);
     MAKE_MOCK1(SetDebugMode, void(bool), override);
-    MAKE_MOCK1(SetShieldedActions, void(const std::vector<std::string>&), override);
-    MAKE_MOCK3(SetPopUpParam, void(int, int, int), override);
-    MAKE_MOCK1(SetRunMode, void(cosmo::RunMode), override);
-    MAKE_MOCK1(SetResourceLimit, void(bool), override);
+    MAKE_MOCK1(SetShieldedActions, cosmo::util::ErrorEnum(const std::vector<std::string>&), override);
+    MAKE_MOCK3(SetPopUpParam, cosmo::util::ErrorEnum(int, int, int), override);
+    MAKE_MOCK1(SetRunMode, cosmo::util::ErrorEnum(cosmo::RunMode), override);
+    MAKE_MOCK1(SetResourceLimit, cosmo::util::ErrorEnum(bool), override);
 };
 
 }  // namespace cosmo::test

@@ -14,7 +14,7 @@ class HttpServer;
 class MsgHanderThread : public cosmo::MsgThread {
 public:
     explicit MsgHanderThread(const std::string& name, HttpServer* server,
-                             std::unique_ptr<cosmo::IRequestDispatcher> dispatcher, size_t maxCount = 0xffff);
+                             std::unique_ptr<cosmo::IRequestDispatcher> dispatcher, size_t maxCount = 8);
     virtual ~MsgHanderThread();
 
     size_t MsgCount() {

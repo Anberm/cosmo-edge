@@ -1,6 +1,7 @@
 #include "catch_amalgamated.hpp"
 #include "mock/MockServiceRegistry.h"
 #include "service/face/impl/FaceLibServiceImpl.h"
+#include "util/Exception.h"
 
 using namespace cosmo::service;
 
@@ -66,4 +67,25 @@ TEST_CASE("FaceLibServiceImpl: CreatePerson returns valid ptr", "[FaceLibService
         auto pics = sut.GetPersonPictures(person);
         REQUIRE(pics.empty());
     }
+}
+
+TEST_CASE("FaceLibServiceImpl: Stop rejects new face work and is idempotent", "[FaceLibService][lifecycle]") {
+    cosmo::test::MockServiceRegistry mocks;
+    FaceLibServiceImpl sut;
+
+    cosmo::AiFeature first;
+    first.feature = {0.0F};
+    cosmo::AiFeature second;
+    second.feature = {0.0F};
+    REQUIRE(sut.CalculateFaceScore(first, second) == 2.0F);
+
+    sut.Stop();
+    sut.Stop();
+
+    VideoFramePtr image;
+    VideoFramePtr cut_image;
+    cosmo::AiFeature output;
+    CHECK(sut.ExtractFaceFeature(image, 80.0F, output, cut_image) == cosmo::util::ErrorEnum::ServiceNotInit);
+    CHECK(sut.CalculateFaceScore(first, second) == 0.0F);
+    CHECK_THROWS_AS(sut.ImportFile("ignored.zip", "ignored-library"), cosmo::util::ErrorMessage);
 }

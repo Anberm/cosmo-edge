@@ -16,6 +16,10 @@ namespace cosmo::service {
 class ICameraService : public ICameraDeviceCrud, public ICameraTaskConfig, public ICameraChannelQuery {
 public:
     virtual ~ICameraService() = default;
+
+    /// Permanently stop camera monitor/switch workers and destroy all camera
+    /// algorithm and channel tasks. Safe to call more than once.
+    virtual void Stop() = 0;
 };
 
 }  // namespace cosmo::service

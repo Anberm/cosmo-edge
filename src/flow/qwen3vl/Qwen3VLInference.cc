@@ -2,6 +2,7 @@
 // Split from Qwen3VLWorker.cc to reduce file size (DEBT-007).
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <sstream>
@@ -94,15 +95,26 @@ namespace {
                 const auto& box = target.box;
                 if (box.width <= 0 || box.height <= 0)
                     continue;
-                int expand_w = static_cast<int>(box.width * 0.2f);
-                int expand_h = static_cast<int>(box.height * 0.2f);
-                util::Box roi;
-                roi.x      = std::max(0, box.x - expand_w);
-                roi.y      = std::max(0, box.y - expand_h);
-                roi.width  = std::min(img_w - roi.x, box.width + 2 * expand_w);
-                roi.height = std::min(img_h - roi.y, box.height + 2 * expand_h);
-                if (roi.width <= 0 || roi.height <= 0)
+                const int64_t expand_w = static_cast<int64_t>(box.width) / 5;
+                const int64_t expand_h = static_cast<int64_t>(box.height) / 5;
+                const int64_t roi_x    = std::max<int64_t>(0, static_cast<int64_t>(box.x) - expand_w);
+                const int64_t roi_y    = std::max<int64_t>(0, static_cast<int64_t>(box.y) - expand_h);
+                if (roi_x >= img_w || roi_y >= img_h) {
                     continue;
+                }
+
+                const int64_t expanded_width  = static_cast<int64_t>(box.width) + 2 * expand_w;
+                const int64_t expanded_height = static_cast<int64_t>(box.height) + 2 * expand_h;
+                const int64_t roi_width =
+                    std::min<int64_t>(static_cast<int64_t>(img_w) - roi_x, expanded_width);
+                const int64_t roi_height =
+                    std::min<int64_t>(static_cast<int64_t>(img_h) - roi_y, expanded_height);
+                if (roi_width <= 0 || roi_height <= 0) {
+                    continue;
+                }
+
+                util::Box roi{static_cast<int>(roi_x), static_cast<int>(roi_y), static_cast<int>(roi_width),
+                              static_cast<int>(roi_height)};
                 auto cropped = service::ServiceRegistry::Instance().Get<service::IVideoFrameTransform>().Crop(
                     srcFrame, roi);
                 if (VideoFrameValid(cropped)) {

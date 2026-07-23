@@ -54,15 +54,43 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, gpumemavailable);
     JSON_OPT(j, v, gpudevusage);
     JSON_OPT(j, v, gpuCapacity);
+    JSON_OPT(j, v, activePreviewPublishers);
+    JSON_OPT(j, v, activePreviewStreams);
+    JSON_OPT(j, v, activeRawPreviewStreams);
+    JSON_OPT(j, v, activeAlgorithmPreviewStreams);
+    JSON_OPT(j, v, previewStreamStarts);
+    JSON_OPT(j, v, previewStreamStops);
+    JSON_OPT(j, v, previewStreamFailures);
+    JSON_OPT(j, v, osdFrames);
+    JSON_OPT(j, v, osdMs);
+    JSON_OPT(j, v, publishedFrames);
+    JSON_OPT(j, v, publishMs);
+    JSON_OPT(j, v, firstFrames);
+    JSON_OPT(j, v, firstFrameMs);
+    JSON_OPT(j, v, firstFrameMaxMs);
 }
 
 void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
-    j["gpuusage"]        = v.gpuusage;
-    j["gpumemusage"]     = v.gpumemusage;
-    j["gpumemtotal"]     = v.gpumemtotal;
-    j["gpumemavailable"] = v.gpumemavailable;
-    j["gpudevusage"]     = v.gpudevusage;
-    j["gpuCapacity"]     = v.gpuCapacity;
+    j["gpuusage"]                      = v.gpuusage;
+    j["gpumemusage"]                   = v.gpumemusage;
+    j["gpumemtotal"]                   = v.gpumemtotal;
+    j["gpumemavailable"]               = v.gpumemavailable;
+    j["gpudevusage"]                   = v.gpudevusage;
+    j["gpuCapacity"]                   = v.gpuCapacity;
+    j["activePreviewPublishers"]       = v.activePreviewPublishers;
+    j["activePreviewStreams"]          = v.activePreviewStreams;
+    j["activeRawPreviewStreams"]       = v.activeRawPreviewStreams;
+    j["activeAlgorithmPreviewStreams"] = v.activeAlgorithmPreviewStreams;
+    j["previewStreamStarts"]           = v.previewStreamStarts;
+    j["previewStreamStops"]            = v.previewStreamStops;
+    j["previewStreamFailures"]         = v.previewStreamFailures;
+    j["osdFrames"]                     = v.osdFrames;
+    j["osdMs"]                         = v.osdMs;
+    j["publishedFrames"]               = v.publishedFrames;
+    j["publishMs"]                     = v.publishMs;
+    j["firstFrames"]                   = v.firstFrames;
+    j["firstFrameMs"]                  = v.firstFrameMs;
+    j["firstFrameMaxMs"]               = v.firstFrameMaxMs;
 }
 
 void from_json(const nlohmann::json& j, MsgDiskInfo& v) {
@@ -119,10 +147,10 @@ void from_json(const nlohmann::json& j, ActionStatus& v) {
 }
 
 void to_json(nlohmann::json& j, const ActionStatus& v) {
-    j["statusCode"]         = v.statusCode;
-    j["statusDesc"]         = v.statusDesc;
+    j["statusCode"] = v.statusCode;
+    j["statusDesc"] = v.statusDesc;
     if (!v.statusDescKey.empty())
-        j["statusDescKey"]  = v.statusDescKey;
+        j["statusDescKey"] = v.statusDescKey;
     j["actionId"]           = v.actionId;
     j["name"]               = v.name;
     j["holdCount"]          = v.holdCount;

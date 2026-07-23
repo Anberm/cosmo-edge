@@ -27,6 +27,7 @@ public:
     // IHttpLifecycle
     void InitHttpServer(const std::string& host, uint16_t port) override;
     void RunHttpLoop() override;
+    void RequestHttpStop() noexcept override;
     void StopHttpServer() override;
 
 private:

@@ -16,8 +16,8 @@ namespace cosmo::service {
 struct NtpConfig {
     int enable{0};       ///< NTP enabled (1) or disabled (0).
     std::string server;  ///< NTP server hostname or IP.
-    short port{123};     ///< NTP server port (default: 123).
-    int interval{60};    ///< Synchronization interval in seconds.
+    int port{123};       ///< NTP server port (default: 123).
+    int interval{60};    ///< Synchronization interval in minutes.
 };
 
 /// Timezone descriptor for UI selection.

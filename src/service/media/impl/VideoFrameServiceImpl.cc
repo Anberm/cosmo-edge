@@ -43,7 +43,7 @@ VideoFramePtr VideoFrameServiceImpl::CopyJpegSrcFrame(VideoFramePtr srcImage) {
         return srcImage;
     }
     if (proc_) {
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
         // CPU backend: EncodeJpeg uses stb (accepts RGB/BGR/I420 via sws_scale),
         // no need to force I420 like Sophon hardware encoder does.
         // Just copy the frame as-is to avoid lossy BGR→I420→RGB round-trips.
@@ -95,23 +95,42 @@ VideoFramePtr VideoFrameServiceImpl::DrawText(VideoFramePtr srcImage, int x, int
 }
 
 bool VideoFrameServiceImpl::BeginOSD(VideoFramePtr frame) {
-    if (proc_) {
-        std::lock_guard<std::shared_mutex> lock(piv_mtx_);
-        return proc_->BeginOSD(frame);
+    osd_session_mtx_.lock();
+    if (osd_session_active_) {
+        // Only the owner can acquire the recursive mutex while a session is
+        // active. Reject a nested session instead of replacing its frame.
+        LOG_ERRO("{}", "BeginOSD rejected: current thread already owns an OSD session");
+        osd_session_mtx_.unlock();
+        return false;
     }
-    return false;
+
+    try {
+        if (!proc_ || !proc_->BeginOSD(frame)) {
+            osd_session_mtx_.unlock();
+            return false;
+        }
+    } catch (...) {
+        osd_session_mtx_.unlock();
+        throw;
+    }
+
+    osd_session_active_ = true;
+    osd_session_owner_  = std::this_thread::get_id();
+    return true;
 }
 
 void VideoFrameServiceImpl::OSDDrawLines(std::vector<std::pair<cosmo::util::Point, cosmo::util::Point>> lines,
                                          const cosmo::media::Color& color, int line_width) {
-    if (proc_) {
+    std::lock_guard<std::recursive_mutex> lock(osd_session_mtx_);
+    if (proc_ && osd_session_active_ && osd_session_owner_ == std::this_thread::get_id()) {
         proc_->OSDDrawLines(lines, color, line_width);
     }
 }
 
 void VideoFrameServiceImpl::OSDDrawText(int x, int y, const std::string& text,
                                         const cosmo::media::Color& color, int font_size) {
-    if (proc_) {
+    std::lock_guard<std::recursive_mutex> lock(osd_session_mtx_);
+    if (proc_ && osd_session_active_ && osd_session_owner_ == std::this_thread::get_id()) {
         proc_->OSDDrawText(x, y, text, color, font_size);
     }
 }
@@ -120,22 +139,38 @@ void VideoFrameServiceImpl::OSDDrawTextEx(int x, int y, const std::string& text,
                                           const cosmo::media::Color& color, int font_size,
                                           const cosmo::media::Color& bgColor, uint8_t bgAlpha, bool outline,
                                           int bg_padding) {
-    if (proc_) {
+    std::lock_guard<std::recursive_mutex> lock(osd_session_mtx_);
+    if (proc_ && osd_session_active_ && osd_session_owner_ == std::this_thread::get_id()) {
         proc_->OSDDrawTextEx(x, y, text, color, font_size, bgColor, bgAlpha, outline, bg_padding);
     }
 }
 
 void VideoFrameServiceImpl::EndOSD() {
-    if (proc_) {
-        proc_->EndOSD();
+    std::lock_guard<std::recursive_mutex> lock(osd_session_mtx_);
+    if (!osd_session_active_ || osd_session_owner_ != std::this_thread::get_id()) {
+        return;
     }
+
+    try {
+        if (proc_) {
+            proc_->EndOSD();
+        }
+    } catch (...) {
+        osd_session_active_ = false;
+        osd_session_owner_  = {};
+        osd_session_mtx_.unlock();
+        throw;
+    }
+
+    osd_session_active_ = false;
+    osd_session_owner_  = {};
+    // Release the lock retained by BeginOSD. The lock_guard releases the
+    // recursive acquisition made at the beginning of EndOSD.
+    osd_session_mtx_.unlock();
 }
 
 VideoFramePtr VideoFrameServiceImpl::Crop(const VideoFramePtr src_picture, const cosmo::util::Box roi) {
-    if (proc_) {
-        return proc_->Crop(src_picture, roi);
-    }
-    return src_picture;
+    return proc_->Crop(src_picture, roi);
 }
 
 VideoFramePtr VideoFrameServiceImpl::Resize(VideoFramePtr src, int dst_height, int dst_width) {

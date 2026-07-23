@@ -12,6 +12,7 @@ namespace cosmo::test {
 
 class MockLiveStreamService : public cosmo::service::ILiveStreamService {
 public:
+    MAKE_MOCK0(Stop, void(), override);
     MAKE_MOCK3(ViewerCreate,
                cosmo::util::ErrorEnum(const std::string&, const std::string&,
                                       cosmo::LiveStream::LiveStreamInfo&),

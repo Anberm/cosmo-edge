@@ -33,6 +33,13 @@ public:
                                                   algorithm::LayoutExportResult& outResult);
     static cosmo::util::ErrorEnum GetAtomicActionList(int actionUsage, const std::string& filePath,
                                                       algorithm::AtomicActionListResult& outResult);
+
+private:
+    static bool ResolveLayoutDirectory(const std::string& requested_path, bool allow_template,
+                                       std::string& resolved_path);
+    static bool ResolveManagedRegularFile(const std::string& root, const std::string& candidate,
+                                          bool must_exist, std::string& resolved_path);
+    static bool ResolveActionsFile(const std::string& requested_path, std::string& resolved_path);
 };
 
 }  // namespace cosmo::service::detail

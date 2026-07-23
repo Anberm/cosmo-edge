@@ -278,14 +278,21 @@ Status DinoPipeline::Forward(std::initializer_list<std::vector<std::shared_ptr<B
 }
 
 Status DinoPipeline::ParseDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs) {
+    auto shared = reinterpret_cast<SharedResource*>(GetSharedResource());
+    if (!shared)
+        return Status(COSMO_NN_ERR_NET, "SharedResource is null");
+    return ParseDinoDetectionOutput(outputs, shared->text_threshold, shared->box_threshold);
+}
+
+Status DinoPipeline::ParseDinoDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs,
+                                              float text_threshold, float box_threshold) {
     outputs.clear();
     auto shared = reinterpret_cast<SharedResource*>(GetSharedResource());
     if (!shared)
         return Status(COSMO_NN_ERR_NET, "SharedResource is null");
     std::vector<std::shared_ptr<Blob>> output_blobs = GetGraphOutput();
     return NetUtils::ParseDINOOutput(output_blobs, shared->tokenizer_handle, image_sizes_,
-                                     shared->prompt_token_ids, shared->text_threshold, shared->box_threshold,
-                                     outputs);
+                                     shared->prompt_token_ids, text_threshold, box_threshold, outputs);
 }
 
 // ========================= Qwen3VL =======================================

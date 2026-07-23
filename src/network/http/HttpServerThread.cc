@@ -2,12 +2,15 @@
 
 #include "network/http/HttpServerThread.h"
 
+#include <filesystem>
 #include <memory>
+#include <string_view>
+#include <utility>
 
 #include "network/http/HttpServer.h"
 #include "util/FileUtil.h"
 #include "util/Log.h"
-#include "util/StringUtil.h"
+#include "util/PathUtil.h"
 
 namespace cosmo::network::http {
 
@@ -15,9 +18,7 @@ namespace chrono = std::chrono;
 
 MsgHanderThread::MsgHanderThread(const std::string& name, HttpServer* server,
                                  std::unique_ptr<cosmo::IRequestDispatcher> dispatcher, size_t maxCount)
-    : cosmo::MsgThread(name), handler_(std::move(dispatcher)), server_(server) {
-    (void)maxCount;
-}
+    : cosmo::MsgThread(name, maxCount), handler_(std::move(dispatcher)), server_(server) {}
 
 MsgHanderThread::~MsgHanderThread() {
     Stop();
@@ -99,7 +100,15 @@ void MsgHanderThread::ProcessHttpReqTask(HttpReqTask& task) {
     if (task.mtk.empty()) {
         LOG_WARN("{}", "MTK Empty");
     }
-    if (!handler_->DispatchRequest(uri, task.mtk, task.body, response)) {
+    RequestDispatchContext context;
+    context.uri                 = uri;
+    context.credential          = task.mtk;
+    context.principal           = task.principal;
+    context.multipart_file_path = task.multipart_file_path;
+    context.multipart_file_name = task.multipart_file_name;
+    context.multipart_file_size = task.multipart_file_size;
+    context.transport           = RequestTransport::kHttp;
+    if (!handler_->DispatchRequest(context, task.body, response)) {
         LOG_INFO("{} Handle uri:{} With {} Ms Rsp: MV_HTTP_NEED_AUTHENTICATE", Name(), uri,
                  chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - task.request_time)
                      .count());
@@ -124,13 +133,51 @@ void MsgHanderThread::SendHttpAck(HttpResponseCode code, HttpRequestToken reques
 }
 
 void MsgHanderThread::ProcessHttpOctetReqTask(HttpReqTask& task) {
+    static constexpr std::string_view kLogPrefix{"/logs/"};
     std::string response;
     std::string request_id;
     const auto& uri = task.interface;
+
+    RequestDispatchContext context;
+    context.uri        = uri;
+    context.credential = task.mtk;
+    context.transport  = RequestTransport::kHttp;
+    if (handler_->InspectRequest(context, false) != RequestAdmission::kAllowed) {
+        SendHttpAck(HttpResponseCode::kNeedAuthenticate, task.request_token, std::string("{}"),
+                    std::move(request_id));
+        return;
+    }
+
+    if (uri.compare(0, kLogPrefix.size(), kLogPrefix) != 0) {
+        SendHttpAck(HttpResponseCode::kNotFound, task.request_token, std::string("{}"),
+                    std::move(request_id));
+        return;
+    }
+
+    const std::string file_name = uri.substr(kLogPrefix.size());
+    if (!cosmo::path::IsSafePathComponent(file_name) || file_name.find_first_of("?#") != std::string::npos ||
+        !server_->callbacks().get_log_path) {
+        LOG_WARN("{} Reject invalid log path", Name());
+        SendHttpAck(HttpResponseCode::kNotFound, task.request_token, std::string("{}"),
+                    std::move(request_id));
+        return;
+    }
+
+    const std::string log_root = server_->callbacks().get_log_path();
+    std::string resolved_path;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(
+            log_root, (std::filesystem::path(log_root) / file_name).string(),
+            cosmo::path::PathEntryType::kRegularFile, resolved_path)) {
+        LOG_WARN("{} Reject unavailable log file {}", Name(), file_name);
+        SendHttpAck(HttpResponseCode::kNotFound, task.request_token, std::string("{}"),
+                    std::move(request_id));
+        return;
+    }
+
     auto ackTask = std::make_unique<HttpAckTask>(static_cast<int>(HttpResponseCode::kOk), task.request_token,
                                                  std::move(response), std::move(request_id));
-    ackTask->file_name = std::string(cosmo::util::GetLastPathSegment(uri));
-    ackTask->file_path = server_->callbacks().get_user_data_path() + uri;
+    ackTask->file_name = file_name;
+    ackTask->file_path = std::move(resolved_path);
     LOG_INFO("{} Handle {} interface:{}", Name(), uri, ackTask->file_name);
     cosmo::MsgEnvelope msg(static_cast<int>(InnerMsgId::kHttpOctetAck), std::move(ackTask));
     server_->Put(std::move(msg));

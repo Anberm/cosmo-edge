@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <memory>
 
 #ifdef __cplusplus
@@ -17,6 +18,7 @@ extern "C" {
 
 #include "media/PixelFormatUtils.h"
 #include "util/Log.h"
+#include "util/VideoInfo.h"
 
 // stb implementations — these macros are normally defined in VideoFrameCodec.cc
 // (Sophon-only), so the CPU build needs them here.
@@ -295,28 +297,54 @@ namespace media {
             return nullptr;
         }
 
-        auto pf = srcPicture->GetPixelFormat();
-        auto w  = static_cast<int>(srcPicture->GetWidth());
-        auto h  = static_cast<int>(srcPicture->GetHeight());
-
-        // Validate ROI
-        if (roi.x < 0 || roi.y < 0 || roi.x + roi.width > w || roi.y + roi.height > h) {
-            LOG_ERRO("{}", "Crop() - ROI out of bounds");
+        const auto source_width  = srcPicture->GetWidth();
+        const auto source_height = srcPicture->GetHeight();
+        if (source_width > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            source_height > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            LOG_ERRO("Crop() - source dimensions exceed integer range: {}x{}", source_width, source_height);
             return nullptr;
+        }
+
+        const auto pf          = srcPicture->GetPixelFormat();
+        const int w            = static_cast<int>(source_width);
+        const int h            = static_cast<int>(source_height);
+        const auto source_size = PixelFormatUtils::CalculateFrameSize(w, h, pf);
+        if (!source_size || *source_size != srcPicture->GetSize()) {
+            LOG_ERRO("Crop() - source frame layout invalid: {}x{}, size {}", w, h, srcPicture->GetSize());
+            return nullptr;
+        }
+
+        constexpr int kCpuCropMinDimension = 1;
+        constexpr int kCpuCropMaxDimension = kVideoFrameMaxSize;
+        const auto normalized_roi =
+            PixelFormatUtils::NormalizeCropRoi(w, h, pf, roi, kCpuCropMinDimension, kCpuCropMaxDimension);
+        if (!normalized_roi) {
+            LOG_ERRO("Crop() - invalid ROI: x {} y {} width {} height {}", roi.x, roi.y, roi.width,
+                     roi.height);
+            return nullptr;
+        }
+        const auto& effective_roi = *normalized_roi;
+        if (effective_roi != roi) {
+            LOG_DEBUG(
+                "Crop() - normalized ROI from x {} y {} width {} height {} to x {} y {} width {} "
+                "height {}",
+                roi.x, roi.y, roi.width, roi.height, effective_roi.x, effective_roi.y, effective_roi.width,
+                effective_roi.height);
         }
 
         if (pf == PixelFormat::PIXEL_BGR8 || pf == PixelFormat::PIXEL_RGB8) {
             // Packed 3-channel crop
-            auto result = std::make_shared<VideoFrame>(roi.width, roi.height, pf, srcPicture->GetFrameIndex(),
-                                                       srcPicture->GetTimestamp());
+            auto result =
+                std::make_shared<VideoFrame>(effective_roi.width, effective_roi.height, pf,
+                                             srcPicture->GetFrameIndex(), srcPicture->GetTimestamp());
             if (!VideoFrameValid(result))
                 return nullptr;
             auto* src_data = srcPicture->GetData();
             auto* dst_data = result->GetData();
-            int row_bytes  = roi.width * 3;
-            for (int row = 0; row < roi.height; ++row) {
-                std::memcpy(dst_data + row * row_bytes, src_data + ((roi.y + row) * w + roi.x) * 3,
-                            row_bytes);
+            int row_bytes  = effective_roi.width * 3;
+            for (int row = 0; row < effective_roi.height; ++row) {
+                std::memcpy(dst_data + row * row_bytes,
+                            src_data + ((effective_roi.y + row) * w + effective_roi.x) * 3, row_bytes);
             }
             return result;
         }
@@ -326,8 +354,9 @@ namespace media {
             return nullptr;
         }
 
-        auto result = std::make_shared<VideoFrame>(roi.width, roi.height, PixelFormat::PIXEL_I420,
-                                                   srcPicture->GetFrameIndex(), srcPicture->GetTimestamp());
+        auto result =
+            std::make_shared<VideoFrame>(effective_roi.width, effective_roi.height, PixelFormat::PIXEL_I420,
+                                         srcPicture->GetFrameIndex(), srcPicture->GetTimestamp());
         if (!VideoFrameValid(result)) {
             return nullptr;
         }
@@ -336,25 +365,28 @@ namespace media {
         auto* dst_data = result->GetData();
 
         // Crop Y plane
-        for (int row = 0; row < roi.height; ++row) {
-            std::memcpy(dst_data + row * roi.width, src_data + (roi.y + row) * w + roi.x, roi.width);
+        for (int row = 0; row < effective_roi.height; ++row) {
+            std::memcpy(dst_data + row * effective_roi.width,
+                        src_data + (effective_roi.y + row) * w + effective_roi.x, effective_roi.width);
         }
 
         // Crop U plane
         auto* src_u = src_data + w * h;
-        auto* dst_u = dst_data + roi.width * roi.height;
-        int half_w  = roi.width / 2;
-        int half_h  = roi.height / 2;
+        auto* dst_u = dst_data + effective_roi.width * effective_roi.height;
+        int half_w  = effective_roi.width / 2;
+        int half_h  = effective_roi.height / 2;
         int src_hw  = w / 2;
         for (int row = 0; row < half_h; ++row) {
-            std::memcpy(dst_u + row * half_w, src_u + (roi.y / 2 + row) * src_hw + roi.x / 2, half_w);
+            std::memcpy(dst_u + row * half_w,
+                        src_u + (effective_roi.y / 2 + row) * src_hw + effective_roi.x / 2, half_w);
         }
 
         // Crop V plane
         auto* src_v = src_u + w * h / 4;
         auto* dst_v = dst_u + half_w * half_h;
         for (int row = 0; row < half_h; ++row) {
-            std::memcpy(dst_v + row * half_w, src_v + (roi.y / 2 + row) * src_hw + roi.x / 2, half_w);
+            std::memcpy(dst_v + row * half_w,
+                        src_v + (effective_roi.y / 2 + row) * src_hw + effective_roi.x / 2, half_w);
         }
 
         return result;
@@ -1016,8 +1048,6 @@ namespace media {
 
             // Draw outline (black)
             uint8_t oyv = RgbToY(0, 0, 0);
-            uint8_t ouv = RgbToU(0, 0, 0);
-            uint8_t ovv = RgbToV(0, 0, 0);
             for (int by = 0; by < bmp.height; by++) {
                 int py = y - bmp.offsetY + by;
                 if (py < 0 || py >= h)

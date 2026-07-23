@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <optional>
 
 #include "util/GeometricCalculation.h"
 #include "util/Log.h"
@@ -154,8 +156,41 @@ namespace {
         return (right - left) * (bottom - top);
     }
 
-    int GetScaleLen(int len, float scale_param) {
-        return static_cast<int>((scale_param - 1.0f) * static_cast<float>(len));
+    std::optional<int64_t> GetScaleLen(int len, float scale_param) {
+        if (!std::isfinite(scale_param)) {
+            return std::nullopt;
+        }
+        if (!FloatDiff(scale_param, 1.0)) {
+            return 0;
+        }
+
+        const float scale_length = (scale_param - 1.0f) * static_cast<float>(len);
+        if (!std::isfinite(scale_length) ||
+            static_cast<long double>(scale_length) <
+                static_cast<long double>(std::numeric_limits<int64_t>::min()) ||
+            static_cast<long double>(scale_length) >
+                static_cast<long double>(std::numeric_limits<int64_t>::max())) {
+            return std::nullopt;
+        }
+        return static_cast<int64_t>(scale_length);
+    }
+
+    std::pair<int, int> ClipSpan(long double start, long double length, int limit) {
+        const auto limit_value   = static_cast<long double>(limit);
+        const auto clipped_start = std::clamp(start, 0.0L, limit_value);
+        if (length <= 0.0L || !std::isfinite(length)) {
+            return {static_cast<int>(clipped_start), 0};
+        }
+
+        const auto end = start + length;
+        if (!std::isfinite(end)) {
+            return {static_cast<int>(clipped_start), 0};
+        }
+        const auto clipped_end = std::clamp(end, 0.0L, limit_value);
+        if (clipped_end <= clipped_start) {
+            return {static_cast<int>(clipped_start), 0};
+        }
+        return {static_cast<int>(clipped_start), static_cast<int>(clipped_end - clipped_start)};
     }
 
 }  // namespace
@@ -184,87 +219,51 @@ float IntersectionIncludeRatio(cosmo::util::Box box1, cosmo::util::Box box2) {
 
 cosmo::util::Box DoScaleBox(cosmo::util::Box input_box, TargetScalerParam param, int pic_width,
                             int pic_height) {
-    int x_move  = 0;
-    int y_move  = 0;
-    int w_scale = 0;
-    int h_scale = 0;
-
     if (input_box.width <= 0 || input_box.height <= 0) {
         return input_box;
     }
-
-    // Scale north (upward).
-    if (FloatDiff(param.scale_north, 1.0)) {
-        auto scale_len = GetScaleLen(input_box.height, param.scale_north);
-        y_move -= scale_len;
-        h_scale += scale_len;
-    }
-    // Scale south (downward).
-    if (FloatDiff(param.scale_south, 1.0)) {
-        auto scale_len = GetScaleLen(input_box.height, param.scale_south);
-        h_scale += scale_len;
-    }
-    // Scale east (rightward).
-    if (FloatDiff(param.scale_east, 1.0)) {
-        auto scale_len = GetScaleLen(input_box.width, param.scale_east);
-        w_scale += scale_len;
-    }
-    // Scale west (leftward).
-    if (FloatDiff(param.scale_west, 1.0)) {
-        auto scale_len = GetScaleLen(input_box.width, param.scale_west);
-        x_move -= scale_len;
-        w_scale += scale_len;
-    }
-    // Horizontal (left + right symmetrically).
-    if (FloatDiff(param.scale_horizontal, 1.0)) {
-        auto scale_len = GetScaleLen(input_box.width, param.scale_horizontal);
-        x_move -= scale_len / 2;
-        w_scale += scale_len;
-    }
-    // Vertical (up + down symmetrically).
-    if (FloatDiff(param.scale_longitudinal, 1.0)) {
-        auto scale_len = GetScaleLen(input_box.height, param.scale_longitudinal);
-        y_move -= scale_len / 2;
-        h_scale += scale_len;
-    }
-    // Uniform (all directions).
-    if (FloatDiff(param.scale_side, 1.0)) {
-        auto scale_len_w = GetScaleLen(input_box.width, param.scale_side);
-        auto scale_len_h = GetScaleLen(input_box.height, param.scale_side);
-        x_move -= scale_len_w / 2;
-        w_scale += scale_len_w;
-        y_move -= scale_len_h / 2;
-        h_scale += scale_len_h;
+    if (pic_width <= 0 || pic_height <= 0) {
+        return {};
     }
 
-    cosmo::util::Box out;
-    out.x      = input_box.x + x_move;
-    out.y      = input_box.y + y_move;
-    out.width  = input_box.width + w_scale;
-    out.height = input_box.height + h_scale;
+    const auto north        = GetScaleLen(input_box.height, param.scale_north);
+    const auto south        = GetScaleLen(input_box.height, param.scale_south);
+    const auto east         = GetScaleLen(input_box.width, param.scale_east);
+    const auto west         = GetScaleLen(input_box.width, param.scale_west);
+    const auto horizontal   = GetScaleLen(input_box.width, param.scale_horizontal);
+    const auto longitudinal = GetScaleLen(input_box.height, param.scale_longitudinal);
+    const auto side_width   = GetScaleLen(input_box.width, param.scale_side);
+    const auto side_height  = GetScaleLen(input_box.height, param.scale_side);
+    if (!north || !south || !east || !west || !horizontal || !longitudinal || !side_width || !side_height) {
+        return {};
+    }
 
-    // Clamp to frame bounds.
-    if (out.x < 0) {
-        out.width = out.width + out.x;  // shrink width by the overshoot
-        out.x     = 0;
-    }
-    if (out.y < 0) {
-        out.height = out.height + out.y;  // shrink height by the overshoot  [BUG FIX: was out.x]
-        out.y      = 0;
-    }
-    if (out.x > pic_width) {
-        out.x = pic_width;
-    }
-    if (out.y > pic_height) {
-        out.y = pic_height;
-    }
-    if (out.x + out.width > pic_width) {
-        out.width = (pic_width > out.x) ? (pic_width - out.x) : 0;
-    }
-    if (out.y + out.height > pic_height) {
-        out.height = (pic_height > out.y) ? (pic_height - out.y) : 0;
-    }
-    return out;
+    long double x_move  = 0.0L;
+    long double y_move  = 0.0L;
+    long double w_scale = 0.0L;
+    long double h_scale = 0.0L;
+
+    // Directional and symmetric scaling. Integer division intentionally preserves the legacy rounding.
+    y_move -= *north;
+    h_scale += *north;
+    h_scale += *south;
+    w_scale += *east;
+    x_move -= *west;
+    w_scale += *west;
+    x_move -= *horizontal / 2;
+    w_scale += *horizontal;
+    y_move -= *longitudinal / 2;
+    h_scale += *longitudinal;
+    x_move -= *side_width / 2;
+    w_scale += *side_width;
+    y_move -= *side_height / 2;
+    h_scale += *side_height;
+
+    const auto [x, width]  = ClipSpan(static_cast<long double>(input_box.x) + x_move,
+                                      static_cast<long double>(input_box.width) + w_scale, pic_width);
+    const auto [y, height] = ClipSpan(static_cast<long double>(input_box.y) + y_move,
+                                      static_cast<long double>(input_box.height) + h_scale, pic_height);
+    return {x, y, width, height};
 }
 
 bool BoxIncludeBox(cosmo::util::Box src, cosmo::util::Box target) {

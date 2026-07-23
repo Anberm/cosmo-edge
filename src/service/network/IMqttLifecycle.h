@@ -25,6 +25,10 @@ public:
 
     /// Start the MQTT client and connect to the configured broker.
     virtual void MqttStart() = 0;
+
+    /// Permanently stop MQTT callbacks, timers, connection work, and message
+    /// queues. This process-shutdown operation is idempotent and not restartable.
+    virtual void MqttShutdown() = 0;
 };
 
 }  // namespace cosmo::service

@@ -72,7 +72,7 @@ bool StreamViewerEncoder::ContainsKeyFrame(const uint8_t* data, size_t size) con
         if (nal_size == 0) {
             break;
         }
-        if (media::GetFrameType(video_type_, data + offset) == media::HFrameType::I) {
+        if (media::GetFrameType(video_type_, data + offset, nal_size) == media::HFrameType::I) {
             return true;
         }
         offset += nal_size;

@@ -4,7 +4,9 @@
 #include "util/CipherUtil.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 #include "cryptopp/aes.h"
@@ -28,6 +30,70 @@ namespace cosmo::util {
 // This is safe as it's a standard idiom for Crypto++ byte-level operations.
 
 namespace crypto = CryptoPP;
+
+namespace {
+
+    constexpr std::size_t kMaxBase64DecodedBytes = 64ULL * 1024 * 1024;
+
+    bool IsBase64Alphabet(unsigned char value) {
+        return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') ||
+               (value >= '0' && value <= '9') || value == '+' || value == '/';
+    }
+
+    bool DecodeBase64Strict(const std::string& input, std::vector<std::uint8_t>& output) {
+        output.clear();
+        if (input.empty()) {
+            return true;
+        }
+        if (input.size() % 4 != 0) {
+            return false;
+        }
+
+        std::size_t padding = 0;
+        if (input.back() == '=') {
+            ++padding;
+        }
+        if (input.size() >= 2 && input[input.size() - 2] == '=') {
+            ++padding;
+        }
+        for (std::size_t index = 0; index < input.size() - padding; ++index) {
+            if (!IsBase64Alphabet(static_cast<unsigned char>(input[index]))) {
+                return false;
+            }
+        }
+        for (std::size_t index = input.size() - padding; index < input.size(); ++index) {
+            if (input[index] != '=') {
+                return false;
+            }
+        }
+
+        if (input.size() / 4 > (std::numeric_limits<std::size_t>::max() - 2) / 3) {
+            return false;
+        }
+        const auto expected_size = input.size() / 4 * 3 - padding;
+        if (expected_size > kMaxBase64DecodedBytes) {
+            return false;
+        }
+
+        try {
+            crypto::Base64Decoder decoder;
+            decoder.PutMessageEnd(reinterpret_cast<const std::uint8_t*>(input.data()), input.size());
+            if (decoder.MaxRetrievable() != expected_size) {
+                return false;
+            }
+            output.resize(expected_size);
+            if (expected_size != 0 && decoder.Get(output.data(), output.size()) != output.size()) {
+                output.clear();
+                return false;
+            }
+        } catch (const crypto::Exception&) {
+            output.clear();
+            return false;
+        }
+        return true;
+    }
+
+}  // namespace
 
 std::string EncAesGcmNoPadding(const std::string& enc_str, const std::string& key, const std::string& iv) {
     using aes_gcm_cipher = crypto::GCM<crypto::AES>;
@@ -71,10 +137,14 @@ std::string DecAesGcmNoPadding(const std::string& dec_str, const std::string& ke
     dec.SetKeyWithIV(reinterpret_cast<const uint8_t*>(key.c_str()), key.size(),
                      reinterpret_cast<const uint8_t*>(iv.c_str()));
 
-    dec.DecryptAndVerify(reinterpret_cast<uint8_t*>(&out_str[0]),
-                         reinterpret_cast<const uint8_t*>(&dec_str[out_len]), 16,
-                         reinterpret_cast<const uint8_t*>(iv.c_str()), static_cast<int>(iv.size()), nullptr,
-                         0, reinterpret_cast<const uint8_t*>(dec_str.c_str()), out_len);
+    const bool verified = dec.DecryptAndVerify(
+        reinterpret_cast<uint8_t*>(&out_str[0]), reinterpret_cast<const uint8_t*>(&dec_str[out_len]), 16,
+        reinterpret_cast<const uint8_t*>(iv.c_str()), static_cast<int>(iv.size()), nullptr, 0,
+        reinterpret_cast<const uint8_t*>(dec_str.c_str()), out_len);
+    if (!verified) {
+        std::fill(out_str.begin(), out_str.end(), '\0');
+        out_str.clear();
+    }
 
     return out_str;
 }
@@ -115,7 +185,9 @@ std::string EncBase64(const std::string& enc_str) {
 
     out_str.resize(size);
 
-    encoder.Get(reinterpret_cast<uint8_t*>(&out_str[0]), size);
+    if (size != 0) {
+        encoder.Get(reinterpret_cast<uint8_t*>(&out_str[0]), size);
+    }
 
     return out_str;
 }
@@ -124,45 +196,36 @@ std::string EncBase64Ex(const uint8_t* data, size_t size) {
     crypto::Base64Encoder encoder(nullptr, false);
     std::string out_str;
 
+    if (data == nullptr && size != 0) {
+        return {};
+    }
     encoder.PutMessageEnd(data, size);
 
     size_t sz = encoder.MaxRetrievable();
 
     out_str.resize(sz);
 
-    encoder.Get(reinterpret_cast<uint8_t*>(&out_str[0]), sz);
+    if (sz != 0) {
+        encoder.Get(reinterpret_cast<uint8_t*>(&out_str[0]), sz);
+    }
 
     return out_str;
 }
 
 std::string DecBase64(const std::string& dec_str) {
-    crypto::Base64Decoder decoder;
-    std::string out_str;
-
-    decoder.PutMessageEnd(reinterpret_cast<const uint8_t*>(dec_str.c_str()), dec_str.size());
-
-    size_t size = decoder.MaxRetrievable();
-
-    out_str.resize(size);
-
-    decoder.Get(reinterpret_cast<uint8_t*>(&out_str[0]), size);
-
-    return out_str;
+    std::vector<std::uint8_t> decoded;
+    if (!DecodeBase64Strict(dec_str, decoded)) {
+        return {};
+    }
+    return {decoded.begin(), decoded.end()};
 }
 
 std::vector<uint8_t> DecBase64Vec(const std::string& dec_str) {
-    crypto::Base64Decoder decoder;
-    std::vector<uint8_t> out_vec;
-
-    decoder.PutMessageEnd(reinterpret_cast<const uint8_t*>(dec_str.c_str()), dec_str.size());
-
-    size_t size = decoder.MaxRetrievable();
-
-    out_vec.resize(size);
-
-    decoder.Get(&out_vec[0], size);
-
-    return out_vec;
+    std::vector<std::uint8_t> decoded;
+    if (!DecodeBase64Strict(dec_str, decoded)) {
+        return {};
+    }
+    return decoded;
 }
 
 std::string Sha1(const std::string& input) {

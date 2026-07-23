@@ -59,8 +59,7 @@ namespace {
 
         size_t parsed = 0;
         if (!ai_detector_fps::ParsePositiveSize(raw_value, parsed)) {
-            LOG_WARN("{}Invalid {} value:{}, fallback:{}", kTag, kEnvMaxReuse, raw_value,
-                     kMaxReuseHardLimit);
+            LOG_WARN("{}Invalid {} value:{}, fallback:{}", kTag, kEnvMaxReuse, raw_value, kMaxReuseHardLimit);
             return kMaxReuseHardLimit;
         }
         return std::clamp(parsed, static_cast<size_t>(1), kMaxRuntimeReuseLimit);
@@ -179,7 +178,7 @@ bool AiDetector::AiSdkInit() {
                  kRetryIntervalMs / 1000, init_retry_count_);
     }
 
-#ifndef COSMO_NN_USE_CPU_BACKEND
+#ifndef COSMO_NN_USE_HOST_BACKEND
     auto availMB =
         service::ServiceRegistry::Instance().Get<service::IHardwareQuery>().GetAvailableGpuMemoryMB();
     if (availMB >= 0 && availMB < kRequiredGpuMemMB) {
@@ -196,7 +195,7 @@ bool AiDetector::AiSdkInit() {
     std::string cfgPath   = "";
     std::string modelPath = "";
     auto cfgRet           = service::ServiceRegistry::Instance().Get<service::IModelService>().GetModelCfg(
-                  alg_code_, cfgPath, modelPath);
+        alg_code_, cfgPath, modelPath);
     if (!cfgRet) {
         LOG_WARN("{}Get Model Configure Failed. AlgCode:{} code:{}", kTag, alg_code_, cfgRet);
         return false;

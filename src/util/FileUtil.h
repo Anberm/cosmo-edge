@@ -24,6 +24,7 @@ std::vector<uint8_t> ReadFileBin(const std::string& file_name, size_t max_size =
 
 bool WriteFile(const std::string& file_name, const std::string& data);
 bool WriteFile(const std::string& file_name, const std::uint8_t* data, int size);
+bool WriteFileAtomically(const std::string& file_name, const std::string& data);
 
 bool WriteFileAppend(const std::string& file_name, const std::string& data);
 bool WriteFileAppend(const std::string& file_name, const std::uint8_t* data, int size);

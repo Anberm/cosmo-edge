@@ -42,6 +42,7 @@ void to_json(nlohmann::json& j, const MsgUploadRecv& v) {
     j["contentLength"] = v.contentLength;
     j["fileName"]      = v.fileName;
     j["filePath"]      = v.filePath;
+    j["uploadId"]      = v.uploadId;
 }
 
 void from_json(const nlohmann::json& j, MsgUploadRecv& v) {
@@ -49,6 +50,7 @@ void from_json(const nlohmann::json& j, MsgUploadRecv& v) {
     JSON_OPT(j, v, contentLength);
     JSON_OPT(j, v, fileName);
     JSON_OPT(j, v, filePath);
+    JSON_OPT(j, v, uploadId);
 }
 
 void to_json(nlohmann::json& j, const MsgListRecv& v) {
@@ -73,8 +75,11 @@ void to_json(nlohmann::json& j, const MsgAddRecv& v) {
     j["description"]            = v.description;
     j["bmodelFiles"]            = v.bmodelFiles;
     j["vocabFilePath"]          = v.vocabFilePath;
+    j["vocabUploadId"]          = v.vocabUploadId;
     j["tokenizerFilePath"]      = v.tokenizerFilePath;
+    j["tokenizerUploadId"]      = v.tokenizerUploadId;
     j["characterTableFilePath"] = v.characterTableFilePath;
+    j["characterTableUploadId"] = v.characterTableUploadId;
     j["normalizationMode"]      = v.normalizationMode;
     j["colorChannel"]           = v.colorChannel;
 }
@@ -87,22 +92,28 @@ void from_json(const nlohmann::json& j, MsgAddRecv& v) {
     JSON_OPT(j, v, description);
     JSON_OPT(j, v, bmodelFiles);
     JSON_OPT(j, v, vocabFilePath);
+    JSON_OPT(j, v, vocabUploadId);
     JSON_OPT(j, v, tokenizerFilePath);
+    JSON_OPT(j, v, tokenizerUploadId);
     JSON_OPT(j, v, characterTableFilePath);
+    JSON_OPT(j, v, characterTableUploadId);
     JSON_OPT(j, v, normalizationMode);
     JSON_OPT(j, v, colorChannel);
 }
 
 void to_json(nlohmann::json& j, const MsgUploadTempRecv& v) {
     to_json(j, static_cast<const MsgRecvHead&>(v));
-    j["contentLength"] = v.contentLength;
-    j["fileName"]      = v.fileName;
-    j["filePath"]      = v.filePath;
-    j["uploadId"]      = v.uploadId;
-    j["chunkIndex"]    = v.chunkIndex;
-    j["totalChunks"]   = v.totalChunks;
-    j["totalSize"]     = v.totalSize;
-    j["chunkSize"]     = v.chunkSize;
+    j["contentLength"]   = v.contentLength;
+    j["fileName"]        = v.fileName;
+    j["filePath"]        = v.filePath;
+    j["uploadId"]        = v.uploadId;
+    j["chunkIndex"]      = v.chunkIndex;
+    j["totalChunks"]     = v.totalChunks;
+    j["totalSize"]       = v.totalSize;
+    j["chunkSize"]       = v.chunkSize;
+    j["purpose"]         = v.purpose;
+    j["sha256"]          = v.sha256;
+    j["clientRequestId"] = v.clientRequestId;
 }
 
 void from_json(const nlohmann::json& j, MsgUploadTempRecv& v) {
@@ -115,6 +126,9 @@ void from_json(const nlohmann::json& j, MsgUploadTempRecv& v) {
     JSON_OPT(j, v, totalChunks);
     JSON_OPT(j, v, totalSize);
     JSON_OPT(j, v, chunkSize);
+    JSON_OPT(j, v, purpose);
+    JSON_OPT(j, v, sha256);
+    JSON_OPT(j, v, clientRequestId);
 }
 
 void to_json(nlohmann::json& j, const MsgUploadTempSend& v) {
@@ -125,6 +139,16 @@ void to_json(nlohmann::json& j, const MsgUploadTempSend& v) {
 void from_json(const nlohmann::json& j, MsgUploadTempSend& v) {
     from_json(j, static_cast<MsgSendHead&>(v));
     JSON_OPT(j, v, resData);
+}
+
+void to_json(nlohmann::json& j, const MsgCancelUploadRecv& v) {
+    to_json(j, static_cast<const MsgRecvHead&>(v));
+    j["uploadId"] = v.uploadId;
+}
+
+void from_json(const nlohmann::json& j, MsgCancelUploadRecv& v) {
+    from_json(j, static_cast<MsgRecvHead&>(v));
+    JSON_OPT(j, v, uploadId);
 }
 
 void to_json(nlohmann::json& j, const MsgGetConfigRecv& v) {
@@ -186,11 +210,13 @@ void from_json(const nlohmann::json& j, MsgExportConfigSend& v) {
 void to_json(nlohmann::json& j, const MsgImportModelRecv& v) {
     to_json(j, static_cast<const MsgRecvHead&>(v));
     j["filePath"] = v.filePath;
+    j["uploadId"] = v.uploadId;
 }
 
 void from_json(const nlohmann::json& j, MsgImportModelRecv& v) {
     from_json(j, static_cast<MsgRecvHead&>(v));
     JSON_OPT(j, v, filePath);
+    JSON_OPT(j, v, uploadId);
 }
 
 void to_json(nlohmann::json& j, const MsgGetModelComponentsSend& v) {
@@ -310,19 +336,27 @@ void to_json(nlohmann::json& j, const MsgPageSend::ResData& v) {
 void from_json(const nlohmann::json& j, BmodelFileInfo& v) {
     JSON_OPT(j, v, role);
     JSON_OPT(j, v, filePath);
+    JSON_OPT(j, v, uploadId);
 }
 
 void to_json(nlohmann::json& j, const BmodelFileInfo& v) {
     j["role"]     = v.role;
     j["filePath"] = v.filePath;
+    j["uploadId"] = v.uploadId;
 }
 
 void from_json(const nlohmann::json& j, MsgUploadTempSend::ResData& v) {
     JSON_OPT(j, v, filePath);
+    JSON_OPT(j, v, uploadId);
+    JSON_OPT(j, v, nextChunkIndex);
+    JSON_OPT(j, v, complete);
 }
 
 void to_json(nlohmann::json& j, const MsgUploadTempSend::ResData& v) {
-    j["filePath"] = v.filePath;
+    j["filePath"]       = v.filePath;
+    j["uploadId"]       = v.uploadId;
+    j["nextChunkIndex"] = v.nextChunkIndex;
+    j["complete"]       = v.complete;
 }
 
 void from_json(const nlohmann::json& j, MsgGetConfigSend::ResData& v) {

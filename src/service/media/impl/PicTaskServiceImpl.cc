@@ -87,6 +87,7 @@ PicTaskServiceImpl::PicTaskServiceImpl() : task_base_(std::make_unique<cosmo::PT
 }
 
 PicTaskServiceImpl::~PicTaskServiceImpl() {
+    DeleteAllTasksImpl();
     LOG_INFO("{}", "PicTaskServiceImpl Delete");
 }
 
@@ -98,14 +99,22 @@ cosmo::util::ErrorEnum PicTaskServiceImpl::TaskCreate(const std::string& taskId,
         LOG_INFO("Task:{} Empty", taskId);
         return cosmo::util::ErrorEnum::InvalidParam;
     }
+    if (!action_alg) {
+        LOG_WARN("Task:{} Cannot Create Without Algorithm Configuration", taskId);
+        return cosmo::util::ErrorEnum::ActionFailed;
+    }
     std::lock_guard<std::shared_mutex> lock(mtx_);
+    if (stopping_) {
+        LOG_WARN("Task:{} Cannot Create While PicTaskService Is Stopping", taskId);
+        return cosmo::util::ErrorEnum::ServiceNotInit;
+    }
     auto it = tasks_.find(taskId);
     if (it != tasks_.end()) {
         auto old_task = it->second;
         if (old_task && old_task->GetVersion() != action_alg->algorithmUpdateTime) {
             LOG_INFO("Task:{} Algorithm Updated. Recreating task ({} -> {})", taskId, old_task->GetVersion(),
                      action_alg->algorithmUpdateTime);
-            task_base_->TaskDelete(old_task);
+            DestroyTask(old_task);
             tasks_.erase(it);
         } else {
             LOG_WARN("Task:{} In Pool, Cant Repeat.", taskId);
@@ -134,9 +143,7 @@ cosmo::util::ErrorEnum PicTaskServiceImpl::TaskDelete(const std::string& taskId)
         auto old_task = task_el->second;
         tasks_.erase(taskId);
 
-        if (!task_base_->TaskDelete(old_task)) {
-            LOG_WARN("Delete {} Actions Warning. Forcing success to ensure UI unmount.", taskId);
-        }
+        DestroyTask(old_task);
         LOG_INFO("Delete {}", taskId);
     } else {
         LOG_WARN("Task:{} Not Found", taskId);
@@ -148,6 +155,10 @@ cosmo::util::ErrorEnum PicTaskServiceImpl::TaskDelete(const std::string& taskId)
 
 bool PicTaskServiceImpl::TaskStart(const std::string& taskId) {
     std::lock_guard<std::shared_mutex> lock(mtx_);
+    if (stopping_) {
+        LOG_WARN("[{}] Cannot Start While PicTaskService Is Stopping", taskId);
+        return false;
+    }
     auto it = tasks_.find(taskId);
     if (it == tasks_.end()) {
         LOG_WARN("[{}] Not In Pool, Cant Start.", taskId);
@@ -159,8 +170,25 @@ bool PicTaskServiceImpl::TaskStart(const std::string& taskId) {
 }
 
 void PicTaskServiceImpl::TaskDeleteAll() {
-    std::lock_guard<std::shared_mutex> lock(mtx_);
-    tasks_.clear();
+    DeleteAllTasksImpl();
+}
+
+void PicTaskServiceImpl::DeleteAllTasksImpl() {
+    // Serialize the whole drain, not only the map swap. A concurrent caller
+    // must not return and allow ServiceRegistry teardown while the first caller
+    // is still destroying action instances.
+    std::lock_guard<std::mutex> shutdown_lock(shutdown_mtx_);
+    std::map<std::string, cosmo::PTaskElementPtr> tasks;
+    {
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        stopping_ = true;
+        tasks.swap(tasks_);
+    }
+
+    for (const auto& [task_id, task] : tasks) {
+        DestroyTask(task);
+        LOG_INFO("Delete {} During PicTaskService Shutdown", task_id);
+    }
 }
 
 void PicTaskServiceImpl::UpdateCheckSum(const std::string& nodeAlgorithmCheckSum) {
@@ -180,26 +208,28 @@ cosmo::util::ErrorEnum PicTaskServiceImpl::DetectPic(const std::string& taskId,
         LOG_INFO("Task:{} Empty", taskId);
         return cosmo::util::ErrorEnum::InvalidParam;
     }
-    // Lock scope
-    cosmo::PTaskElementPtr task;
-    {
-        std::shared_lock<std::shared_mutex> lock(mtx_);
-        auto it = tasks_.find(taskId);
-        if (it == tasks_.end()) {
-            LOG_WARN("Task:{} Not In Pool, .", taskId);
-            return cosmo::util::ErrorEnum::NotCreated;
-        }
-        task = it->second;
+    // Keep a shared service lock through inference. Shutdown takes the unique
+    // lock before moving tasks out, so it cannot destroy action instances while
+    // an in-flight request is using them.
+    std::shared_lock<std::shared_mutex> lock(mtx_);
+    if (stopping_) {
+        return cosmo::util::ErrorEnum::ServiceNotInit;
+    }
+    auto it = tasks_.find(taskId);
+    if (it == tasks_.end()) {
+        LOG_WARN("Task:{} Not In Pool, .", taskId);
+        return cosmo::util::ErrorEnum::NotCreated;
+    }
+    auto task = it->second;
 
-        if (!task->is_started) {
-            if (task->startFailedCount > 10) {
-                LOG_WARN("Task:{} Start Failed More Than 10 Times.", taskId);
-                return cosmo::util::ErrorEnum::CreateToManyTimes;
-            } else {
-                if (!task_base_->TaskActionInit(task)) {
-                    LOG_WARN("Task:{} Start Failed.", taskId);
-                    return cosmo::util::ErrorEnum::TaskCreateFailed;
-                }
+    if (!task->is_started) {
+        if (task->startFailedCount > 10) {
+            LOG_WARN("Task:{} Start Failed More Than 10 Times.", taskId);
+            return cosmo::util::ErrorEnum::CreateToManyTimes;
+        } else {
+            if (!task_base_->TaskActionInit(task)) {
+                LOG_WARN("Task:{} Start Failed.", taskId);
+                return cosmo::util::ErrorEnum::TaskCreateFailed;
             }
         }
     }
@@ -427,6 +457,26 @@ bool PicTaskServiceImpl::TasksHaveChange(const std::string& nodeAlgorithmCheckSu
 size_t PicTaskServiceImpl::TaskCount() {
     std::shared_lock<std::shared_mutex> lock(mtx_);
     return tasks_.size();
+}
+
+void PicTaskServiceImpl::DestroyTask(const cosmo::PTaskElementPtr& task) noexcept {
+    if (!task) {
+        return;
+    }
+    try {
+        if (task->is_started && !task_base_->TaskActionDestroy(task)) {
+            LOG_WARN("Stop {} Actions Warning. Continuing task cleanup.", task->taskId);
+        }
+    } catch (...) {
+        LOG_ERRO("Stop {} Actions Threw. Continuing task cleanup.", task->taskId);
+    }
+    try {
+        if (!task_base_->TaskDelete(task)) {
+            LOG_WARN("Delete {} Actions Warning. Forcing success to ensure UI unmount.", task->taskId);
+        }
+    } catch (...) {
+        LOG_ERRO("Delete {} Actions Threw. Continuing shutdown.", task->taskId);
+    }
 }
 
 }  // namespace cosmo::service

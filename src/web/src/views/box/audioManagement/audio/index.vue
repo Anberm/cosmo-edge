@@ -79,6 +79,7 @@ import { WarningFilled } from '@element-plus/icons-vue'
 import TopBar from '@/components/TopBar.vue'
 import moment from 'moment'
 import { t, localeColon, currentLocale } from '@/i18n'
+import { uploadFileInChunks, UploadPurpose } from '@/utils/chunkUpload'
 
 // Resolve default audio display name from backend Chinese
 const AUDIO_NAME_MAP = {
@@ -174,36 +175,61 @@ function selectable(row) {
 }
 
 function handleChange(file, fileList) {
-  const isMP3orWAV = file.raw.type === 'audio/mpeg' || file.raw.type === 'audio/wav'
-  const isLt2M = file.size / 1024 / 1024 < 3
+  const rawFile = file.raw || file
+  const lowerName = (rawFile.name || '').toLowerCase()
+  const isMP3orWAV = lowerName.endsWith('.mp3') || lowerName.endsWith('.wav')
+  const isLt3M = rawFile.size <= 3 * 1024 * 1024
   if (!isMP3orWAV) {
+    audioFile.value = null
+    fileNameString.value = ''
+    audioRef.value?.clearFiles?.()
     proxy.$message.error(t('boxOther.audioUploadFormatError'))
     return
   }
-  if (!isLt2M) {
+  if (!isLt3M) {
+    audioFile.value = null
+    fileNameString.value = ''
+    audioRef.value?.clearFiles?.()
     proxy.$message.error(t('boxOther.audioUploadSizeError'))
     return
   }
 
   // el-upload does not expose its internal uploadFiles, so track the selected
   // file ourselves. show-file-list is false, so only the latest pick matters.
-  audioFile.value = file.raw
-  fileNameString.value = file.name
+  audioFile.value = rawFile
+  fileNameString.value = rawFile.name
 }
 
-function saveAudio() {
+async function saveAudio() {
   if (!audioFile.value) {
     return proxy.$message.warning(t('boxOther.selectAudioFile'))
   }
 
-  const formData = new FormData()
-  formData.append('importType', '5')
-  formData.append('file', audioFile.value)
-  proxy.$API.boxImportFile(formData).then(() => {
+  let stagedUpload
+  try {
+    stagedUpload = await uploadFileInChunks(audioFile.value, {
+      purpose: UploadPurpose.AUDIO,
+      uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+    })
+    if (!stagedUpload.uploadId) throw new Error(t('validate.cannotGetFilePath'))
+    await proxy.$API.boxImportFile({
+      importType: 5,
+      uploadId: stagedUpload.uploadId
+    })
     proxy.$message.success(t('validate.uploadSucceeded'))
     searchList()
-  })
-  addDialogVisible.value = false
+    addDialogVisible.value = false
+  } catch (_) {
+    if (stagedUpload?.uploadId) {
+      try {
+        await proxy.$API.cancelAtomicModelUpload({ uploadId: stagedUpload.uploadId })
+      } catch (_) {
+        // The staging service also expires abandoned sessions by TTL.
+      }
+    }
+    // The request interceptor reports the concrete upload/import error.
+  }
 }
 
 function playAudio(item) {

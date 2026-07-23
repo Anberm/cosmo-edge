@@ -32,7 +32,7 @@ public:
     Status Allocate(void** handle, size_t size);
 
 private:
-    bm_handle_t bm_handle;
+    bm_handle_t bm_handle = nullptr;
 };
 
 }  // namespace cosmo::nn

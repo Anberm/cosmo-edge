@@ -159,6 +159,9 @@ std::string ErrorCategory::message(int code) const {
         CaseStr(DecoderColorConvertFailed, "图像色彩转换失败");
         CaseStr(DecoderResizePaddingFailed, "图像Padding失败");
         CaseStr(DecoderFrameFailed, "解码帧数据失败");
+        CaseStr(LiveStreamPublishFailed, "实时预览推流失败");
+        CaseStr(LiveStreamReadyTimeout, "实时预览首帧超时");
+        CaseStr(LiveStreamStopped, "实时预览已停止");
 
         CaseStr(ImageDecodeFailed, "图像解码失败");
         CaseStr(ImageDownloadFailed, "图像下载失败");
@@ -349,6 +352,9 @@ std::string ErrorEnumName(ErrorEnum code) {
         CaseName(DecoderColorConvertFailed);
         CaseName(DecoderResizePaddingFailed);
         CaseName(DecoderFrameFailed);
+        CaseName(LiveStreamPublishFailed);
+        CaseName(LiveStreamReadyTimeout);
+        CaseName(LiveStreamStopped);
         CaseName(ImageDecodeFailed);
         CaseName(ImageDownloadFailed);
         CaseName(ImageResolutionInvalid);

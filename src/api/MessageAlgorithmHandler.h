@@ -5,6 +5,7 @@
 #include <system_error>
 
 #include "service/algorithm/dto/AlgorithmDto.h"
+#include "util/IRequestDispatcher.h"
 
 namespace cosmo::service {
 class IAlgorithmQuery;
@@ -31,6 +32,9 @@ public:
 
     // Upload algorithm package
     [[nodiscard]] Algorithm::MsgUploadSend Handle(Algorithm::MsgUploadRecv&& data,
+                                                  std::error_condition& errc) const;
+    [[nodiscard]] Algorithm::MsgUploadSend Handle(Algorithm::MsgUploadRecv&& data,
+                                                  const RequestDispatchContext& context,
                                                   std::error_condition& errc) const;
 
     // Edit algorithm

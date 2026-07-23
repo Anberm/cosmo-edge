@@ -2,7 +2,9 @@
 
 #include "service/system/impl/DeviceInfoServiceImpl.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <filesystem>
 #include <mutex>
 #include <thread>
@@ -22,6 +24,37 @@
 namespace cosmo::service {
 
 namespace fs = std::filesystem;
+
+namespace {
+
+    double ClampRatio(double value) {
+        return std::isfinite(value) ? std::clamp(value, 0.0, 1.0) : 0.0;
+    }
+
+    struct CapacityUsage {
+        int64_t total{0};
+        int64_t available{0};
+        int64_t used{0};
+        int percent{0};
+        bool valid{false};
+    };
+
+    CapacityUsage GetCapacityUsage(int64_t total, int64_t available) {
+        CapacityUsage result;
+        if (total <= 0 || available < 0) {
+            return result;
+        }
+        result.total     = total;
+        result.available = std::min(available, total);
+        result.used      = total - result.available;
+        result.percent   = static_cast<int>(
+            std::lround(static_cast<double>(result.used) * 100.0 / static_cast<double>(result.total)));
+        result.percent = std::clamp(result.percent, 0, 100);
+        result.valid   = true;
+        return result;
+    }
+
+}  // namespace
 
 // Hardware info state (migrated from HwInfo singleton).
 // Reads device static info once at construction via HardwareQueryUtil.
@@ -49,7 +82,6 @@ struct DeviceInfoServiceImpl::HwResState {
     cosmo::MsgDiskInfo disk_info_;
     cosmo::MsgNetInfo net_info_;
     uint32_t gpu_device_cnt_{1};
-    std::string dev_id_string_;
     std::thread monitor_thread_;
 
     HwResState() {
@@ -124,8 +156,7 @@ struct DeviceInfoServiceImpl::HwResState {
             LOG_ERRO("{}", "Fail To get MAC!");
             return "Get DevId Failed";
         }
-        dev_id_string_ = "CWAI_Analyzer_" + mac;
-        return dev_id_string_;
+        return "CWAI_Analyzer_" + mac;
     }
 };
 
@@ -163,34 +194,35 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
     std::vector<HwResourceItem> items;
 
     // CPU
-    auto cpu_utl = hw_res_state_->GetCpuUtilization();
-    items.push_back({"cpuUtilization", "CPU使用率", static_cast<int>(cpu_utl * 100 + 0.5),
+    const auto raw_cpu_utl = hw_res_state_->GetCpuUtilization();
+    const auto cpu_utl     = ClampRatio(raw_cpu_utl);
+    items.push_back({"cpuUtilization", "CPU使用率", static_cast<int>(std::lround(cpu_utl * 100)),
                      COSMO_FORMAT("{:.0f}%", cpu_utl * 100), COSMO_FORMAT("{:.0f}%", (1 - cpu_utl) * 100),
-                     1});
+                     std::isfinite(raw_cpu_utl) && raw_cpu_utl >= 0.0 ? 1 : 0});
 
     // Memory
-    auto mem_utl = hw_res_state_->GetMemoryUtilization();
-    int mem_percent =
-        static_cast<int>((mem_utl.memtotal - mem_utl.memavailable) * 100.0 / mem_utl.memtotal + 0.5);
-    items.push_back({"generalMemoryUtilization", "业务内存使用率", mem_percent,
-                     COSMO_FORMAT("{:.2f} MB",
-                                  static_cast<double>(mem_utl.memtotal - mem_utl.memavailable) / 1024 / 1024),
-                     COSMO_FORMAT("{:.2f} MB", static_cast<double>(mem_utl.memavailable) / 1024 / 1024), 1});
+    const auto mem_utl   = hw_res_state_->GetMemoryUtilization();
+    const auto mem_usage = GetCapacityUsage(mem_utl.memtotal, mem_utl.memavailable);
+    items.push_back({"generalMemoryUtilization", "业务内存使用率", mem_usage.percent,
+                     COSMO_FORMAT("{:.2f} MB", static_cast<double>(mem_usage.used) / 1024 / 1024),
+                     COSMO_FORMAT("{:.2f} MB", static_cast<double>(mem_usage.available) / 1024 / 1024),
+                     mem_usage.valid ? 1 : 0});
 
     // GPU/NPU
-    auto gpu_utl = hw_res_state_->GetGpuUtilization();
-    items.push_back({"npuUtilization", "NPU使用率", static_cast<int>(gpu_utl.gpuusage * 100 + 0.5),
-                     COSMO_FORMAT("{:.0f}%", gpu_utl.gpuusage * 100),
-                     COSMO_FORMAT("{:.0f}%", (1 - gpu_utl.gpuusage) * 100), 1});
+    auto gpu_utl             = hw_res_state_->GetGpuUtilization();
+    const auto raw_gpu_usage = gpu_utl.gpuusage;
+    const auto gpu_usage     = ClampRatio(raw_gpu_usage);
+    gpu_utl.gpuusage         = gpu_usage;
+    items.push_back({"npuUtilization", "NPU使用率", static_cast<int>(std::lround(gpu_usage * 100)),
+                     COSMO_FORMAT("{:.0f}%", gpu_usage * 100), COSMO_FORMAT("{:.0f}%", (1 - gpu_usage) * 100),
+                     std::isfinite(raw_gpu_usage) && raw_gpu_usage >= 0.0 ? 1 : 0});
 
     // GPU memory details
     auto add_gpu_mem_item = [&](const std::string& key, const std::string& name, const auto& dev) {
-        int percent =
-            static_cast<int>((dev.gpumemtotal - dev.gpumemavailable) * 100.0 / dev.gpumemtotal + 0.5);
+        const auto usage = GetCapacityUsage(dev.gpumemtotal, dev.gpumemavailable);
         items.push_back(
-            {key, name, percent,
-             COSMO_FORMAT("{:.2f} GB", static_cast<double>(dev.gpumemtotal - dev.gpumemavailable) / 1024),
-             COSMO_FORMAT("{:.2f} GB", static_cast<double>(dev.gpumemavailable) / 1024), 1});
+            {key, name, usage.percent, COSMO_FORMAT("{:.2f} GB", static_cast<double>(usage.used) / 1024),
+             COSMO_FORMAT("{:.2f} GB", static_cast<double>(usage.available) / 1024), usage.valid ? 1 : 0});
     };
 
     if (2 == gpu_utl.gpudevusage.size()) {
@@ -201,34 +233,33 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
         add_gpu_mem_item("pictureMemoryUtilization", "heap 1 内存使用率", gpu_utl.gpudevusage[1]);
         add_gpu_mem_item("TPPMemoryUtilization", "heap 2 内存使用率", gpu_utl.gpudevusage[2]);
     } else {
-        int gpu_mem_percent = static_cast<int>(
-            (gpu_utl.gpumemtotal - gpu_utl.gpumemavailable) * 100.0 / gpu_utl.gpumemtotal + 0.5);
-        items.push_back(
-            {"specialMemoryUtilization", "芯片内存使用率", gpu_mem_percent,
-             COSMO_FORMAT("{:.2f} GB",
-                          static_cast<double>(gpu_utl.gpumemtotal - gpu_utl.gpumemavailable) / 1024),
-             COSMO_FORMAT("{:.2f} GB", static_cast<double>(gpu_utl.gpumemavailable) / 1024), 1});
+        const auto gpu_mem_usage = GetCapacityUsage(gpu_utl.gpumemtotal, gpu_utl.gpumemavailable);
+        items.push_back({"specialMemoryUtilization", "芯片内存使用率", gpu_mem_usage.percent,
+                         COSMO_FORMAT("{:.2f} GB", static_cast<double>(gpu_mem_usage.used) / 1024),
+                         COSMO_FORMAT("{:.2f} GB", static_cast<double>(gpu_mem_usage.available) / 1024),
+                         gpu_mem_usage.valid ? 1 : 0});
     }
 
     // Disk
-    auto disk_utl = hw_res_state_->GetDiskUtilization();
-    int disk_percent =
-        static_cast<int>((disk_utl.disktotal - disk_utl.diskavailable) * 100.0 / disk_utl.disktotal + 0.5);
+    const auto disk_utl   = hw_res_state_->GetDiskUtilization();
+    const auto disk_usage = GetCapacityUsage(disk_utl.disktotal, disk_utl.diskavailable);
     items.push_back(
-        {"eMMCUtilization", "eMMC使用率", disk_percent,
-         COSMO_FORMAT("{:.2f} GB",
-                      static_cast<double>(disk_utl.disktotal - disk_utl.diskavailable) / 1024 / 1024 / 1024),
-         COSMO_FORMAT("{:.2f} GB", static_cast<double>(disk_utl.diskavailable) / 1024 / 1024 / 1024), 1});
+        {"eMMCUtilization", "eMMC使用率", disk_usage.percent,
+         COSMO_FORMAT("{:.2f} GB", static_cast<double>(disk_usage.used) / 1024 / 1024 / 1024),
+         COSMO_FORMAT("{:.2f} GB", static_cast<double>(disk_usage.available) / 1024 / 1024 / 1024),
+         disk_usage.valid ? 1 : 0});
 
     // Packet stats
     size_t packet_total = 0, packet_proc = 0, packet_discard = 0, continues_discard_sec = 0;
     ServiceRegistry::Instance().Get<ITaskQuery>().PacketStatus(packet_total, packet_proc, packet_discard,
                                                                continues_discard_sec);
+    packet_discard      = std::min(packet_discard, packet_total);
     double used_percent = 0.0;
     if (packet_total > 0) {
         used_percent = static_cast<double>(packet_discard) / packet_total;
     }
-    items.push_back({"packetDiscardUtilization", "丢包率", static_cast<int>(used_percent * 100),
+    used_percent = ClampRatio(used_percent);
+    items.push_back({"packetDiscardUtilization", "丢包率", static_cast<int>(std::lround(used_percent * 100)),
                      COSMO_FORMAT("{}个", packet_discard),
                      COSMO_FORMAT("{}个", packet_total - packet_discard), 1});
     LOG_INFO("continuesDiscardSec:{} packetDiscard:{}", continues_discard_sec, packet_discard);
@@ -236,9 +267,14 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
     std::vector<cosmo::GpuMemSnapshot> devs;
     devs.reserve(gpu_utl.gpudevusage.size());
     std::transform(gpu_utl.gpudevusage.begin(), gpu_utl.gpudevusage.end(), std::back_inserter(devs),
-                   [](const auto& d) -> cosmo::GpuMemSnapshot { return {d.gpumemtotal, d.gpumemavailable}; });
-    custom_score = cosmo::CalcCustomScore(gpu_utl.gpuusage, gpu_utl.gpumemtotal, gpu_utl.gpumemavailable,
-                                          devs, used_percent, continues_discard_sec);
+                   [](const auto& dev) -> cosmo::GpuMemSnapshot {
+                       const auto usage = GetCapacityUsage(dev.gpumemtotal, dev.gpumemavailable);
+                       return {usage.total, usage.available};
+                   });
+    const auto aggregate_gpu_memory = GetCapacityUsage(gpu_utl.gpumemtotal, gpu_utl.gpumemavailable);
+    custom_score =
+        cosmo::CalcCustomScore(gpu_usage, aggregate_gpu_memory.total, aggregate_gpu_memory.available, devs,
+                               used_percent, continues_discard_sec);
     return items;
 }
 

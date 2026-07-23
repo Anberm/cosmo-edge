@@ -92,10 +92,10 @@ AlgMp4Record::~AlgMp4Record() {
                             LOG_WARN("{} Upload {} Failed", taskId, mp4Name);
                         } else {
                             LOG_INFO("{} Upload {} Success!", taskId, mp4Name);
+                            // Preserve the local recording when the platform
+                            // did not durably accept it.
+                            remove(mp4Name.c_str());
                         }
-
-                        // Delete the file after upload.
-                        remove(mp4Name.c_str());
                     },
                     nullptr, "mp4", mp4_name_, bucket, upload_url_);
             }
@@ -135,10 +135,8 @@ void AlgMp4Record::UploadOverviewFile() {
                         LOG_WARN("{} Upload {} Failed", taskId, fileName);
                     } else {
                         LOG_INFO("{} Upload {} Success!", taskId, fileName);
+                        remove(fileName.c_str());
                     }
-
-                    // Delete the file after upload.
-                    remove(fileName.c_str());
                 },
                 nullptr, "json", fileName, bucket, overview_json_url_);
         }
@@ -271,10 +269,8 @@ void AlgMp4Record::UploadJsonFile() {
                     LOG_WARN("{} Upload {} Failed", taskId, jsonName);
                 } else {
                     LOG_INFO("{} Upload {} Success!", taskId, jsonName);
+                    remove(jsonName.c_str());
                 }
-
-                // Delete the file after upload.
-                remove(jsonName.c_str());
             },
             nullptr, "json", jsonName, bucket, upload_json_url_);
     }

@@ -64,6 +64,14 @@ TEST_CASE("CipherUtil: DecBase64Vec", "[cipher]") {
         REQUIRE(vec[1] == 2);
         REQUIRE(vec[2] == 3);
     }
+
+    SECTION("empty and malformed inputs fail without out-of-bounds access") {
+        REQUIRE(DecBase64Vec("").empty());
+        REQUIRE(DecBase64Vec("AAA").empty());
+        REQUIRE(DecBase64Vec("AA$=").empty());
+        REQUIRE(DecBase64Vec("AA=A").empty());
+        REQUIRE(DecBase64Vec("A===").empty());
+    }
 }
 
 TEST_CASE("CipherUtil: Sha1", "[cipher]") {
@@ -105,4 +113,9 @@ TEST_CASE("CipherUtil: AES-GCM round-trip", "[cipher]") {
 
     auto decrypted = DecAesGcmNoPadding(encrypted, key, iv);
     REQUIRE(decrypted == plaintext);
+
+    SECTION("tampered authentication tag is rejected") {
+        encrypted.back() ^= 0x01;
+        REQUIRE(DecAesGcmNoPadding(encrypted, key, iv).empty());
+    }
 }

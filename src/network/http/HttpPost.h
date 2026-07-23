@@ -55,6 +55,7 @@ public:
     std::string& GetPostUrl(const CliReqType& type);
 
     void SetAppInfo(const std::string& app_key, const std::string& app_secret);
+    bool HasAppInfo() const noexcept;
     // Set proxy
     void SetProxy(const std::string& proxy, const std::string& username = "",
                   const std::string& password = "");
@@ -63,17 +64,20 @@ public:
 
 public:
     // Client push interface
-    void AppendHeaderS(HttpRequest& hrt);
+    bool AppendHeaderS(HttpRequest& hrt);
 
     template <typename IN, typename OUT>
     bool HttpClientSubmit(const CliReqType& type, IN& rgt_in, OUT& rgt_out) {
         HttpStringHandler http_hnd{};
         HttpRequest http_req(GetPostUrl(type), &http_hnd);
 
-        AppendHeaderS(http_req);
+        if (!AppendHeaderS(http_req)) {
+            return false;
+        }
         std::string json_result{};
         if (!cosmo::util::EncodeJson(rgt_in, json_result)) {
             LOG_ERRO("{}", "StructToJson failed");
+            return false;
         }
 
         if (type != CliReqType::kCliGetFileSrv) {
@@ -93,12 +97,14 @@ public:
         LOG_INFO("Msg:{} Get Response is:{}", GetPostUrl(type), http_hnd.GetData());
         if (!cosmo::util::DecodeJson(http_hnd.GetData(), rgt_out)) {
             LOG_ERRO("cosmo::util::DecodeJson failed, [{}]", http_hnd.GetData());
+            return false;
         }
         return true;
     }
 
 private:
     void BoundaryGen();
+    bool LoadAppInfoFromRuntime();
 
 private:
     HttpStringHandler str_hnd_;
@@ -106,8 +112,8 @@ private:
     std::string data_;
     std::string boundary_;
 
-    std::string app_key_    = "6623141131";
-    std::string app_secret_ = "b67e258d8a6c422c7cbf16c1e0ebbb1c9a117a77";
+    std::string app_key_;
+    std::string app_secret_;
 
     std::string ip_port_;
     std::string register_url_;

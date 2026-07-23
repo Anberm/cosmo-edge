@@ -17,22 +17,37 @@
 namespace cosmo::service {
 
 TimerRestartServiceImpl::~TimerRestartServiceImpl() {
-    if (restart_task_id_ != cosmo::kInvalidTaskId) {
-        timer_->Cancel(restart_task_id_);
-        restart_task_id_ = cosmo::kInvalidTaskId;
-    }
-    if (timer_) {
-        timer_->Destroy();
-    }
-
+    TimerRestartServiceImpl::Stop();
     LOG_INFO("{}", "TimerRestartServiceImpl Delete");
 }
 
 void TimerRestartServiceImpl::Start() {
-    timer_ = std::make_unique<cosmo::PeriodicTimer>("TimetRestart");
-    timer_->Start();
-    restart_task_id_ = timer_->Schedule([this]() { CheckRestart(); }, 10000);
+    std::lock_guard<std::mutex> lock(lifecycle_mtx_);
+    if (stop_requested_ || timer_) {
+        return;
+    }
+    auto timer = std::make_unique<cosmo::PeriodicTimer>("TimetRestart");
+    timer->Start();
+    restart_task_id_ = timer->Schedule([this]() { CheckRestart(); }, 10000);
+    timer_           = std::move(timer);
     LOG_INFO("{}", "Timer Restart Started");
+}
+
+void TimerRestartServiceImpl::Stop() {
+    std::unique_ptr<cosmo::PeriodicTimer> timer;
+    cosmo::TaskId restart_task_id;
+    {
+        std::lock_guard<std::mutex> lock(lifecycle_mtx_);
+        stop_requested_  = true;
+        timer            = std::move(timer_);
+        restart_task_id  = restart_task_id_;
+        restart_task_id_ = cosmo::kInvalidTaskId;
+    }
+    if (!timer) {
+        return;
+    }
+    timer->Cancel(restart_task_id);
+    timer->Destroy();
 }
 
 void TimerRestartServiceImpl::CheckRestart() {

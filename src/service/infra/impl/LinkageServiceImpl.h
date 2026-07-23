@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <nlohmann/json_fwd.hpp>
 #include <shared_mutex>
 #include <string>
@@ -47,6 +48,8 @@ public:
     LinkageServiceImpl();
     ~LinkageServiceImpl() override;
 
+    void Stop() override;
+
     cosmo::util::ErrorEnum Add(const std::string& name, const std::string& work_flow,
                                std::string& id) override;
     cosmo::util::ErrorEnum Delete(std::string& id) override;
@@ -65,13 +68,14 @@ public:
 private:
     void LoadConfig();
     bool LoadSupportedStorageFromJson(const std::string& file_path);
-    void SaveConfig();
-    void SaveStrategy(const std::string& id, const std::string& linkage_strategy);
-    void RmvStrategy(const std::string& id);
+    bool SaveConfig(const cosmo::LinkageStrategyConfig& config);
+    bool SaveStrategy(const std::string& id, const std::string& linkage_strategy);
+    bool RmvStrategy(const std::string& id);
     std::string ReadStrategy(const std::string& id);
 
     cosmo::linkage::LinkAgeTaskPtr MakeTask(const std::string& name,
                                             cosmo::linkage::LinkageStrategyWorkflow& strategy);
+    bool ValidateWorkflow(const cosmo::linkage::LinkageStrategyWorkflow& strategy) const;
 
     void DoAlarm(const std::string& channel_id, const std::string& alg_id);
 
@@ -82,6 +86,8 @@ private:
     std::vector<cosmo::StorageList> support_storages_;
 
     cosmo::AsyncQueue<cosmo::LinkageAlarm> async_queue_;
+    std::mutex lifecycle_mtx_;
+    bool stopped_{false};
 };
 
 }  // namespace cosmo::service

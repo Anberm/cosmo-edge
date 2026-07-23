@@ -10,6 +10,7 @@
 #include "mock/MockLiveStreamService.h"
 #include "mock/MockServiceRegistry.h"
 #include "util/ErrorCode.h"
+#include "util/Exception.h"
 
 using namespace cosmo;
 
@@ -91,4 +92,15 @@ TEST_CASE("MessageHandler: GraphicsMemory", "[CoreHandler]") {
     auto rsp                  = handler.Handle(std::move(req), errc);
 
     REQUIRE(rsp.debugMessage == "mem_debug_info");
+}
+
+TEST_CASE("MessageHandler: overview file rejects path-like task ID", "[CoreHandler][security]") {
+    test::MockServiceRegistry mocks;
+    MessageHandler handler;
+
+    MsgQueryTaskOverviewFileRecv req{};
+    req.taskId                = "../../outside";
+    std::error_condition errc = util::ErrorEnum::Success;
+
+    REQUIRE_THROWS_AS(handler.Handle(std::move(req), errc), util::ErrorMessage);
 }

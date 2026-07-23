@@ -7,6 +7,7 @@
 #include <iterator>
 #include <map>
 #include <thread>
+#include <tuple>
 
 #include "flow/common/AlgDataRecord.h"
 #include "flow/detect/DinoDetector.h"
@@ -23,6 +24,21 @@
 
 static constexpr const char* kTag = "DINO-DETECTER ";
 namespace cosmo {
+
+namespace {
+
+    struct DinoInferenceKey {
+        std::string prompt;
+        float text_threshold = 0.25f;
+        float box_threshold  = 0.3f;
+
+        bool operator<(const DinoInferenceKey& other) const {
+            return std::tie(prompt, text_threshold, box_threshold) <
+                   std::tie(other.prompt, other.text_threshold, other.box_threshold);
+        }
+    };
+
+}  // namespace
 
 bool DinoDetector::TaskExist(const std::string& channel_id, const std::string& task) const {
     std::lock_guard<std::shared_mutex> lock(mtx);
@@ -69,11 +85,9 @@ DinoDetectorParamEl DinoDetector::GetTaskParamsUnlocked(const std::string& taskI
     if (it != params_.param.end()) {
         return *it;
     }
-    // If no exact taskId match and only one task param exists, use it (avoid default fallback)
-    if (params_.param.size() == 1)
-        return params_.param[0];
-    DinoDetectorParamEl emptyParam;
-    return emptyParam;
+    DinoDetectorParamEl default_param;
+    default_param.task_id = taskId;
+    return default_param;
 }
 
 DinoDetectorParamEl DinoDetector::GetTaskParams(const std::string& taskId) const {
@@ -88,61 +102,85 @@ void DinoDetector::HandFrames(std::vector<AlgDataPtr> alg_datas) {
             return;
     }
 
-    // Collect valid frames and per-frame prompts (different tasks may have different prompts)
+    // A channel frame may feed several tasks.  Build inference groups by the
+    // complete prompt/threshold contract, then select the corresponding result
+    // in DistributorData's per-task callback.  This prevents one task from
+    // inheriting another task's prompt or thresholds.
     std::vector<VideoFramePtr> images;
-    std::vector<std::string> prompts;
     std::vector<AlgDataPtr> validDatas;
+    std::vector<std::vector<std::string>> frameTasks;
 
     for (auto& data : alg_datas) {
         if (!data || !data->chanDataDec.frame || !data->chanDataDec.frame->Active()) {
             continue;
         }
-        std::string taskId = data->taskId;
-        if (taskId.empty()) {
+        std::vector<std::string> task_ids;
+        if (!data->taskId.empty()) {
+            task_ids.push_back(data->taskId);
+        } else {
             std::shared_lock<std::shared_mutex> lockCh(mtx);
             auto it = std::find_if(channel_list_.begin(), channel_list_.end(), [&data](const auto& ch) {
                 return ch.channel == data->channelId && !ch.tasks.empty();
             });
-            if (it != channel_list_.end()) {
-                taskId = it->tasks.front();
-            }
+            if (it != channel_list_.end())
+                task_ids = it->tasks;
+        }
+        if (task_ids.empty()) {
+            LOG_WARN("{}[{} {}] Channel:{} has no DINO task binding", kTag, alg_code_, uuid, data->channelId);
+            continue;
         }
 
-        DinoDetectorParamEl taskParam = GetTaskParams(taskId);
-        std::string prompt            = taskParam.prompt.empty() ? "person" : taskParam.prompt;
-
         images.push_back(data->chanDataDec.frame);
-        prompts.push_back(prompt);
         validDatas.push_back(data);
+        frameTasks.push_back(std::move(task_ids));
     }
 
     if (images.empty()) {
         return;
     }
 
-    // Group by prompt so each task uses its own detection prompt
-    std::map<std::string, std::vector<size_t>> promptToIndices;
-    for (size_t i = 0; i < prompts.size(); i++) {
-        promptToIndices[prompts[i]].push_back(i);
+    using FrameConsumers = std::map<size_t, std::vector<std::string>>;
+    std::map<DinoInferenceKey, FrameConsumers> inference_groups;
+    for (size_t input_index = 0; input_index < frameTasks.size(); ++input_index) {
+        for (const auto& consumer_task_id : frameTasks[input_index]) {
+            const auto task_param = GetTaskParams(consumer_task_id);
+            DinoInferenceKey key;
+            key.prompt         = task_param.prompt.empty() ? "person" : task_param.prompt;
+            key.text_threshold = task_param.text_confidence;
+            key.box_threshold  = task_param.box_confidence;
+            inference_groups[key][input_index].push_back(consumer_task_id);
+        }
     }
 
-    std::vector<std::vector<AiDetectRstEl>> resultsByIndex(validDatas.size());
+    std::vector<std::map<std::string, std::vector<AiDetectRstEl>>> results_by_task(validDatas.size());
 
-    for (const auto& kv : promptToIndices) {
-        const std::string& prompt          = kv.first;
-        const std::vector<size_t>& indices = kv.second;
+    for (const auto& group : inference_groups) {
         std::vector<VideoFramePtr> groupImages;
-        groupImages.reserve(indices.size());
-        std::transform(indices.begin(), indices.end(), std::back_inserter(groupImages),
-                       [&images](size_t idx) { return images[idx]; });
+        std::vector<size_t> frame_indices;
+        groupImages.reserve(group.second.size());
+        frame_indices.reserve(group.second.size());
+        for (const auto& frame : group.second) {
+            frame_indices.push_back(frame.first);
+            groupImages.push_back(images.at(frame.first));
+        }
         std::vector<std::vector<AiDetectRstEl>> groupResults;
-        auto ret = detector_->Detect(groupImages, prompt, groupResults);
+        DinoDetectionOptions options;
+        options.text_threshold = group.first.text_threshold;
+        options.box_threshold  = group.first.box_threshold;
+        auto ret               = detector_->Detect(groupImages, group.first.prompt, options, groupResults);
         if (util::ErrorEnum::Success != ret) {
-            LOG_WARN("{}[{} {}] Detect Failed. prompt:\", kTag{}\" Ret:{}", alg_code_, uuid, prompt, ret);
+            LOG_WARN("{}[{} {}] Detect Failed. prompt:\"{}\" text:{} box:{} Ret:{}", kTag, alg_code_, uuid,
+                     group.first.prompt, group.first.text_threshold, group.first.box_threshold, ret);
             continue;
         }
-        for (size_t k = 0; k < indices.size() && k < groupResults.size(); k++) {
-            resultsByIndex[indices[k]] = std::move(groupResults[k]);
+        for (size_t result_index = 0;
+             result_index < frame_indices.size() && result_index < groupResults.size(); ++result_index) {
+            const size_t input_index = frame_indices[result_index];
+            const auto consumers_it  = group.second.find(input_index);
+            if (consumers_it == group.second.end())
+                continue;
+            for (const auto& consumer_task_id : consumers_it->second)
+                results_by_task[input_index][consumer_task_id] = groupResults[result_index];
         }
     }
 
@@ -157,30 +195,21 @@ void DinoDetector::HandFrames(std::vector<AlgDataPtr> alg_datas) {
         data->chanDataDetect.detRet->timestamp   = images[i]->GetTimestamp();
         data->chanDataDetect.detRet->picWidth    = images[i]->GetWidth();
         data->chanDataDetect.detRet->picHeight   = images[i]->GetHeight();
-        data->chanDataDetect.detRet->targets     = std::move(resultsByIndex[i]);
+        data->chanDataDetect.detRet->targets.clear();
 
+        const auto task_results = results_by_task[i];
         distributor->DistributorData(
-            data->channelId, data, [this](AlgDataPtr frame, const std::string& taskId) {
+            data->channelId, data, [this, task_results](AlgDataPtr frame, const std::string& taskId) {
                 auto outData = AlgDataCopy(frame);
                 if (!outData) {
                     return frame;
                 }
                 outData->taskId = taskId;
 
-                // Filter out low-confidence detections based on task-specific threshold
                 if (outData->chanDataDetect.detRet) {
-                    DinoDetectorParamEl taskParam;
-                    {
-                        std::shared_lock<std::shared_mutex> paramLock(mtx);
-                        taskParam = GetTaskParamsUnlocked(taskId);
-                    }
-                    auto& targets = outData->chanDataDetect.detRet->targets;
-                    targets.erase(std::remove_if(targets.begin(), targets.end(),
-                                                 [&taskParam](const AiDetectRstEl& target) {
-                                                     return target.confidence.confidence <
-                                                            taskParam.box_confidence;
-                                                 }),
-                                  targets.end());
+                    const auto result = task_results.find(taskId);
+                    outData->chanDataDetect.detRet->targets =
+                        result == task_results.end() ? std::vector<AiDetectRstEl>{} : result->second;
                 }
 
                 SignTargetAreas(outData, taskId);
@@ -188,8 +217,8 @@ void DinoDetector::HandFrames(std::vector<AlgDataPtr> alg_datas) {
             });
     }
 
-    LOG_DEBUG("{}[{} {}] Processed {} frames ({} prompts)", kTag, alg_code_, uuid, validDatas.size(),
-              promptToIndices.size());
+    LOG_DEBUG("{}[{} {}] Processed {} frames ({} DINO inference contracts)", kTag, alg_code_, uuid,
+              validDatas.size(), inference_groups.size());
 }
 
 void DinoDetector::TargetAddArea(AiDetectRstEl& target, TargetPosition pos, TargetAreaType type,

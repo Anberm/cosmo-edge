@@ -37,6 +37,20 @@ public:
     /// @return true if the token is valid and not expired.
     virtual bool IsValidToken(const std::string& token) = 0;
 
+    /// Validate an active session token and resolve it to a stable account
+    /// identity. Resource ownership and quotas must use this principal rather
+    /// than the replaceable bearer token.
+    virtual bool ResolvePrincipal(const std::string& token, std::string& principal) {
+        principal.clear();
+        if (!IsValidToken(token)) {
+            return false;
+        }
+        // Compatibility fallback for test doubles and alternate implementations.
+        // Production AuthServiceImpl overrides this with the account username.
+        principal = token;
+        return true;
+    }
+
     /// Check whether any user account still uses the factory-default password.
     /// The login response includes a `passwordChangeRequired` flag derived from
     /// this check, prompting the UI to force a password change on first login.

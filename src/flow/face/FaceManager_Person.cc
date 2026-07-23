@@ -82,14 +82,40 @@ std::vector<MsgResultInfo> FaceManager::RemovePerson(FaceLibPtr face_lib,
 }
 
 util::ErrorEnum FaceManager::RemoveAllPerson(const std::string& face_lib_id) {
-    std::vector<std::string> person_id_list;
-    person_id_list.reserve(128);
-    for (auto& p : person_map_) {
-        if (face_lib_id.empty() || p.second->IsInFaceLibs({face_lib_id})) {
-            person_id_list.push_back(p.first);
+    std::lock_guard<std::shared_mutex> lock(mtx_);
+    FaceLibPtr face_lib;
+    if (!face_lib_id.empty()) {
+        const auto lib_it = std::find_if(
+            face_libs_.begin(), face_libs_.end(),
+            [&](const FaceLibPtr& candidate) { return candidate && candidate->GetId() == face_lib_id; });
+        if (lib_it == face_libs_.end()) {
+            return util::ErrorEnum::NoSuchId;
+        }
+        face_lib = *lib_it;
+    }
+
+    auto person_it = person_map_.begin();
+    while (person_it != person_map_.end()) {
+        auto person = person_it->second;
+        if (!person || (!face_lib_id.empty() && !person->IsInFaceLibs({face_lib_id}))) {
+            ++person_it;
+            continue;
+        }
+
+        if (face_lib) {
+            person->RemoveFaceLib(face_lib);
+        } else {
+            for (const auto& current_lib : person->GetFaceLibs()) {
+                person->RemoveFaceLib(current_lib);
+            }
+        }
+
+        if (person->GetFaceLibs().empty()) {
+            person_it = person_map_.erase(person_it);
+        } else {
+            ++person_it;
         }
     }
-    RemovePerson(GetFaceLib(face_lib_id), person_id_list);
     return util::ErrorEnum::Success;
 }
 

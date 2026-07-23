@@ -11,7 +11,7 @@ import { isPrimaryThroughputAction, normalizeTaskType } from './task-strategies.
 //     { key, name, usedPercent, usedSize, unusedSize, available }
 //     key in { cpuUtilization, generalMemoryUtilization, npuUtilization,
 //       modelMemoryUtilization, pictureMemoryUtilization, TPPMemoryUtilization,
-//       eMMCUtilization, packetDiscardUtilization }
+//       specialMemoryUtilization, eMMCUtilization, packetDiscardUtilization }
 //
 // NOTE: RunningDetail silently drops tasks whose action count <= 2. We detect
 // such "sampling-missing" channels by diffing expected taskIds vs returned ones.
@@ -23,6 +23,7 @@ const HW_KEYS = [
   'modelMemoryUtilization',
   'pictureMemoryUtilization',
   'TPPMemoryUtilization',
+  'specialMemoryUtilization',
   'eMMCUtilization',
   'packetDiscardUtilization',
 ];
@@ -233,8 +234,17 @@ export class MetricsSampler {
       }
     }
     hw.customScore = hwResult.value?.customScore ?? null;
+    hw.accelerator = normalizeAccelerator(hwResult.value?.accelerator);
     return hw;
   }
+}
+
+function normalizeAccelerator(value) {
+  if (!value || typeof value !== 'object') return null;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+    if (typeof item === 'number') return [key, Number.isFinite(item) ? item : null];
+    return [key, item];
+  }));
 }
 
 function num(v) {

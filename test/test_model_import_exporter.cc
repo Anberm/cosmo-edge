@@ -20,6 +20,7 @@
 #include "service/model/impl/ModelImportExporter.h"
 #undef private
 #include "mock/MockServiceRegistry.h"
+#include "util/Exec.h"
 #include "util/JsonFileUtil.h"
 
 using namespace cosmo::service;
@@ -31,12 +32,18 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
     ModelImportExporter importExporter;
 
     std::string testRoot = "/tmp/cosmo_test_models";
-    cosmo::path::OverrideRootPathForTest(testRoot, testRoot);
+    fs::remove_all(testRoot);
+    cosmo::path::OverrideRootPathForTest(testRoot + "/udata", testRoot + "/adata");
 
-    std::string testModelDir    = testRoot + "/resource/models";
-    std::string testTemplateDir = testRoot + "/resource/model_template";
+    std::string testModelDir             = cosmo::path::GetModelPath();
+    std::string testPresetDir            = cosmo::path::GetPresetModelPath();
+    std::string testTemplateDir          = cosmo::path::GetModelTemplatePath();
+    std::string testUploadDir            = cosmo::path::GetModelUploadTmpDir();
+    const std::string longExportModelDir = testModelDir + "/" + std::string(129, 'm');
     fs::create_directories(testModelDir);
+    fs::create_directories(testPresetDir);
     fs::create_directories(testTemplateDir);
+    fs::create_directories(testUploadDir);
 
     std::ofstream outTemp(testTemplateDir + "/DET.json");
     outTemp
@@ -54,19 +61,23 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
                                   if (code == "1234567")
                                       return testModelDir + "/1234567";
                                   if (code == "test_export_model")
-                                      return testRoot + "/export_target/test_export_model";
+                                      return testModelDir + "/test_export_model";
+                                  if (code == "preset_export_model")
+                                      return testPresetDir + "/preset_export_model";
+                                  if (code == "long_export_model")
+                                      return longExportModelDir;
                                   return std::string("");
                               },
                               [&]() { return std::string("1234567"); }, [&](const nlohmann::json&) {},
                               [&](const std::string&, const std::string&) {});
 
     SECTION("2.1 AddAtomicModel：验证目录创建、config.json 生成、model.nn 创建") {
-        std::string bmodelSrc = "/tmp/cosmo_test_models/source.bmodel";
+        std::string bmodelSrc = testUploadDir + "/source.bmodel";
         std::ofstream out(bmodelSrc);
         out << "fake bmodel";
         out.close();
 
-        std::string tokenizerSrc = "/tmp/cosmo_test_models/tokenizer.json";
+        std::string tokenizerSrc = testUploadDir + "/tokenizer.json";
         std::ofstream outTok(tokenizerSrc);
         outTok << "{}";
         outTok.close();
@@ -99,7 +110,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
     }
 
     SECTION("OCR character table is required, validated, and copied with a fixed name") {
-        std::string bmodelSrc = "/tmp/cosmo_test_models/ocr_source.bmodel";
+        std::string bmodelSrc = testUploadDir + "/ocr_source.bmodel";
         std::ofstream(bmodelSrc).close();
         std::vector<cosmo::Model::BmodelFileInfo> bmodelFiles = {{"main", bmodelSrc}};
         std::string resolvedCode;
@@ -109,13 +120,13 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
                                                             resolvedCode, bmodelPaths);
         REQUIRE(result == cosmo::util::ErrorEnum::InvalidParam);
 
-        std::string invalidTable = "/tmp/cosmo_test_models/character_table.json";
+        std::string invalidTable = testUploadDir + "/character_table.json";
         std::ofstream(invalidTable) << "[]";
         result = importExporter.ValidateAddModelInputs("", "OcrModel", "ocr", bmodelFiles, "", "",
                                                        invalidTable, resolvedCode, bmodelPaths);
         REQUIRE(result == cosmo::util::ErrorEnum::InvalidParam);
 
-        std::string characterTable = "/tmp/cosmo_test_models/character_table.txt";
+        std::string characterTable = testUploadDir + "/character_table.txt";
         std::ofstream(characterTable) << "blank\n京\n";
         result = importExporter.ValidateAddModelInputs("", "OcrModel", "ocr", bmodelFiles, "", "",
                                                        characterTable, resolvedCode, bmodelPaths);
@@ -133,7 +144,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
     }
 
     SECTION("OCR character table config binds the legacy 6624-entry table to 6625 CTC classes") {
-        const std::string characterTable = "/tmp/cosmo_test_models/legacy_character_table.txt";
+        const std::string characterTable = testUploadDir + "/legacy_character_table.txt";
         {
             std::ofstream table(characterTable);
             table << "blank\n";
@@ -161,7 +172,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
     }
 
     SECTION("PP-OCR character table prepends blank and appends space for 6625 classes") {
-        const std::string characterTable = "/tmp/cosmo_test_models/ppocr_character_table.txt";
+        const std::string characterTable = testUploadDir + "/ppocr_character_table.txt";
         {
             std::ofstream table(characterTable);
             for (int index = 0; index < 6623; ++index)
@@ -186,7 +197,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
     }
 
     SECTION("OCR character table config rejects mismatched tables and dynamic class dimensions") {
-        const std::string characterTable = "/tmp/cosmo_test_models/character_table_exact.txt";
+        const std::string characterTable = testUploadDir + "/character_table_exact.txt";
         std::ofstream(characterTable) << "blank\nA\nB\n";
         nlohmann::json config = {{"models", {{{"params", nlohmann::json::object()}}}}};
 
@@ -342,7 +353,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         outNn << "fake";
         outNn.close();
 
-        std::string tarFile = "/tmp/cosmo_test_models/test_import.tar.gz";
+        std::string tarFile = testUploadDir + "/test_import.tar.gz";
         std::string cmd     = "cd " + tempArchiveDir + " && tar -czf " + tarFile + " fake_model";
         (void)!system(cmd.c_str());
 
@@ -368,7 +379,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         outNn << "fake";
         outNn.close();
 
-        std::string tarFile = "/tmp/cosmo_test_models/flat_import.tar.gz";
+        std::string tarFile = testUploadDir + "/flat_import.tar.gz";
         std::string cmd = "cd " + tempArchiveDir + " && tar -czf " + tarFile + " config.json " + modelFile;
         (void)!system(cmd.c_str());
 
@@ -388,7 +399,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
     }
 
     SECTION("2.4 ExportModelConfig：验证 tar.gz 创建") {
-        std::string exportModelDir = testRoot + "/export_target/test_export_model";
+        std::string exportModelDir = testModelDir + "/test_export_model";
         fs::create_directories(exportModelDir);
         std::ofstream outCfg(exportModelDir + "/config.json");
         outCfg << "{\"modelCode\": \"test_export_model\", \"algorithmVersion\": \"1.0.0\"}";
@@ -401,13 +412,115 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         REQUIRE(res == cosmo::util::ErrorEnum::Success);
         REQUIRE(fs::exists(outPath));
         REQUIRE(outName.find("test_export_model") != std::string::npos);
+        const auto permissions = fs::status(outPath).permissions();
+        REQUIRE((permissions & (fs::perms::group_all | fs::perms::others_all)) == fs::perms::none);
 
         fs::remove_all(exportModelDir);
         fs::remove(outPath);
     }
 
-    fs::remove_all(testModelDir);
-    fs::remove_all(testTemplateDir);
+    SECTION("ExportModelConfig rejects preset model directories") {
+        const std::string presetModelDir = testPresetDir + "/preset_export_model";
+        fs::create_directories(presetModelDir);
+        std::ofstream(presetModelDir + "/config.json") << "{}";
+
+        std::string outPath;
+        std::string outName;
+        REQUIRE(importExporter.ExportModelConfig("preset_export_model", "preset", outPath, outName) ==
+                cosmo::util::ErrorEnum::DefaultCantBeExport);
+        REQUIRE(outPath.empty());
+        REQUIRE(outName.empty());
+        REQUIRE(fs::is_regular_file(presetModelDir + "/config.json"));
+    }
+
+    SECTION("ExportModelConfig accepts managed model directory names up to the importer limit") {
+        fs::create_directories(longExportModelDir);
+        std::ofstream(longExportModelDir + "/config.json") << "{}";
+
+        std::string outPath;
+        std::string outName;
+        REQUIRE(importExporter.ExportModelConfig("long_export_model", "long", outPath, outName) ==
+                cosmo::util::ErrorEnum::Success);
+        REQUIRE(fs::is_regular_file(outPath));
+        fs::remove(outPath);
+    }
+
+    SECTION("ExportModelConfig rejects unsafe codes and symlink model directories") {
+        std::string outPath;
+        std::string outName;
+        REQUIRE(importExporter.ExportModelConfig("../escape", "export_name", outPath, outName) ==
+                cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(outPath.empty());
+
+        const std::string outsideDir = testRoot + "/outside_model";
+        fs::create_directories(outsideDir);
+        std::ofstream(outsideDir + "/config.json") << "{}";
+        const std::string linkedDir = testModelDir + "/test_export_model";
+        fs::create_directory_symlink(outsideDir, linkedDir);
+
+        REQUIRE(importExporter.ExportModelConfig("test_export_model", "export_name", outPath, outName) ==
+                cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(outPath.empty());
+        fs::remove(linkedDir);
+        fs::remove_all(outsideDir);
+    }
+
+    SECTION("managed upload boundary never deletes an external model component") {
+        const std::string outsideFile = testRoot + "/outside.bmodel";
+        std::ofstream(outsideFile) << "must survive";
+        std::vector<cosmo::Model::BmodelFileInfo> files = {{"main", outsideFile}};
+
+        auto result = importExporter.AddAtomicModel("", "OutsideModel", "DET", "", files, "", "", "", "", "");
+        REQUIRE(result == cosmo::util::ErrorEnum::FileNotExist);
+        REQUIRE(fs::exists(outsideFile));
+
+        result = importExporter.ImportModel(outsideFile);
+        REQUIRE(result == cosmo::util::ErrorEnum::FileNotExist);
+        REQUIRE(fs::exists(outsideFile));
+        fs::remove(outsideFile);
+    }
+
+    SECTION("flat model import rejects path components from config") {
+        const std::string archiveDir = testRoot + "/unsafe_flat_archive";
+        fs::create_directories(archiveDir);
+        std::ofstream(archiveDir + "/config.json")
+            << R"({"algorithm_code":"../../escape","version":"V1.0.0","models":[{"name":"safe"}]})";
+        std::ofstream(archiveDir + "/model.bmodel") << "fake";
+
+        const std::string archivePath = testUploadDir + "/unsafe_flat.tar.gz";
+        const std::string command =
+            "tar -czf " + archivePath + " -C " + archiveDir + " config.json model.bmodel";
+        REQUIRE(system(command.c_str()) == 0);
+
+        REQUIRE(importExporter.ImportModel(archivePath) == cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE_FALSE(fs::exists(testRoot + "/escape"));
+        REQUIRE(fs::is_empty(testModelDir));
+        REQUIRE(fs::is_regular_file(archivePath));
+
+        fs::remove_all(archiveDir);
+        fs::remove(archivePath);
+    }
+
+    SECTION("model import rejects duplicate names after dot-prefix normalization") {
+        const fs::path archive_dir = fs::path(testRoot) / "duplicate_member_archive";
+        fs::create_directories(archive_dir);
+        std::ofstream(archive_dir / "config.json") << R"({"algorithm_code":"1234567"})";
+        std::ofstream(archive_dir / "model.bmodel") << "fake";
+
+        const fs::path archive_path = fs::path(testUploadDir) / "duplicate_member.tar.gz";
+        std::string output;
+        REQUIRE(cosmo::util::Exec({"tar", "--hard-dereference", "-czf", archive_path.string(), "-C",
+                                   archive_dir.string(), "./config.json", "config.json", "model.bmodel"},
+                                  output) == 0);
+
+        REQUIRE(importExporter.ImportModel(archive_path.string()) == cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(fs::is_regular_file(archive_path));
+
+        fs::remove_all(archive_dir);
+        fs::remove(archive_path);
+    }
+
+    fs::remove_all(testRoot);
 }
 
 #ifdef COSMO_NN_USE_CPU_BACKEND

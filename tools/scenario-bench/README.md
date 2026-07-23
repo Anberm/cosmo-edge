@@ -33,6 +33,16 @@ node src/cli.js doctor \
   --password admin
 ```
 
+自动化环境推荐通过环境变量传入设备短期 token，避免凭据出现在命令行历史和报告中：
+
+```bash
+export COSMO_BENCH_TOKEN='<short-lived-token>'
+node src/cli.js doctor \
+  --scenario scenarios/no-helmet-99898-fps5-20260630 \
+  --device http://192.168.0.22 \
+  --token-env COSMO_BENCH_TOKEN
+```
+
 检查通过后运行压测：
 
 ```bash
@@ -53,7 +63,7 @@ node src/cli.js run \
 | `report.html` | 面向人工阅读的报告，包含容量结论、判定口径、路数结果和阈值明细 |
 | `summary.json` | 机器可读摘要，适合后续做批量汇总或版本对比 |
 | `metrics.json` | 完整采样数据，包含每个 tick 的通道指标和硬件资源 |
-| `metrics.partial.json` | 运行过程中持续写入的临时采样文件，用于异常中断兜底 |
+| `metrics.partial.json` | 运行过程中每 30 秒更新的临时采样文件，用于异常中断兜底且不让证据写盘干扰采样周期 |
 
 ## 创建场景包
 
@@ -234,6 +244,61 @@ node src/cli.js run --device <url> --user <u> --password <p> --scenario <dir> --
 | `--profile <mode>` | `capacity` 默认，连续扫描路数上限；`configured` 按 `scenario.yml` 原始配置执行 |
 | `--ramp-batch-size <n>` | 每次 ramp 新增通道数，默认 1 |
 | `--ramp-batch-delay-sec <n>` | ramp 批次间隔，默认 15 秒 |
+| `--token-env <name>` | 从指定环境变量读取短期 token；与 `--user/--password` 二选一 |
+| `--preview <mode>` | `none`、`raw` 或 `algorithm`；默认 `none` |
+| `--preview-streams <n\|all>` | 每阶梯开启预览的通道数；默认全部 |
+| `--preview-clients <n>` | 每路预览的并发解码客户端数；默认 1 |
+| `--media-base <url>` | HTTP-FLV 服务基址；启用预览时必填 |
+| `--srs-api <url>` | SRS API 基址，用于采集发布流和客户端数 |
+
+### 预览负载矩阵
+
+正式验收应至少覆盖以下四种负载，它们分别隔离算法基线、单路媒体开销、随路数增长的媒体开销和同流多客户端分发开销：
+
+| 模式 | 参数 | 验证目标 |
+| --- | --- | --- |
+| A | `--preview none` | 算法容量基线，不引入预览链路 |
+| B | `--preview algorithm --preview-streams 1 --preview-clients 1` | 单路算法预览的解码、OSD、编码、发布开销 |
+| C | `--preview algorithm --preview-streams all --preview-clients 1` | 每路均预览；建议按 1/4/8/目标上限路配置执行 |
+| D | `--preview algorithm --preview-streams 1 --preview-clients 4` | 同一路流的多客户端播放与 SRS 分发能力 |
+
+示例：
+
+```bash
+node src/cli.js run \
+  --device http://192.168.0.22 \
+  --token-env COSMO_BENCH_TOKEN \
+  --scenario scenarios/my-scenario \
+  --output reports/my-scenario-preview-d \
+  --profile configured \
+  --preview algorithm \
+  --preview-streams 1 \
+  --preview-clients 4 \
+  --media-base http://192.168.0.22:18088 \
+  --srs-api http://192.168.0.22:1985 \
+  --cleanup
+```
+
+### `preview`
+
+对一个已运行的确定性测试通道执行媒体专项验收。该命令会真实探测并解码 HTTP-FLV，而不是只检查 API 返回值；覆盖 H.264 编码、分辨率、连续帧和时间戳、算法 OSD 像素差异、同流多客户端、SRS 发布/客户端计数、前端断开/后端停止、资源释放、非法通道/算法，以及可选的同流反复启停。
+
+```bash
+node src/cli.js preview \
+  --device http://192.168.0.22 \
+  --token-env COSMO_BENCH_TOKEN \
+  --channel LX0000000007 \
+  --algorithm 7463 \
+  --mode both \
+  --media-base http://192.168.0.22:18088 \
+  --srs-api http://192.168.0.22:1985 \
+  --clients 4 \
+  --lifecycle-iterations 1000 \
+  --min-overlay-pixel-delta 1 \
+  --output reports/preview-validation
+```
+
+输出包含 `preview-validation.json`、`preview-validation.md` 和原始/算法代表帧 PPM 截图。命令默认完成清理；验收结束后仍应确认 `activePreviewStreams` 和 `activePreviewPublishers` 均回到基线。
 
 ### `init-scenario`
 
@@ -292,6 +357,12 @@ node src/cli.js init-scenario --name <name> --template <algorithm-template.json>
 | 检测节点延时 | 单通道稳定窗口内取平均，再取通道间最大值 |
 | 关键链路延时 | CV 包含解码、检测、跟踪、分类、判断；直接 VLM 任务额外加入 Qwen3VL 节点平均耗时 |
 | NPU/CPU/内存峰值 | 稳定窗口内硬件资源峰值 |
+| 媒体分阶段耗时 | 按累计计数差分计算预处理、推理、后处理、OSD 和 Publish 耗时 |
+| 首帧耗时 | 预览发布器从启动到首个已发布帧的平均值与最大值 |
+| 预览生命周期 | 活跃预览流/发布器峰值、原始/算法预览峰值、启动/停止/失败计数增量 |
+| SRS 分发 | 活跃发布流和播放客户端峰值 |
+
+媒体阶段指标来自 `QueryHardwareResource.resData.accelerator` 的平台中立累计计数。报告按每个稳定窗口的首尾样本做差分，并明确显示无样本值，不会把缺失遥测伪装成 0。启用预览的报告会额外生成媒体阶段表，用于区分算法推理、OSD、发布和 SRS 分发环节。
 
 报告 PASS/FAIL 使用 `scenario.yml` 中的 `thresholds`。运行期瓶颈停止使用独立保护规则，典型规则包括：
 

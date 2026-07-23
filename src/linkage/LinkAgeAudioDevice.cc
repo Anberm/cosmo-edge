@@ -2,6 +2,8 @@
 
 #include "linkage/LinkAgeAudioDevice.h"
 
+#include <utility>
+
 #include "service/detail/ServiceRegistry.h"
 #include "service/media/IAudioService.h"
 #include "util/Keys.h"
@@ -10,8 +12,11 @@
 
 namespace cosmo::linkage {
 LinkAgeAudioDevice::LinkAgeAudioDevice(LinkAgeParamNode& action) : LinkAgeBase(action) {
+    std::string audio_data;
+    std::string text_data;
     for (const auto& param : action.config_object.params) {
-        if (kKeyStrageAudioDeviceId == param.key.ToString()) {
+        if (kKeyStrageAudioDeviceId == param.key.ToString() ||
+            kKeyLinkageAudioDeviceId == param.key.ToString()) {
             param_.dev_id = param.value;
         } else if (kKeyStrageAudioDeviceOperation == param.key.ToString()) {
             auto value = util::ParseInt(param.value);
@@ -21,9 +26,10 @@ LinkAgeAudioDevice::LinkAgeAudioDevice(LinkAgeParamNode& action) : LinkAgeBase(a
                 LOG_WARN("{} Set {} To {} Invalid", GetFlowActionId(), param.key, param.value);
             }
         } else if (kKeyStrageAudioDeviceData == param.key.ToString()) {
-            param_.data = param.value;
-        } else if (kKeyStrageAudioDeviceText == param.key.ToString()) {
-            param_.data = param.value;
+            audio_data = param.value;
+        } else if (kKeyStrageAudioDeviceText == param.key.ToString() ||
+                   kKeyLinkageAudioDeviceText == param.key.ToString()) {
+            text_data = param.value;
         } else if (kKeyStrageAudioDeviceTone == param.key.ToString()) {
             auto value = util::ParseInt(param.value);
             if (IsValidTone(value)) {
@@ -68,6 +74,12 @@ LinkAgeAudioDevice::LinkAgeAudioDevice(LinkAgeParamNode& action) : LinkAgeBase(a
             }
         }
     }
+
+    // Resource payloads contain both conditional form fields.  Select data by
+    // operation after parsing so an empty hidden `text` field cannot overwrite
+    // a valid audio-file ID (and vice versa).
+    param_.data = param_.operation == LinkAgeAudioDeviceOperation::kTextPlay ? std::move(text_data)
+                                                                             : std::move(audio_data);
 
     LOG_INFO(
         "{} Param: AudioDev:{} Op:{} data:{} Duration:{} Speed:{} Times:{} tone:{} volume:{} Interval:{}",

@@ -3,23 +3,107 @@
 #include "app/application.h"
 
 #include <malloc.h>
+#include <pthread.h>
 
+#include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <stdexcept>
+#include <system_error>
+#include <thread>
 
 #include "app/AppConstants.h"
 #include "app/app_init.h"
 #include "mem/DeviceContext.h"
 #include "mem/IDeviceContext.h"
 #include "service/detail/ServiceRegistry.h"
+#include "service/network/INetworkService.h"
 #include "util/Log.h"
 #include "util/PathUtil.h"
 #include "util/Version.h"
 
 namespace cosmo::app {
+
+namespace {
+
+    class ShutdownSignalMonitor {
+    public:
+        ShutdownSignalMonitor() {
+            sigemptyset(&signal_set_);
+            sigaddset(&signal_set_, SIGTERM);
+            sigaddset(&signal_set_, SIGINT);
+            sigaddset(&signal_set_, SIGUSR1);
+            const int result = pthread_sigmask(SIG_BLOCK, &signal_set_, nullptr);
+            if (result != 0) {
+                throw std::system_error(result, std::generic_category(), "cannot block shutdown signals");
+            }
+        }
+
+        ~ShutdownSignalMonitor() noexcept {
+            Stop();
+        }
+
+        ShutdownSignalMonitor(const ShutdownSignalMonitor&)            = delete;
+        ShutdownSignalMonitor& operator=(const ShutdownSignalMonitor&) = delete;
+
+        void Start(std::function<void()> shutdown_callback) {
+            if (wait_thread_.joinable()) {
+                throw std::logic_error("shutdown signal monitor already started");
+            }
+            wait_thread_ = std::thread([this, callback = std::move(shutdown_callback)]() {
+                while (!is_stopping_.load(std::memory_order_acquire)) {
+                    int signal_number = 0;
+                    const int result  = sigwait(&signal_set_, &signal_number);
+                    if (result != 0) {
+                        LOG_ERRO("sigwait failed: {}", result);
+                        InvokeShutdownCallback(callback);
+                        return;
+                    }
+                    if (is_stopping_.load(std::memory_order_acquire)) {
+                        return;
+                    }
+                    if (signal_number == SIGTERM || signal_number == SIGINT) {
+                        LOG_INFO("Received shutdown signal {}, requesting HTTP loop stop", signal_number);
+                        InvokeShutdownCallback(callback);
+                        return;
+                    }
+                }
+            });
+        }
+
+        void Stop() noexcept {
+            is_stopping_.store(true, std::memory_order_release);
+            if (wait_thread_.joinable()) {
+                const int result = pthread_kill(wait_thread_.native_handle(), SIGUSR1);
+                if (result != 0 && result != ESRCH) {
+                    LOG_ERRO("cannot wake shutdown signal monitor: {}", result);
+                }
+                wait_thread_.join();
+            }
+        }
+
+    private:
+        static void InvokeShutdownCallback(const std::function<void()>& callback) noexcept {
+            try {
+                callback();
+            } catch (const std::exception& ex) {
+                LOG_ERRO("cannot request graceful shutdown: {}", ex.what());
+            } catch (...) {
+                LOG_ERRO("{}", "cannot request graceful shutdown: unknown error");
+            }
+        }
+
+        sigset_t signal_set_{};
+        std::atomic<bool> is_stopping_{false};
+        std::thread wait_thread_;
+    };
+
+}  // namespace
 
 Application::Application(std::string name) : app_name_(std::move(name)) {}
 
@@ -81,8 +165,13 @@ void Application::run(const char* base_dir) {
     // constructor exception is caught and logged cleanly instead of escaping to
     // std::terminate.
     std::unique_ptr<cosmo::mem::DeviceContext> device_ctx;
+    std::unique_ptr<ShutdownSignalMonitor> shutdown_signals;
 
     try {
+        // Block process termination signals before any service creates worker
+        // threads. A dedicated sigwait thread handles them in normal C++
+        // context, so the libevent loop and hardware watchdog can shut down.
+        shutdown_signals = std::make_unique<ShutdownSignalMonitor>();
         signal(SIGILL, SIG_IGN);
         signal(SIGPIPE, SIG_IGN);
 
@@ -104,11 +193,19 @@ void Application::run(const char* base_dir) {
         cosmo::service::ServiceRegistry::Instance().Set<cosmo::mem::IDeviceContext>(device_ctx.get());
         SwDeviceInit();
 
+        auto& network_service =
+            cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::INetworkService>();
+        shutdown_signals->Start([&network_service]() { network_service.RequestHttpStop(); });
+
         // Blocking — runs the HTTP server event loop until shutdown.
         SwDeviceRun();
 
     } catch (const std::exception& ex) {
         LOG_ERRO("ERROR Exit! [{}]", ex.what());
+    }
+
+    if (shutdown_signals) {
+        shutdown_signals->Stop();
     }
 
     SwDeviceDestroy();

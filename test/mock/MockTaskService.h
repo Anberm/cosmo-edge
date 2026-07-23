@@ -13,6 +13,7 @@ namespace cosmo::test {
 class MockTaskService : public cosmo::service::ITaskService {
 public:
     // ITaskLifecycle
+    MAKE_MOCK0(Shutdown, void(), override);
     MAKE_MOCK4(TaskCreate,
                cosmo::util::ErrorEnum(const std::string&, const std::string&, const std::string&,
                                       cosmo::ActionAlgPtr),

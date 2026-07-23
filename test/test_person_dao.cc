@@ -263,6 +263,53 @@ TEST_CASE("PersonDao: RemoveFacesetPersonRelation", "[person-dao-direct]") {
     REQUIRE(result.total_count == 0);
 }
 
+TEST_CASE("PersonDao: removing a library membership preserves shared persons",
+          "[person-dao-direct][consistency]") {
+    auto db = MakeTestDb();
+    db::PersonDao dao(db);
+
+    REQUIRE(dao.AddFaceLib(MakeLib("lib-A")));
+    REQUIRE(dao.AddFaceLib(MakeLib("lib-B")));
+
+    db::PersonCondition person;
+    person.person_id                                                    = "p-shared";
+    person.person_name                                                  = "Shared";
+    person.face_lib_id                                                  = {"lib-A", "lib-B"};
+    const std::vector<std::pair<std::string, std::vector<float>>> faces = {{"face-shared", {1.0f}}};
+    REQUIRE(dao.AddPerson(person, faces));
+
+    REQUIRE(dao.RemovePersonFromFaceLib("p-shared", "lib-A"));
+
+    db::FacePersonQueryCondition condition;
+    condition.person_id        = "p-shared";
+    condition.face_lib_id_list = {"lib-B"};
+    REQUIRE(dao.QueryPersons(condition).total_count == 1);
+    REQUIRE(dao.QueryFaceFeature("face-shared") == std::vector<float>{1.0f});
+
+    REQUIRE(dao.RemovePersonFromFaceLib("p-shared", "lib-B"));
+    REQUIRE(dao.QueryPersons(condition).total_count == 0);
+    REQUIRE(dao.QueryFaceFeature("face-shared").empty());
+}
+
+TEST_CASE("PersonDao: updating a missing person never creates orphan details",
+          "[person-dao-direct][consistency]") {
+    auto db = MakeTestDb();
+    db::PersonDao dao(db);
+    REQUIRE(dao.AddFaceLib(MakeLib("lib-A")));
+
+    db::PersonCondition person;
+    person.person_id   = "missing-person";
+    person.person_name = "Missing";
+    person.face_lib_id = {"lib-A"};
+    REQUIRE_FALSE(dao.UpdatePerson(person, {{"orphan-face", {1.0f}}}));
+
+    db::FacePersonQueryCondition condition;
+    condition.person_id        = "missing-person";
+    condition.face_lib_id_list = {"lib-A"};
+    REQUIRE(dao.QueryPersons(condition).total_count == 0);
+    REQUIRE(dao.QueryFaceFeature("orphan-face").empty());
+}
+
 TEST_CASE("PersonDao: transaction control", "[person-dao-direct]") {
     auto db = MakeTestDb();
     db::PersonDao dao(db);

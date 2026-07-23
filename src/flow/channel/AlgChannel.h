@@ -20,7 +20,7 @@ public:
                const std::string& url = "");
     ~AlgChannel();
 
-    void Start() override;
+    [[nodiscard]] bool Start() override;
     void Stop() override;
 
     // dataType selects pre-decode (ChannelDataOrig: H.264/H.265) or post-decode data.

@@ -139,6 +139,16 @@ TEST_CASE("AppInfoServiceImpl: GetPagedLogs validation", "[appinfo][service]") {
         auto result = appInfoSvc.GetPagedLogs(req, errc);
         REQUIRE(errc == cosmo::util::ErrorEnum::ParameterException);
     }
+
+    SECTION("Excessive pageSize returns error") {
+        cosmo::MsgQueryLogsRecv req;
+        req.pageNum  = 1;
+        req.pageSize = 1001;
+        std::error_condition errc;
+
+        auto result = appInfoSvc.GetPagedLogs(req, errc);
+        REQUIRE(errc == cosmo::util::ErrorEnum::ParameterException);
+    }
 }
 
 TEST_CASE("AppInfoServiceImpl: GetSystemOverviewInfo device validation", "[appinfo][service]") {

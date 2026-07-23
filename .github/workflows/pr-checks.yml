@@ -12,6 +12,142 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Non-blocking workflow policy audit ─────────────────────────────
+  # This remains informational until the team agrees to enforce it in
+  # the repository ruleset.
+  policy-audit:
+    name: policy-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Audit issue, scope, candidate, and risk evidence
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -uo pipefail
+
+          warnings=()
+          add_warning() {
+            warnings+=("$1")
+            echo "::warning::$1"
+          }
+
+          changed_paths=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          changed_lines=$(git diff --numstat "$BASE_SHA" "$HEAD_SHA" | awk '
+            BEGIN { total = 0 }
+            {
+              if ($1 ~ /^[0-9]+$/) total += $1
+              if ($2 ~ /^[0-9]+$/) total += $2
+            }
+            END { print total }
+          ')
+
+          shopt -s nocasematch
+          if (( changed_lines > 50 )) && \
+             [[ ! "$PR_BODY" =~ (close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+ ]]; then
+            add_warning "Changes over 50 lines must use a closing keyword to reference an agreed issue."
+          fi
+          shopt -u nocasematch
+
+          if [[ "$PR_DRAFT" != "true" ]]; then
+            for heading in \
+              "## Related issue" \
+              "## Root cause" \
+              "## Scope" \
+              "## Candidate identity" \
+              "## Verification" \
+              "## Acceptance and cleanup"; do
+              if ! grep -Fqi "$heading" <<< "$PR_BODY"; then
+                add_warning "PR body is missing required heading: $heading"
+              fi
+            done
+
+            candidate=$(sed -nE \
+              's/^[[:space:]-]*Candidate commit:[[:space:]]*`?([0-9a-fA-F]{7,40})`?.*/\1/p' \
+              <<< "$PR_BODY" | head -n 1)
+            if [[ -z "$candidate" ]]; then
+              add_warning "PR body does not record a candidate commit."
+            elif [[ "$HEAD_SHA" != "$candidate"* ]]; then
+              add_warning "Recorded candidate commit does not match the current PR HEAD."
+            fi
+          fi
+
+          risk_notes=()
+          if grep -Eq '^(src/api/|src/network/)' <<< "$changed_paths"; then
+            risk_notes+=("API/network changes require authentication, invalid-input, error-response, and lifecycle evidence.")
+          fi
+          if grep -Eq '^(src/media/|src/service/media/|src/web/.*(whep|flv|bigScreen))' <<< "$changed_paths"; then
+            risk_notes+=("Media changes require ownership, first-frame, switching, overlay, and sustained-playback evidence.")
+          fi
+          if grep -Eq '^(src/infer/|src/nn/|src/flow/)' <<< "$changed_paths"; then
+            risk_notes+=("Inference, NN, or flow changes require Sophon package and focused device evidence.")
+          fi
+          if grep -Eq '^src/web/' <<< "$changed_paths"; then
+            risk_notes+=("Frontend changes require the Docker production build and affected UI evidence.")
+          fi
+          if grep -Eq '(^|/)(CMakeLists[.]txt|docker-compose[.]sophon[.]yml)$|^(cmake/|data/resource/|scripts/build)' <<< "$changed_paths"; then
+            risk_notes+=("Build, resource, or package changes require final package checksum and compatibility evidence.")
+          fi
+
+          {
+            echo "## Workflow policy audit"
+            echo
+            echo "This job is informational and does not block merging."
+            echo
+            echo "- Changed lines: $changed_lines"
+            echo "- Candidate HEAD: \`$HEAD_SHA\`"
+            echo
+            if (( ${#warnings[@]} == 0 )); then
+              echo "No policy gaps detected."
+            else
+              echo "### Policy gaps"
+              for warning in "${warnings[@]}"; do
+                echo "- $warning"
+              done
+            fi
+            if (( ${#risk_notes[@]} > 0 )); then
+              echo
+              echo "### Risk-based evidence reminders"
+              for note in "${risk_notes[@]}"; do
+                echo "- $note"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit 0
+
+  # ── Platform-neutral validation tools ─────────────────────────────
+  validation-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/scenario-bench/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Test scenario benchmark tooling
+        working-directory: tools/scenario-bench
+        run: |
+          npm ci
+          npm test
+
+      - name: Test offline accuracy comparison
+        run: python -m unittest discover -s test -p 'test_offline_accuracy_compare.py'
+
   # ── C++ format check via clang-format ──────────────────────────────
   # Only checks files changed in the PR (not the entire codebase)
   format-check:
@@ -63,7 +199,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Node 22 LTS ships npm 10, matching the build image used for
           # production frontend builds. Node 24 ships npm 11, whose stricter

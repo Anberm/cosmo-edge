@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -61,11 +62,19 @@ std::vector<std::string> DinoDetectorUnify::GetLabels() {
 }
 
 util::ErrorEnum DinoDetectorUnify::Detect(const std::vector<VideoFramePtr>& images, const std::string& prompt,
+                                          const DinoDetectionOptions& options,
                                           std::vector<std::vector<AiDetectRstEl>>& results) {
     auto start = std::chrono::high_resolution_clock::now();
+    results.clear();
     if (!detector_) {
         LOG_WARN("{}", "SDK Dino Detector Not Init");
         return util::ErrorEnum::NotInit;
+    }
+    if (!std::isfinite(options.text_threshold) || !std::isfinite(options.box_threshold) ||
+        options.text_threshold < 0.0f || options.text_threshold > 1.0f || options.box_threshold < 0.0f ||
+        options.box_threshold > 1.0f) {
+        LOG_WARN("{}", "GroundingDINO thresholds must be finite values in [0,1]");
+        return util::ErrorEnum::InvalidParam;
     }
 
     size_t image_num = images.size();
@@ -75,7 +84,7 @@ util::ErrorEnum DinoDetectorUnify::Detect(const std::vector<VideoFramePtr>& imag
         size_t input_size = inputs.size();
         if (input_size == max_batch_size_ || (i + 1) == image_num) {
             std::vector<std::vector<AiDetectRstEl>> outputs;
-            auto ret = Forward(inputs, prompt, outputs);
+            auto ret = Forward(inputs, prompt, options, outputs);
             if (util::ErrorEnum::Success != ret) {
                 LOG_ERRO("Dino Forward Failed. Ret:{}", ret);
                 return ret;
@@ -96,7 +105,7 @@ util::ErrorEnum DinoDetectorUnify::Detect(const std::vector<VideoFramePtr>& imag
 }
 
 util::ErrorEnum DinoDetectorUnify::Forward(const std::vector<VideoFramePtr>& images,
-                                           const std::string& prompt,
+                                           const std::string& prompt, const DinoDetectionOptions& options,
                                            std::vector<std::vector<AiDetectRstEl>>& results) {
     std::vector<std::shared_ptr<cosmo::nn::Blob>> image_blobs{};
     auto ret = ConvertImagesToBlobs(images, image_blobs);
@@ -144,7 +153,7 @@ util::ErrorEnum DinoDetectorUnify::Forward(const std::vector<VideoFramePtr>& ima
     }
 
     std::vector<std::vector<cosmo::nn::ObjectInfoV1>> outputs;
-    status = detector_->ParseOutput<cosmo::nn::ObjectInfoV1>(outputs);
+    status = detector_->ParseDinoOutput(outputs, options.text_threshold, options.box_threshold);
     if (!bool(status)) {
         LOG_ERRO("Dino ParseOutput Failed.({})", status.description());
         return util::ErrorEnum::AI_PARSE_OUTPUT_FAILED;
@@ -156,6 +165,8 @@ util::ErrorEnum DinoDetectorUnify::Forward(const std::vector<VideoFramePtr>& ima
         auto dims    = desc.dims;
         std::vector<AiDetectRstEl> result;
         for (auto obj : detects) {
+            if (obj.infos.empty())
+                continue;
             AiDetectRstEl el;
             el.box.x      = static_cast<int>(obj.x1);
             el.box.y      = static_cast<int>(obj.y1);

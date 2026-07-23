@@ -82,6 +82,18 @@ TEST_CASE("ErrorCode: Demux/Decoder segment", "[error-code]") {
     }
 }
 
+TEST_CASE("ErrorCode: Live preview transport segment", "[error-code]") {
+    auto publish = make_error_condition(ErrorEnum::LiveStreamPublishFailed);
+    auto timeout = make_error_condition(ErrorEnum::LiveStreamReadyTimeout);
+    auto stopped = make_error_condition(ErrorEnum::LiveStreamStopped);
+
+    REQUIRE(publish.value() == 0x3200);
+    REQUIRE_FALSE(publish.message().empty());
+    REQUIRE_FALSE(timeout.message().empty());
+    REQUIRE_FALSE(stopped.message().empty());
+    REQUIRE(cosmo::util::ErrorEnumName(ErrorEnum::LiveStreamPublishFailed) == "LiveStreamPublishFailed");
+}
+
 TEST_CASE("ErrorCode: Face segment (0x4000+)", "[error-code]") {
     SECTION("FaceIsNotInTheMiddle has message") {
         auto cond = make_error_condition(ErrorEnum::FaceIsNotInTheMiddle);

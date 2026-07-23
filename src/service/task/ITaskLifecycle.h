@@ -24,6 +24,10 @@ class ITaskLifecycle {
 public:
     virtual ~ITaskLifecycle() = default;
 
+    /// Permanently reject new task creation/start requests, then stop and
+    /// delete every remaining task. Safe to call more than once.
+    virtual void Shutdown() = 0;
+
     /// Create a new video analysis task.
     /// @param channelId   Camera channel identifier.
     /// @param channelName Camera channel display name.

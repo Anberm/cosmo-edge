@@ -27,7 +27,7 @@
             1,
             256
           ],
-          "data_type": 0
+          "data_type": 1
         },
         {
           "name": "text_self_attention_masks",
@@ -44,7 +44,7 @@
             1,
             256
           ],
-          "data_type": 0
+          "data_type": 1
         },
         {
           "name": "token_type_ids",
@@ -52,7 +52,7 @@
             1,
             256
           ],
-          "data_type": 0
+          "data_type": 1
         },
         {
           "name": "attention_mask",

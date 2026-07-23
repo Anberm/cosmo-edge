@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <exception>
 #include <future>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 
@@ -16,6 +18,10 @@ class PersonImport {
 public:
     PersonImport();
     ~PersonImport();
+
+    /// Permanently reject new imports and wait for the current import to
+    /// finish. Safe to call repeatedly and concurrently.
+    void Stop() noexcept;
 
     /// Import images from a zip archive into a face library.
     /// @param file_name Path to the uploaded zip file.
@@ -41,17 +47,23 @@ public:
 
 private:
     void DoImportFile(const std::string& file_name, FaceLibPtr facelib, const std::string& uuid);
-    void UnzipArchive(const std::string& file_name, const std::string& work_dir);
+    bool UnzipArchive(const std::string& file_name, const std::string& work_dir);
     void ProcessImages(const std::string& work_dir, FaceLibPtr facelib, std::ofstream& ofile);
     void Clean();
 
+    // Serializes ownership and replacement of future_.  Status readers use
+    // mtx_ independently so polling cannot race with import admission.
+    std::mutex stop_mutex_;
+    mutable std::mutex import_mutex_;
     mutable std::shared_mutex mtx_;
     std::string query_id_;
     std::string error_file_;
     int success_{0};
     int failed_{0};
     int total_{0};
+    std::exception_ptr async_error_;
     mutable std::future<void> future_;
     mutable std::atomic<bool> completed_{true};
+    bool stopped_{false};
 };
 }  // namespace cosmo

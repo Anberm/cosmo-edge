@@ -55,7 +55,7 @@ public:
     bool HttpclientSubmit(FileServerClientType type, const std::string& rgtIn,
                           cosmo::FMsgReqGetFileUrl& rgtOut, const std::string& bucket,
                           const std::string& fileUrl);
-    // TODO(refactor): point upload is unimplemented — stub always returns true
+    // TODO(refactor): point upload is unimplemented and fails closed.
     bool HttpclientSubmit(FileServerClientType type, const std::string& filepath,
                           cosmo::FMsgReqPUpFile& rgtOut);
     bool HttpclientSubmit(FileServerClientType type, cosmo::FMsgRspUpFile& rgtIn,

@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include "api/ApiRouter.h"
 #include "nlohmann/json.hpp"
@@ -29,21 +30,26 @@ namespace detail {
         MsgSendHead retData{};
         retData.resCode = kServerRspFailed;
         MsgResBase resMsg;
-        resMsg.msgCode = std::to_string(errc.value());
+        resMsg.msgCode    = std::to_string(errc.value());
         resMsg.messageKey = "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
-        resMsg.msgText = e.what();
+        resMsg.msgText    = e.what();
         retData.resMsg.push_back(resMsg);
         return nlohmann::json(retData).dump();
     }
 
     inline std::string ErroResult(const char* errMsg, std::error_condition& errc) {
         LOG_ERRO("{}", errMsg);
+        // A plain std::exception does not carry a Cosmo error condition. Never
+        // serialize it with msgCode=0/messageKey=Success.
+        if (errc == util::ErrorEnum::Success) {
+            errc = util::ErrorEnum::InternalError;
+        }
         MsgSendHead retData{};
         retData.resCode = kServerRspFailed;
         MsgResBase resMsg;
-        resMsg.msgCode = std::to_string(errc.value());
+        resMsg.msgCode    = std::to_string(errc.value());
         resMsg.messageKey = "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
-        resMsg.msgText = errMsg;
+        resMsg.msgText    = errMsg;
         retData.resMsg.push_back(resMsg);
         return nlohmann::json(retData).dump();
     }
@@ -54,9 +60,9 @@ namespace detail {
         MsgSendHead retData{};
         retData.resCode = kServerRspFailed;
         MsgResBase resMsg;
-        resMsg.msgCode = std::to_string(errc.value());
+        resMsg.msgCode    = std::to_string(errc.value());
         resMsg.messageKey = "api.error." + util::ErrorEnumName(util::ErrorEnum::ParameterException);
-        resMsg.msgText = errc.message();
+        resMsg.msgText    = errc.message();
         retData.resMsg.push_back(resMsg);
         return nlohmann::json(retData).dump();
     }
@@ -76,15 +82,56 @@ namespace detail {
             if (errc == util::ErrorEnum::Success) {
                 ret.resCode = kServerRspSuccess;
                 MsgResBase resMsg;
-                resMsg.msgCode = std::to_string(errc.value());
+                resMsg.msgCode    = std::to_string(errc.value());
                 resMsg.messageKey = "api.error.Success";
-                resMsg.msgText = "操作成功";
+                resMsg.msgText    = "操作成功";
                 ret.resMsg.push_back(resMsg);
             } else {
                 ret.resCode = kServerRspFailed;
                 MsgResBase resMsg;
                 resMsg.msgCode = std::to_string(errc.value());
-                resMsg.messageKey = "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
+                resMsg.messageKey =
+                    "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
+                resMsg.msgText = errc.message();
+                ret.resMsg.push_back(resMsg);
+            }
+            return nlohmann::json(ret).dump(-1, ' ', false, nlohmann::json::error_handler_t::ignore);
+        } catch (const nlohmann::json::exception& e) {
+            return ErroResult(e, errc);
+        } catch (const util::ErrorMessage& e) {
+            return ErroResult(e, errc);
+        } catch (const std::exception& e) {
+            return ErroResult(e.what(), errc);
+        }
+    }
+
+    /// JSON dispatch variant for handlers whose authorization-sensitive work
+    /// needs the non-forgeable transport context supplied by the router.
+    template <typename Ret, typename Par, typename Handler>
+    std::string DispatchJsonWithContext(MessageFromType from, Handler& handler,
+                                        const RequestDispatchContext& context, const std::string& jsonStr,
+                                        std::error_condition& errc) {
+        Par p{};
+        try {
+            if (!jsonStr.empty()) {
+                auto j = nlohmann::json::parse(jsonStr);
+                j.get_to(p);
+            }
+            p.messageFrom = from;
+            auto ret      = handler.Handle(std::move(p), context, errc);
+            if (errc == util::ErrorEnum::Success) {
+                ret.resCode = kServerRspSuccess;
+                MsgResBase resMsg;
+                resMsg.msgCode    = std::to_string(errc.value());
+                resMsg.messageKey = "api.error.Success";
+                resMsg.msgText    = "操作成功";
+                ret.resMsg.push_back(resMsg);
+            } else {
+                ret.resCode = kServerRspFailed;
+                MsgResBase resMsg;
+                resMsg.msgCode = std::to_string(errc.value());
+                resMsg.messageKey =
+                    "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
                 resMsg.msgText = errc.message();
                 ret.resMsg.push_back(resMsg);
             }
@@ -111,8 +158,18 @@ namespace detail {
                                                GetMessageFrom(), *handler, jsonStr, errc);                   \
                                        }}
 
-#define ROUTE_CORE(url, X)                                                                                   \
-    url_map_[util::ToLower(url #X)] = {InterfaceMsgAuthType::None,                                           \
+#define ROUTE_CONTEXT(url, auth, handler, NS, X)                                                             \
+    url_map_[util::ToLower(url #X)] = {                                                                      \
+        auth,                                                                                                \
+        {},                                                                                                  \
+        [this](const RequestDispatchContext& context, const std::string& jsonStr,                            \
+               std::error_condition& errc) {                                                                 \
+            return detail::DispatchJsonWithContext<NS::Msg##X##Send, NS::Msg##X##Recv>(                      \
+                GetMessageFrom(), *handler, context, jsonStr, errc);                                         \
+        }}
+
+#define ROUTE_CORE(url, auth, X)                                                                             \
+    url_map_[util::ToLower(url #X)] = {auth,                                                                 \
                                        [this](const std::string& jsonStr, std::error_condition& errc) {      \
                                            return detail::DispatchJson<Msg##X##Send, Msg##X##Recv>(          \
                                                GetMessageFrom(), *handler_, jsonStr, errc);                  \

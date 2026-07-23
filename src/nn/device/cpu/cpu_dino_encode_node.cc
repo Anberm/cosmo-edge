@@ -1,9 +1,11 @@
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
 
 #include "nn/device/cpu/cpu_dino_encode_node.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 
@@ -13,6 +15,86 @@
 
 namespace cosmo::nn {
 
+namespace {
+
+    bool IsAsciiWhitespace(unsigned char value) {
+        return value == ' ' || value == '\t' || value == '\n' || value == '\r' || value == '\f' ||
+               value == '\v';
+    }
+
+    bool IsAsciiControl(unsigned char value) {
+        return (value < 32U && !IsAsciiWhitespace(value)) || value == 127U;
+    }
+
+    bool IsUnicodePunctuation(std::uint32_t value) {
+        if (value < 128U)
+            return std::ispunct(static_cast<unsigned char>(value)) != 0;
+        return (value >= 0x2000U && value <= 0x206fU) || (value >= 0x2e00U && value <= 0x2e7fU) ||
+               (value >= 0x3001U && value <= 0x303fU) || (value >= 0xff01U && value <= 0xff65U);
+    }
+
+    bool IsCjk(std::uint32_t value) {
+        return (value >= 0x3400U && value <= 0x4dbfU) || (value >= 0x4e00U && value <= 0x9fffU) ||
+               (value >= 0xf900U && value <= 0xfaffU) || (value >= 0x20000U && value <= 0x2fa1fU);
+    }
+
+    std::size_t Utf8CodePointLength(unsigned char first) {
+        if ((first & 0x80U) == 0U)
+            return 1;
+        if ((first & 0xe0U) == 0xc0U)
+            return 2;
+        if ((first & 0xf0U) == 0xe0U)
+            return 3;
+        if ((first & 0xf8U) == 0xf0U)
+            return 4;
+        return 0;
+    }
+
+    bool DecodeUtf8(const std::string& text, std::size_t offset, std::uint32_t& value, std::size_t& length) {
+        if (offset >= text.size())
+            return false;
+        const unsigned char first = static_cast<unsigned char>(text[offset]);
+        length                    = Utf8CodePointLength(first);
+        if (length == 0 || offset + length > text.size())
+            return false;
+        if (length == 1) {
+            value = first;
+            return true;
+        }
+        value = first & ((1U << (7U - static_cast<unsigned int>(length))) - 1U);
+        for (std::size_t i = 1; i < length; ++i) {
+            const unsigned char next = static_cast<unsigned char>(text[offset + i]);
+            if ((next & 0xc0U) != 0x80U)
+                return false;
+            value = (value << 6U) | (next & 0x3fU);
+        }
+        return true;
+    }
+
+    std::vector<std::size_t> Utf8Boundaries(const std::string& text) {
+        std::vector<std::size_t> boundaries{0};
+        std::size_t offset = 0;
+        while (offset < text.size()) {
+            std::uint32_t value = 0;
+            std::size_t length  = 0;
+            if (!DecodeUtf8(text, offset, value, length))
+                length = 1;
+            offset += length;
+            boundaries.push_back(offset);
+        }
+        return boundaries;
+    }
+
+    bool NeedsLeadingSpace(const std::string& token) {
+        if (token.empty())
+            return false;
+        std::uint32_t value = 0;
+        std::size_t length  = 0;
+        return !DecodeUtf8(token, 0, value, length) || !IsUnicodePunctuation(value);
+    }
+
+}  // namespace
+
 // ==================== CpuTokenizer Implementation ====================
 
 bool CpuTokenizer::LoadVocab(const std::string& vocab_path) {
@@ -21,44 +103,127 @@ bool CpuTokenizer::LoadVocab(const std::string& vocab_path) {
         return false;
 
     std::string line;
-    int idx = 0;
+    int64_t idx = 0;
     while (std::getline(infile, line)) {
-        token2idx[line] = idx;
-        idx2token[idx]  = line;
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (!token2idx.emplace(line, idx).second)
+            return false;
+        idx2token.emplace(idx, line);
         idx++;
     }
-    return true;
-}
-
-std::vector<std::string> CpuTokenizer::StringSplit(const std::string& str, char delim) {
-    std::vector<std::string> elems;
-    size_t lastPos = str.find_first_not_of(delim, 0);
-    size_t pos     = str.find_first_of(delim, lastPos);
-    while (pos != std::string::npos || lastPos != std::string::npos) {
-        elems.push_back(str.substr(lastPos, pos - lastPos));
-        lastPos = str.find_first_not_of(delim, pos);
-        pos     = str.find_first_of(delim, lastPos);
-    }
-    return elems;
-}
-
-void CpuTokenizer::Tokenize(const std::string& token, std::vector<int64_t>& idx) {
-    idx.clear();
-    idx.push_back(101);  // [CLS]
-    {
-        auto tokens = StringSplit(token, '.');
-        for (const auto& t : tokens) {
-            if (token2idx.find(t) != token2idx.end())
-                idx.push_back(token2idx[t]);
-            if (token2idx.find(".") != token2idx.end())
-                idx.push_back(token2idx["."]);
-        }
-    }
-    idx.push_back(102);  // [SEP]
+    const auto special_id = [&](const std::string& token) -> int64_t {
+        const auto found = token2idx.find(token);
+        return found == token2idx.end() ? -1 : found->second;
+    };
+    unk_id_ = special_id("[UNK]");
+    cls_id_ = special_id("[CLS]");
+    sep_id_ = special_id("[SEP]");
+    pad_id_ = special_id("[PAD]");
+    return !token2idx.empty() && unk_id_ >= 0 && cls_id_ >= 0 && sep_id_ >= 0 && pad_id_ >= 0;
 }
 
 void CpuTokenizer::EncodeText(const std::string& text, std::vector<int64_t>& ids) {
-    Tokenize(text, ids);
+    ids.clear();
+    if (unk_id_ < 0 || cls_id_ < 0 || sep_id_ < 0 || pad_id_ < 0)
+        return;
+    ids.push_back(cls_id_);
+    for (const auto& token : BasicTokenize(text))
+        WordPieceTokenize(token, ids);
+    ids.push_back(sep_id_);
+}
+
+std::vector<std::string> CpuTokenizer::BasicTokenize(const std::string& text) const {
+    std::vector<std::string> tokens;
+    std::string current;
+    const auto flush = [&]() {
+        if (!current.empty()) {
+            tokens.push_back(current);
+            current.clear();
+        }
+    };
+    std::size_t offset = 0;
+    while (offset < text.size()) {
+        std::uint32_t value = 0;
+        std::size_t length  = 0;
+        if (!DecodeUtf8(text, offset, value, length)) {
+            flush();
+            ++offset;
+            continue;
+        }
+        if ((value < 128U && IsAsciiWhitespace(static_cast<unsigned char>(value))) ||
+            (value < 128U && IsAsciiControl(static_cast<unsigned char>(value)))) {
+            flush();
+        } else if (IsUnicodePunctuation(value) || IsCjk(value)) {
+            flush();
+            std::string token = text.substr(offset, length);
+            if (value < 128U)
+                token[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[0])));
+            tokens.push_back(std::move(token));
+        } else {
+            std::string piece = text.substr(offset, length);
+            if (value < 128U)
+                piece[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(piece[0])));
+            current += piece;
+        }
+        offset += length;
+    }
+    flush();
+    return tokens;
+}
+
+void CpuTokenizer::WordPieceTokenize(const std::string& token, std::vector<int64_t>& ids) const {
+    const auto boundaries = Utf8Boundaries(token);
+    if (boundaries.size() <= 1)
+        return;
+    if (boundaries.size() - 1 > 100U) {
+        ids.push_back(unk_id_);
+        return;
+    }
+    std::size_t start = 0;
+    std::vector<int64_t> pieces;
+    while (start + 1 < boundaries.size()) {
+        std::size_t end  = boundaries.size() - 1;
+        int64_t piece_id = -1;
+        while (end > start) {
+            std::string piece = token.substr(boundaries[start], boundaries[end] - boundaries[start]);
+            if (start != 0)
+                piece = "##" + piece;
+            const auto found = token2idx.find(piece);
+            if (found != token2idx.end()) {
+                piece_id = found->second;
+                break;
+            }
+            --end;
+        }
+        if (piece_id < 0) {
+            ids.push_back(unk_id_);
+            return;
+        }
+        pieces.push_back(piece_id);
+        start = end;
+    }
+    ids.insert(ids.end(), pieces.begin(), pieces.end());
+}
+
+std::string CpuTokenizer::DecodeIds(const std::vector<int>& ids) const {
+    std::string decoded;
+    for (const int id : ids) {
+        if (id == cls_id_ || id == sep_id_ || id == pad_id_)
+            continue;
+        const auto found = idx2token.find(id);
+        if (found == idx2token.end())
+            continue;
+        const std::string& token = found->second;
+        if (token.rfind("##", 0) == 0) {
+            decoded += token.substr(2);
+        } else {
+            if (!decoded.empty() && NeedsLeadingSpace(token))
+                decoded.push_back(' ');
+            decoded += token;
+        }
+    }
+    return decoded;
 }
 
 // ==================== CpuDinoEncodeNode Implementation ====================
@@ -157,10 +322,12 @@ void CpuDinoEncodeNode::CreateTokenizer(std::string path) {
         if (tokenizer->token2idx.find(token_str) != tokenizer->token2idx.end())
             special_token_ids.push_back(tokenizer->token2idx[token_str]);
     }
-    if (std::find(special_token_ids.begin(), special_token_ids.end(), 101) == special_token_ids.end())
-        special_token_ids.push_back(101);
-    if (std::find(special_token_ids.begin(), special_token_ids.end(), 102) == special_token_ids.end())
-        special_token_ids.push_back(102);
+    if (std::find(special_token_ids.begin(), special_token_ids.end(), tokenizer->ClsId()) ==
+        special_token_ids.end())
+        special_token_ids.push_back(tokenizer->ClsId());
+    if (std::find(special_token_ids.begin(), special_token_ids.end(), tokenizer->SepId()) ==
+        special_token_ids.end())
+        special_token_ids.push_back(tokenizer->SepId());
 }
 
 std::vector<int64_t> CpuDinoEncodeNode::Encode(const std::string& text) {
@@ -180,6 +347,10 @@ std::string CpuDinoEncodeNode::GetPromptStr(std::shared_ptr<Blob>& prompt) {
 Status CpuDinoEncodeNode::Forward(std::vector<std::shared_ptr<Blob>>& images,
                                   std::vector<std::shared_ptr<Blob>>& prompts,
                                   std::vector<std::shared_ptr<Blob>>& top_blobs) {
+    if (!shared_resource)
+        return Status(COSMO_NN_ERR_PARAM, "shared resource is null");
+    if (images.size() != 1 || prompts.size() != 1 || top_blobs.size() != GetTopCount())
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO host preprocessing requires one image and prompt");
     if (!tokenizer) {
         CreateTokenizer(shared_resource->tokenizer_path);
         if (!tokenizer)
@@ -191,6 +362,11 @@ Status CpuDinoEncodeNode::Forward(std::vector<std::shared_ptr<Blob>>& images,
 
     auto image_blob  = images.at(0);
     auto prompt_blob = prompts.at(0);
+    if (!image_blob || !prompt_blob || std::any_of(top_blobs.begin(), top_blobs.end(), [](const auto& blob) {
+            return !blob || !blob->GetHandle().base;
+        })) {
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO preprocessing received a null blob");
+    }
 
     auto top_image                     = top_blobs.at(0);
     auto top_position_ids              = top_blobs.at(1);
@@ -202,42 +378,51 @@ Status CpuDinoEncodeNode::Forward(std::vector<std::shared_ptr<Blob>>& images,
     auto top_proposals                 = top_blobs.at(7);
 
     // Process prompt
+    const auto prompt_desc = prompt_blob->GetBlobDesc();
+    if (prompt_desc.data_type != DATA_TYPE_UINT8 || prompt_desc.dims.empty() ||
+        DimsVectorUtils::Count(prompt_desc.dims) <= 0 || !prompt_blob->GetHandle().base) {
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO prompt must be a non-empty UINT8 blob");
+    }
     std::string caption = GetPromptStr(prompt_blob);
-    std::transform(caption.begin(), caption.end(), caption.begin(), ::tolower);
-    caption = Strip(caption);
+    caption             = Strip(caption);
     while (!caption.empty() && Endswith(caption, "."))
         caption.pop_back();
     if (caption.empty())
         return Status(COSMO_NN_ERR_PARAM, "prompt is empty");
+    caption.push_back('.');
 
     auto token = Encode(caption);
     if (token.empty())
         return Status(COSMO_NN_ERR_PARAM, "encode failed");
 
-    if (token[0] != 101)
-        token.insert(token.begin(), 101);
-    if (token.back() != 102)
-        token.push_back(102);
+    if (token.front() != tokenizer->ClsId() || token.back() != tokenizer->SepId())
+        return Status(COSMO_NN_ERR_PARAM, "tokenizer did not emit CLS/SEP tokens");
+    if (token.size() > static_cast<std::size_t>(kTokenLength))
+        return Status(COSMO_NN_ERR_PARAM, "prompt exceeds GroundingDINO token limit");
 
-    auto token_len    = token.size();
-    auto input_ids_cp = token;
+    const auto token_len = token.size();
+    auto input_ids_cp    = token;
 
-    if (static_cast<int>(token_len) < kTokenLength)
-        token.resize(kTokenLength, 0);
-    else if (static_cast<int>(token_len) > kTokenLength) {
-        token.resize(kTokenLength);
-        token[kTokenLength - 1] = 102;
-    }
+    token.resize(kTokenLength, tokenizer->PadId());
 
     shared_resource->prompt_token_ids.clear();
     for (auto id : token)
         shared_resource->prompt_token_ids.push_back(static_cast<int32_t>(id));
 
     // ========== Process Image ==========
-    auto img_dims = image_blob->GetBlobDesc().dims;
-    int src_h     = img_dims.at(1);
-    int src_w     = img_dims.at(2);
-    int channels  = 3;
+    const auto image_desc = image_blob->GetBlobDesc();
+    auto img_dims         = image_desc.dims;
+    if (dst_width <= 0 || dst_height <= 0 || mean.size() != 3 || scale.size() != 3 || img_dims.size() != 4 ||
+        img_dims.at(0) != 1 || img_dims.at(3) != 3 || image_desc.data_type != DATA_TYPE_UINT8 ||
+        image_desc.data_format != DATA_FORMAT_NHWC ||
+        (!ImageFormatIsBGR(image_desc.image_format) && !ImageFormatIsRGB(image_desc.image_format))) {
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO image must be NHWC packed BGR/RGB UINT8");
+    }
+    int src_h    = img_dims.at(1);
+    int src_w    = img_dims.at(2);
+    int channels = 3;
+    if (src_h <= 0 || src_w <= 0 || !image_blob->GetHandle().base)
+        return Status(COSMO_NN_ERR_PARAM, "GroundingDINO image dimensions or buffer are invalid");
 
     auto* src_data = static_cast<const uint8_t*>(image_blob->GetHandle().base);
 
@@ -248,14 +433,28 @@ Status CpuDinoEncodeNode::Forward(std::vector<std::shared_ptr<Blob>>& images,
         const float y_ratio = static_cast<float>(src_h) / dst_height;
         for (int dy = 0; dy < dst_height; dy++) {
             float fy     = (dy + 0.5f) * y_ratio - 0.5f;
-            int sy       = std::max(0, std::min(static_cast<int>(fy), src_h - 1));
-            float frac_y = fy - sy;
-            int sy1      = std::min(sy + 1, src_h - 1);
+            int sy       = static_cast<int>(std::floor(fy));
+            float frac_y = fy - static_cast<float>(sy);
+            if (sy < 0) {
+                sy     = 0;
+                frac_y = 0.0f;
+            } else if (sy >= src_h - 1) {
+                sy     = src_h - 1;
+                frac_y = 0.0f;
+            }
+            int sy1 = std::min(sy + 1, src_h - 1);
             for (int dx = 0; dx < dst_width; dx++) {
                 float fx     = (dx + 0.5f) * x_ratio - 0.5f;
-                int sx       = std::max(0, std::min(static_cast<int>(fx), src_w - 1));
-                float frac_x = fx - sx;
-                int sx1      = std::min(sx + 1, src_w - 1);
+                int sx       = static_cast<int>(std::floor(fx));
+                float frac_x = fx - static_cast<float>(sx);
+                if (sx < 0) {
+                    sx     = 0;
+                    frac_x = 0.0f;
+                } else if (sx >= src_w - 1) {
+                    sx     = src_w - 1;
+                    frac_x = 0.0f;
+                }
+                int sx1 = std::min(sx + 1, src_w - 1);
                 for (int c = 0; c < channels; c++) {
                     float v00 = src_data[(sy * src_w + sx) * channels + c];
                     float v01 = src_data[(sy * src_w + sx1) * channels + c];
@@ -278,8 +477,10 @@ Status CpuDinoEncodeNode::Forward(std::vector<std::shared_ptr<Blob>>& images,
         float beta  = -mean[c] * scale[c];
         for (int y = 0; y < dst_height; y++) {
             for (int x = 0; x < dst_width; x++) {
+                const bool input_is_bgr  = ImageFormatIsBGR(image_desc.image_format);
+                const int source_channel = (is_bgr == input_is_bgr) ? c : channels - 1 - c;
                 top_img_ptr[c * spatial + y * dst_width + x] =
-                    resized[(y * dst_width + x) * channels + c] * alpha + beta;
+                    resized[(y * dst_width + x) * channels + source_channel] * alpha + beta;
             }
         }
     }
@@ -306,7 +507,7 @@ Status CpuDinoEncodeNode::Forward(std::vector<std::shared_ptr<Blob>>& images,
 
     // Fill text_token_mask
     for (size_t i = 0; i < token_len; i++)
-        token_mask_ptr[i] = (token[i] > 0) ? 1.0f : 0.0f;
+        token_mask_ptr[i] = (token[i] != tokenizer->PadId()) ? 1.0f : 0.0f;
 
     // Initialize diagonal for attention masks
     for (int i = 0; i < kTokenLength; i++) {
@@ -367,4 +568,4 @@ Status CpuDinoEncodeNode::Forward(std::vector<std::shared_ptr<Blob>>& images,
 
 }  // namespace cosmo::nn
 
-#endif  // COSMO_NN_USE_CPU_BACKEND
+#endif  // COSMO_NN_USE_HOST_BACKEND

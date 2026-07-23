@@ -13,7 +13,7 @@
 namespace cosmo::linkage {
 LinkAgeAlarm::LinkAgeAlarm(LinkAgeParamNode& action) : LinkAgeBase(action) {
     for (const auto& param : action.config_object.params) {
-        if (kKeyStrageAlgs == param.key.ToString()) {
+        if (kKeyStrageAlgs == param.key.ToString() || kKeyLinkageAlgs == param.key.ToString()) {
             AnalysisTasks(param.value);
         }
     }

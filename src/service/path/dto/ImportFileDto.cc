@@ -25,7 +25,8 @@ void to_json(nlohmann::json& j, const MsgImportFileRecv& v) {
     j["faceLibId"]     = v.faceLibId;
     j["contentLength"] = v.contentLength;
     j["filePath"]      = v.filePath;
-    j["FileName"]      = v.filename;
+    j["uploadId"]      = v.uploadId;
+    j["fileName"]      = v.filename;
 }
 
 void from_json(const nlohmann::json& j, MsgImportFileRecv& v) {
@@ -47,7 +48,12 @@ void from_json(const nlohmann::json& j, MsgImportFileRecv& v) {
     JSON_OPT(j, v, faceLibId);
     JSON_OPT(j, v, contentLength);
     JSON_OPT(j, v, filePath);
-    JSON_OPT_KEY(j, v, "FileName", filename);
+    JSON_OPT(j, v, uploadId);
+    if (j.contains("fileName")) {
+        JSON_OPT_KEY(j, v, "fileName", filename);
+    } else {
+        JSON_OPT_KEY(j, v, "FileName", filename);
+    }
 }
 
 void to_json(nlohmann::json& j, const MsgQueryImportStatusRecv& v) {

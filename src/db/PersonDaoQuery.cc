@@ -130,7 +130,9 @@ bool PersonDao::AddPerson(const PersonCondition& person,
 
 bool PersonDao::UpdatePerson(const PersonCondition& person,
                              const std::vector<std::pair<std::string, std::vector<float>>>& face) {
-    RemovePersonDetail(person.person_id);
+    if (!RemovePersonDetail(person.person_id)) {
+        return false;
+    }
 
     auto now_time = util::GetMilliseconds();
 
@@ -141,7 +143,9 @@ bool PersonDao::UpdatePerson(const PersonCondition& person,
     stmt.bind(3, "");
     stmt.bind(4, (0 == person.update_time) ? static_cast<int64_t>(now_time) : person.update_time);
     stmt.bind(5, person.person_id);
-    stmt.exec();
+    if (stmt.exec() <= 0) {
+        return false;
+    }
 
     return AddPersonDetail(person, face, now_time);
 }
@@ -263,6 +267,29 @@ bool PersonDao::RemoveFacesetPersonRelation(const std::string& person_id, const 
     success = stmt.exec() > 0 && success;
 
     return success;
+}
+
+bool PersonDao::RemovePersonFromFaceLib(const std::string& person_id, const std::string& faceset_token) {
+    if (!RemoveFacesetPersonRelation(person_id, faceset_token)) {
+        return false;
+    }
+
+    SQLite::Statement count(Db(), "SELECT COUNT(*) FROM t_faceset_person_relation WHERE person_id=?");
+    count.bind(1, person_id);
+    if (!count.executeStep()) {
+        return false;
+    }
+    if (count.getColumn(0).getInt() > 0) {
+        return true;
+    }
+
+    SQLite::Statement del_face(Db(), "DELETE FROM t_face WHERE person_id=?");
+    del_face.bind(1, person_id);
+    del_face.exec();
+
+    SQLite::Statement del_person(Db(), "DELETE FROM t_person WHERE person_id=?");
+    del_person.bind(1, person_id);
+    return del_person.exec() > 0;
 }
 
 std::vector<std::string> PersonDao::GetAllFaceLibs() const {

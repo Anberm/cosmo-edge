@@ -7,24 +7,47 @@ namespace cosmo::nn {
 
 static constexpr int64_t kMaxBlobBytes = 512L * 1024 * 1024;
 
-int64_t GetBlobMemoryBytesSize(BlobMemorySizeInfo& size_info) {
+namespace {
+
+    bool CheckedMultiply(int64_t lhs, int64_t rhs, int64_t* result) {
+        if (lhs <= 0 || rhs <= 0 || lhs > kMaxBlobBytes / rhs) {
+            return false;
+        }
+        *result = lhs * rhs;
+        return true;
+    }
+
+}  // namespace
+
+int64_t GetBlobMemoryBytesSize(const BlobMemorySizeInfo& size_info) {
+    const int bytes_per_element = DataTypeUtils::GetBytesSize(size_info.data_type);
+    if (bytes_per_element <= 0) {
+        return -1;
+    }
+
     if (size_info.dims.size() == 1) {
-        int64_t dims_count = DimsVectorUtils::Count(size_info.dims);
-        if (dims_count < 0)
+        const int64_t dims_count = size_info.dims.front();
+        int64_t bytes            = 0;
+        if (!CheckedMultiply(dims_count, bytes_per_element, &bytes)) {
             return -1;
-        int64_t bytes = dims_count * DataTypeUtils::GetBytesSize(size_info.data_type);
-        return (bytes < 0 || bytes > kMaxBlobBytes) ? -1 : bytes;
+        }
+        return bytes;
     } else if (size_info.dims.size() == 2) {
         int64_t dims_count = 1;
         for (auto dim : size_info.dims) {
-            if (dim < 0)
+            if (!CheckedMultiply(dims_count, dim, &dims_count)) {
                 return -1;
-            dims_count *= dim;
+            }
         }
-        int64_t bytes = dims_count * 4 * DataTypeUtils::GetBytesSize(size_info.data_type);
-        return (bytes < 0 || bytes > kMaxBlobBytes) ? -1 : bytes;
+        int64_t packed_count = 0;
+        int64_t bytes        = 0;
+        if (!CheckedMultiply(dims_count, 4, &packed_count) ||
+            !CheckedMultiply(packed_count, bytes_per_element, &bytes)) {
+            return -1;
+        }
+        return bytes;
     } else {
-        return 0;
+        return -1;
     }
 }
 

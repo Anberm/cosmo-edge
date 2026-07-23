@@ -4,7 +4,12 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+#include <cctype>
+#include <exception>
 #include <filesystem>
+#include <string_view>
+#include <utility>
 
 #include "service/algorithm/IAlgorithmQuery.h"
 #include "service/detail/ServiceRegistry.h"
@@ -28,23 +33,67 @@ namespace {
     constexpr int kOfflinePushIntervalMs = 60 * 1000;           // 1 minute
     constexpr int64_t kRetryWindowMs     = 24 * 3600 * 1000LL;  // 24 hours
     constexpr int64_t kMinEventAgeMs     = 60 * 1000;           // 1 minute
+    constexpr size_t kMaxPushUrlBytes    = 2048;
+
+    bool IsValidPushUrl(const std::string& url) {
+        if (url.empty() || url.size() > kMaxPushUrlBytes || url.find('\\') != std::string::npos) {
+            return false;
+        }
+        if (std::any_of(url.begin(), url.end(), [](char character) {
+                const auto byte = static_cast<unsigned char>(character);
+                return byte < 0x20 || byte == 0x7f;
+            })) {
+            return false;
+        }
+
+        constexpr std::string_view kHttpPrefix{"http://"};
+        constexpr std::string_view kHttpsPrefix{"https://"};
+        size_t authority_begin = 0;
+        if (url.compare(0, kHttpPrefix.size(), kHttpPrefix) == 0) {
+            authority_begin = kHttpPrefix.size();
+        } else if (url.compare(0, kHttpsPrefix.size(), kHttpsPrefix) == 0) {
+            authority_begin = kHttpsPrefix.size();
+        } else {
+            return false;
+        }
+        const auto authority_end = url.find_first_of("/?#", authority_begin);
+        const auto authority = std::string_view(url).substr(authority_begin, authority_end - authority_begin);
+        if (authority.empty() || authority.find('@') != std::string_view::npos) {
+            return false;
+        }
+        const bool syntax_valid = std::all_of(authority.begin(), authority.end(), [](char character) {
+            const auto byte = static_cast<unsigned char>(character);
+            return std::isalnum(byte) != 0 || character == '.' || character == '-' || character == '_' ||
+                   character == ':' || character == '[' || character == ']';
+        });
+        return syntax_valid && std::any_of(authority.begin(), authority.end(), [](char character) {
+                   return std::isalnum(static_cast<unsigned char>(character)) != 0;
+               });
+    }
 }  // namespace
 
 AlarmPushServiceImpl::AlarmPushServiceImpl() : event_post_que_("HTTP EVENT POST QUE", 100) {
     auto cfg_path = (std::filesystem::path(cosmo::path::GetCfgPath()) / conf_file_name_).string();
-    if (!cosmo::util::LoadStructFromJsonFile(cfg_path, config_)) {
+    AlarmPushParam loaded;
+    if (!cosmo::util::LoadStructFromJsonFile(cfg_path, loaded)) {
         LOG_WARN("Failed to load alarm push config from {}", cfg_path);
+    } else if ((loaded.is_open && loaded.url.empty()) ||
+               (!loaded.url.empty() && !IsValidPushUrl(loaded.url))) {
+        LOG_WARN("Reject invalid alarm push config from {}", cfg_path);
+    } else {
+        config_ = std::move(loaded);
     }
 }
 
 AlarmPushServiceImpl::~AlarmPushServiceImpl() {
-    if (timer_) {
-        timer_->Cancel(offline_push_task_id_);
-        timer_->Destroy();
-    }
+    AlarmPushServiceImpl::Stop();
 }
 
 void AlarmPushServiceImpl::Init() {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+    if (stop_requested_ || timer_) {
+        return;
+    }
     if (ServiceRegistry::Instance().Get<IConfigReadService>().IsNetworkModel()) {
         return;
     }
@@ -54,7 +103,7 @@ void AlarmPushServiceImpl::Init() {
     offline_push_task_id_ = timer_->Schedule([this]() { OfflinePush(); }, kOfflinePushIntervalMs);
 
     event_post_que_.SetProcessor([this](cosmo::CMsgOnEventsReq&& data) {
-        if (config_.is_open) {
+        if (GetInfo().is_open) {
             OnEvents(std::move(data));
         } else {
             LOG_WARN("Push {}/{} But HTTP Client Not Registed", data.recordId, data.messageId);
@@ -67,6 +116,35 @@ void AlarmPushServiceImpl::Init() {
     ServiceRegistry::Instance().Get<IEventNotifier>().SetEventPostQue(event_post_que_);
 }
 
+void AlarmPushServiceImpl::Stop() {
+    std::unique_lock<std::mutex> lifecycle_lock(lifecycle_mtx_);
+    if (stop_requested_) {
+        return;
+    }
+    stop_requested_ = true;
+
+    if (timer_) {
+        timer_->Cancel(offline_push_task_id_);
+        offline_push_task_id_ = cosmo::kInvalidTaskId;
+        timer_->Destroy();
+        timer_.reset();
+    }
+
+    auto& registry = ServiceRegistry::Instance();
+    try {
+        if (registry.Has<IEventNotifier>()) {
+            registry.Get<IEventNotifier>().ClearEventPostQue(event_post_que_);
+        }
+    } catch (const std::exception& ex) {
+        LOG_WARN("Failed to clear alarm event queue binding during shutdown: {}", ex.what());
+    }
+
+    // AsyncQueue::Stop() rejects new input and waits for a currently running
+    // processor to release its callback lock; Thread::stop() then joins it.
+    event_post_que_.Stop();
+    event_post_que_.stop();
+}
+
 bool AlarmPushServiceImpl::IsEnabled() {
     return GetInfo().is_open;
 }
@@ -76,23 +154,30 @@ std::string AlarmPushServiceImpl::GetUrl() {
 }
 
 cosmo::util::ErrorEnum AlarmPushServiceImpl::SetPush(bool enable, const std::string& url) {
+    if ((enable || !url.empty()) && !IsValidPushUrl(url)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     AlarmPushParam info;
     info.is_open = enable;
     info.url     = url;
 
     std::lock_guard<std::shared_mutex> lock(mtx_);
     if ((info.is_open != config_.is_open) || (info.url != config_.url)) {
-        config_ = info;
-        SaveCfg();
+        if (!SaveCfg(info)) {
+            return cosmo::util::ErrorEnum::SysErr;
+        }
+        config_ = std::move(info);
     }
     return cosmo::util::ErrorEnum::Success;
 }
 
-void AlarmPushServiceImpl::SaveCfg() {
+bool AlarmPushServiceImpl::SaveCfg(const AlarmPushParam& config) {
     auto path = (std::filesystem::path(cosmo::path::GetCfgPath()) / conf_file_name_).string();
-    if (!cosmo::util::SaveStructToJsonFile(path, config_)) {
+    if (!cosmo::util::SaveStructToJsonFile(path, config)) {
         LOG_WARN("Failed to save alarm push config to {}", path);
+        return false;
     }
+    return true;
 }
 
 bool AlarmPushServiceImpl::OfflinePushData(AlarmEventRecord& data) {

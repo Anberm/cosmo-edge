@@ -44,6 +44,11 @@ import { ref, watch, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import RunningDetail from './components/RunningDetail.vue'
 import { t } from '@/i18n'
+import {
+  uploadFileInChunks,
+  UploadPurpose,
+  UPLOAD_MAX_TOTAL_SIZE
+} from '@/utils/chunkUpload'
 
 const { proxy } = getCurrentInstance()
 const $API = proxy.$API
@@ -66,6 +71,10 @@ const beforeUpload = (file) => {
     ElMessage.error(t('systemManage.invalidUpgradeFile'))
     return false
   }
+  if (file.size > UPLOAD_MAX_TOTAL_SIZE) {
+    ElMessage.error(t('validate.fileMaxSize', { n: 500 }))
+    return false
+  }
   fileName.value = file.name
   uploadFile.value = file
   return true
@@ -73,19 +82,27 @@ const beforeUpload = (file) => {
 
 const handleFileChange = (file) => {
   if (file) {
-    if (!upgradePackagePattern.test(file.name)) {
+    const rawFile = file.raw || file
+    if (!upgradePackagePattern.test(rawFile.name)) {
       ElMessage.error(t('systemManage.invalidUpgradeFile'))
       fileName.value = ''
       uploadFile.value = null
       upload.value?.clearFiles()
       return
     }
-    fileName.value = file.name
-    uploadFile.value = file.raw
+    if (rawFile.size > UPLOAD_MAX_TOTAL_SIZE) {
+      ElMessage.error(t('validate.fileMaxSize', { n: 500 }))
+      fileName.value = ''
+      uploadFile.value = null
+      upload.value?.clearFiles()
+      return
+    }
+    fileName.value = rawFile.name
+    uploadFile.value = rawFile
   }
 }
 
-const handleUpgrade = () => {
+const handleUpgrade = async () => {
   if (!uploadFile.value) {
     ElMessage.warning(t('systemManage.selectUpgradeFile'))
     return
@@ -95,22 +112,36 @@ const handleUpgrade = () => {
     text: t('systemManage.fileTransferring'),
     background: 'rgba(0, 0, 0, 0.7)'
   })
-  const formData = new FormData()
-  formData.append('file', uploadFile.value)
-  $API
-    .boxSystemUpgrade(formData)
-    .then(() => {
-      loading.setText(t('systemManage.fileTransferComplete'))
-      setTimeout(() => {
-        loading.setText(t('systemManage.upgradeInProgress'))
-        checkDeviceStatus(loading)
-      }, 1000)
+  let stagedUpload
+  try {
+    stagedUpload = await uploadFileInChunks(uploadFile.value, {
+      purpose: UploadPurpose.UPGRADE,
+      uploadChunk: formData => $API.uploadAtomicModelTemp(formData),
+      cancelUpload: data => $API.cancelAtomicModelUpload(data)
     })
-    .catch((err) => {
-      loading.close()
-      const msg = err?.resMsg?.[0]?.msgText || t('systemManage.fileTransferFailed')
-      ElMessage.error(msg)
+    if (!stagedUpload.uploadId) {
+      throw new Error(t('validate.cannotGetFilePath'))
+    }
+    await $API.boxSystemUpgrade({
+      uploadId: stagedUpload.uploadId
     })
+    loading.setText(t('systemManage.fileTransferComplete'))
+    setTimeout(() => {
+      loading.setText(t('systemManage.upgradeInProgress'))
+      checkDeviceStatus(loading)
+    }, 1000)
+  } catch (error) {
+    if (stagedUpload?.uploadId) {
+      try {
+        await $API.cancelAtomicModelUpload({ uploadId: stagedUpload.uploadId })
+      } catch (_) {
+        // The staging service also expires abandoned sessions by TTL.
+      }
+    }
+    loading.close()
+    const msg = error?.resMsg?.[0]?.msgText || t('systemManage.fileTransferFailed')
+    ElMessage.error(msg)
+  }
 }
 
 const checkDeviceStatus = (loading) => {

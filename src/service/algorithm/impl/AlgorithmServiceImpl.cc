@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <system_error>
 #include <unordered_set>
 
 #include "nlohmann/json.hpp"
@@ -221,10 +222,21 @@ cosmo::util::ErrorEnum AlgorithmServiceImpl::AddFromJson(const std::string& algo
                                                          int algorithmCategory, int algorithmUsage,
                                                          const std::string& remark,
                                                          const std::string& eventType,
-                                                         const std::string& filePath) {
+                                                         const std::string& /*filePath*/) {
     cosmo::util::ErrorEnum val_res = detail::AlgorithmValidator::ValidateAlgorithmName(algorithmName);
     if (val_res != cosmo::util::ErrorEnum::Success) {
         return val_res;
+    }
+
+    const std::string resource_path  = cosmo::path::GetResourcePath();
+    const std::string algorithm_path = cosmo::path::GetAlgorithmPath();
+    std::string resolved_resource;
+    std::string algorithm_dir;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(
+            resource_path, resource_path, cosmo::path::PathEntryType::kDirectory, resolved_resource) ||
+        !cosmo::path::ResolveExistingPathWithinRoot(resolved_resource, algorithm_path,
+                                                    cosmo::path::PathEntryType::kDirectory, algorithm_dir)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
     }
 
     // Generate ID and insert under write lock to eliminate race condition
@@ -269,16 +281,25 @@ cosmo::util::ErrorEnum AlgorithmServiceImpl::AddFromJson(const std::string& algo
     }
 
     // Write layout file (I/O outside lock)
-    std::string algorithm_dir = filePath.empty() ? cosmo::path::GetAlgorithmPath() : filePath;
     if (!cosmo::util::CreateDir(algorithm_dir)) {
         LOG_WARN("Failed to create algorithm directory: {}", algorithm_dir);
         return cosmo::util::ErrorEnum::Failed;
     }
     uint64_t file_timestamp = cosmo::util::GetCurrentDateTime().ToYMDHMSInt();
-    std::string layout_file_path =
+    const std::string layout_file_candidate =
         (std::filesystem::path(algorithm_dir) /
          (algorithm_code + "_" + algorithmName + "_" + std::to_string(file_timestamp) + ".json"))
             .string();
+    std::string layout_file_path;
+    if (!cosmo::path::ResolvePathWithinRoot(algorithm_dir, layout_file_candidate, layout_file_path)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    std::error_code status_error;
+    const auto target_status = std::filesystem::symlink_status(layout_file_path, status_error);
+    if ((!status_error && std::filesystem::is_symlink(target_status)) ||
+        (status_error && status_error != std::errc::no_such_file_or_directory)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     nlohmann::json layoutDoc;
     detail::BuildDefaultLayoutJson(layoutDoc, algorithm_code, algorithmName, algorithmCategory,
                                    algorithmUsage, check_type, ms_timestamp, remark);

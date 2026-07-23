@@ -24,6 +24,9 @@ public:
 
     void SetConnectTimeout(long seconds);
 
+    // Override the system trust store with a PEM CA bundle for private PKI.
+    void SetCaBundlePath(const std::string& ca_bundle_path);
+
     void AppendHeader(const std::string& key, const std::string& value);
 
     // Clears existing data and sets new data
@@ -53,6 +56,7 @@ private:
     std::string post_content_type_;
     std::string result_content_type_;
     std::string interface_name_;
+    std::string ca_bundle_path_;
     HttpRequestHandler* result_handler_;
     std::vector<std::string> header_;
     long status_;

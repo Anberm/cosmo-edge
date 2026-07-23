@@ -17,6 +17,8 @@ import { ReportWriter } from './report-writer.js';
 import { Logger } from './logger.js';
 import { summarizeStep, runtimeStepDecision } from './step-evaluator.js';
 import { strategyForTaskType } from './task-strategies.js';
+import { PreviewLoad } from './preview-load.js';
+import { runPreviewValidation } from './preview-validator.js';
 
 function parseArgs(argv) {
   const args = {};
@@ -31,7 +33,7 @@ function parseArgs(argv) {
       } else {
         args[key] = argv[++i];
       }
-    } else if (!args.command && ['run', 'doctor', 'init-scenario'].includes(a)) {
+    } else if (!args.command && ['run', 'doctor', 'preview', 'init-scenario'].includes(a)) {
       args.command = a;
     }
   }
@@ -42,14 +44,16 @@ function printHelp() {
   console.log(`scenario-bench - CosmoEdge scenario load benchmark
 
 Usage:
-  scenario-bench run --device <url> --user <u> --password <p> --scenario <dir> --output <dir> [options]
+  scenario-bench run --device <url> (--user <u> --password <p> | --token-env <name>) --scenario <dir> --output <dir> [options]
+  scenario-bench preview --device <url> (--user <u> --password <p> | --token-env <name>) --channel <id> --output <dir> [options]
   scenario-bench doctor --scenario <dir> [--device <url> --user <u> --password <p>] [--output <dir>]
   scenario-bench init-scenario --name <name> --template <algorithm-template.json> --video <file> [options]
 
 run required:
   --device <url>       Device base URL, e.g. http://192.168.1.10:8080
-  --user <account>     Login account
+  --user <account>     Login account (use together with --password)
   --password <plain>   Login password
+  --token-env <name>   Read an existing device token from this environment variable
   --scenario <dir>     Scenario package directory
   --output <dir>       Report output directory
 
@@ -63,8 +67,28 @@ run options:
   --profile <mode>     capacity (default) expands to every channel count; configured keeps scenario.yml steps
   --ramp-batch-size <n>
   --ramp-batch-delay-sec <n>
+  --preview <mode>      none (default) | raw | algorithm
+  --preview-streams <n> Number of preview streams or all (default)
+  --preview-clients <n> Media clients per preview stream, default 1
+  --media-base <url>    HTTP-FLV base, e.g. http://device:18088
+  --srs-api <url>       Optional SRS API base, e.g. http://device:1985
+  --ffmpeg <path>       ffmpeg executable, default ffmpeg
   --lang <code>        Accept-Language, default zh-CN
   --verbose            Print per-sample debug logs
+
+preview options:
+  --channel <id>       Existing, running deterministic test channel
+  --algorithm <id>     Running algorithm code; omit for raw-only validation
+  --mode <mode>        raw | algorithm | both (default when --algorithm is set)
+  --media-base <url>   HTTP-FLV base, e.g. http://device:18088
+  --srs-api <url>      SRS API base, e.g. http://device:1985
+  --duration-sec <n>   Decode duration per client, default 8
+  --clients <n>        Concurrent clients on one stream, default 4
+  --lifecycle-iterations <n> Repeated same-stream open/close count, default 0
+  --min-overlay-pixel-delta <n> Algorithm-vs-raw pixel gate, default 0
+  --ffmpeg <path>      ffmpeg executable, default ffmpeg
+  --ffprobe <path>     ffprobe executable, default ffprobe
+  --token-env <name>   Read an existing device token from this environment variable
 
 init-scenario options:
   --output <dir>       New scenario directory, default scenarios/<name>
@@ -95,6 +119,18 @@ function ensureWritableDir(dir) {
   fs.writeFileSync(probe, 'ok', 'utf8');
   fs.unlinkSync(probe);
   return abs;
+}
+
+function deviceAuth(args) {
+  const tokenEnv = args['token-env'];
+  const token = tokenEnv ? process.env[tokenEnv] : null;
+  if (tokenEnv && !token) {
+    throw new Error(`environment variable ${tokenEnv} is empty or unset`);
+  }
+  if (!token && (!args.user || !args.password)) {
+    throw new Error('provide --user and --password together, or use --token-env');
+  }
+  return { user: args.user, password: args.password, token };
 }
 
 async function runDoctor(args) {
@@ -147,16 +183,16 @@ async function runDoctor(args) {
     }
   }
 
-  if (args.device || args.user || args.password) {
-    if (!args.device || !args.user || !args.password) {
-      checkLine(false, 'device login', 'provide --device, --user, and --password together');
+  if (args.device || args.user || args.password || args['token-env']) {
+    if (!args.device) {
+      checkLine(false, 'device login', 'provide --device with credentials');
       failures++;
     } else {
       try {
+        const auth = deviceAuth(args);
         const client = new CosmoClient({
           base: args.device,
-          user: args.user,
-          password: args.password,
+          ...auth,
           lang: args.lang ?? 'zh-CN',
         });
         await client.login();
@@ -173,7 +209,7 @@ async function runDoctor(args) {
       }
     }
   } else {
-    checkLine(true, 'device checks skipped', 'provide --device --user --password to enable');
+    checkLine(true, 'device checks skipped', 'provide --device with login credentials or --token-env to enable');
   }
 
   if (failures) {
@@ -298,13 +334,15 @@ thresholds:
 }
 
 async function runBenchmark(args) {
-  requireArgs(args, ['device', 'user', 'password', 'scenario', 'output']);
+  requireArgs(args, ['device', 'scenario', 'output']);
+  const auth = deviceAuth(args);
 
   const log = new Logger({ verbose: args.verbose });
   const startedAt = new Date().toISOString();
   let pkg = null;
   let deviceInfo = {};
   let channelMgr = null;
+  let previewLoad = null;
   const samples = [];
   let baselineFps = null;
   const baselineByTask = {};
@@ -347,6 +385,7 @@ async function runBenchmark(args) {
     loadProfile: effectiveLoadProfile.map((s, i) => ({ index: i, ...s })),
     configuredLoadProfile: pkg?.loadProfile?.map((s, i) => ({ index: i, ...s })) ?? [],
     profileMode: args.profile ?? 'capacity',
+    previewProfile: previewLoad?.profile() ?? { mode: args.preview ?? 'none' },
     bottleneck: bottleneckStep != null
       ? {
           stepIndex: bottleneckStep,
@@ -385,8 +424,7 @@ async function runBenchmark(args) {
     log.info(`Connecting to device ${args.device}...`);
     const client = new CosmoClient({
       base: args.device,
-      user: args.user,
-      password: args.password,
+      ...auth,
       lang: args.lang ?? 'zh-CN',
     });
     await client.login();
@@ -428,13 +466,25 @@ async function runBenchmark(args) {
     }, log);
     runner.setChannels(videoChannelIds);
 
+    previewLoad = new PreviewLoad(client, {
+      mode: args.preview ?? 'none',
+      streamLimit: args['preview-streams'] ?? 'all',
+      clientsPerStream: Number(args['preview-clients'] ?? 1),
+      mediaBase: args['media-base'],
+      srsApiBase: args['srs-api'],
+      ffmpeg: args.ffmpeg ?? 'ffmpeg',
+      logger: log,
+    });
+
     const sampler = new MetricsSampler(client, log);
     const activeEntries = () => runner.expectedTaskEntries(runner.allChannelIds.slice(0, currentChannels));
     const FPS_HALVE_RATIO = 0.5;
     const DISCARD_BOTTLENECK = 0.05;
 
     const captureSample = async (phase = 'hold', targetChannels = currentChannels) => {
+      previewLoad.assertHealthy();
       const sample = await sampler.sample(activeEntries());
+      sample.preview = await previewLoad.snapshot();
       sample.stepIndex = currentStepIndex;
       sample.phase = phase;
       sample.targetChannels = targetChannels;
@@ -495,7 +545,7 @@ async function runBenchmark(args) {
         currentStepIndex = step.index;
         return quickFuse(await captureSample('ramp', step.channels));
       },
-      onStepStart: async (step, active) => {
+      onStepStart: async (step, active, entries) => {
         currentChannels = active.length;
         currentStepIndex = step.index;
 
@@ -504,6 +554,7 @@ async function runBenchmark(args) {
           log.info(`[warmup] VLM detected in first step, waiting 30 seconds for model loading before sampling...`);
           await new Promise((resolve) => setTimeout(resolve, 30000));
         }
+        await previewLoad.sync(entries);
       },
       onSample: async () => {
         await captureSample('hold', currentChannels);
@@ -546,6 +597,13 @@ async function runBenchmark(args) {
     runError = err;
     log.error(`Benchmark aborted; a partial report will be written: ${err.message}`);
   } finally {
+    if (previewLoad) {
+      try {
+        await previewLoad.stop();
+      } catch (e) {
+        log.warn(`Preview cleanup failed: ${e.message}`);
+      }
+    }
     if (channelMgr) {
       try {
         await channelMgr.finish();
@@ -572,6 +630,34 @@ async function runBenchmark(args) {
   log.info(`Report written:\n  ${jsonPath}\n  ${htmlPath}`);
 }
 
+async function runPreviewCommand(args) {
+  requireArgs(args, ['device', 'channel', 'output', 'media-base', 'srs-api']);
+  const auth = deviceAuth(args);
+  const log = new Logger({ verbose: args.verbose });
+  const client = new CosmoClient({
+    base: args.device,
+    ...auth,
+    lang: args.lang ?? 'zh-CN',
+  });
+  await client.login();
+  const report = await runPreviewValidation(client, {
+    channelId: args.channel,
+    algorithmId: args.algorithm ?? '',
+    mode: args.mode,
+    output: args.output,
+    mediaBase: args['media-base'],
+    srsApiBase: args['srs-api'],
+    durationSec: args['duration-sec'],
+    clients: args.clients,
+    lifecycleIterations: args['lifecycle-iterations'],
+    minOverlayPixelDelta: args['min-overlay-pixel-delta'],
+    ffmpeg: args.ffmpeg,
+    ffprobe: args.ffprobe,
+    logger: log,
+  });
+  log.info(`Preview validation ${report.status}: ${path.join(path.resolve(args.output), 'preview-validation.json')}`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.command || args.command === 'help') {
@@ -584,6 +670,10 @@ async function main() {
   }
   if (args.command === 'init-scenario') {
     await initScenario(args);
+    return;
+  }
+  if (args.command === 'preview') {
+    await runPreviewCommand(args);
     return;
   }
   await runBenchmark(args);

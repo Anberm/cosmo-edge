@@ -90,6 +90,9 @@ export const createWhepPlayer = ({
   let failed = false
   let mediaReady = false
   let connectedNotified = false
+  let ownedStream = null
+  let videoFrameCallback = null
+  let mediaReadyListener = null
   const diagnosticsTimers = []
 
   const clearMediaTimeout = () => {
@@ -97,6 +100,18 @@ export const createWhepPlayer = ({
       clearTimeout(mediaTimeout)
       mediaTimeout = null
     }
+  }
+
+  const clearMediaReadyWait = () => {
+    if (videoFrameCallback !== null && video?.cancelVideoFrameCallback) {
+      video.cancelVideoFrameCallback(videoFrameCallback)
+    }
+    videoFrameCallback = null
+    if (mediaReadyListener && video) {
+      video.removeEventListener('playing', mediaReadyListener)
+      video.removeEventListener('loadeddata', mediaReadyListener)
+    }
+    mediaReadyListener = null
   }
 
   const cleanup = async ({ markStopped = true } = {}) => {
@@ -108,6 +123,7 @@ export const createWhepPlayer = ({
       timeout = null
     }
     clearMediaTimeout()
+    clearMediaReadyWait()
     diagnosticsTimers.forEach((timer) => clearTimeout(timer))
     diagnosticsTimers.length = 0
     if (abortController) {
@@ -119,16 +135,18 @@ export const createWhepPlayer = ({
       fetch(resourceUrl, { method: 'DELETE' }).catch(() => {})
       resourceUrl = ''
     }
-    if (peer) {
-      peer.getReceivers().forEach((receiver) => {
+    const ownedPeer = peer
+    peer = null
+    if (ownedPeer) {
+      ownedPeer.getReceivers().forEach((receiver) => {
         receiver.track && receiver.track.stop()
       })
-      peer.close()
-      peer = null
+      ownedPeer.close()
     }
-    if (video) {
+    if (video && ownedStream && video.srcObject === ownedStream) {
       video.srcObject = null
     }
+    ownedStream = null
   }
 
   const stop = () => cleanup({ markStopped: true })
@@ -141,24 +159,54 @@ export const createWhepPlayer = ({
   }
 
   const markMediaReady = () => {
+    if (stopped) return
     mediaReady = true
     clearMediaTimeout()
+    clearMediaReadyWait()
     if (!connectedNotified) {
       connectedNotified = true
       onConnected && onConnected()
     }
   }
 
+  const waitForFirstFrame = (stream) => {
+    if (!video) {
+      fail(new Error('WebRTC video element is unavailable'))
+      return
+    }
+
+    clearMediaReadyWait()
+    const ready = () => {
+      if (stopped || ownedStream !== stream || video.srcObject !== stream) return
+      markMediaReady()
+    }
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      videoFrameCallback = video.requestVideoFrameCallback(() => {
+        videoFrameCallback = null
+        ready()
+      })
+    } else {
+      mediaReadyListener = ready
+      video.addEventListener('playing', ready)
+      video.addEventListener('loadeddata', ready)
+    }
+  }
+
   const start = async () => {
+    let currentPeer = null
+    const isCurrent = () => !stopped && peer === currentPeer
     try {
-      abortController = new AbortController()
+      const controller = new AbortController()
+      abortController = controller
       console.log('[WHEP] secure context:', window.isSecureContext, 'url:', url)
-      peer = new RTCPeerConnection({
+      currentPeer = new RTCPeerConnection({
         iceServers,
         iceCandidatePoolSize: 4
       })
+      peer = currentPeer
       const candidates = []
       const onCandidate = (event) => {
+        if (!isCurrent()) return
         if (event.candidate) {
           candidates.push(event.candidate)
           console.log('[WHEP] ICE candidate:', event.candidate.candidate)
@@ -166,8 +214,9 @@ export const createWhepPlayer = ({
           console.log('[WHEP] ICE candidate gathering complete')
         }
       }
-      peer.addEventListener('icecandidate', onCandidate)
-      peer.addEventListener('icecandidateerror', (event) => {
+      currentPeer.addEventListener('icecandidate', onCandidate)
+      currentPeer.addEventListener('icecandidateerror', (event) => {
+        if (!isCurrent()) return
         console.warn('[WHEP] ICE candidate error:', {
           address: event.address,
           port: event.port,
@@ -176,54 +225,52 @@ export const createWhepPlayer = ({
           errorText: event.errorText
         })
       })
-      peer.addEventListener('icegatheringstatechange', () => {
-        logPeerState(peer, 'state changed')
+      currentPeer.addEventListener('icegatheringstatechange', () => {
+        if (isCurrent()) logPeerState(currentPeer, 'state changed')
       })
-      peer.addEventListener('iceconnectionstatechange', () => {
-        logPeerState(peer, 'state changed')
-        if (['connected', 'completed'].includes(peer.iceConnectionState)) {
-          markMediaReady()
+      currentPeer.addEventListener('iceconnectionstatechange', () => {
+        if (isCurrent()) logPeerState(currentPeer, 'state changed')
+      })
+      currentPeer.addEventListener('connectionstatechange', () => {
+        if (isCurrent()) logPeerState(currentPeer, 'state changed')
+      })
+      currentPeer.addEventListener('signalingstatechange', () => {
+        if (isCurrent()) logPeerState(currentPeer, 'state changed')
+      })
+      currentPeer.addTransceiver('video', { direction: 'recvonly' })
+      currentPeer.ontrack = (event) => {
+        if (!isCurrent()) return
+        const stream = event.streams?.[0]
+        if (!stream || !video) {
+          fail(new Error('WebRTC track did not provide a media stream'))
+          return
         }
-      })
-      peer.addEventListener('connectionstatechange', () => {
-        logPeerState(peer, 'state changed')
-        if (peer.connectionState === 'connected') {
-          markMediaReady()
-        }
-      })
-      peer.addEventListener('signalingstatechange', () => {
-        logPeerState(peer, 'state changed')
-      })
-      peer.addTransceiver('video', { direction: 'recvonly' })
-      peer.ontrack = (event) => {
-        if (video && video.srcObject !== event.streams[0]) {
-          video.srcObject = event.streams[0]
-          video.play().catch(() => {})
-        }
-        markMediaReady()
+        ownedStream = stream
+        if (video.srcObject !== stream) video.srcObject = stream
+        waitForFirstFrame(stream)
+        Promise.resolve(video.play()).catch(fail)
       }
-      peer.onconnectionstatechange = () => {
-        if (peer.connectionState === 'connected') {
-          markMediaReady()
-        }
-        if (['failed', 'disconnected', 'closed'].includes(peer.connectionState)) {
-          fail(new Error(`WebRTC ${peer.connectionState}`))
+      currentPeer.onconnectionstatechange = () => {
+        if (!isCurrent()) return
+        if (['failed', 'disconnected', 'closed'].includes(currentPeer.connectionState)) {
+          fail(new Error(`WebRTC ${currentPeer.connectionState}`))
         }
       }
-      peer.oniceconnectionstatechange = () => {
-        if (['connected', 'completed'].includes(peer.iceConnectionState)) {
-          markMediaReady()
-        }
-        if (['failed', 'disconnected', 'closed'].includes(peer.iceConnectionState)) {
-          fail(new Error(`WebRTC ICE ${peer.iceConnectionState}`))
+      currentPeer.oniceconnectionstatechange = () => {
+        if (!isCurrent()) return
+        if (['failed', 'disconnected', 'closed'].includes(currentPeer.iceConnectionState)) {
+          fail(new Error(`WebRTC ICE ${currentPeer.iceConnectionState}`))
         }
       }
 
-      const offer = await peer.createOffer()
-      await peer.setLocalDescription(offer)
-      await waitForFirstCandidate(peer, candidates, firstCandidateTimeoutMs)
-      console.log('[WHEP] ICE gathering state:', peer.iceGatheringState, 'candidate count:', candidates.length)
-      const offerSdp = appendCandidatesToSdp(peer.localDescription.sdp, candidates)
+      const offer = await currentPeer.createOffer()
+      if (!isCurrent()) return
+      await currentPeer.setLocalDescription(offer)
+      if (!isCurrent()) return
+      await waitForFirstCandidate(currentPeer, candidates, firstCandidateTimeoutMs)
+      if (!isCurrent()) return
+      console.log('[WHEP] ICE gathering state:', currentPeer.iceGatheringState, 'candidate count:', candidates.length)
+      const offerSdp = appendCandidatesToSdp(currentPeer.localDescription.sdp, candidates)
       const localCandidateLines = getCandidateLines(offerSdp)
       console.log('[WHEP] local SDP candidate count:', localCandidateLines.length, localCandidateLines)
       if (!localCandidateLines.length) {
@@ -234,7 +281,8 @@ export const createWhepPlayer = ({
       }
 
       timeout = setTimeout(() => {
-        abortController && abortController.abort()
+        if (!isCurrent()) return
+        controller.abort()
         fail(new Error('WebRTC connect timeout'))
       }, timeoutMs)
 
@@ -244,7 +292,7 @@ export const createWhepPlayer = ({
           'Content-Type': 'application/sdp'
         },
         body: offerSdp,
-        signal: abortController.signal
+        signal: controller.signal
       })
 
       if (!response.ok) {
@@ -260,23 +308,32 @@ export const createWhepPlayer = ({
       if (resourceUrl && resourceUrl.startsWith('/')) {
         resourceUrl = new URL(resourceUrl, url).toString()
       }
+      if (!isCurrent()) {
+        await cleanup({ markStopped: false })
+        return
+      }
 
       const answer = await response.text()
+      if (!isCurrent()) {
+        await cleanup({ markStopped: false })
+        return
+      }
       const remoteCandidateLines = getCandidateLines(answer)
       console.log('[WHEP] remote SDP candidate count:', remoteCandidateLines.length, remoteCandidateLines)
-      await peer.setRemoteDescription({ type: 'answer', sdp: answer })
-      logPeerState(peer, 'after remote answer')
+      await currentPeer.setRemoteDescription({ type: 'answer', sdp: answer })
+      if (!isCurrent()) return
+      logPeerState(currentPeer, 'after remote answer')
       diagnosticsTimers.push(setTimeout(() => {
-        if (peer) {
+        if (isCurrent()) {
           console.log('[WHEP] candidates after 2s:', candidates.length, candidates.map((candidate) => candidate.candidate))
-          logPeerState(peer, 'after 2s')
+          logPeerState(currentPeer, 'after 2s')
         }
       }, 2000))
       diagnosticsTimers.push(setTimeout(() => {
-        if (peer) {
+        if (isCurrent()) {
           console.log('[WHEP] candidates after 10s:', candidates.length, candidates.map((candidate) => candidate.candidate))
-          logPeerState(peer, 'after 10s')
-          if (!candidates.length && peer.iceConnectionState === 'new') {
+          logPeerState(currentPeer, 'after 10s')
+          if (!candidates.length && currentPeer.iceConnectionState === 'new') {
             fail(new Error('Browser did not gather local ICE candidates; check Chrome WebRTC UDP/IP policy'))
           }
         }
@@ -284,7 +341,7 @@ export const createWhepPlayer = ({
 
       if (!mediaReady) {
         mediaTimeout = setTimeout(() => {
-          fail(new Error('WebRTC media timeout'))
+          if (isCurrent()) fail(new Error('WebRTC media timeout'))
         }, mediaTimeoutMs)
       }
     } catch (error) {

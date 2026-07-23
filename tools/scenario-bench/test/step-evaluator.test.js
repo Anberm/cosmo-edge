@@ -3,6 +3,23 @@ import test from 'node:test';
 
 import { summarizeStep, runtimeStepDecision } from '../src/step-evaluator.js';
 
+test('step summary records accelerator and accelerator-memory peaks', () => {
+  const samples = Array.from({ length: 8 }, (_, index) => ({
+    stepIndex: 0,
+    ts: index * 3000,
+    channels: [],
+    hardware: {
+      npuUtilization: { usedPercent: 20 + index },
+      specialMemoryUtilization: { usedPercent: 30 + index },
+    },
+  }));
+
+  const summary = summarizeStep({ index: 0, channels: 0, holdSec: 24 }, samples);
+
+  assert.equal(summary.maxNpu, 27);
+  assert.equal(summary.maxAcceleratorMem, 37);
+});
+
 test('runtime decision stops CV tasks when steady throughput falls below half baseline', () => {
   const decision = runtimeStepDecision({
     avgDiscard: 0,

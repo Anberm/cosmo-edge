@@ -1,8 +1,15 @@
 // LinkageCrud.cc — CRUD operations for LinkageServiceImpl.
 // Split from LinkageServiceImpl.cc to reduce file size (DEBT-007).
 
+#include <algorithm>
 #include <filesystem>
+#include <initializer_list>
+#include <iterator>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
+#include "linkage/LinkAgeAlarm.h"
 #include "linkage/LinkAgeAudioDevice.h"
 #include "nlohmann/json.hpp"
 #include "service/detail/ServiceRegistry.h"
@@ -11,7 +18,9 @@
 #include "util/FormatString.h"
 #include "util/JsonFileUtil.h"
 #include "util/JsonStructUtil.h"
+#include "util/Keys.h"
 #include "util/Log.h"
+#include "util/SafeParse.h"
 #include "util/TimeUtil.h"
 #include "util/UuidUtil.h"
 
@@ -19,6 +28,45 @@
 
 namespace cosmo::service {
 using detail::NormalizeWorkflowJson;
+
+namespace {
+    std::string FindParameter(const cosmo::linkage::LinkAgeParamNode& node,
+                              std::initializer_list<std::string_view> keys) {
+        for (const auto& parameter : node.config_object.params) {
+            const auto key = parameter.key.ToString();
+            if (std::find(keys.begin(), keys.end(), std::string_view(key)) != keys.end()) {
+                return parameter.value.ToString();
+            }
+        }
+        return {};
+    }
+
+    bool HasValidAlarmBinding(const cosmo::linkage::LinkAgeParamNode& node) {
+        const auto value =
+            FindParameter(node, {cosmo::linkage::kKeyLinkageAlgs, cosmo::linkage::kKeyStrageAlgs});
+        std::vector<cosmo::linkage::LinkAgeAlarmTaskUnit> tasks;
+        return !value.empty() && cosmo::util::DecodeJson(value, tasks) && !tasks.empty() &&
+               std::all_of(tasks.begin(), tasks.end(), [](const auto& task) {
+                   return !task.channel_id.empty() && !task.algorithm_id.empty();
+               });
+    }
+
+    bool HasValidAudioBinding(const cosmo::linkage::LinkAgeParamNode& node) {
+        const auto device_id = FindParameter(
+            node, {cosmo::linkage::kKeyLinkageAudioDeviceId, cosmo::linkage::kKeyStrageAudioDeviceId});
+        const auto operation =
+            cosmo::util::ParseInt(FindParameter(node, {cosmo::linkage::kKeyStrageAudioDeviceOperation}));
+        if (device_id.empty() || !cosmo::linkage::IsValidOperation(operation)) {
+            return false;
+        }
+        if (operation == static_cast<int>(cosmo::linkage::LinkAgeAudioDeviceOperation::kAudioPlay)) {
+            return !FindParameter(node, {cosmo::linkage::kKeyStrageAudioDeviceData}).empty();
+        }
+        return !FindParameter(node, {cosmo::linkage::kKeyLinkageAudioDeviceText,
+                                     cosmo::linkage::kKeyStrageAudioDeviceText})
+                    .empty();
+    }
+}  // namespace
 
 cosmo::util::ErrorEnum LinkageServiceImpl::Add(const std::string& name, const std::string& linkage_strategy,
                                                std::string& id) {
@@ -28,21 +76,33 @@ cosmo::util::ErrorEnum LinkageServiceImpl::Add(const std::string& name, const st
     if (!cosmo::util::DecodeJson(normalized_workflow, storage.workflow)) {
         return cosmo::util::ErrorEnum::Failed;
     }
-    id = cosmo::util::GenerateUUID();
-    SaveStrategy(id, normalized_workflow);
+    auto task = MakeTask(name, storage);
+    if (!task) {
+        return cosmo::util::ErrorEnum::ParameterException;
+    }
+    const std::string new_id = cosmo::util::GenerateUUID();
     std::lock_guard<std::shared_mutex> lock(mtx_);
 
-    // 3. Update strategy table and save to local config
     cosmo::LinkageStrategyConfigUnit unit;
-    unit.strategy_id      = id;
+    unit.strategy_id      = new_id;
     unit.name             = name;
     unit.timestamp        = cosmo::util::GetMilliseconds();
     unit.create_timestamp = unit.timestamp;
     unit.strategy         = storage;
-    unit.task             = MakeTask(name, storage);
-    config_.strategies.push_back(unit);
+    unit.task             = std::move(task);
 
-    SaveConfig();
+    auto next_config = config_;
+    next_config.strategies.push_back(std::move(unit));
+    if (!SaveStrategy(new_id, normalized_workflow)) {
+        return cosmo::util::ErrorEnum::Failed;
+    }
+    if (!SaveConfig(next_config)) {
+        RmvStrategy(new_id);
+        return cosmo::util::ErrorEnum::Failed;
+    }
+
+    config_ = std::move(next_config);
+    id      = new_id;
     return cosmo::util::ErrorEnum::Success;
 }
 
@@ -52,9 +112,18 @@ cosmo::util::ErrorEnum LinkageServiceImpl::Delete(std::string& id) {
         std::find_if(config_.strategies.begin(), config_.strategies.end(),
                      [&](const cosmo::LinkageStrategyConfigUnit& cfg) { return cfg.strategy_id == id; });
     if (it != config_.strategies.end()) {
-        RmvStrategy(it->strategy_id);
-        config_.strategies.erase(it);
-        SaveConfig();
+        auto next_config = config_;
+        next_config.strategies.erase(next_config.strategies.begin() +
+                                     std::distance(config_.strategies.begin(), it));
+        if (!SaveConfig(next_config)) {
+            return cosmo::util::ErrorEnum::Failed;
+        }
+        config_ = std::move(next_config);
+        if (!RmvStrategy(id)) {
+            // The durable index no longer references the strategy.  A stale
+            // sidecar is harmless and will not be loaded after restart.
+            LOG_WARN("Failed to remove unreferenced linkage strategy file {}", id);
+        }
         return cosmo::util::ErrorEnum::Success;
     }
     return cosmo::util::ErrorEnum::IDNotExist;
@@ -68,21 +137,38 @@ cosmo::util::ErrorEnum LinkageServiceImpl::Update(const std::string& name, const
         LOG_ERRO("{}/{} dec json failed", strategy_id, name);
         return cosmo::util::ErrorEnum::Failed;
     }
+    auto task = MakeTask(name, storage);
+    if (!task) {
+        return cosmo::util::ErrorEnum::ParameterException;
+    }
     std::lock_guard<std::shared_mutex> lock(mtx_);
     auto it = std::find_if(
         config_.strategies.begin(), config_.strategies.end(),
         [&](const cosmo::LinkageStrategyConfigUnit& cfg) { return cfg.strategy_id == strategy_id; });
 
     if (it != config_.strategies.end()) {
-        SaveStrategy(strategy_id, normalized_workflow);
+        const std::string previous_workflow = ReadStrategy(strategy_id);
+        auto next_config                    = config_;
+        auto next_it       = next_config.strategies.begin() + std::distance(config_.strategies.begin(), it);
+        next_it->name      = name;
+        next_it->strategy  = storage;
+        next_it->timestamp = cosmo::util::GetMilliseconds();
+        next_it->task      = std::move(task);
 
-        it->name      = name;
-        it->strategy  = storage;
-        it->timestamp = cosmo::util::GetMilliseconds();
-        it->task      = MakeTask(name, storage);
+        if (!SaveStrategy(strategy_id, normalized_workflow)) {
+            return cosmo::util::ErrorEnum::Failed;
+        }
+        if (!SaveConfig(next_config)) {
+            if (previous_workflow.empty()) {
+                RmvStrategy(strategy_id);
+            } else if (!SaveStrategy(strategy_id, previous_workflow)) {
+                LOG_ERRO("Failed to restore linkage strategy {} after config write failure", strategy_id);
+            }
+            return cosmo::util::ErrorEnum::Failed;
+        }
+        config_ = std::move(next_config);
 
         LOG_INFO("{}/{} Update", strategy_id, name);
-        SaveConfig();
         return cosmo::util::ErrorEnum::Success;
     } else {
         LOG_INFO("{} Not Exist", strategy_id);
@@ -97,9 +183,15 @@ cosmo::util::ErrorEnum LinkageServiceImpl::Switch(std::string& id, bool is_open)
                      [&](const cosmo::LinkageStrategyConfigUnit& cfg) { return cfg.strategy_id == id; });
     if (it != config_.strategies.end()) {
         if (it->is_open != is_open) {
-            it->is_open = is_open;
-            SaveConfig();
-            LOG_INFO("{}/{} -> {}", it->strategy_id, it->name, it->is_open ? "Open" : "Close");
+            const std::string strategy_name = it->name;
+            auto next_config                = config_;
+            auto next_it     = next_config.strategies.begin() + std::distance(config_.strategies.begin(), it);
+            next_it->is_open = is_open;
+            if (!SaveConfig(next_config)) {
+                return cosmo::util::ErrorEnum::Failed;
+            }
+            config_ = std::move(next_config);
+            LOG_INFO("{}/{} -> {}", id, strategy_name, is_open ? "Open" : "Close");
         }
 
         return cosmo::util::ErrorEnum::Success;
@@ -116,6 +208,7 @@ std::vector<cosmo::LinkageStrategyOutputUnit> LinkageServiceImpl::Query(int page
     struct MatchInfo {
         std::string id;
         std::string name;
+        std::string workflow;
         bool status;
     };
     std::vector<MatchInfo> matches;
@@ -134,20 +227,24 @@ std::vector<cosmo::LinkageStrategyOutputUnit> LinkageServiceImpl::Query(int page
             index += 1;
             total++;
             if ((index > index_start) && (index <= index_end)) {
-                matches.push_back({info.strategy_id, info.name, info.is_open});
+                std::string workflow;
+                if (!cosmo::util::EncodeJson(info.strategy.workflow, workflow)) {
+                    continue;
+                }
+                matches.push_back({info.strategy_id, info.name, std::move(workflow), info.is_open});
             }
         }
     }
 
-    // Read strategy files outside lock to avoid holding lock during IO
+    // Materialize response DTOs after releasing the service lock.
     std::vector<cosmo::LinkageStrategyOutputUnit> infos;
     infos.reserve(matches.size());
-    for (const auto& m : matches) {
+    for (auto& m : matches) {
         cosmo::LinkageStrategyOutputUnit unit;
         unit.id       = m.id;
         unit.name     = m.name;
         unit.status   = m.status;
-        unit.workFlow = NormalizeWorkflowJson(ReadStrategy(unit.id));
+        unit.workFlow = std::move(m.workflow);
         infos.push_back(std::move(unit));
     }
     return infos;
@@ -163,11 +260,59 @@ bool LinkageServiceImpl::ReadSupportedStorage(int& total_size, std::vector<cosmo
 
 cosmo::linkage::LinkAgeTaskPtr LinkageServiceImpl::MakeTask(
     const std::string& name, cosmo::linkage::LinkageStrategyWorkflow& strategy) {
-    if (strategy.workflow.empty()) {
+    if (!ValidateWorkflow(strategy)) {
         return nullptr;
     }
 
     return std::make_shared<cosmo::linkage::LinkAgeTask>(name, strategy);
+}
+
+bool LinkageServiceImpl::ValidateWorkflow(const cosmo::linkage::LinkageStrategyWorkflow& strategy) const {
+    constexpr size_t kMaxWorkflowNodes = 128;
+    if (strategy.workflow.empty() || strategy.workflow.size() > kMaxWorkflowNodes) {
+        return false;
+    }
+
+    std::unordered_map<std::string, const cosmo::linkage::LinkAgeParamNode*> nodes;
+    nodes.reserve(strategy.workflow.size());
+    size_t root_count = 0;
+    for (const auto& node : strategy.workflow) {
+        const bool is_alarm = node.action_id == cosmo::linkage::kLaAlarmDataCode ||
+                              node.action_id == cosmo::linkage::kLaAlarmDataLegacyCode;
+        const bool is_audio = node.action_id == cosmo::linkage::kLaAudioDeviceCode ||
+                              node.action_id == cosmo::linkage::kLaAudioDeviceLegacyCode;
+        if ((!is_alarm && !is_audio) || node.flowActionId.empty() ||
+            node.flowActionId == cosmo::key::alg::ACTION_ROOT_VALUE ||
+            !nodes.emplace(node.flowActionId, &node).second || (is_alarm && !HasValidAlarmBinding(node)) ||
+            (is_audio && !HasValidAudioBinding(node))) {
+            return false;
+        }
+        if (node.preFlowActionId == cosmo::key::alg::ACTION_ROOT_VALUE) {
+            if (!is_alarm) {
+                return false;
+            }
+            ++root_count;
+        }
+    }
+    if (root_count != 1) {
+        return false;
+    }
+
+    for (const auto& node : strategy.workflow) {
+        std::unordered_set<std::string> visited;
+        const cosmo::linkage::LinkAgeParamNode* current = &node;
+        while (current->preFlowActionId != cosmo::key::alg::ACTION_ROOT_VALUE) {
+            if (!visited.insert(current->flowActionId).second) {
+                return false;
+            }
+            const auto parent = nodes.find(current->preFlowActionId);
+            if (parent == nodes.end()) {
+                return false;
+            }
+            current = parent->second;
+        }
+    }
+    return true;
 }
 
 bool LinkageServiceImpl::Alarm(const std::string& channel_id, const std::string& alg_id) {

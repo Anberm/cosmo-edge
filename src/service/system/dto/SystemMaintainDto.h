@@ -52,6 +52,7 @@ struct MsgUpgradeRecv : public MsgRecvHead {
     std::string contentLength;
     std::string fileName;
     std::string filePath;
+    std::string uploadId;
     std::string fileUrl;
 };
 

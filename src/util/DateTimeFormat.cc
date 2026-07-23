@@ -2,12 +2,11 @@
 
 #include "util/DateTimeFormat.h"
 
-#include <string>
+#include <limits>
 
 #include "util/Exception.h"
 #include "util/FormatString.h"
 #include "util/Log.h"
-#include "util/StringUtil.h"
 #include "util/TimeUtil.h"
 
 namespace {
@@ -18,6 +17,44 @@ constexpr char DigitHi(uint8_t n) {
 }
 constexpr char DigitLo(uint8_t n) {
     return static_cast<char>(n % 10 + '0');
+}
+
+constexpr bool IsAsciiDigit(char value) {
+    return value >= '0' && value <= '9';
+}
+
+uint32_t ParseDigits(std::string_view value, size_t offset, size_t count) {
+    if (offset > value.size() || count > value.size() - offset) {
+        throw cosmo::util::Exception(COSMO_FORMAT("wrong format, [{}]", value));
+    }
+
+    uint32_t result = 0;
+    for (size_t index = offset; index < offset + count; ++index) {
+        if (!IsAsciiDigit(value[index])) {
+            throw cosmo::util::Exception(COSMO_FORMAT("wrong format, [{}]", value));
+        }
+        result = result * 10 + static_cast<uint32_t>(value[index] - '0');
+    }
+    return result;
+}
+
+constexpr bool IsLeapYear(uint16_t year) {
+    return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
+constexpr uint8_t DaysInMonth(uint16_t year, uint8_t month) {
+    constexpr uint8_t kMonthDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month == 0 || month > 12) {
+        return 0;
+    }
+    if (month == 2 && IsLeapYear(year)) {
+        return 29;
+    }
+    return kMonthDays[month - 1];
+}
+
+[[noreturn]] void ThrowInvalidTimestamp() {
+    throw cosmo::util::Exception("timestamp cannot be represented as local time");
 }
 
 }  // namespace
@@ -32,14 +69,14 @@ HMSTime::HMSTime() : hour_{0}, minute_{0}, second_{0} {}
 
 HMSTime::HMSTime(std::string_view str) : HMSTime{} {
     if (!str.empty()) {
-        if (str.size() != 5 && str.size() != 8) {
+        if ((str.size() != 5 && str.size() != 8) || str[2] != ':' || (str.size() == 8 && str[5] != ':')) {
             throw Exception(COSMO_FORMAT("wrong format, [{}]", str));
         }
-        // Construct null-terminated string for sscanf safety.
-        std::string safe(str);
-        int h{0}, m{0}, s{0};
-        int ret = sscanf(safe.c_str(), "%d:%d:%d", &h, &m, &s);
-        if ((ret != 2 && ret != 3) || h >= 24 || m >= 60 || s >= 60) {
+
+        const auto h = ParseDigits(str, 0, 2);
+        const auto m = ParseDigits(str, 3, 2);
+        const auto s = str.size() == 8 ? ParseDigits(str, 6, 2) : 0;
+        if (h >= 24 || m >= 60 || s >= 60) {
             throw Exception(COSMO_FORMAT("wrong format, [{}]", str));
         }
         hour_   = static_cast<uint8_t>(h);
@@ -68,8 +105,10 @@ HMSTime::HMSTime(uint32_t sec) {
 }
 
 HMSTime::HMSTime(std::time_t timestamp) : HMSTime{} {
-    tm local_tm;
-    localtime_r(&timestamp, &local_tm);
+    tm local_tm{};
+    if (localtime_r(&timestamp, &local_tm) == nullptr) {
+        ThrowInvalidTimestamp();
+    }
     hour_   = static_cast<uint8_t>(local_tm.tm_hour);
     minute_ = static_cast<uint8_t>(local_tm.tm_min);
     second_ = static_cast<uint8_t>(local_tm.tm_sec);
@@ -113,17 +152,26 @@ YMDDate::YMDDate() : year_{1970}, month_{1}, day_{1} {}
 YMDDate::YMDDate(std::string_view str) : YMDDate{} {
     if (!str.empty()) {
         // Accept "YYYY-MM", "YYYY-MM-DD", and "YYYY-MM-DD HH:MM:SS".
-        if (str.size() != 7 && str.size() != 10 && str.size() != 19) {
+        if ((str.size() != 7 && str.size() != 10 && str.size() != 19) || str[4] != '-' ||
+            (str.size() >= 10 && str[7] != '-')) {
             LOG_INFO("{}", str);
             throw Exception(COSMO_FORMAT("wrong format, [{}]", str));
         }
-        // Construct null-terminated string for sscanf safety.
-        std::string safe(str);
-        int y{1970}, m{1}, d{1};
-        int ret = sscanf(safe.c_str(), "%d-%d-%d", &y, &m, &d);
-        if ((ret != 2 && ret != 3) || y >= 9999 || m > 12 || d > 31 || m == 0 || d == 0) {
+
+        const auto y = ParseDigits(str, 0, 4);
+        const auto m = ParseDigits(str, 5, 2);
+        const auto d = str.size() >= 10 ? ParseDigits(str, 8, 2) : 1;
+        if (y == 0 || y >= 9999 || m == 0 || m > 12 || d == 0 ||
+            d > DaysInMonth(static_cast<uint16_t>(y), static_cast<uint8_t>(m))) {
             LOG_INFO("{}", str);
             throw Exception(COSMO_FORMAT("wrong format, [{}]", str));
+        }
+
+        if (str.size() == 19) {
+            if (str[10] != ' ') {
+                throw Exception(COSMO_FORMAT("wrong format, [{}]", str));
+            }
+            (void)HMSTime(str.substr(11));
         }
         year_  = static_cast<uint16_t>(y);
         month_ = static_cast<uint8_t>(m);
@@ -132,14 +180,19 @@ YMDDate::YMDDate(std::string_view str) : YMDDate{} {
 }
 
 YMDDate::YMDDate(uint16_t y, uint8_t m, uint8_t d) : year_(y), month_(m), day_(d) {
-    if (y >= 9999 || m > 12 || d > 31 || m == 0 || d == 0) {
+    if (y == 0 || y >= 9999 || m == 0 || m > 12 || d == 0 || d > DaysInMonth(y, m)) {
         throw Exception(COSMO_FORMAT("wrong format, [{:04}-{:02}-{:02}]", y, m, d));
     }
 }
 
 YMDDate::YMDDate(std::time_t timestamp) : YMDDate{} {
-    tm local_tm;
-    localtime_r(&timestamp, &local_tm);
+    tm local_tm{};
+    if (localtime_r(&timestamp, &local_tm) == nullptr) {
+        ThrowInvalidTimestamp();
+    }
+    if (local_tm.tm_year < -1899 || local_tm.tm_year > 8098) {
+        ThrowInvalidTimestamp();
+    }
     year_  = static_cast<uint16_t>(local_tm.tm_year + 1900);
     month_ = static_cast<uint8_t>(local_tm.tm_mon + 1);
     day_   = static_cast<uint8_t>(local_tm.tm_mday);
@@ -162,15 +215,12 @@ std::string YMDDate::ToYMZH() const {
 }
 
 int YMDDate::WeekDay() const {
-    tm t{};
-    t.tm_year = year_ - 1900;
-    t.tm_mon  = month_ - 1;
-    t.tm_mday = day_;
-
-    time_t ts = mktime(&t);
-    localtime_r(&ts, &t);
-
-    return t.tm_wday;
+    const auto timestamp = DateTime(*this).ToTimeStamp();
+    tm local_tm{};
+    if (localtime_r(&timestamp, &local_tm) == nullptr) {
+        ThrowInvalidTimestamp();
+    }
+    return local_tm.tm_wday;
 }
 
 uint16_t YMDDate::Year() const {
@@ -194,36 +244,44 @@ DateTime::DateTime(const YMDDate& date, const HMSTime& time) : date_(date), time
 DateTime::DateTime(std::time_t timestamp) : date_(timestamp), time_(timestamp) {}
 
 DateTime::DateTime(std::string_view str) {
-    auto str_parts = cosmo::util::Split(str, " ");
-    switch (str_parts.size()) {
-        case 0:
-            return;
-        case 1:
-            if (str_parts[0].find('-') != std::string::npos)
-                date_ = YMDDate(std::string_view(str_parts[0]));
-            else
-                time_ = HMSTime(std::string_view(str_parts[0]));
-            return;
-        case 2:
-            date_ = YMDDate(std::string_view(str_parts[0]));
-            time_ = HMSTime(std::string_view(str_parts[1]));
-            return;
-        default:
-            break;
+    if ((str.size() == 7 || str.size() == 10) && str.find('-') != std::string_view::npos) {
+        date_ = YMDDate(str);
+        return;
+    }
+    if ((str.size() == 5 || str.size() == 8) && str.find(':') != std::string_view::npos) {
+        time_ = HMSTime(str);
+        return;
+    }
+    if (str.size() == 19 && str[10] == ' ') {
+        date_ = YMDDate(str.substr(0, 10));
+        time_ = HMSTime(str.substr(11));
+        return;
     }
     throw Exception(COSMO_FORMAT("wrong format, [{}]", str));
 }
 
 time_t DateTime::ToTimeStamp() const {
     tm t{};
-    t.tm_year = date_.Year() - 1900;
-    t.tm_mon  = date_.Month() - 1;
-    t.tm_mday = date_.Day();
-    t.tm_hour = time_.Hour();
-    t.tm_min  = time_.Minute();
-    t.tm_sec  = time_.Second();
+    t.tm_year  = static_cast<int>(date_.Year()) - 1900;
+    t.tm_mon   = static_cast<int>(date_.Month()) - 1;
+    t.tm_mday  = static_cast<int>(date_.Day());
+    t.tm_hour  = static_cast<int>(time_.Hour());
+    t.tm_min   = static_cast<int>(time_.Minute());
+    t.tm_sec   = static_cast<int>(time_.Second());
+    t.tm_isdst = -1;
 
-    return mktime(&t);
+    const auto timestamp = mktime(&t);
+    tm round_trip{};
+    if (localtime_r(&timestamp, &round_trip) == nullptr ||
+        round_trip.tm_year != static_cast<int>(date_.Year()) - 1900 ||
+        round_trip.tm_mon != static_cast<int>(date_.Month()) - 1 ||
+        round_trip.tm_mday != static_cast<int>(date_.Day()) ||
+        round_trip.tm_hour != static_cast<int>(time_.Hour()) ||
+        round_trip.tm_min != static_cast<int>(time_.Minute()) ||
+        round_trip.tm_sec != static_cast<int>(time_.Second())) {
+        ThrowInvalidTimestamp();
+    }
+    return timestamp;
 }
 
 const YMDDate& DateTime::Date() const {
@@ -306,9 +364,16 @@ YMDDate AddDay(const YMDDate& d1, int day) {
 YMDDate AddMonth(const YMDDate& d1, int month) {
     time_t ts = DateTime(d1, HMSTime{}).ToTimeStamp();
     tm local_tm{};
-    localtime_r(&ts, &local_tm);
+    if (localtime_r(&ts, &local_tm) == nullptr) {
+        ThrowInvalidTimestamp();
+    }
+    if ((month > 0 && local_tm.tm_mon > std::numeric_limits<int>::max() - month) ||
+        (month < 0 && local_tm.tm_mon < std::numeric_limits<int>::min() - month)) {
+        throw Exception("month offset is out of range");
+    }
     local_tm.tm_mon += month;
-    return YMDDate(mktime(&local_tm));
+    const auto result = mktime(&local_tm);
+    return YMDDate(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -321,15 +386,24 @@ DateTime GetCurrentDateTime() {
 }
 
 time_t TimeFromYMDHMSInt(uint64_t value) {
-    tm t{};
-    t.tm_year = static_cast<int>(value / 10000000000) - 1900;
-    t.tm_mon  = static_cast<int>(value / 100000000 % 100) - 1;
-    t.tm_mday = static_cast<int>(value / 1000000 % 100);
-    t.tm_hour = static_cast<int>(value / 10000 % 100);
-    t.tm_min  = static_cast<int>(value / 100 % 100);
-    t.tm_sec  = static_cast<int>(value % 100);
+    const auto year   = value / 10000000000ULL;
+    const auto month  = value / 100000000ULL % 100;
+    const auto day    = value / 1000000ULL % 100;
+    const auto hour   = value / 10000ULL % 100;
+    const auto minute = value / 100ULL % 100;
+    const auto second = value % 100;
 
-    return mktime(&t);
+    if (year > std::numeric_limits<uint16_t>::max() || month > std::numeric_limits<uint8_t>::max() ||
+        day > std::numeric_limits<uint8_t>::max() || hour > std::numeric_limits<uint8_t>::max() ||
+        minute > std::numeric_limits<uint8_t>::max() || second > std::numeric_limits<uint8_t>::max()) {
+        throw Exception("packed date/time is out of range");
+    }
+
+    return DateTime(
+               YMDDate(static_cast<uint16_t>(year), static_cast<uint8_t>(month), static_cast<uint8_t>(day)),
+               HMSTime(static_cast<uint8_t>(hour), static_cast<uint8_t>(minute),
+                       static_cast<uint8_t>(second)))
+        .ToTimeStamp();
 }
 
 DateTime DateTimeFromYMDHMSInt(uint64_t value) {

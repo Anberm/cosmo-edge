@@ -2,6 +2,10 @@
 
 #include "media/VideoDecoder.h"
 
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
+
 #include "util/Log.h"
 
 static constexpr const char* kTag = "[DECODER] ";
@@ -39,10 +43,16 @@ namespace media {
 
         if (!send_result) {
             result = false;
-            LOG_WARN(
-                "{}{} Frame Size:{} Decode Failed. frameIndex:{} data:{:02x} {:02x} {:02x} {:02x} {:02x} "
-                "{:02x}",
-                kTag, idx_name_, len, frame_idx, pkt[0], pkt[1], pkt[2], pkt[3], pkt[4], pkt[5]);
+            std::ostringstream prefix;
+            const size_t prefix_size = pkt == nullptr ? 0 : std::min<size_t>(len, 6);
+            for (size_t i = 0; i < prefix_size; ++i) {
+                if (i != 0) {
+                    prefix << ' ';
+                }
+                prefix << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned int>(pkt[i]);
+            }
+            LOG_WARN("{}{} Frame Size:{} Decode Failed. frameIndex:{} data:{}", kTag, idx_name_, len,
+                     frame_idx, prefix.str());
             return nullptr;
         }
 

@@ -126,19 +126,19 @@
         </span>
       </template>
     </el-dialog>
-    <el-dialog :title="t('action.importTask')" v-model="uploadAlgorithmicVisible" width="400px" center @close="uploadAlgorithmicClosed">
+    <el-dialog :title="t('action.importTask')" v-model="uploadAlgorithmicVisible" width="400px" center :close-on-click-modal="!uploadAlgorithmicLoading" :close-on-press-escape="!uploadAlgorithmicLoading" :show-close="!uploadAlgorithmicLoading" @close="uploadAlgorithmicClosed">
       <div>
         <div class="upload-div">{{ t('validate.selectFile') }}{{ localeColon }}</div>
         <el-input v-model="uploadAlgorithmicName" class="upload-input" disabled :placeholder="t('validate.selectFile')" size="small"></el-input>
-        <el-upload ref="uploadAlgorithmicRef" class="upload-btn" action="#" :show-file-list="false" :file-list="uploadAlgorithmicData" :auto-upload="false" accept=".tar.gz,.tgz" :http-request="uploadFile" :on-change="handleChange">
+        <el-upload ref="uploadAlgorithmicRef" class="upload-btn" action="#" :show-file-list="false" :file-list="uploadAlgorithmicData" :auto-upload="false" :disabled="uploadAlgorithmicLoading" accept=".tar.gz,.tgz" :http-request="uploadFile" :on-change="handleChange">
           <el-button size="small">{{ t('action.browse') }}</el-button>
         </el-upload>
         <div class="upload-warn">*{{ t('validate.selectTarGzMax') }}</div>
       </div>
       <template #footer>
         <span class="dialog-footer">
-          <el-button type="primary" size="small" @click="sureUploadAlgorithmic">{{ t('action.ok') }}</el-button>
-          <el-button size="small" @click="uploadAlgorithmicVisible = false">{{ t('action.cancel') }}</el-button>
+          <el-button type="primary" size="small" :loading="uploadAlgorithmicLoading" :disabled="uploadAlgorithmicLoading" @click="sureUploadAlgorithmic">{{ t('action.ok') }}</el-button>
+          <el-button size="small" :disabled="uploadAlgorithmicLoading" @click="uploadAlgorithmicVisible = false">{{ t('action.cancel') }}</el-button>
         </span>
       </template>
     </el-dialog>
@@ -152,6 +152,11 @@ import { ArrowDown, Delete } from '@element-plus/icons-vue'
 import moment from 'moment'
 import { t, localeColon } from '@/i18n'
 import { resolveResourceAlgorithmRemark, resolveResourceAlgorithmName } from '@/utils/i18nResource'
+import {
+  uploadFileInChunks,
+  UploadPurpose,
+  UPLOAD_MAX_TOTAL_SIZE
+} from '@/utils/chunkUpload'
 
 export default {
   components: {
@@ -232,6 +237,7 @@ export default {
       },
       uploadAlgorithmicName: '',
       uploadAlgorithmicData: [],
+      uploadAlgorithmicLoading: false,
       engineTypeList: [],
       batchDeleteFalg: false
     }
@@ -704,33 +710,66 @@ export default {
       this.uploadAlgorithmicVisible = true
     },
     sureUploadAlgorithmic() {
+      if (this.uploadAlgorithmicLoading) return
       if (this.uploadAlgorithmicData.length === 0)
         return this.$message.warning(t('validate.uploadFileFirst'))
       this.$refs.uploadAlgorithmicRef.submit()
     },
-    uploadFile(params) {
-      // 检查文件大小限制（500MB = 500 * 1024 * 1024 字节）
-      const maxSize = 500 * 1024 * 1024
-      if (params.file.size > maxSize) {
+    async uploadFile(params) {
+      if (!Number.isSafeInteger(params.file.size) || params.file.size <= 0) {
+        this.$message.error(t('api.error.UpLoadDataEmpty'))
+        throw new RangeError(t('api.error.UpLoadDataEmpty'))
+      }
+      if (params.file.size > UPLOAD_MAX_TOTAL_SIZE) {
         this.$message.error(t('validate.fileMaxSize', { n: 500 }))
-        return
+        throw new RangeError(t('validate.fileMaxSize', { n: 500 }))
       }
 
-      let formData = new FormData()
-      formData.append('file', params.file)
-      if (this.platformType === '15') {
-        this.$API.boxAlgorithmUpload(formData).then((res) => {
+      this.uploadAlgorithmicLoading = true
+      let stagedUpload
+      try {
+        if (this.platformType === '15') {
+          stagedUpload = await uploadFileInChunks(params.file, {
+            purpose: UploadPurpose.ALGORITHM,
+            uploadChunk: formData => this.$API.uploadAtomicModelTemp(formData),
+            cancelUpload: data => this.$API.cancelAtomicModelUpload(data),
+            onProgress: progress => {
+              if (typeof params.onProgress === 'function') {
+                params.onProgress({ percent: progress.percent })
+              }
+            }
+          })
+          if (!stagedUpload.uploadId) {
+            throw new Error(t('validate.cannotGetFilePath'))
+          }
+          await this.$API.boxAlgorithmUpload({
+            uploadId: stagedUpload.uploadId
+          })
           this.$message.success(t('common.operationSucceeded'))
           this.uploadAlgorithmicVisible = false
           this.searchList()
-        })
-      } else {
-        this.$API.importAlgorithmLayout(formData).then((res) => {
-          this.$message.success(t('common.operationSucceeded'))
-          this.uploadAlgorithmicVisible = false
-          this.searchList()
-          this.synchronousCustAlgorithnm()
-        })
+          return
+        }
+
+        // The platform layout-import endpoint has not migrated to upload sessions.
+        const formData = new FormData()
+        formData.append('file', params.file)
+        await this.$API.importAlgorithmLayout(formData)
+        this.$message.success(t('common.operationSucceeded'))
+        this.uploadAlgorithmicVisible = false
+        this.searchList()
+        this.synchronousCustAlgorithnm()
+      } catch (error) {
+        if (stagedUpload?.uploadId) {
+          try {
+            await this.$API.cancelAtomicModelUpload({ uploadId: stagedUpload.uploadId })
+          } catch (_) {
+            // The staging service also expires abandoned sessions by TTL.
+          }
+        }
+        throw error
+      } finally {
+        this.uploadAlgorithmicLoading = false
       }
     },
     handleChange(file) {

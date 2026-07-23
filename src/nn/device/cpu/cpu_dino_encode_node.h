@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
 
 #include <map>
 #include <memory>
@@ -11,17 +11,34 @@
 
 namespace cosmo::nn {
 
-// Simple tokenizer for CPU (same logic as SophonTokenizer)
+// BERT-compatible uncased WordPiece tokenizer used by GroundingDINO host
+// preprocessing.  This intentionally avoids the Rust tokenizers dependency so
+// Deployment images can tokenize prompts without a second runtime.
 class CpuTokenizer {
 public:
     bool LoadVocab(const std::string& vocab_path);
     void EncodeText(const std::string& text, std::vector<int64_t>& ids);
+    std::string DecodeIds(const std::vector<int>& ids) const;
+    int64_t ClsId() const {
+        return cls_id_;
+    }
+    int64_t SepId() const {
+        return sep_id_;
+    }
+    int64_t PadId() const {
+        return pad_id_;
+    }
     std::map<int64_t, std::string> idx2token;
     std::map<std::string, int64_t> token2idx;
 
 private:
-    std::vector<std::string> StringSplit(const std::string& str, char delim);
-    void Tokenize(const std::string& token, std::vector<int64_t>& idx);
+    std::vector<std::string> BasicTokenize(const std::string& text) const;
+    void WordPieceTokenize(const std::string& token, std::vector<int64_t>& ids) const;
+
+    int64_t unk_id_ = -1;
+    int64_t cls_id_ = -1;
+    int64_t sep_id_ = -1;
+    int64_t pad_id_ = -1;
 };
 
 /**
@@ -67,4 +84,4 @@ private:
 
 }  // namespace cosmo::nn
 
-#endif  // COSMO_NN_USE_CPU_BACKEND
+#endif  // COSMO_NN_USE_HOST_BACKEND

@@ -2,6 +2,7 @@
 /*
  * test_alg_data_queue.cc - AlgDataQueue 单元测试
  */
+#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -130,28 +131,29 @@ TEST_CASE("AlgDataQueue RecordDiscard", "[AlgDataQueue]") {
 
 TEST_CASE("AlgDataQueue concurrent access", "[AlgDataQueue]") {
     AlgDataQueue<int> queue("concurrent_q", 100);
-    const int N = 50;
+    const int N  = 50;
+    int consumed = 0;
 
     std::thread producer([&]() {
-        for (int i = 0; i < N; i++) {
+        for (int i = 1; i <= N; i++) {
             queue.Insert(i);
         }
     });
 
     std::thread consumer([&]() {
-        int count = 0;
-        while (count < N) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (consumed < N && std::chrono::steady_clock::now() < deadline) {
             auto val = queue.Pop();
-            if (val != 0 || queue.RestSize() > 0) {
-                count++;
+            if (val != 0) {
+                consumed++;
+            } else {
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
     });
 
     producer.join();
     consumer.join();
 
-    // Should not crash — that's the main assertion for concurrency
-    REQUIRE(true);
+    REQUIRE(consumed == N);
 }

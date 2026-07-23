@@ -34,7 +34,7 @@ public:
     // Read /sys/class/thermal/thermal_zone0/temp.
     static float QueryCpuTemperature();
 
-    // Query SOPHON BM1688 NPU via bm_dev_request + bm_get_stat.
+    // Query the selected accelerator metrics provider.
     static cosmo::MsgGpuInfo QueryGpuUtilization();
 
     // Read /proc/meminfo for MemTotal and MemAvailable.

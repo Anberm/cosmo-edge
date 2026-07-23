@@ -6,6 +6,7 @@
 // clang-format on
 
 #include "api/MessageSystemHandler.h"
+#include "media/PreviewPipelineMetrics.h"
 #include "mock/MockConfigNetworkService.h"
 #include "mock/MockConfigReadService.h"
 #include "mock/MockConfigWriteService.h"
@@ -42,6 +43,25 @@ TEST_CASE("SystemHandler: QueryDeviceInfo", "[system-handler]") {
     std::error_condition errc;
     auto ret = handler.Handle(std::move(data), errc);
     REQUIRE(!errc);
+}
+
+TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview telemetry", "[system-handler]") {
+    MockServiceRegistry mocks;
+    auto handler = MakeHandler(mocks);
+
+    REQUIRE_CALL(mocks.deviceInfoSvc, GetHardwareResource(_)).RETURN(std::vector<service::HwResourceItem>{});
+    MsgGpuInfo gpu;
+    gpu.gpuusage = 0.5;
+    REQUIRE_CALL(mocks.deviceInfoSvc, GetGpuUtilization()).RETURN(gpu);
+    const auto preview = media::GetPreviewPipelineMetrics().Snapshot();
+
+    System::MsgQueryHardwareResourceRecv data{};
+    std::error_condition errc;
+    auto ret = handler.Handle(std::move(data), errc);
+
+    CHECK(ret.resData.accelerator.gpuusage == 0.5);
+    CHECK(ret.resData.accelerator.activePreviewStreams == preview.active_preview_streams);
+    CHECK(ret.resData.accelerator.activeAlgorithmPreviewStreams == preview.active_algorithm_preview_streams);
 }
 
 TEST_CASE("SystemHandler: QueryPictureQuality", "[system-handler]") {
@@ -130,6 +150,43 @@ TEST_CASE("SystemHandler: QueryDevRebootParam", "[system-handler]") {
     std::error_condition errc;
     auto ret = handler.Handle(std::move(data), errc);
     REQUIRE(!errc);
+}
+
+TEST_CASE("SystemHandler: ModifyDevRestartParam accepts strict HH:MM", "[system-handler]") {
+    MockServiceRegistry mocks;
+    auto handler = MakeHandler(mocks);
+
+    REQUIRE_CALL(mocks.configWriteSvc, SetRebootParam(_))
+        .WITH(_1.isTimingRestart)
+        .WITH(_1.weekDay == 3)
+        .WITH(_1.restartTimeSec == 9 * 3600 + 5 * 60)
+        .RETURN(util::ErrorEnum::Success);
+
+    System::MsgModifyDevRestartParamRecv data{};
+    data.isTimingRestart = 1;
+    data.weekDay         = 3;
+    data.restartTime     = std::string("09:05");
+    std::error_condition errc;
+
+    (void)handler.Handle(std::move(data), errc);
+
+    REQUIRE(!errc);
+}
+
+TEST_CASE("SystemHandler: ModifyDevRestartParam rejects malformed HH:MM", "[system-handler]") {
+    MockServiceRegistry mocks;
+    auto handler = MakeHandler(mocks);
+
+    for (const auto* invalid : {"", "9:05", "09:5", "09:05 ", "09-05", "0a:05", "24:00", "23:60"}) {
+        INFO("restartTime=" << invalid);
+        System::MsgModifyDevRestartParamRecv data{};
+        data.restartTime          = std::string(invalid);
+        std::error_condition errc = util::ErrorEnum::Success;
+
+        (void)handler.Handle(std::move(data), errc);
+
+        CHECK(errc == util::ErrorEnum::ParameterException);
+    }
 }
 
 TEST_CASE("SystemHandler: QuerySystemLogo", "[system-handler]") {

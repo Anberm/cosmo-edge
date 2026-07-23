@@ -357,7 +357,7 @@ Status Graph::WireNetNode(const ModelInfo& model, const std::vector<std::string>
         }
 
         if (producer_node && producer_node->GetTopBlobDeviceType() == DEVICE_NAIVE &&
-            device_type_ != DEVICE_CPU && device_type_ != DEVICE_NAIVE) {
+            !UsesHostMemory(device_type_)) {
             // This input is from NAIVE device, insert a H2D copy node (Sophon only)
             auto copy_node = NodeTypeUtils::CreateNode(NODE_COPY, copy_count, max_batch_size, device_type_);
             copy_count++;
@@ -426,10 +426,10 @@ Status Graph::WireNetNode(const ModelInfo& model, const std::vector<std::string>
                             o.op->name == "yolo_e2e_postprocess");
         });
 
-    bool is_cpu_device = (device_type_ == DEVICE_CPU || device_type_ == DEVICE_NAIVE);
+    bool is_host_memory_device = UsesHostMemory(device_type_);
 
-    if (is_cpu_device) {
-        // CPU mode: net output is already in host memory, no D2H copy needed.
+    if (is_host_memory_device) {
+        // Host-memory backends copy network outputs into graph-owned host blobs.
         AddNodeTopBlobs(net_raw, net_output_num);
         for (size_t j = 0; j < net_output_num; j++) {
             auto blob_name = net_raw->GetTopBlobNames().at(j);
@@ -623,7 +623,7 @@ Status Graph::LoadWeight(const std::string& model_path) {
     int net_node_num = NodeTypeUtils::TypedNodeCount(nodes, NODE_NET);
 
     std::ifstream stream(model_path, std::ios::in | std::ios::binary);
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_ONNX_BACKEND
     if (stream.fail() && !std::filesystem::is_directory(model_path))
         return Status(COSMO_NN_ERR_LOAD_MODEL, "open model file failed");
 #else
@@ -687,7 +687,7 @@ Status Graph::LoadWeight(const std::string& model_path) {
     }
 #endif
 
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_ONNX_BACKEND
     stream.close();
 
     namespace fs = std::filesystem;
@@ -726,11 +726,11 @@ Status Graph::LoadWeight(const std::string& model_path) {
 
     if (!fs::is_directory(base_path)) {
         return Status(COSMO_NN_ERR_LOAD_MODEL,
-                      "CPU multi-net backend expects model directory with per-net ONNX files");
+                      "ONNX backend expects a model directory with per-net ONNX files");
     }
 
     if (net_node_num != static_cast<int>(model_infos_.size())) {
-        return Status(COSMO_NN_ERR_LOAD_MODEL, "CPU graph net nodes (" + std::to_string(net_node_num) +
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "ONNX graph net nodes (" + std::to_string(net_node_num) +
                                                    ") do not match config models (" +
                                                    std::to_string(model_infos_.size()) + ")");
     }
@@ -750,7 +750,7 @@ Status Graph::LoadWeight(const std::string& model_path) {
             part_path = onnx_files.at(i);
         } else {
             return Status(COSMO_NN_ERR_LOAD_MODEL,
-                          "CPU multi-net model missing file_name for net_" + std::to_string(i));
+                          "Multi-net ONNX model missing file_name for net_" + std::to_string(i));
         }
 
         std::ifstream model_stream(part_path, std::ios::in | std::ios::binary);
@@ -1087,8 +1087,7 @@ std::string Graph::Dump() {
     ss << "node num:" << node_num << std::endl;
 
     // table header
-    ss << "index\t\ttype\t\tname\t\t\tbottom names\t\t\ttop name"
-       << "\t\ttop shape\ttop device" << std::endl;
+    ss << "index\t\ttype\t\tname\t\t\tbottom names\t\t\ttop name" << "\t\ttop shape\ttop device" << std::endl;
     for (size_t i = 0; i < node_num; i++) {
         Node* node                = nodes.at(i).get();
         NodeType type             = node->GetNodeType();

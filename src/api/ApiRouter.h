@@ -8,6 +8,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
+#include <utility>
 
 #include "api/MessageAlgorithmHandler.h"
 #include "api/MessageAudioHandler.h"
@@ -33,8 +34,17 @@ namespace cosmo {
 
 enum class InterfaceMsgAuthType { None = 0, Mtk, Appkey };
 struct InterfaceMsgMapUnit {
+    using Handler = std::function<std::string(const std::string&, std::error_condition&)>;
+    using ContextHandler =
+        std::function<std::string(const RequestDispatchContext&, const std::string&, std::error_condition&)>;
+
+    InterfaceMsgMapUnit() = default;
+    InterfaceMsgMapUnit(InterfaceMsgAuthType auth_type, Handler handler, ContextHandler context_handler = {})
+        : authType(auth_type), func(std::move(handler)), context_func(std::move(context_handler)) {}
+
     InterfaceMsgAuthType authType{InterfaceMsgAuthType::None};
-    std::function<std::string(const std::string&, std::error_condition&)> func;
+    Handler func;
+    ContextHandler context_func;
 };
 // Main thread
 class ApiRouter : public IRequestDispatcher {
@@ -46,11 +56,13 @@ public:
     ApiRouter& operator=(const ApiRouter&) = delete;
 
     bool SupportsRoute(const std::string& interface) override;
-    bool DispatchRequest(const std::string& interface, const std::string& mtk, const std::string& message,
+    RequestAdmission InspectRequest(RequestDispatchContext& context, bool require_known_route) override;
+    bool DispatchRequest(const RequestDispatchContext& context, const std::string& message,
                          std::string& response) override;
 
-    // Legacy overload without mtk — used by MQTT caller
-    bool DispatchRequest(const std::string& interface, const std::string& message, std::string& response);
+    // Compatibility helper for callers that already own a transport-specific router.
+    bool DispatchRequest(const std::string& interface, const std::string& credential,
+                         const std::string& message, std::string& response);
     MessageFromType GetMessageFrom() const {
         return from_;
     };
@@ -58,7 +70,7 @@ public:
     MessageHandler& Handler();
 
 private:
-    bool MtkValid(const std::string& mtk, InterfaceMsgAuthType interfaceAuthType);
+    bool CredentialValid(RequestDispatchContext& context, InterfaceMsgAuthType interface_auth_type);
 
     void RegisterCoreRoutes();
     void RegisterNetworkRoutes();

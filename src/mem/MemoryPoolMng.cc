@@ -26,9 +26,12 @@ MemoryPoolMng& GetMemoryPool() {
 
 MemoryPoolMng::MemoryPoolMng(std::unique_ptr<Allocator> alloc, std::vector<int> poolSize)
     : block_op_queue_("Block Malloc", 20), allocator_(std::move(alloc)) {
+    poolSize.erase(std::remove_if(poolSize.begin(), poolSize.end(), [](int size) { return size <= 0; }),
+                   poolSize.end());
     // Sort pool sizes ascending for GetPoolSize() binary search
     sort(poolSize.begin(), poolSize.end(), [](const auto& p1, const auto& p2) { return p1 < p2; });
-    pool_block_size_ = poolSize;
+    poolSize.erase(std::unique(poolSize.begin(), poolSize.end()), poolSize.end());
+    pool_block_size_.assign(poolSize.begin(), poolSize.end());
 
     for (auto size : pool_block_size_) {
         auto pool = CreatePoolInst(size);
@@ -84,7 +87,7 @@ void MemoryPoolMng::RealMalloc(BlockOp&& op) {
     }
 
     // get pool
-    auto pool = GetPoolInst(static_cast<int>(op.size));
+    auto pool = GetPoolInst(op.size);
     if (!pool) {
         LOG_WARN("Malloc {} for {} Blocks But Cant Get Pool Inst", size, step);
         return;
@@ -132,7 +135,7 @@ void MemoryPoolMng::RealFree(BlockOp&& op) {
     }
 
     // get pool
-    auto pool = GetPoolInst(static_cast<int>(op.size));
+    auto pool = GetPoolInst(op.size);
     if (!pool) {
         LOG_WARN("Free {} for {} Blocks But Cant Get Pool Inst", size, step);
         return;
@@ -164,9 +167,9 @@ void MemoryPoolMng::RealFree(BlockOp&& op) {
     }
 }
 
-int MemoryPoolMng::GetPoolSize(int size) const {
+size_t MemoryPoolMng::GetPoolSize(size_t size) const {
     auto it = std::find_if(pool_block_size_.begin(), pool_block_size_.end(),
-                           [size](int poolSize) { return poolSize >= size; });
+                           [size](size_t poolSize) { return poolSize >= size; });
     if (it != pool_block_size_.end()) {
         return *it;
     }
@@ -174,7 +177,7 @@ int MemoryPoolMng::GetPoolSize(int size) const {
     return 0;
 }
 
-std::shared_ptr<FixedBlockPool> MemoryPoolMng::CreatePoolInst(int poolSize) {
+std::shared_ptr<FixedBlockPool> MemoryPoolMng::CreatePoolInst(size_t poolSize) {
     std::lock_guard<std::shared_mutex> lock(mtx_);
     auto it = pools_.find(poolSize);
     if (it == pools_.end()) {
@@ -186,8 +189,8 @@ std::shared_ptr<FixedBlockPool> MemoryPoolMng::CreatePoolInst(int poolSize) {
     return nullptr;
 }
 
-std::shared_ptr<FixedBlockPool> MemoryPoolMng::GetPoolInst(int size) const {
-    int poolSize = GetPoolSize(size);
+std::shared_ptr<FixedBlockPool> MemoryPoolMng::GetPoolInst(size_t size) const {
+    size_t poolSize = GetPoolSize(size);
     if (0 == poolSize) {
         return nullptr;
     }
@@ -201,7 +204,7 @@ std::shared_ptr<FixedBlockPool> MemoryPoolMng::GetPoolInst(int size) const {
 }
 
 Block* MemoryPoolMng::Acquire(size_t size) {
-    auto pool = GetPoolInst(static_cast<int>(size));
+    auto pool = GetPoolInst(size);
     if (!pool) {
         LOG_WARN("Malloc {} But Cant Get Pool Inst", size);
         return nullptr;
@@ -231,7 +234,7 @@ void MemoryPoolMng::Recycle(Block* block) {
     if (size == 0)
         return;
 
-    auto pool = GetPoolInst(static_cast<int>(size));
+    auto pool = GetPoolInst(size);
     if (!pool) {
         LOG_WARN("Recycle {} But Cant Get Pool Inst", size);
         return;

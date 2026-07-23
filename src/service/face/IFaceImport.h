@@ -16,6 +16,10 @@ class IFaceImport {
 public:
     virtual ~IFaceImport() = default;
 
+    /// Permanently stop accepting imports and wait for the active import, if
+    /// any, to finish. Implementations must make this operation idempotent.
+    virtual void Stop() = 0;
+
     /// Start importing persons from an archive file into a face library.
     /// @param filePath  Path to the import archive (ZIP with images and metadata).
     /// @param faceLibId Target face library identifier.

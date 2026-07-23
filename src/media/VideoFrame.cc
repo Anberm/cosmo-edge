@@ -14,14 +14,17 @@ namespace cosmo {
 namespace media {
 
     VideoFrame::VideoFrame(int w, int h, PixelFormat fmt, uint64_t frameIndex, int64_t ts) {
-        pixel_fmt_ = fmt;
-        width_     = static_cast<size_t>(w);
-        height_    = static_cast<size_t>(h);
-        channel_   = PixelFormatUtils::PixelFormatChannels(fmt);
-        size_ = static_cast<size_t>(w) * static_cast<size_t>(h) * PixelFormatUtils::PixelFormatDepth(fmt) / 8;
-        if (size_ == 0) {
+        pixel_fmt_            = fmt;
+        const auto frame_size = PixelFormatUtils::CalculateFrameSize(w, h, fmt);
+        if (!frame_size) {
+            LOG_WARN("Invalid frame dimensions or format: {}x{}, format {}", w, h, static_cast<int>(fmt));
             return;
         }
+
+        width_   = static_cast<size_t>(w);
+        height_  = static_cast<size_t>(h);
+        channel_ = PixelFormatUtils::PixelFormatChannels(fmt);
+        size_    = *frame_size;
 
         int index = 0;
         while (index++ <= 10) {

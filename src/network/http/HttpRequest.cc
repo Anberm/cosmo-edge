@@ -3,6 +3,7 @@
 #include "network/http/HttpRequest.h"
 
 #include <memory>
+#include <utility>
 
 #include "curl/curl.h"
 #include "util/Log.h"
@@ -130,11 +131,45 @@ long HttpRequest::Submit(HttpRequestMethod method) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_);
     curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, follow_location_);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
-    // SSL verification disabled for internal network environment
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
+#if LIBCURL_VERSION_NUM >= 0x075500
+    res = curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+#else
+    res = curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+#endif
+    if (res != CURLE_OK) {
+        LOG_ERRO("Failed to restrict request protocols: [{}]", curl_easy_strerror(res));
+        return -1;
+    }
+#if LIBCURL_VERSION_NUM >= 0x075500
+    res = curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    res = curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+#endif
+    if (res != CURLE_OK) {
+        LOG_ERRO("Failed to restrict redirect protocols: [{}]", curl_easy_strerror(res));
+        return -1;
+    }
+
+    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    if (res != CURLE_OK) {
+        LOG_ERRO("CURLOPT_SSL_VERIFYPEER fail : [{}]", curl_easy_strerror(res));
+        return -1;
+    }
+    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    if (res != CURLE_OK) {
+        LOG_ERRO("CURLOPT_SSL_VERIFYHOST fail : [{}]", curl_easy_strerror(res));
+        return -1;
+    }
+    if (!ca_bundle_path_.empty()) {
+        res = curl_easy_setopt(curl, CURLOPT_CAINFO, ca_bundle_path_.c_str());
+        if (res != CURLE_OK) {
+            LOG_ERRO("CURLOPT_CAINFO fail : [{}]", curl_easy_strerror(res));
+            return -1;
+        }
+    }
 
     if (!interface_name_.empty()) {
         curl_easy_setopt(curl, CURLOPT_INTERFACE, interface_name_.c_str());
@@ -203,6 +238,10 @@ void HttpRequest::SetTimeout(long seconds) {
 
 void HttpRequest::SetConnectTimeout(long seconds) {
     connect_timeout_ = seconds;
+}
+
+void HttpRequest::SetCaBundlePath(const std::string& ca_bundle_path) {
+    ca_bundle_path_ = ca_bundle_path;
 }
 
 void HttpRequest::SetProxy(const std::string& proxy, const std::string& username,

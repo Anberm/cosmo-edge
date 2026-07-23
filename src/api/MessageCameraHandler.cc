@@ -4,11 +4,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
+#include <utility>
 
+#include "api/HttpUploadClaim.h"
 #include "service/camera/ICameraChannelQuery.h"
 #include "service/camera/ICameraDeviceCrud.h"
 #include "service/camera/ICameraTaskConfig.h"
+#include "service/detail/ServiceRegistry.h"
+#include "service/path/IUploadStagingService.h"
 #include "service/task/ITaskQuery.h"
 #include "util/ErrorCode.h"
 #include "util/FileUtil.h"
@@ -42,6 +47,10 @@ camera::MsgAddSend MessageCameraHandler::Handle(camera::MsgAddRecv&& data, std::
 camera::MsgAddVideoSend MessageCameraHandler::Handle(camera::MsgAddVideoRecv&& data,
                                                      std::error_condition& errc) {
     camera::MsgAddVideoSend retData{};
+    if (data.channelCodeConflict) {
+        errc = util::ErrorEnum::ParameterException;
+        return retData;
+    }
     MsgCameraInfo info;
     info.url         = data.filePath;
     info.channelCode = data.channelCode;
@@ -84,6 +93,35 @@ camera::MsgAddVideoSend MessageCameraHandler::Handle(camera::MsgAddVideoRecv&& d
     errc = crud_.Add(info, retData.resData.id);
 
     return retData;
+}
+
+camera::MsgAddVideoSend MessageCameraHandler::Handle(camera::MsgAddVideoRecv&& data,
+                                                     const RequestDispatchContext& context,
+                                                     std::error_condition& errc) {
+    camera::MsgAddVideoSend result{};
+    if (context.transport != RequestTransport::kHttp || context.principal.empty() ||
+        data.channelCodeConflict) {
+        errc = util::ErrorEnum::InvalidParam;
+        return result;
+    }
+
+    service::StagedFileLease lease;
+    if (!data.uploadId.empty()) {
+        errc = service::ServiceRegistry::Instance().Get<service::IUploadStagingService>().Consume(
+            context.principal, data.uploadId, service::UploadPurpose::kVideo, lease);
+    } else {
+        errc = detail::ClaimHttpUpload(context, data.filePath, service::UploadPurpose::kVideo, lease);
+    }
+    if (errc) {
+        return result;
+    }
+    if (!lease.Revalidate()) {
+        errc = util::ErrorEnum::FileAnalysisFailed;
+        return result;
+    }
+    data.filePath      = lease.Path();
+    data.contentLength = std::to_string(lease.Size());
+    return Handle(std::move(data), errc);
 }
 
 camera::MsgUpdateSend MessageCameraHandler::Handle(camera::MsgUpdateRecv&& data, std::error_condition& errc) {

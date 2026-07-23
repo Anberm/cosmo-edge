@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <system_error>
 #include <unordered_set>
 
 #include "nlohmann/json.hpp"
@@ -38,8 +39,95 @@ namespace {
     }
 }  // namespace
 
+bool AlgorithmLayoutMng::ResolveLayoutDirectory(const std::string& requested_path, bool allow_template,
+                                                std::string& resolved_path) {
+    resolved_path.clear();
+
+    const std::string resource_path  = cosmo::path::GetResourcePath();
+    const std::string algorithm_path = cosmo::path::GetAlgorithmPath();
+    std::string resolved_resource;
+    std::string resolved_algorithm;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(
+            resource_path, resource_path, cosmo::path::PathEntryType::kDirectory, resolved_resource) ||
+        !cosmo::path::ResolveExistingPathWithinRoot(
+            resolved_resource, algorithm_path, cosmo::path::PathEntryType::kDirectory, resolved_algorithm)) {
+        return false;
+    }
+
+    const std::string& selected_path = requested_path.empty() ? algorithm_path : requested_path;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(resolved_resource, selected_path,
+                                                    cosmo::path::PathEntryType::kDirectory, resolved_path)) {
+        return false;
+    }
+    if (resolved_path == resolved_algorithm) {
+        return true;
+    }
+    if (!allow_template) {
+        resolved_path.clear();
+        return false;
+    }
+
+    const std::string template_path =
+        (std::filesystem::path(resolved_resource) / "algorithm_template").string();
+    std::string resolved_template;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(
+            resolved_resource, template_path, cosmo::path::PathEntryType::kDirectory, resolved_template) ||
+        resolved_path != resolved_template) {
+        resolved_path.clear();
+        return false;
+    }
+    return true;
+}
+
+bool AlgorithmLayoutMng::ResolveManagedRegularFile(const std::string& root, const std::string& candidate,
+                                                   bool must_exist, std::string& resolved_path) {
+    resolved_path.clear();
+    std::string resolved_root;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(root, root, cosmo::path::PathEntryType::kDirectory,
+                                                    resolved_root)) {
+        return false;
+    }
+
+    std::error_code status_error;
+    const auto link_status = std::filesystem::symlink_status(candidate, status_error);
+    if (status_error && status_error != std::errc::no_such_file_or_directory) {
+        return false;
+    }
+    const bool exists = !status_error && std::filesystem::exists(link_status);
+    if (exists) {
+        if (std::filesystem::is_symlink(link_status)) {
+            return false;
+        }
+        return cosmo::path::ResolveExistingPathWithinRoot(
+            resolved_root, candidate, cosmo::path::PathEntryType::kRegularFile, resolved_path);
+    }
+    if (must_exist) {
+        return false;
+    }
+    return cosmo::path::ResolvePathWithinRoot(resolved_root, candidate, resolved_path);
+}
+
+bool AlgorithmLayoutMng::ResolveActionsFile(const std::string& requested_path, std::string& resolved_path) {
+    const std::string layout_path    = cosmo::path::GetLayoutPath();
+    const std::string actions_path   = cosmo::path::GetActionsJsonPath();
+    const std::string& selected_path = requested_path.empty() ? actions_path : requested_path;
+
+    std::string resolved_actions;
+    if (!ResolveManagedRegularFile(layout_path, actions_path, false, resolved_actions) ||
+        !ResolveManagedRegularFile(layout_path, selected_path, false, resolved_path) ||
+        resolved_path != resolved_actions) {
+        resolved_path.clear();
+        return false;
+    }
+    return true;
+}
+
 cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutSave(const algorithm::LayoutSaveReq& req) {
-    std::string jsonFilePath   = req.filePath.empty() ? cosmo::path::GetAlgorithmPath() : req.filePath;
+    std::string jsonFilePath;
+    if (!ResolveLayoutDirectory(req.filePath, false, jsonFilePath) ||
+        !cosmo::path::IsSafePathComponent(req.algorithmId)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     std::string layoutFilePath = jsonFilePath;
     if (layoutFilePath.back() != '/')
         layoutFilePath += "/";
@@ -49,6 +137,11 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutSave(const algorithm::LayoutSav
     nlohmann::json existingDoc;
     bool useExistingFile = false;
     if (!foundPath.empty()) {
+        std::string resolved_found_path;
+        if (!ResolveManagedRegularFile(jsonFilePath, foundPath, true, resolved_found_path)) {
+            return cosmo::util::ErrorEnum::InvalidParam;
+        }
+        foundPath  = resolved_found_path;
         targetFile = std::filesystem::path(foundPath).filename().string();
         if (cosmo::util::JsonFileUtil::ReadJsonFile(foundPath, existingDoc) ==
             cosmo::util::ErrorEnum::Success) {
@@ -59,17 +152,30 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutSave(const algorithm::LayoutSav
         }
     }
     if (!useExistingFile) {
-        std::string oldFormatFile =
+        const std::string old_format_candidate =
             jsonFilePath + (jsonFilePath.back() == '/' ? "" : "/") + req.algorithmId + ".json";
+        std::string oldFormatFile;
+        if (!ResolveManagedRegularFile(jsonFilePath, old_format_candidate, false, oldFormatFile)) {
+            return cosmo::util::ErrorEnum::InvalidParam;
+        }
         nlohmann::json oldDoc;
         if (cosmo::util::JsonFileUtil::ReadJsonFile(oldFormatFile, oldDoc) ==
                 cosmo::util::ErrorEnum::Success &&
             oldDoc.contains("algorithmName") && oldDoc["algorithmName"].is_string())
             algorithmName = oldDoc["algorithmName"].get<std::string>();
+        if (!algorithmName.empty() && !cosmo::path::IsSafePathComponent(algorithmName)) {
+            return cosmo::util::ErrorEnum::InvalidParam;
+        }
         uint64_t timestamp = cosmo::util::GetCurrentDateTime().ToYMDHMSInt();
-        layoutFilePath += algorithmName.empty() ? req.algorithmId + "_" + std::to_string(timestamp) + ".json"
-                                                : req.algorithmId + "_" + algorithmName + "_" +
-                                                      std::to_string(timestamp) + ".json";
+        const std::string target_name =
+            algorithmName.empty()
+                ? req.algorithmId + "_" + std::to_string(timestamp) + ".json"
+                : req.algorithmId + "_" + algorithmName + "_" + std::to_string(timestamp) + ".json";
+        if (!ResolveManagedRegularFile(jsonFilePath,
+                                       (std::filesystem::path(jsonFilePath) / target_name).string(), false,
+                                       layoutFilePath)) {
+            return cosmo::util::ErrorEnum::InvalidParam;
+        }
     }
     nlohmann::json doc;
     cosmo::util::ErrorEnum ret = cosmo::util::JsonFileUtil::ReadJsonFile(layoutFilePath, doc);
@@ -168,15 +274,17 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutSave(const algorithm::LayoutSav
 
 cosmo::util::ErrorEnum AlgorithmLayoutMng::GetLayoutDetail(const std::string& id, const std::string& filePath,
                                                            algorithm::LayoutDetailResult& outResult) {
-    std::string jsonFilePath   = filePath.empty() ? cosmo::path::GetAlgorithmPath() : filePath;
-    std::string layoutFilePath = jsonFilePath + (jsonFilePath.back() == '/' ? "" : "/");
-    std::string foundPath      = cosmo::util::FindPrefixedJsonFile(jsonFilePath, id);
-    std::string targetFile;
-    if (!foundPath.empty())
-        targetFile = std::filesystem::path(foundPath).filename().string();
-    if (targetFile.empty())
-        targetFile = id + ".json";
-    layoutFilePath += targetFile;
+    std::string jsonFilePath;
+    if (!ResolveLayoutDirectory(filePath, true, jsonFilePath) || !cosmo::path::IsSafePathComponent(id)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    std::string foundPath = cosmo::util::FindPrefixedJsonFile(jsonFilePath, id);
+    const std::string candidate =
+        foundPath.empty() ? (std::filesystem::path(jsonFilePath) / (id + ".json")).string() : foundPath;
+    std::string layoutFilePath;
+    if (!ResolveManagedRegularFile(jsonFilePath, candidate, false, layoutFilePath)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     nlohmann::json doc;
     if (cosmo::util::JsonFileUtil::ReadJsonFile(layoutFilePath, doc) != cosmo::util::ErrorEnum::Success) {
         return cosmo::util::ErrorEnum::Success;
@@ -233,8 +341,11 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::GetLayoutDetail(const std::string& id
 cosmo::util::ErrorEnum AlgorithmLayoutMng::GetLayoutList(const std::string& /*supplier*/, int usage,
                                                          const std::string& filePath,
                                                          algorithm::LayoutListResult& outResult) {
-    std::string algorithmDir = filePath.empty() ? cosmo::path::GetAlgorithmPath() : filePath;
-    DIR* dir                 = opendir(algorithmDir.c_str());
+    std::string algorithmDir;
+    if (!ResolveLayoutDirectory(filePath, true, algorithmDir)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    DIR* dir = opendir(algorithmDir.c_str());
     if (!dir)
         return cosmo::util::ErrorEnum::Success;
     struct dirent* entry;
@@ -245,7 +356,11 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::GetLayoutList(const std::string& /*su
         if (filename == "actions.json" || filename == "atomicModels.json" || filename == "list.json" ||
             filename == "algorithms.json")
             continue;
-        std::string jsonFilePath = algorithmDir + (algorithmDir.back() == '/' ? "" : "/") + filename;
+        const std::string candidate = (std::filesystem::path(algorithmDir) / filename).string();
+        std::string jsonFilePath;
+        if (!ResolveManagedRegularFile(algorithmDir, candidate, true, jsonFilePath)) {
+            continue;
+        }
         nlohmann::json doc;
         if (cosmo::util::JsonFileUtil::ReadJsonFile(jsonFilePath, doc) != cosmo::util::ErrorEnum::Success)
             continue;

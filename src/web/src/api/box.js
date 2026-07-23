@@ -336,7 +336,7 @@ const audio = {
   // 查询音频文件列表
   queryAudioFile(data) {
     return request({
-      url: '/gtw/cwai/Audio/QueryAudioFile  ',
+      url: '/gtw/cwai/Audio/QueryAudioFile',
       method: 'post',
       data,
     })

@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 #include "catch_amalgamated.hpp"
 #include "mock/MockAlarmPushService.h"
@@ -334,6 +335,18 @@ TEST_CASE("SystemServiceImpl: PopUpParam", "[SystemConfigService]") {
         REQUIRE(audioPlay == 1);
         REQUIRE(popUpDuration == 5);
     }
+
+    SECTION("Persistence failure leaves popup state unchanged") {
+        fs::remove_all(cfg.dir + "/conf");
+        WriteJsonFile(cfg.dir + "/conf", "not-a-directory");
+
+        REQUIRE(sut.SetPopUpParam(0, 0, 10) == cosmo::util::ErrorEnum::SysErr);
+        int popUpSwitch = -1, audioPlay = -1, popUpDuration = -1;
+        sut.GetPopUpParam(popUpSwitch, audioPlay, popUpDuration);
+        REQUIRE(popUpSwitch == 1);
+        REQUIRE(audioPlay == 1);
+        REQUIRE(popUpDuration == 2);
+    }
 }
 
 TEST_CASE("SystemServiceImpl: HttpInterface delegates to AlarmPushService", "[SystemConfigService]") {
@@ -358,6 +371,11 @@ TEST_CASE("SystemServiceImpl: HttpInterface delegates to AlarmPushService", "[Sy
             .RETURN(cosmo::util::ErrorEnum::Success);
         auto result = sut.SetHttpInterfaceParam(param);
         REQUIRE(result == cosmo::util::ErrorEnum::Success);
+    }
+
+    SECTION("SetHttpInterfaceParam rejects unsafe URL before delegation") {
+        cosmo::service::HttpPushParam param{true, "file:///etc/passwd"};
+        REQUIRE(sut.SetHttpInterfaceParam(param) == cosmo::util::ErrorEnum::InvalidParam);
     }
 }
 
@@ -680,23 +698,22 @@ TEST_CASE("SystemServiceImpl: RebootParam restartTimeSec behavior", "[SystemConf
         REQUIRE(sut.GetRebootParam().restartTimeSec == 0);
     }
 
-    SECTION("restartTimeSec=86400 (24h) is accepted") {
+    SECTION("restartTimeSec=86400 (24h) is rejected") {
         cosmo::CfgRebootParamInfo info;
         info.weekDay        = 1;
         info.restartTimeSec = 86400;
         auto result         = sut.SetRebootParam(info);
-        REQUIRE(result == cosmo::util::ErrorEnum::Success);
-        REQUIRE(sut.GetRebootParam().restartTimeSec == 86400);
+        REQUIRE(result == cosmo::util::ErrorEnum::ParameterException);
+        REQUIRE(sut.GetRebootParam().restartTimeSec == 7200);
     }
 
-    SECTION("restartTimeSec negative is accepted (no validation in code)") {
+    SECTION("restartTimeSec negative is rejected") {
         cosmo::CfgRebootParamInfo info;
         info.weekDay        = 1;
         info.restartTimeSec = -1;
         auto result         = sut.SetRebootParam(info);
-        // Currently no validation on restartTimeSec
-        REQUIRE(result == cosmo::util::ErrorEnum::Success);
-        REQUIRE(sut.GetRebootParam().restartTimeSec == -1);
+        REQUIRE(result == cosmo::util::ErrorEnum::ParameterException);
+        REQUIRE(sut.GetRebootParam().restartTimeSec == 7200);
     }
 }
 
@@ -753,16 +770,27 @@ TEST_CASE("SystemServiceImpl: MqttParam dirty-check and field round-trip", "[Sys
         REQUIRE(stored.status == true);
     }
 
-    SECTION("SetMqttParam with empty URL is accepted") {
+    SECTION("SetMqttParam with enabled empty URL is rejected") {
         cosmo::service::MqttParam param;
         param.enable = true;
         param.url    = "";
         param.port   = 1883;
 
-        ALLOW_CALL(mocks.networkSvc, MqttStop());
-        ALLOW_CALL(mocks.networkSvc, MqttStart());
         auto result = sut.SetMqttParam(param);
-        REQUIRE(result == cosmo::util::ErrorEnum::Success);
+        REQUIRE(result == cosmo::util::ErrorEnum::InvalidParam);
+    }
+
+    SECTION("SetMqttParam rejects invalid port and authentication") {
+        cosmo::service::MqttParam param;
+        param.enable   = true;
+        param.url      = "mqtt.example.com";
+        param.port     = 65536;
+        param.authMode = 0;
+        REQUIRE(sut.SetMqttParam(param) == cosmo::util::ErrorEnum::InvalidParam);
+
+        param.port     = 1883;
+        param.authMode = 1;
+        REQUIRE(sut.SetMqttParam(param) == cosmo::util::ErrorEnum::InvalidParam);
     }
 }
 
@@ -772,31 +800,36 @@ TEST_CASE("SystemServiceImpl: PopUpParam edge values", "[SystemConfigService]") 
 
     cosmo::service::SystemServiceImpl sut;
 
-    SECTION("Negative values are accepted (no validation)") {
-        sut.SetPopUpParam(-1, -1, -1);
+    SECTION("Negative values are rejected") {
+        REQUIRE(sut.SetPopUpParam(-1, -1, -1) == cosmo::util::ErrorEnum::InvalidParam);
         int s = 0, a = 0, d = 0;
         sut.GetPopUpParam(s, a, d);
-        REQUIRE(s == -1);
-        REQUIRE(a == -1);
-        REQUIRE(d == -1);
+        REQUIRE(s == 1);
+        REQUIRE(a == 1);
+        REQUIRE(d == 2);
     }
 
-    SECTION("Large values are accepted (no validation)") {
-        sut.SetPopUpParam(999, 999, 999);
+    SECTION("Large values are rejected") {
+        REQUIRE(sut.SetPopUpParam(999, 999, 999) == cosmo::util::ErrorEnum::InvalidParam);
         int s = 0, a = 0, d = 0;
         sut.GetPopUpParam(s, a, d);
-        REQUIRE(s == 999);
-        REQUIRE(a == 999);
-        REQUIRE(d == 999);
+        REQUIRE(s == 1);
+        REQUIRE(a == 1);
+        REQUIRE(d == 2);
     }
 
-    SECTION("Zero values are accepted") {
-        sut.SetPopUpParam(0, 0, 0);
+    SECTION("Zero duration is rejected") {
+        REQUIRE(sut.SetPopUpParam(0, 0, 0) == cosmo::util::ErrorEnum::InvalidParam);
         int s = -1, a = -1, d = -1;
         sut.GetPopUpParam(s, a, d);
-        REQUIRE(s == 0);
-        REQUIRE(a == 0);
-        REQUIRE(d == 0);
+        REQUIRE(s == 1);
+        REQUIRE(a == 1);
+        REQUIRE(d == 2);
+    }
+
+    SECTION("Duration boundaries are accepted") {
+        REQUIRE(sut.SetPopUpParam(0, 0, 1) == cosmo::util::ErrorEnum::Success);
+        REQUIRE(sut.SetPopUpParam(1, 1, 30) == cosmo::util::ErrorEnum::Success);
     }
 }
 
@@ -819,10 +852,10 @@ TEST_CASE("SystemServiceImpl: ActionSwitch edge cases", "[SystemConfigService]")
         REQUIRE(sut.GetActionSwitch("") == true);
     }
 
-    SECTION("Empty actionId IS shielded when in list") {
+    SECTION("Empty shielded action IDs are rejected") {
         sut.SetDebugMode(true);
-        sut.SetShieldedActions({""});
-        REQUIRE(sut.GetActionSwitch("") == false);
+        REQUIRE(sut.SetShieldedActions({""}) == cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(sut.GetShieldedActions().empty());
     }
 
     SECTION("ShieldedActions replacement overwrites previous list") {
@@ -850,7 +883,7 @@ TEST_CASE("SystemServiceImpl: SystemLogo supplementary cases", "[SystemConfigSer
         auto logoDir = cosmo::path::GetLogoPath();
         fs::create_directories(logoDir);
 
-        std::vector<uint8_t> fakeImg = {0x89, 0x50, 0x4E, 0x47};
+        std::vector<uint8_t> fakeImg = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 
         // First set with bigScreenName
         sut.SetSystemLogo("System1", ".png", fakeImg, "BigScreen1");
@@ -868,12 +901,23 @@ TEST_CASE("SystemServiceImpl: SystemLogo supplementary cases", "[SystemConfigSer
         auto logoDir = cosmo::path::GetLogoPath();
         fs::create_directories(logoDir);
 
-        std::vector<uint8_t> fakeImg = {0x89, 0x50};
+        std::vector<uint8_t> fakeImg = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
         sut.SetSystemLogo("TestSys", ".png", fakeImg, "Screen");
         REQUIRE(fs::exists(logoDir + "/logo.png"));
 
         auto logo = sut.GetSystemLogo();
         REQUIRE(logo.logoUrl.find("logo.png") != std::string::npos);
+    }
+
+    SECTION("SetSystemLogo rejects extension traversal and mismatched content") {
+        const auto logoDir = cosmo::path::GetLogoPath();
+        fs::create_directories(logoDir);
+        const std::vector<uint8_t> png = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+
+        REQUIRE(sut.SetSystemLogo("Test", "/../../escape.png", png, "Screen") ==
+                cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(sut.SetSystemLogo("Test", ".jpg", png, "Screen") == cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE_FALSE(fs::exists(fs::path(cfg.dir) / "escape.png"));
     }
 }
 
@@ -893,6 +937,16 @@ TEST_CASE("SystemServiceImpl: RunMode round-trip", "[SystemConfigService]") {
     // The following test documents the expected linkage behavior.
     SECTION("RunMode enum values are distinct") {
         REQUIRE(cosmo::RunMode::RunModeStandAlone != cosmo::RunMode::RunModeIotNetwork);
+    }
+
+    SECTION("Invalid RunMode is rejected without reboot") {
+        REQUIRE(sut.SetRunMode(static_cast<cosmo::RunMode>(99)) == cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(sut.GetRunMode() == cosmo::RunMode::RunModeStandAlone);
+    }
+
+    SECTION("Invalid RunMode JSON throws") {
+        cosmo::RunMode mode = cosmo::RunMode::RunModeStandAlone;
+        REQUIRE_THROWS(nlohmann::json(99).get_to(mode));
     }
 }
 
@@ -1004,5 +1058,14 @@ TEST_CASE("SystemServiceImpl: IotNetworkParam dirty-check", "[SystemConfigServic
         REQUIRE_CALL(mocks.networkSvc, IsMqttEnabled()).RETURN(false);
         auto param = sut.GetIotNetworkParam();
         REQUIRE(param.mqttPort == 9999);
+    }
+
+    SECTION("SetIotNetworkParam rejects malformed endpoints") {
+        REQUIRE(sut.SetIotNetworkParam("file:///etc/passwd", "10.0.0.1", 1883) ==
+                cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(sut.SetIotNetworkParam("http://iot.example.com", "bad host", 1883) ==
+                cosmo::util::ErrorEnum::InvalidParam);
+        REQUIRE(sut.SetIotNetworkParam("http://iot.example.com", "10.0.0.1", 0) ==
+                cosmo::util::ErrorEnum::InvalidParam);
     }
 }

@@ -54,6 +54,8 @@ public:
         return OutputCategory::DETECTION;
     }
     Status ParseDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs) override;
+    Status ParseDinoDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs, float text_threshold,
+                                    float box_threshold) override;
 
 private:
     int max_batch_ = 1;

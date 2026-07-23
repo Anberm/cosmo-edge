@@ -31,7 +31,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onBeforeUnmount, onMounted, getCurrentInstance } from 'vue'
+import { ref, shallowRef, nextTick, watch, onBeforeUnmount, onMounted, getCurrentInstance } from 'vue'
 import flvjs from 'flv.js'
 import { createWhepPlayer } from '@/utils/whepPlayer'
 import { t, localeColon } from '@/i18n'
@@ -54,11 +54,8 @@ const { proxy } = getCurrentInstance()
 const $API = proxy.$API
 
 const deviceType = localStorage.getItem('deviceType')
-const player = ref(null)
-const webRtcPlayer = ref(null)
-const sourceUrl = ref('')
-const fallbackFlvUrl = ref('')
-const playbackProtocol = ref('httpflv')
+const player = shallowRef(null)
+const webRtcPlayer = shallowRef(null)
 const hideControl = ref(true)
 const isShowStopPreview = ref(false)
 const isShowVideo = ref(true)
@@ -76,189 +73,666 @@ const videoContainer = ref(null)
 let _onCanPlay = null
 let _onScriptData = null
 let _onError = null
+let activeStreamSession = null
+let pendingStreamSession = null
+let latestDesiredSession = null
+let streamRequestGeneration = 0
+let streamSwitchQueue = Promise.resolve()
+const activeHeartbeatRequests = new WeakSet()
+let isUnmounted = false
+let playbackAttempt = null
+let playbackRevision = 0
+let releaseRetiringStopWait = null
+const retiringStopsByKey = new Map()
+// Backend expires a viewer after a 10s threshold fails six 10s watchdog checks.
+const kViewerWatchdogGraceMs = 80000
 
-// 函数定义必须在 watch 之前，并按调用顺序排列
-const getstreamkeepalive = () => {
-  const params = {
-    channelId: props.channelId,
-    algorithmId: algorithmId.value
+const sameStreamKey = (left, right) => {
+  return Boolean(left && right) &&
+    left.channelId === right.channelId &&
+    left.algorithmId === right.algorithmId
+}
+
+const clearPendingSession = (session) => {
+  if (pendingStreamSession === session) {
+    pendingStreamSession = null
   }
-  $API
-    .boxStreamKeepAlive(params)
-    .then(() => {})
-    .catch(() => {
-      console.log('error=>')
+}
+
+const createPlaybackAttempt = () => {
+  return {
+    revision: ++playbackRevision,
+    cancelled: false,
+    reason: null,
+    cancelHandler: null,
+    cancel(reason = new Error('Video playback setup cancelled')) {
+      if (this.cancelled) return
+      this.cancelled = true
+      this.reason = reason
+      const handler = this.cancelHandler
+      this.cancelHandler = null
+      if (handler) handler(reason)
+    }
+  }
+}
+
+const createPlaybackError = (error, attempt) => {
+  const playbackError = new Error(
+    error?.message || `Video playback failed: ${String(error)}`
+  )
+  playbackError.name = error?.name || playbackError.name
+  playbackError.cause = error
+  playbackError.playbackSuperseded = attempt.cancelled ||
+    playbackRevision !== attempt.revision
+  return playbackError
+}
+
+const isPlaybackSuperseded = (error) => {
+  return error?.playbackSuperseded === true
+}
+
+const clearHeartbeat = () => {
+  if (timers.value) {
+    clearInterval(timers.value)
+    timers.value = null
+  }
+}
+
+const getStreamKey = (session) => {
+  return `${session.channelId}\u0000${session.algorithmId || ''}`
+}
+
+const stopStreamSession = (session) => {
+  if (!session?.channelId) return Promise.resolve()
+  if (session.stopPromise) return session.stopPromise
+
+  const key = getStreamKey(session)
+  const previousBarrier = retiringStopsByKey.get(key) || Promise.resolve()
+  session.stopPromise = previousBarrier.then(async () => {
+    try {
+      await $API.boxStreamStop({
+        channelId: session.channelId,
+        algorithmId: session.algorithmId
+      })
+      return true
+    } catch (error) {
+      // ViewerDelete is non-idempotent, so leave a failed Stop to the watchdog.
+      console.warn('[Video] Failed to stop stream session:', error)
+      return false
+    }
+  })
+  let retiringBarrier = session.stopPromise.then((stopped) => {
+    if (!stopped) {
+      return new Promise((resolve) => setTimeout(resolve, kViewerWatchdogGraceMs))
+    }
+  })
+  retiringBarrier = retiringBarrier.finally(() => {
+    if (retiringStopsByKey.get(key) === retiringBarrier) {
+      retiringStopsByKey.delete(key)
+    }
+  })
+  retiringStopsByKey.set(key, retiringBarrier)
+  return session.stopPromise
+}
+
+const waitForRetiringStop = async (session) => {
+  const barrier = retiringStopsByKey.get(getStreamKey(session))
+  if (!barrier) return
+  let releaseWait = null
+  const superseded = new Promise((resolve) => {
+    releaseWait = resolve
+    releaseRetiringStopWait = resolve
+  })
+  await Promise.race([barrier, superseded])
+  if (releaseRetiringStopWait === releaseWait) releaseRetiringStopWait = null
+}
+
+const getstreamkeepalive = async () => {
+  const session = activeStreamSession
+  if (!session || activeHeartbeatRequests.has(session)) return
+
+  activeHeartbeatRequests.add(session)
+  try {
+    await $API.boxStreamKeepAlive({
+      channelId: session.channelId,
+      algorithmId: session.algorithmId
+    })
+  } catch (error) {
+    // A reconnect can create a new viewer with the same channel/algorithm
+    // while an earlier heartbeat is still in flight. Object identity keeps a
+    // late failure from tearing down that replacement viewer.
+    if (activeStreamSession !== session) return
+
+    console.warn('[Video] Stream keepalive failed:', error)
+    clearHeartbeat()
+    activeStreamSession = null
+    await stopStreamSession(session)
+    if (isUnmounted) return
+
+    // The Stop request can finish after a replacement stream has committed and
+    // cleared pendingStreamSession. Re-check both active identity and the latest
+    // desired key before changing the selection.
+    if (activeStreamSession || pendingStreamSession ||
+        !sameStreamKey(latestDesiredSession, session)) return
+
+    algorithmId.value = ''
+    if (session.algorithmId) {
+      emit('runAlgorithmIdChange', {
+        channelId: session.channelId,
+        runAlgorithmId: '',
+        index: props.index
+      })
+    } else {
+      getrequestLiveStream('heartbeat')
+    }
+  } finally {
+    activeHeartbeatRequests.delete(session)
+  }
+}
+
+const sendHeartBeat = (time) => {
+  clearHeartbeat()
+  void getstreamkeepalive()
+  const interval = Number(time)
+  if (!Number.isFinite(interval) || interval <= 0) return
+
+  timers.value = setInterval(() => {
+    getstreamkeepalive()
+  }, interval)
+}
+
+const startProvisionalHeartbeat = (session) => {
+  let timer = null
+  let stopped = false
+  let inFlight = false
+  let rejectFailure = null
+  const failure = new Promise((_, reject) => {
+    rejectFailure = reject
+  })
+  const stop = () => {
+    stopped = true
+    if (timer) clearInterval(timer)
+    timer = null
+  }
+  const pulse = async () => {
+    if (stopped || inFlight) return
+    inFlight = true
+    try {
+      await $API.boxStreamKeepAlive({
+        channelId: session.channelId,
+        algorithmId: session.algorithmId
+      })
+    } catch (error) {
+      if (!stopped) {
+        stop()
+        if (playbackAttempt) playbackAttempt.cancel(error)
+        rejectFailure(error)
+      }
+    } finally {
+      inFlight = false
+    }
+  }
+
+  void pulse()
+  const interval = Number(session.keepAliveInterval)
+  if (Number.isFinite(interval) && interval > 0) {
+    timer = setInterval(pulse, interval)
+  }
+  return { failure, stop }
+}
+
+const buildStreamSession = (session, stream) => {
+  const domain = window.location.hostname
+  const streamScheme = window.location.protocol === 'https:' ? 'https' : 'http'
+  const protocol = stream.protocol || 'httpflv'
+  const fallbackUrl = stream.flvUrl
+    ? `${streamScheme}://${domain}:${stream.httpPort || 8080}${stream.flvUrl}`
+    : `${streamScheme}://${domain}:${stream.port}${stream.url}`
+  const primaryUrl = protocol === 'webrtc'
+    ? `${streamScheme}://${domain}:${stream.rtcApiPort || stream.port || 1985}${stream.webrtcUrl || stream.url}`
+    : `${streamScheme}://${domain}:${stream.httpPort || stream.port}${stream.flvUrl || stream.url}`
+
+  return {
+    channelId: session.channelId,
+    algorithmId: session.algorithmId,
+    playbackProtocol: protocol,
+    sourceUrl: primaryUrl,
+    fallbackFlvUrl: fallbackUrl,
+    keepAliveInterval: Number(stream.keepAliveInterval) * 1000
+  }
+}
+
+const restoreParentSelection = (session) => {
+  latestDesiredSession = session
+  algorithmId.value = session.algorithmId || ''
+  if (props.channelId === session.channelId &&
+      (props.runAlgorithmId || '') === algorithmId.value) {
+    return
+  }
+  emit('runAlgorithmIdChange', {
+    channelId: session.channelId,
+    runAlgorithmId: algorithmId.value,
+    index: props.index
+  })
+}
+
+const performLiveStreamRequest = async (session, generation, reason) => {
+  if (isUnmounted || generation !== streamRequestGeneration) return
+  const previousSession = activeStreamSession
+
+  // Rebuilding the player for the same backend viewer must not call
+  // ViewerCreate/ViewerDelete again; those APIs change a reference count.
+  if (sameStreamKey(previousSession, session)) {
+    const shouldRebuildPlayer = reason === 'timer' || reason === 'flv-retry'
+    if (!shouldRebuildPlayer) {
+      clearPendingSession(session)
+      isShowLoading.value = false
+      isShowStopPreview.value = false
+      return
+    }
+    try {
+      await playVideo(previousSession)
+      if (activeStreamSession === previousSession) {
+        clearPendingSession(session)
+        isShowStopPreview.value = false
+        return
+      }
+      // The viewer can be invalidated by a heartbeat failure while playback is
+      // being rebuilt. Fall through and create a replacement viewer once.
+      destroyVideo()
+    } catch (error) {
+      if (isUnmounted || generation !== streamRequestGeneration) return
+      if (isPlaybackSuperseded(error)) {
+        clearPendingSession(session)
+        return
+      }
+      console.warn('[Video] Failed to rebuild the current stream player:', error)
+      destroyVideo()
+      if (activeStreamSession === previousSession) {
+        isShowLoading.value = false
+        if (reason === 'flv-retry') {
+          clearHeartbeat()
+          activeStreamSession = null
+          await stopStreamSession(previousSession)
+          if (isUnmounted || generation !== streamRequestGeneration ||
+              !sameStreamKey(latestDesiredSession, session)) return
+        } else {
+          clearPendingSession(session)
+          if (reason === 'timer') {
+            scheduleFlvPlayerRetry(previousSession)
+          } else {
+            isShowStopPreview.value = true
+          }
+          return
+        }
+      }
+      // A concurrent heartbeat failure retired this viewer. Continue below and
+      // create one replacement after that single Stop request has completed.
+    }
+  }
+
+  if (isUnmounted || generation !== streamRequestGeneration) return
+
+  isShowLoading.value = true
+  isShowStopPreview.value = false
+  flvRetryCount.value = 0
+  let candidateViewerOwned = false
+  let playerWasReplaced = false
+  let provisionalHeartbeat = null
+
+  const releaseCandidateViewer = async () => {
+    if (!candidateViewerOwned) return
+    candidateViewerOwned = false
+    await stopStreamSession(session)
+  }
+
+  try {
+    await waitForRetiringStop(session)
+    if (isUnmounted || generation !== streamRequestGeneration) return
+
+    const res = await $API.boxRequestLiveStream({
+      channelId: session.channelId,
+      algorithmId: session.algorithmId
+    })
+    candidateViewerOwned = true
+    if (isUnmounted || generation !== streamRequestGeneration) {
+      await releaseCandidateViewer()
+      if (!isUnmounted) isShowLoading.value = false
+      return
+    }
+
+    const stream = res?.resData?.stream
+    if (!stream) {
+      throw new Error('Live stream response is missing stream information')
+    }
+
+    const candidateSession = buildStreamSession(session, stream)
+    console.log('视频预览地址==>', candidateSession.sourceUrl, '--------')
+    provisionalHeartbeat = startProvisionalHeartbeat(candidateSession)
+    playerWasReplaced = true
+    await Promise.race([
+      playVideo(candidateSession),
+      provisionalHeartbeat.failure
+    ])
+    if (candidateSession.playbackError) throw candidateSession.playbackError
+
+    if (isUnmounted || generation !== streamRequestGeneration) {
+      throw new Error('Live stream switch superseded')
+    }
+
+    provisionalHeartbeat.stop()
+    provisionalHeartbeat = null
+    const previousViewerStillActive = activeStreamSession === previousSession
+    activeStreamSession = candidateSession
+    candidateViewerOwned = false
+    clearPendingSession(session)
+    algorithmId.value = candidateSession.algorithmId
+    sendHeartBeat(candidateSession.keepAliveInterval)
+    // Playback has already reached the protocol-specific ready gate. Publish
+    // the committed visible state before awaiting old-viewer retirement so a
+    // later playback error, retry, or user stop can still override it.
+    isShowLoading.value = false
+    isShowStopPreview.value = false
+
+    if (previousViewerStillActive && previousSession) {
+      // Stop is intentionally attempted once. If it fails, its heartbeat has
+      // already been removed and the backend watchdog bounds the stale viewer.
+      await stopStreamSession(previousSession)
+    }
+  } catch (error) {
+    provisionalHeartbeat?.stop()
+    provisionalHeartbeat = null
+    await releaseCandidateViewer()
+
+    let playerRestored = false
+    let playerRecoveryNeeded = false
+    if (playerWasReplaced && !isUnmounted &&
+        activeStreamSession === previousSession && previousSession) {
+      try {
+        await playVideo(previousSession)
+        playerRestored = true
+      } catch (restoreError) {
+        if (isPlaybackSuperseded(restoreError)) {
+          playerRestored = true
+        } else {
+          console.warn('[Video] Failed to restore the previous player:', restoreError)
+          isShowStopPreview.value = true
+          playerRecoveryNeeded = true
+        }
+      }
+    }
+    if (playerWasReplaced && !playerRestored) {
+      destroyVideo()
+    }
+    if (playerRecoveryNeeded) {
+      scheduleFlvPlayerRetry(previousSession)
+    }
+
+    if (isUnmounted || generation !== streamRequestGeneration) return
+
+    clearPendingSession(session)
+    isShowLoading.value = false
+    const msgCode = error?.resMsg?.[0]?.msgCode ??
+      error?.response?.data?.resMsg?.[0]?.msgCode
+
+    if (activeStreamSession === previousSession && previousSession) {
+      restoreParentSelection(previousSession)
+    } else if (session.algorithmId) {
+      // Only a tile without a previous live viewer needs a raw-stream fallback.
+      algorithmId.value = ''
+      latestDesiredSession = {
+        channelId: session.channelId,
+        algorithmId: ''
+      }
+      emit('runAlgorithmIdChange', {
+        channelId: session.channelId,
+        runAlgorithmId: '',
+        index: props.index
+      })
+    } else if (msgCode === '12303' || msgCode === 12303) {
       emit('runAlgorithmIdChange', {
         channelId: '',
         runAlgorithmId: '',
         index: props.index
       })
-      clearInterval(timers.value)
-    })
-}
-
-const sendHeartBeat = (time) => {
-  timers.value && clearInterval(timers.value)
-  timers.value = setInterval(() => {
-    getstreamkeepalive()
-  }, time)
-}
-
-const getrequestLiveStream = () => {
-  // 停掉旧的 viewer（切换算法/通道时释放后端编码器资源）
-  if (player.value) {
-    stopRequest()
+    } else {
+      isShowStopPreview.value = true
+    }
   }
-  algorithmId.value = props.runAlgorithmId
-  flvRetryCount.value = 0
-  const domain = window.location.hostname
-  const streamScheme = window.location.protocol === 'https:' ? 'https' : 'http'
-  const params = {
+}
+
+const getrequestLiveStream = (reason = 'prop-sync') => {
+  const session = {
     channelId: props.channelId,
-    algorithmId: algorithmId.value
+    algorithmId: props.runAlgorithmId || ''
   }
-  console.log(props.runAlgorithmId, '====runAlgorithmId====', params)
+  algorithmId.value = session.algorithmId
+  if (sameStreamKey(pendingStreamSession, session)) {
+    return streamSwitchQueue
+  }
 
-  $API
-    .boxRequestLiveStream(params)
-    .then((res) => {
-      const { resData } = res
-      if (resData) {
-        const stream = resData.stream
-        playbackProtocol.value = stream.protocol || 'httpflv'
-        fallbackFlvUrl.value = stream.flvUrl
-          ? `${streamScheme}://${domain}:${stream.httpPort || 8080}${stream.flvUrl}`
-          : `${streamScheme}://${domain}:${stream.port}${stream.url}`
-        sourceUrl.value = stream.protocol === 'webrtc'
-          ? `${streamScheme}://${domain}:${stream.rtcApiPort || stream.port || 1985}${stream.webrtcUrl || stream.url}`
-          : `${streamScheme}://${domain}:${stream.httpPort || stream.port}${stream.flvUrl || stream.url}`
-        // sourceUrl.value = 'http://192.168.23.82:' + resData.stream.port +  resData.stream.url
-        console.log('视频预览地址==>', sourceUrl.value, '--------')
-        sendHeartBeat(
-          stream.keepAliveInterval * 1000,
-          stream.keepAliveUrl
-        )
-      }
-    })
-    .catch((e) => {
-      if (e?.resMsg[0].msgCode == '12303') {
-        emit('runAlgorithmIdChange', {
-          channelId: '',
-          runAlgorithmId: '',
-          index: props.index
-        })
-      } else {
-        emit('runAlgorithmIdChange', {
-          channelId: props.channelId,
-          runAlgorithmId: '',
-          index: props.index
-        })
-      }
-    })
+  const currentOperationSession = pendingStreamSession || activeStreamSession || latestDesiredSession
+  const supersedesPlayback = currentOperationSession &&
+    !sameStreamKey(currentOperationSession, session)
+  pendingStreamSession = session
+  latestDesiredSession = session
+  const generation = ++streamRequestGeneration
+  if (supersedesPlayback && flvRetryTimer.value) {
+    clearTimeout(flvRetryTimer.value)
+    flvRetryTimer.value = null
+    flvRetryCount.value = 0
+  }
+  if (releaseRetiringStopWait && supersedesPlayback) {
+    const releaseWait = releaseRetiringStopWait
+    releaseRetiringStopWait = null
+    releaseWait()
+  }
+  if (playbackAttempt && supersedesPlayback) {
+    playbackAttempt.cancel(new Error('Video playback setup superseded'))
+  }
+
+  streamSwitchQueue = streamSwitchQueue
+    .catch(() => {})
+    .then(() => performLiveStreamRequest(session, generation, reason))
+  return streamSwitchQueue
 }
-
-watch(sourceUrl, (val, oldVal) => {
-  if (val != oldVal) {
-    playVideo()
-    const filterList = props.taskList.filter(
-      (item) => item.enableStatus == 1
-    )
-    algorithmOverlayList.value = [
-      {
-        algorithmId: '',
-        algorithmName: t('common.none')
-      },
-      ...filterList
-    ]
-  }
-})
-
-watch(() => props.channelId, () => {
-  isShowStopPreview.value = false
-  getrequestLiveStream()
-}, { immediate: true })
-
-watch(() => props.runAlgorithmId, (newVal) => {
-  algorithmId.value = newVal
-  getrequestLiveStream()
-  console.log('====runAlgorithmId====', algorithmId.value)
-})
 
 const getRestartTime = () => {
   return Math.floor((Math.random() * (6 - 3) + 3) * 60 * 60 * 1000)
 }
 
-const playVideo = () => {
-  if (playbackProtocol.value === 'webrtc') {
-    playWebRtc()
+const scheduleFlvPlayerRetry = (session) => {
+  if (activeStreamSession !== session || isUnmounted || flvRetryTimer.value) return
+
+  if (flvRetryCount.value < 3) {
+    const delay = flvRetryCount.value === 0
+      ? 300
+      : Math.pow(2, flvRetryCount.value) * 1000
+    flvRetryCount.value++
+    console.log(`FLV retry ${flvRetryCount.value}/3 in ${delay}ms`)
+    flvRetryTimer.value = setTimeout(() => {
+      flvRetryTimer.value = null
+      if (activeStreamSession !== session || isUnmounted) return
+      void playVideo(session).then(() => {
+        if (activeStreamSession === session &&
+            sameStreamKey(latestDesiredSession, session)) {
+          isShowStopPreview.value = false
+        }
+      }).catch((retryError) => {
+        if (isPlaybackSuperseded(retryError) || isUnmounted ||
+            activeStreamSession !== session ||
+            !sameStreamKey(latestDesiredSession, session)) return
+        console.warn('[Video] HTTP-FLV player retry failed:', retryError)
+        scheduleFlvPlayerRetry(session)
+      })
+    }, delay)
     return
   }
-  playFlv(sourceUrl.value)
+
+  flvRetryCount.value = 0
+  flvRetryTimer.value = setTimeout(() => {
+    flvRetryTimer.value = null
+    if (activeStreamSession !== session || isUnmounted) return
+    getrequestLiveStream('flv-retry')
+  }, 5000)
 }
 
-const playFallbackFlv = (reason) => {
-  if (!fallbackFlvUrl.value) {
+const playVideo = async (session) => {
+  if (!session) {
+    throw new Error('Cannot play a stream without an active session')
+  }
+
+  destroyVideo()
+  const attempt = createPlaybackAttempt()
+  playbackAttempt = attempt
+  isShowLoading.value = true
+  isShowVideo.value = true
+
+  try {
+    await nextTick()
+    if (attempt.cancelled) throw attempt.reason
+    if (!video.value) {
+      throw new Error('Video element was not mounted')
+    }
+
+    if (session.playbackProtocol === 'webrtc') {
+      await playWebRtc(session, attempt)
+    } else {
+      await playFlv(session.sourceUrl, session, attempt)
+    }
+  } catch (error) {
+    const playbackError = createPlaybackError(error, attempt)
+    // Only the attempt that still owns the player may tear it down. A stale
+    // retry can reject after a newer stream has already installed its player.
+    if (playbackAttempt === attempt) {
+      destroyVideo({ cancelPlaybackAttempt: false })
+      isShowLoading.value = false
+    }
+    throw playbackError
+  } finally {
+    if (playbackAttempt === attempt) {
+      playbackAttempt = null
+    }
+  }
+}
+
+const playFallbackFlv = async (reason, session, attempt) => {
+  if (!session.fallbackFlvUrl) {
     isShowLoading.value = false
     proxy.$message.error(reason?.message || t('event.webRtcConnectionFailed'))
-    return
+    throw reason || new Error('HTTP-FLV fallback URL is unavailable')
   }
 
-  console.warn('[Video] WebRTC failed, fallback to HTTP-FLV:', reason, fallbackFlvUrl.value)
-  playbackProtocol.value = 'httpflv'
+  console.warn('[Video] WebRTC failed, fallback to HTTP-FLV:', reason, session.fallbackFlvUrl)
+  session.playbackProtocol = 'httpflv'
+  session.sourceUrl = session.fallbackFlvUrl
   flvRetryCount.value = 0
-  playFlv(fallbackFlvUrl.value)
+  await playFlv(session.sourceUrl, session, attempt)
 }
 
-const playWebRtc = () => {
+const playWebRtc = (session, attempt) => {
   if (!window.RTCPeerConnection) {
-    playFallbackFlv(new Error('Browser does not support WebRTC'))
-    return
+    return playFallbackFlv(new Error('Browser does not support WebRTC'), session, attempt)
   }
-  isShowLoading.value = true
-  destroyVideo()
-  isShowVideo.value = true
-  webRtcPlayer.value = createWhepPlayer({
-    video: video.value,
-    url: sourceUrl.value,
-    onConnected: () => {
-      isShowLoading.value = false
-      flvRetryCount.value = 0
-    },
-    onError: (error) => {
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let whepPlayer = null
+
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      if (attempt.cancelHandler === onCancelled) attempt.cancelHandler = null
+      callback(value)
+    }
+    const stopWhep = () => {
+      if (webRtcPlayer.value === whepPlayer) webRtcPlayer.value = null
+      if (whepPlayer) void whepPlayer.stop()
+    }
+    const onCancelled = (reason) => {
+      stopWhep()
+      finish(reject, reason)
+    }
+    const handleRuntimeError = (error) => {
+      if (isUnmounted) return
+      if (activeStreamSession !== session) {
+        session.playbackError = error
+        return
+      }
+      if (!session.fallbackFlvUrl) {
+        isShowLoading.value = false
+        isShowStopPreview.value = true
+        proxy.$message.error(error?.message || t('event.webRtcConnectionFailed'))
+        return
+      }
+      session.playbackProtocol = 'httpflv'
+      session.sourceUrl = session.fallbackFlvUrl
+      void playVideo(session).catch((fallbackError) => {
+        if (isPlaybackSuperseded(fallbackError) || isUnmounted ||
+            activeStreamSession !== session ||
+            !sameStreamKey(latestDesiredSession, session)) return
+        console.warn('[Video] Runtime HTTP-FLV fallback failed:', fallbackError)
+        scheduleFlvPlayerRetry(session)
+      })
+    }
+    const handleError = (error) => {
       console.log('==========WebRTC ERROR ============', error)
-      webRtcPlayer.value && webRtcPlayer.value.stop()
-      webRtcPlayer.value = null
-      playFallbackFlv(error)
+      if (settled) {
+        if (webRtcPlayer.value !== whepPlayer) return
+        handleRuntimeError(error)
+        return
+      }
+      if (playbackAttempt !== attempt ||
+          (whepPlayer && webRtcPlayer.value !== whepPlayer)) return
+      stopWhep()
+      playFallbackFlv(error, session, attempt).then(
+        () => finish(resolve),
+        (fallbackError) => finish(reject, fallbackError)
+      )
+    }
+
+    if (attempt.cancelled) return onCancelled(attempt.reason)
+    attempt.cancelHandler = onCancelled
+
+    try {
+      whepPlayer = createWhepPlayer({
+        video: video.value,
+        url: session.sourceUrl,
+        onConnected: () => {
+          if (settled || playbackAttempt !== attempt ||
+              webRtcPlayer.value !== whepPlayer) return
+          isShowLoading.value = false
+          flvRetryCount.value = 0
+          finish(resolve)
+        },
+        onError: handleError
+      })
+      webRtcPlayer.value = whepPlayer
+      Promise.resolve(whepPlayer.start()).catch(handleError)
+    } catch (error) {
+      handleError(error)
     }
   })
-  webRtcPlayer.value.start()
 }
 
-const playFlv = async (url) => {
+const playFlv = (url, session, attempt) => {
   if (!flvjs.isSupported()) {
     proxy.$message.error(t('event.videoPreviewUnsupported'))
-    return
+    throw new Error('Browser does not support HTTP-FLV playback')
   }
 
-  isShowLoading.value = true
-
-  destroyVideo()
-  isShowVideo.value = true
-
-  // 等待 Vue DOM 更新，确保新的 video 元素已挂载
-  await nextTick()
+  if (attempt.cancelled) throw attempt.reason
 
   const videoEl = video.value
   if (!videoEl) {
-    console.warn('video element not found after nextTick')
-    return
+    throw new Error('Video element not found after nextTick')
   }
 
-  player.value = flvjs.createPlayer(
+  const flvPlayer = flvjs.createPlayer(
     {
       type: 'flv',
       isLive: true,
-      url: url || sourceUrl.value,
+      url,
       hasAudio: false,
       hasVideo: true,
       loadStartTimeout: 10000
@@ -268,82 +742,122 @@ const playFlv = async (url) => {
       autoCleanupSourceBuffer: true
     }
   )
-  player.value.attachMediaElement(videoEl)
+  player.value = flvPlayer
+  flvPlayer.attachMediaElement(videoEl)
 
-  // 等待媒体数据就绪后再播放，同时隐藏 loading
-  _onCanPlay = () => {
-    videoEl.removeEventListener('canplay', _onCanPlay)
-    _onCanPlay = null
-    isShowLoading.value = false
-    if (player.value) {
-      player.value.play()
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let playPending = false
+    let setupTimeout = null
+    let onCanPlay = null
+    let onScriptData = null
+    let onError = null
+
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      if (setupTimeout) {
+        clearTimeout(setupTimeout)
+        if (loadingFallbackTimer.value === setupTimeout) {
+          loadingFallbackTimer.value = null
+        }
+        setupTimeout = null
+      }
+      if (onCanPlay) {
+        videoEl.removeEventListener('canplay', onCanPlay)
+      }
+      if (_onCanPlay === onCanPlay) {
+        _onCanPlay = null
+      }
+      if (attempt.cancelHandler === onCancelled) attempt.cancelHandler = null
+      if (!error) {
+        resolve()
+        return
+      }
+      reject(error instanceof Error
+        ? error
+        : new Error(`HTTP-FLV playback failed: ${String(error)}`))
     }
-  }
-  videoEl.addEventListener('canplay', _onCanPlay)
+    const onCancelled = (reason) => finish(reason)
 
-  player.value.load()
-
-  // 追帧：延迟超过 3s 时跳到最新帧
-  if (chaseFrameTimer.value) {
-    clearInterval(chaseFrameTimer.value)
-  }
-  chaseFrameTimer.value = setInterval(() => {
-    if (!videoEl.buffered.length) {
-      return
+    // Resolve setup only after the media element is actually playable.
+    onCanPlay = () => {
+      if (playPending || settled) return
+      playPending = true
+      Promise.resolve(flvPlayer.play()).then(() => {
+        if (settled || playbackAttempt !== attempt ||
+            player.value !== flvPlayer) return
+        isShowLoading.value = false
+        flvRetryCount.value = 0
+        finish()
+      }).catch((error) => {
+        if (settled || playbackAttempt !== attempt ||
+            player.value !== flvPlayer) return
+        finish(error)
+      })
     }
-    let end = videoEl.buffered.end(0)
-    let diff = end - videoEl.currentTime
-    if (diff >= 3) {
-      videoEl.currentTime = end
-    }
-  }, 3000)
+    _onCanPlay = onCanPlay
+    videoEl.addEventListener('canplay', onCanPlay)
 
-  // SCRIPTDATA_ARRIVED 作为辅助隐藏 loading
-  _onScriptData = () => {
-    isShowLoading.value = false
-    if (player.value) {
-      player.value.off(flvjs.Events.SCRIPTDATA_ARRIVED, _onScriptData)
-    }
-    _onScriptData = null
-  }
-  player.value.on(flvjs.Events.SCRIPTDATA_ARRIVED, _onScriptData)
+    // 追帧：延迟超过 3s 时跳到最新帧
+    chaseFrameTimer.value = setInterval(() => {
+      if (!videoEl.buffered.length) return
+      const end = videoEl.buffered.end(0)
+      const diff = end - videoEl.currentTime
+      if (diff >= 3) {
+        videoEl.currentTime = end
+      }
+    }, 3000)
 
-  // 兜底超时：10s 后无论如何隐藏 loading
-  if (loadingFallbackTimer.value) {
-    clearTimeout(loadingFallbackTimer.value)
-  }
-  loadingFallbackTimer.value = setTimeout(() => {
-    if (isShowLoading.value) {
-      console.warn('Loading fallback timeout triggered')
+    // SCRIPTDATA_ARRIVED can hide loading, but canplay remains the setup gate.
+    onScriptData = () => {
+      flvPlayer.off(flvjs.Events.SCRIPTDATA_ARRIVED, onScriptData)
+      if (player.value !== flvPlayer) return
       isShowLoading.value = false
+      if (_onScriptData === onScriptData) _onScriptData = null
     }
-  }, 10000)
+    _onScriptData = onScriptData
+    flvPlayer.on(flvjs.Events.SCRIPTDATA_ARRIVED, onScriptData)
 
-  // FLV 错误时指数退避重试
-  _onError = (e) => {
-    console.log('==========FLV ERROR ============', e)
-    const maxRetry = 3
-    if (flvRetryCount.value < maxRetry) {
-      const delay = flvRetryCount.value === 0 ? 300 : Math.pow(2, flvRetryCount.value) * 1000
-      flvRetryCount.value++
-      console.log(`FLV retry ${flvRetryCount.value}/${maxRetry} in ${delay}ms`)
-      flvRetryTimer.value = setTimeout(() => {
-        playVideo()
-      }, delay)
-    } else {
-      flvRetryCount.value = 0
-      setTimeout(() => {
-        getrequestLiveStream()
-      }, 5000)
+    onError = (error) => {
+      if (!settled) {
+        console.log('==========FLV ERROR ============', error)
+        finish(error)
+        return
+      }
+      if (activeStreamSession !== session || player.value !== flvPlayer) return
+
+      console.log('==========FLV ERROR ============', error)
+      scheduleFlvPlayerRetry(session)
     }
-  }
-  player.value.on(flvjs.Events.ERROR, _onError)
+    _onError = onError
+    flvPlayer.on(flvjs.Events.ERROR, onError)
+
+    setupTimeout = setTimeout(() => {
+      finish(new Error('HTTP-FLV media setup timeout'))
+    }, 10000)
+    loadingFallbackTimer.value = setupTimeout
+
+    if (attempt.cancelled) return onCancelled(attempt.reason)
+    attempt.cancelHandler = onCancelled
+    try {
+      flvPlayer.load()
+    } catch (error) {
+      finish(error)
+    }
+  })
 }
 
-const destroyVideo = () => {
+const destroyVideo = ({ cancelPlaybackAttempt = true } = {}) => {
+  if (playbackAttempt) {
+    const attempt = playbackAttempt
+    playbackAttempt = null
+    if (cancelPlaybackAttempt) attempt.cancel()
+  }
   if (webRtcPlayer.value) {
-    webRtcPlayer.value.stop()
+    const currentWebRtcPlayer = webRtcPlayer.value
     webRtcPlayer.value = null
+    void currentWebRtcPlayer.stop()
   }
   if (flvRetryTimer.value) {
     clearTimeout(flvRetryTimer.value)
@@ -363,45 +877,60 @@ const destroyVideo = () => {
     _onCanPlay = null
   }
   if (player.value) {
-    if (_onScriptData) {
-      player.value.off(flvjs.Events.SCRIPTDATA_ARRIVED, _onScriptData)
-      _onScriptData = null
-    }
-    if (_onError) {
-      player.value.off(flvjs.Events.ERROR, _onError)
-      _onError = null
-    }
-    player.value.pause()
-    player.value.unload()
-    player.value.detachMediaElement()
-    player.value.destroy()
+    const currentPlayer = player.value
     player.value = null
-    isShowVideo.value = false
+    try {
+      if (_onScriptData) {
+        currentPlayer.off(flvjs.Events.SCRIPTDATA_ARRIVED, _onScriptData)
+      }
+      if (_onError) {
+        currentPlayer.off(flvjs.Events.ERROR, _onError)
+      }
+      currentPlayer.pause()
+      currentPlayer.unload()
+      currentPlayer.detachMediaElement()
+      currentPlayer.destroy()
+    } catch (error) {
+      console.warn('[Video] Failed to destroy HTTP-FLV player cleanly:', error)
+    }
   }
+  _onScriptData = null
+  _onError = null
+  const videoEl = video.value
+  if (videoEl?.srcObject) {
+    videoEl.srcObject = null
+  }
+  isShowVideo.value = false
 }
 
-const stop = () => {
+const stop = async () => {
+  ++streamRequestGeneration
+  if (releaseRetiringStopWait) {
+    const releaseWait = releaseRetiringStopWait
+    releaseRetiringStopWait = null
+    releaseWait()
+  }
+  pendingStreamSession = null
+  latestDesiredSession = null
   isShowLoading.value = false
   isShowStopPreview.value = true
-  timers.value && clearInterval(timers.value)
+  clearHeartbeat()
   destroyVideo()
-  stopRequest()
+  const session = activeStreamSession
+  activeStreamSession = null
+  await stopStreamSession(session)
 }
 
 const stopPreview = () => {
-  stop()
+  void stop()
   emit('stop', props.index)
 }
 
-const stopRequest = () => {
-  const params = {
-    channelId: props.channelId,
-    algorithmId: algorithmId.value
-  }
-  $API.boxStreamStop(params).then(() => {})
-}
-
 const overlayAlgorithmChange = (val) => {
+  latestDesiredSession = {
+    channelId: props.channelId,
+    algorithmId: val || ''
+  }
   emit('runAlgorithmIdChange', {
     channelId: props.channelId,
     runAlgorithmId: val,
@@ -427,19 +956,43 @@ const handleExitFullScreen = () => {
   })
 }
 
+watch(() => props.taskList, (taskList) => {
+  const filterList = (taskList || []).filter(
+    (item) => item.enableStatus == 1
+  )
+  algorithmOverlayList.value = [
+    {
+      algorithmId: '',
+      algorithmName: t('common.none')
+    },
+    ...filterList
+  ]
+}, { immediate: true, deep: true })
+
+watch(() => props.channelId, () => {
+  isShowStopPreview.value = false
+  getrequestLiveStream()
+}, { immediate: true })
+
+watch(() => props.runAlgorithmId, (newVal) => {
+  algorithmId.value = newVal || ''
+  getrequestLiveStream()
+  console.log('====runAlgorithmId====', algorithmId.value)
+})
+
 onMounted(() => {
   restartInterval.value = setInterval(() => {
-    stop()
-    playVideo()
+    getrequestLiveStream('timer')
   }, getRestartTime())
 })
 
 onBeforeUnmount(() => {
+  isUnmounted = true
   if (restartInterval.value) {
     clearInterval(restartInterval.value)
     restartInterval.value = null
   }
-  stop()
+  void stop()
 })
 </script>
 

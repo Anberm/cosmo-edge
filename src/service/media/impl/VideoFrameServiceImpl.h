@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
+#include <thread>
 
 #include "service/media/IVideoFrameService.h"
 
@@ -58,7 +60,14 @@ public:
 
 private:
     std::unique_ptr<cosmo::media::IVideoFrameProc> proc_;
-    std::shared_mutex piv_mtx_;  // Protects DrawText and BeginOSD (moved from deleted VideoFrameProc)
+    std::shared_mutex piv_mtx_;  // Protects standalone DrawText operations.
+
+    // IVideoFrameProc keeps the current BeginOSD frame as mutable session state.
+    // Hold this recursive mutex for the complete BeginOSD..EndOSD transaction so
+    // concurrent preview streams cannot overwrite or clear another stream's frame.
+    std::recursive_mutex osd_session_mtx_;
+    bool osd_session_active_{false};
+    std::thread::id osd_session_owner_{};
 };
 
 }  // namespace cosmo::service

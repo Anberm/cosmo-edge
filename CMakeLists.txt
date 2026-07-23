@@ -92,14 +92,55 @@ if(NOT COSMO_NN_USE_SOPHON_BACKEND AND NOT COSMO_NN_USE_CPU_BACKEND)
     message(FATAL_ERROR "At least one NN backend must be enabled")
 endif()
 
-if(COSMO_NN_USE_CPU_BACKEND)
+# Media acceleration is selected independently from inference. Defaults keep
+# existing builds unchanged while allowing a software media pipeline to be
+# paired with another inference backend.
+set(_cosmo_media_sophon_default OFF)
+set(_cosmo_media_cpu_default OFF)
+if(COSMO_NN_USE_SOPHON_BACKEND)
+    set(_cosmo_media_sophon_default ON)
+else()
+    set(_cosmo_media_cpu_default ON)
+endif()
+
+option(COSMO_MEDIA_USE_SOPHON_BACKEND "Enable Sophon hardware media backend"
+       ${_cosmo_media_sophon_default})
+option(COSMO_MEDIA_USE_CPU_BACKEND "Enable FFmpeg software media backend"
+       ${_cosmo_media_cpu_default})
+
+set(_cosmo_media_backend_count 0)
+foreach(_media_backend_option
+        COSMO_MEDIA_USE_SOPHON_BACKEND
+        COSMO_MEDIA_USE_CPU_BACKEND)
+    if(${_media_backend_option})
+        math(EXPR _cosmo_media_backend_count "${_cosmo_media_backend_count} + 1")
+    endif()
+endforeach()
+if(NOT _cosmo_media_backend_count EQUAL 1)
+    message(FATAL_ERROR "Exactly one media backend must be enabled: Sophon or CPU")
+endif()
+if(COSMO_MEDIA_USE_SOPHON_BACKEND AND NOT COSMO_NN_USE_SOPHON_BACKEND)
+    message(FATAL_ERROR "Sophon media requires the Sophon device runtime")
+endif()
+
+if(COSMO_MEDIA_USE_SOPHON_BACKEND)
+    add_compile_definitions(COSMO_MEDIA_USE_SOPHON_BACKEND)
+else()
+    add_compile_definitions(COSMO_MEDIA_USE_CPU_BACKEND)
+endif()
+
+if(COSMO_MEDIA_USE_CPU_BACKEND)
     set(COSMO_ENABLE_OPENH264 ON)
     set(COSMO_OPENH264_USE_ASM OFF)
-    set(COSMO_MODEL_GUARD OFF)
 else()
     set(COSMO_ENABLE_OPENH264 OFF)
     set(COSMO_OPENH264_USE_ASM OFF)
+endif()
+
+if(COSMO_NN_USE_SOPHON_BACKEND)
     set(COSMO_MODEL_GUARD ON)
+else()
+    set(COSMO_MODEL_GUARD OFF)
 endif()
 
 if(COSMO_MODEL_GUARD)
@@ -296,7 +337,10 @@ if(COSMO_MODEL_GUARD)
     endif()
 endif()
 if(COSMO_NN_USE_CPU_BACKEND)
-    target_compile_definitions(${EXECUTABLE_NAME} PRIVATE COSMO_NN_USE_CPU_BACKEND)
+    target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
+        COSMO_NN_USE_CPU_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_ONNX_BACKEND)
 endif()
 #Build order: OBJECT libs → third_build (explicit, see foreach above)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${COMMON_LIBS})
@@ -331,7 +375,10 @@ if(BUILD_TESTS)
         endif()
     endif()
     if(COSMO_NN_USE_CPU_BACKEND)
-        target_compile_definitions(cosmo-tests PRIVATE COSMO_NN_USE_CPU_BACKEND)
+        target_compile_definitions(cosmo-tests PRIVATE
+            COSMO_NN_USE_CPU_BACKEND
+            COSMO_NN_USE_HOST_BACKEND
+            COSMO_NN_USE_ONNX_BACKEND)
     endif()
     target_link_libraries(cosmo-tests PRIVATE ${COMMON_LIBS})
     if(COSMO_ENABLE_COVERAGE)

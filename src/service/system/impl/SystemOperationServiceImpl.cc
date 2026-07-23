@@ -29,20 +29,36 @@ void SystemOperationServiceImpl::ResetDevice(const std::string& reason) {
 cosmo::util::ErrorEnum SystemOperationServiceImpl::ExportLogs(std::string& fileName, std::string& fileUrl) {
     auto timestamp      = cosmo::util::GetMilliseconds();
     auto web_local_path = cosmo::path::GetWebLocalPath(timestamp);
-    for (auto& f : fs::directory_iterator(web_local_path)) {
-        if (f.path().filename().string().find("IedLog") == 0 && f.path().extension() == ".tar") {
-            LOG_INFO("remove {}", f.path());
-            remove(f.path());
+    std::error_code filesystem_error;
+    for (fs::directory_iterator entry(web_local_path, filesystem_error), end;
+         !filesystem_error && entry != end; entry.increment(filesystem_error)) {
+        const auto& path = entry->path();
+        if (path.filename().string().find("IedLog") == 0 && path.extension() == ".tar") {
+            LOG_INFO("remove {}", path);
+            std::error_code remove_error;
+            fs::remove(path, remove_error);
         }
     }
+    if (filesystem_error) {
+        LOG_WARN("Failed to enumerate export directory {}: {}", web_local_path, filesystem_error.message());
+        return cosmo::util::ErrorEnum::SysErr;
+    }
 
-    fileName              = "IedLog" + std::to_string(timestamp) + ".tar";
-    std::string save_path = (fs::path(web_local_path) / fileName).string();
-    std::string str_cmd   = std::string("tar cf ") + cosmo::util::ShellEscape(save_path) + " " +
-                          cosmo::path::GetLogPath() + "/*" + " " + (cosmo::path::GetCfgPath() + "/*");
-    LOG_INFO("{}", str_cmd);
+    fileName               = "IedLog" + std::to_string(timestamp) + ".tar";
+    std::string save_path  = (fs::path(web_local_path) / fileName).string();
+    const auto log_path    = fs::path(cosmo::path::GetLogPath()).lexically_normal();
+    const auto config_path = fs::path(cosmo::path::GetCfgPath()).lexically_normal();
+    if (!fs::is_directory(log_path, filesystem_error) || filesystem_error ||
+        !fs::is_directory(config_path, filesystem_error) || filesystem_error) {
+        LOG_ERRO("{}", "Cannot export invalid log/config directories");
+        return cosmo::util::ErrorEnum::SysErr;
+    }
+
     std::string cmd_out;
-    int ret = cosmo::util::ExecShell(str_cmd, cmd_out);
+    const int ret = cosmo::util::Exec(
+        {"tar", "-cf", save_path, "-C", log_path.parent_path().string(), log_path.filename().string(), "-C",
+         config_path.parent_path().string(), config_path.filename().string()},
+        cmd_out);
     if (ret != 0) {
         LOG_ERRO("tar failed ({}): {}", ret, cmd_out);
         return cosmo::util::ErrorEnum::SysErr;

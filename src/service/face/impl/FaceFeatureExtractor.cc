@@ -27,48 +27,67 @@ static constexpr const char* kTag = "SRV-FACEFEATURE ";
 namespace cosmo {
 
 FaceFeatureExtractor::~FaceFeatureExtractor() {
-    LOG_INFO("{}[{}] Stop", kTag, name_);
-    is_running_ = false;
-    stop();
+    Stop();
     LOG_INFO("{}[{}] Delete", kTag, name_);
+}
+
+void FaceFeatureExtractor::Stop() {
+    std::lock_guard<std::mutex> stop_lock(stop_mutex_);
+    if (stopped_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    LOG_INFO("{}[{}] Stop", kTag, name_);
+    is_service_enabled_.store(false, std::memory_order_release);
+    is_running_.store(false, std::memory_order_release);
+    stop();
+    Destroy();
 }
 
 FaceFeatureExtractor::FaceFeatureExtractor()
     : Thread("FaceFeature Service"), name_("FaceFeature Service"), is_running_(true) {
     if (!start()) {
-        is_running_ = false;
+        is_running_.store(false, std::memory_order_release);
         LOG_ERRO("{}[{}] Init failed: worker thread is still joinable", kTag, name_);
     }
     LOG_INFO("{}[{}] Init ", kTag, name_);
 }
 
 void FaceFeatureExtractor::ServiceEnable() {
-    std::lock_guard<std::shared_mutex> lock(mtx_);
-    if (!is_service_enabled_) {
+    if (stopped_.load(std::memory_order_acquire)) {
+        return;
+    }
+    bool expected = false;
+    if (is_service_enabled_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         LOG_INFO("{}[{}] Service Enable ", kTag, name_);
-        is_service_enabled_ = true;
     }
 }
 
 void FaceFeatureExtractor::run() {
     bool service_enable = false;
-    while (is_running_) {
+    while (is_running_.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(timing::kOneSecondInterval);
 
-        if (is_service_enabled_ != service_enable) {
+        if (!is_running_.load(std::memory_order_acquire)) {
+            break;
+        }
+        const bool requested_enable = is_service_enabled_.load(std::memory_order_acquire);
+        if (requested_enable != service_enable) {
             LOG_INFO("{}[{}] service switch changed: {} -> {}", kTag, name_, service_enable,
-                     is_service_enabled_);
-            if (is_service_enabled_) {
+                     requested_enable);
+            if (requested_enable) {
                 if (Init()) {
                     service_enable = true;
-                    LOG_INFO("{}[{}] service enable success, is_ready_:{}", kTag, name_, is_ready_);
+                    LOG_INFO("{}[{}] service enable success, is_ready_:{}", kTag, name_,
+                             is_ready_.load(std::memory_order_acquire));
                 } else {
-                    LOG_ERRO("{}[{}] service enable failed, is_ready_:{}", kTag, name_, is_ready_);
+                    LOG_ERRO("{}[{}] service enable failed, is_ready_:{}", kTag, name_,
+                             is_ready_.load(std::memory_order_acquire));
                 }
             } else {
                 if (Destroy()) {
                     service_enable = false;
-                    LOG_INFO("{}[{}] service disable success, is_ready_:{}", kTag, name_, is_ready_);
+                    LOG_INFO("{}[{}] service disable success, is_ready_:{}", kTag, name_,
+                             is_ready_.load(std::memory_order_acquire));
                 }
             }
         }
@@ -107,11 +126,9 @@ bool FaceFeatureExtractor::InitModel(std::shared_ptr<T>& instance, const std::st
 
 bool FaceFeatureExtractor::Destroy() {
     std::lock_guard<std::shared_mutex> lock(mtx_);
-    if (!is_ready_) {
+    if (!is_ready_.exchange(false, std::memory_order_acq_rel)) {
         LOG_INFO("{}[{}] Not Ready ", kTag, name_);
-        return true;
     }
-    is_ready_ = false;
     // Face detection
     if (face_det_inst_) {
         face_det_inst_.reset();
@@ -143,7 +160,10 @@ bool FaceFeatureExtractor::Destroy() {
 
 bool FaceFeatureExtractor::Init() {
     std::lock_guard<std::shared_mutex> lock(mtx_);
-    if (is_ready_) {
+    if (stopped_.load(std::memory_order_acquire)) {
+        return false;
+    }
+    if (is_ready_.load(std::memory_order_acquire)) {
         LOG_INFO("{}[{}] Ready ", kTag, name_);
         return true;
     }
@@ -181,8 +201,9 @@ bool FaceFeatureExtractor::Init() {
         LOG_ERRO("{}[{}] InitModel<Recognizer> failed. algCode:1000005", kTag, name_);
         return false;
     }
-    is_ready_ = true;
-    LOG_INFO("{}[{}] Init all face models success, is_ready_:{}", kTag, name_, is_ready_);
+    is_ready_.store(true, std::memory_order_release);
+    LOG_INFO("{}[{}] Init all face models success, is_ready_:{}", kTag, name_,
+             is_ready_.load(std::memory_order_acquire));
     return true;
 }
 
@@ -190,7 +211,7 @@ std::vector<AiDetectRstEl> FaceFeatureExtractor::FaceDetect(VideoFramePtr frame,
     std::vector<AiDetectRstEl> rst;
 
     std::lock_guard<std::shared_mutex> lock(mtx_);
-    if (!is_ready_) {
+    if (!is_ready_.load(std::memory_order_acquire)) {
         LOG_WARN("{}FaceDetect skipped: service not ready", kTag);
         bInited = false;
         return rst;
@@ -216,7 +237,7 @@ std::vector<AiDetectRstEl> FaceFeatureExtractor::FaceDetect(VideoFramePtr frame,
 
 bool FaceFeatureExtractor::FaceQulityAngle(VideoFramePtr frame, std::vector<AiDetectRstEl>& ioPuts) {
     std::lock_guard<std::shared_mutex> lock(mtx_);
-    if (!is_ready_) {
+    if (!is_ready_.load(std::memory_order_acquire)) {
         return false;
     }
     if (!face_quality_inst_) {
@@ -231,7 +252,7 @@ bool FaceFeatureExtractor::FaceQulityAngle(VideoFramePtr frame, std::vector<AiDe
 
 bool FaceFeatureExtractor::FaceMask(VideoFramePtr frame, std::vector<AiDetectRstEl>& ioPuts) {
     std::lock_guard<std::shared_mutex> lock(mtx_);
-    if (!is_ready_) {
+    if (!is_ready_.load(std::memory_order_acquire)) {
         return false;
     }
     if (!face_mask_inst_) {
@@ -246,7 +267,7 @@ bool FaceFeatureExtractor::FaceMask(VideoFramePtr frame, std::vector<AiDetectRst
 
 bool FaceFeatureExtractor::FaceLandmark(VideoFramePtr frame, std::vector<AiDetectRstEl>& ioPuts) {
     std::lock_guard<std::shared_mutex> lock(mtx_);
-    if (!is_ready_) {
+    if (!is_ready_.load(std::memory_order_acquire)) {
         return false;
     }
     if (!landmark_inst_) {

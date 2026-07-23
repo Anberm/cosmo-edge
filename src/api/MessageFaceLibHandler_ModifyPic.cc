@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <unordered_set>
 
 #include "api/MessageFaceLibHandler.h"
 #include "db/TransactionGuard.h"
@@ -67,6 +68,11 @@ Lib::MsgModifyFacePicLibSend MessageFaceLibHandler::Handle(Lib::MsgModifyFacePic
     std::vector<std::string> faceLibId;
     faceLibId.reserve(data.faceLibId.size());
     std::copy(data.faceLibId.begin(), data.faceLibId.end(), std::back_inserter(faceLibId));
+    const std::unordered_set<std::string> unique_face_lib_ids(faceLibId.begin(), faceLibId.end());
+    if (unique_face_lib_ids.size() != faceLibId.size() || unique_face_lib_ids.count("") != 0) {
+        throw util::ErrorMessage(util::ErrorEnum::ParameterException,
+                                 "Face library IDs must be non-empty and unique");
+    }
     auto faceLibs = lib_repo_.GetFaceLibs(std::move(faceLibId));
 
     if (!person_repo_.IsValidSerialNumber(data.personId, data.serialNumber)) {
@@ -75,7 +81,7 @@ Lib::MsgModifyFacePicLibSend MessageFaceLibHandler::Handle(Lib::MsgModifyFacePic
     }
 
     // Guard clause: face lib must exist
-    if (faceLibs.empty()) {
+    if (faceLibs.size() != unique_face_lib_ids.size()) {
         throw util::ErrorMessage(util::ErrorEnum::NoSuchId, "Face library ID does not exist");
     }
 

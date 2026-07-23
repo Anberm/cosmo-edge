@@ -49,6 +49,18 @@ TEST_CASE("TimerRestartServiceImpl: lifecycle", "[timer-restart]") {
         // If we reach here, destructor succeeded
         REQUIRE(true);
     }
+
+    SECTION("Stop is safe and idempotent") {
+        cosmo::CfgRebootParamInfo disabledReboot;
+        disabledReboot.isTimingRestart = false;
+        ALLOW_CALL(mocks.configReadSvc, GetRebootParam()).RETURN(disabledReboot);
+
+        TimerRestartServiceImpl sut;
+        sut.Start();
+        REQUIRE_NOTHROW(sut.Stop());
+        REQUIRE_NOTHROW(sut.Stop());
+        REQUIRE_NOTHROW(sut.Start());
+    }
 }
 
 TEST_CASE("CfgRebootParamInfo: default values", "[timer-restart]") {

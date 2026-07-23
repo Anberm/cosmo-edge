@@ -1,5 +1,5 @@
 // VideoDecoderCreateCpu.cc — CPU backend factory for VideoDecoder.
-// Compiled only when COSMO_NN_USE_CPU_BACKEND is ON (CMake file-level switching).
+// Compiled only when COSMO_MEDIA_USE_CPU_BACKEND is ON (CMake file-level switching).
 
 #include "media/VideoDecoder.h"
 #include "media/VideoDecoderCpu.h"

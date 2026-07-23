@@ -177,6 +177,37 @@ TEST_CASE("DoScaleBox - zero-size input returns input", "[Geometric]") {
     REQUIRE(result.width == 0);
 }
 
+TEST_CASE("DoScaleBox - preserves symmetric integer rounding", "[Geometric]") {
+    cosmo::util::Box input_box(100, 100, 101, 101);
+    cosmo::util::TargetScalerParam param;
+    param.scale_side = 2.0f;
+
+    auto result = cosmo::util::DoScaleBox(input_box, param, 1920, 1080);
+    REQUIRE(result == cosmo::util::Box(50, 50, 202, 202));
+}
+
+TEST_CASE("DoScaleBox - safely clips extreme integer input", "[Geometric]") {
+    constexpr int kIntMax = std::numeric_limits<int>::max();
+    cosmo::util::TargetScalerParam param;
+    param.scale_side = 2.0f;
+
+    auto covering_result =
+        cosmo::util::DoScaleBox(cosmo::util::Box(0, 0, kIntMax, kIntMax), param, 1920, 1080);
+    REQUIRE(covering_result == cosmo::util::Box(0, 0, 1920, 1080));
+
+    auto outside_result =
+        cosmo::util::DoScaleBox(cosmo::util::Box(kIntMax, kIntMax, kIntMax, kIntMax), param, 1920, 1080);
+    REQUIRE(outside_result == cosmo::util::Box(1920, 1080, 0, 0));
+}
+
+TEST_CASE("DoScaleBox - rejects non-finite scale", "[Geometric]") {
+    cosmo::util::TargetScalerParam param;
+    param.scale_side = std::numeric_limits<float>::infinity();
+
+    auto result = cosmo::util::DoScaleBox(cosmo::util::Box(10, 10, 100, 100), param, 1920, 1080);
+    REQUIRE(result.empty());
+}
+
 TEST_CASE("IntersectionUnionRatio", "[Geometric]") {
     SECTION("Identical boxes") {
         cosmo::util::Box box(0, 0, 100, 100);

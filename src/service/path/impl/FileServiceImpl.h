@@ -8,6 +8,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <vector>
@@ -25,7 +26,7 @@ static constexpr int kWorkerThreadCount = 4;
 
 class FileServiceImpl final : public IFileService {
 public:
-    FileServiceImpl() = default;
+    explicit FileServiceImpl(size_t workerQueueCapacity = 0xffff);
     ~FileServiceImpl();
 
     // -- IFileService --
@@ -51,11 +52,11 @@ private:
     void UpdateIpPort(const std::string& ip_port);
 
     // --- Thread pool ---
-    std::vector<std::unique_ptr<cosmo::service::CHttpFileServerCliThread>> worker_threads_;
-    std::atomic<int> current_img_idx_{-1};
+    std::vector<std::shared_ptr<cosmo::service::CHttpFileServerCliThread>> worker_threads_;
+    std::atomic<size_t> current_img_idx_{0};
+    std::mutex worker_mutex_;
     cosmo::network::http::HttpFileServerCli http_file_cli_;
     cosmo::network::http::HttpPost http_post_;
-    bool has_file_server_ = true;
 
     // --- URL cache ---
     std::map<FileType, std::list<std::string>> url_buffer_;

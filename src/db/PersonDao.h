@@ -51,6 +51,9 @@ public:
     bool RemovePerson(const std::string& person_id);
     // Remove relation
     bool RemoveFacesetPersonRelation(const std::string& person_id, const std::string& faceset_token);
+    // Remove one relation; remove the person and faces only when it was the
+    // final relation.
+    bool RemovePersonFromFaceLib(const std::string& person_id, const std::string& faceset_token);
 
 private:
     bool AddPersonDetail(const FaceRegRecordUnit& person, int64_t time);

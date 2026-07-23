@@ -6,6 +6,7 @@
  * Uses a temporary directory created in /tmp for test isolation.
  */
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 
 #include "util/FileUtil.h"
@@ -78,6 +79,27 @@ TEST_CASE("FileUtil: WriteFileAppend", "[file-util]") {
     WriteFileAppend(file_path, " second");
     auto content = ReadFile(file_path);
     REQUIRE(content == "first second");
+
+    CleanupTestDir(dir);
+}
+
+TEST_CASE("FileUtil: WriteFileAtomically", "[file-util]") {
+    auto dir = CreateTestDir();
+    REQUIRE_FALSE(dir.empty());
+
+    const std::string target   = dir + "/config.json";
+    const std::string sentinel = dir + "/sentinel.json";
+    REQUIRE(WriteFile(target, "old"));
+    REQUIRE(WriteFileAtomically(target, "new"));
+    REQUIRE(ReadFile(target) == "new");
+
+    REQUIRE(WriteFile(sentinel, "keep"));
+    REQUIRE(std::filesystem::remove(target));
+    REQUIRE_NOTHROW(std::filesystem::create_symlink(sentinel, target));
+    REQUIRE(WriteFileAtomically(target, "replacement"));
+    REQUIRE(ReadFile(target) == "replacement");
+    REQUIRE(ReadFile(sentinel) == "keep");
+    REQUIRE(std::filesystem::is_regular_file(std::filesystem::symlink_status(target)));
 
     CleanupTestDir(dir);
 }

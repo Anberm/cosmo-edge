@@ -388,6 +388,14 @@ export default {
       data,
     })
   },
+  cancelAtomicModelUpload: (data) => {
+    return request({
+      url: '/gtw/cwai/atomic/model/cancelUpload',
+      method: 'post',
+      data,
+      silentError: true
+    })
+  },
   // 添加原子模型接口
   addAtomicModel: (data) => {
     return request({

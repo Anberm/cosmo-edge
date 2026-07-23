@@ -3,16 +3,25 @@
 #include "media/VideoDecoderSophon.h"
 
 #include <chrono>
+#include <limits>
 #include <thread>
 
 #include "media/PixelFormatUtils.h"
 #include "util/Log.h"
 #include "util/TimingConstants.h"
+#include "util/VideoInfo.h"
 
 // BM1688 VPU hardware decoder's create/delete share underlying hardware resources (VPU core, frame buffer
 // pool). Concurrent execution of bmvpu_dec_create and bmvpu_dec_delete may corrupt the active decoder's
 // handle, returning BM_ERR_VDEC_ILLEGAL_PARAM. This global lock serializes all VPU lifecycle operations.
 static std::mutex g_vpuLifecycleMutex;
+
+namespace {
+// A newly created VPU channel, or one starting a repeated file sequence, can transiently report
+// WRONG_RESOLUTION until enough packets have arrived. Bound the warmup window by output attempts
+// so an invalid stream still becomes visible promptly while allowing the caller to feed packets.
+constexpr unsigned int kOutputWarmupAttemptBudget = 16;
+}  // namespace
 
 namespace cosmo {
 namespace media {
@@ -43,10 +52,23 @@ namespace media {
     }
 
     bool VideoDecoderSophon::IsOpened() {
-        return opened_;
+        return opened_.load() && !stop_.load();
     }
 
     bool VideoDecoderSophon::Open() {
+        std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+        if (opened_.load()) {
+            if (!stop_.load()) {
+                return true;
+            }
+            LOG_ERRO("{} cannot reopen after an incomplete decoder close", idx_name_);
+            return false;
+        }
+        if (bm_handle_ == nullptr || code_handle_ != nullptr) {
+            LOG_ERRO("{} cannot open decoder with an invalid device or lifecycle state", idx_name_);
+            return false;
+        }
+
         if (codec_type_ == VideoCodecType::kH265) {
             stream_format_ = BmVpuDecStreamFormat::BMDEC_HEVC;
         } else if (codec_type_ == VideoCodecType::kH264) {
@@ -69,51 +91,73 @@ namespace media {
         dec_params.wtlFormat           = BmVpuDecOutputMapType::BMDEC_OUTPUT_UNMAP;
         dec_params.pixel_format        = BmVpuDecPixFormat::BM_VPU_DEC_PIX_FORMAT_YUV420P;
 
+        auto next_frame            = std::make_unique<BMVidFrame>();
+        BMVidCodHandle next_handle = nullptr;
         int ret;
         {
             std::lock_guard<std::mutex> vpuLock(g_vpuLifecycleMutex);
-            ret = bmvpu_dec_create(&code_handle_, dec_params);
+            ret = bmvpu_dec_create(&next_handle, dec_params);
         }
-        if (ret != BM_SUCCESS) {
+        if (ret != BM_ERR_VDEC_SUCCESS || next_handle == nullptr) {
             LOG_WARN("{} bmvpu_dec_create failed ret:{}", idx_name_, ret);
             return false;
         }
 
-        frame_  = std::make_unique<BMVidFrame>();
-        stop_   = false;
-        opened_ = true;
+        code_handle_                      = next_handle;
+        frame_                            = std::move(next_frame);
+        output_warmup_attempts_remaining_ = kOutputWarmupAttemptBudget;
+        last_input_frame_index_           = -1;
+        stop_.store(false);
+        opened_.store(true);
         LOG_INFO("{} VPU decoder opened", idx_name_);
         return true;
     }
 
     bool VideoDecoderSophon::Close() {
-        std::lock_guard<std::mutex> lock(close_mutex_);
-        if (!opened_)
+        stop_.store(true);
+        std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+        if (!opened_.load() && code_handle_ == nullptr) {
             return true;
+        }
 
-        stop_ = true;
-
-        std::this_thread::sleep_for(timing::kMediumPollInterval);
         {
             std::lock_guard<std::mutex> vpuLock(g_vpuLifecycleMutex);
             if (code_handle_) {
-                bmvpu_dec_delete(code_handle_);
+                const auto ret = bmvpu_dec_delete(code_handle_);
+                if (ret != BM_ERR_VDEC_SUCCESS) {
+                    LOG_ERRO("{} bmvpu_dec_delete failed: {}", idx_name_, ret);
+                    return false;
+                }
                 code_handle_ = nullptr;
             }
         }
 
         frame_.reset();
+        output_warmup_attempts_remaining_ = 0;
+        last_input_frame_index_           = -1;
 
-        opened_ = false;
+        opened_.store(false);
         LOG_INFO("{} VPU decoder closed", idx_name_);
         return true;
     }
 
     bool VideoDecoderSophon::SendPacket(const uint8_t* pkt, size_t len, int64_t frame_idx) {
-        if (stop_)
+        if (stop_.load() || (pkt == nullptr && len != 0) || len > std::numeric_limits<unsigned int>::max()) {
             return false;
+        }
 
-        BMVidStream stream;
+        std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+        if (stop_.load() || !opened_.load() || code_handle_ == nullptr) {
+            return false;
+        }
+
+        // Local-file repeat keeps the same decoder but resets packet indices. The VPU then
+        // re-enters sequence initialization and may briefly report WRONG_RESOLUTION.
+        if (frame_idx >= 0 && last_input_frame_index_ >= 0 && frame_idx < last_input_frame_index_) {
+            output_warmup_attempts_remaining_ = kOutputWarmupAttemptBudget;
+        }
+
+        BMVidStream stream{};
         // SAFETY: BMVidStream.buf is non-const but bmvpu_dec_decode only reads
         // the packet data. const_cast required at Sophon VPU C API boundary.
         stream.buf            = const_cast<uint8_t*>(pkt);
@@ -126,67 +170,135 @@ namespace media {
         stream.extradata      = nullptr;
         stream.extradata_size = 0;
 
-        BMVidDecRetStatus ret;
-        while ((ret = bmvpu_dec_decode(code_handle_, stream)) != BMVidDecRetStatus::BM_ERR_VDEC_SUCCESS) {
-            if (ret == BMVidDecRetStatus::BM_ERR_VDEC_ILLEGAL_PARAM) {
+        constexpr int kMaxDecodeAttempts = 100;
+        for (int attempt = 0; attempt < kMaxDecodeAttempts; ++attempt) {
+            const auto ret = bmvpu_dec_decode(code_handle_, stream);
+            if (ret == BMVidDecRetStatus::BM_ERR_VDEC_SUCCESS) {
+                last_input_frame_index_ = frame_idx;
+                return true;
+            }
+            if (ret != BMVidDecRetStatus::BM_ERR_VDEC_BUF_FULL &&
+                ret != BMVidDecRetStatus::BM_ERR_VDEC_NOBUF && ret != BMVidDecRetStatus::BM_ERR_VDEC_BUSY) {
+                LOG_WARN("{} bmvpu_dec_decode failed: {}", idx_name_, ret);
                 return false;
             }
-
+            if (stop_.load()) {
+                return false;
+            }
             std::this_thread::sleep_for(timing::kSpinWaitInterval);
         }
-
-        return true;
+        LOG_WARN("{} bmvpu_dec_decode remained busy after {} attempts", idx_name_, kMaxDecodeAttempts);
+        return false;
     }
 
     VideoFramePtr VideoDecoderSophon::GetFrame() {
-        if (stop_ || !code_handle_)
+        if (stop_.load()) {
             return nullptr;
+        }
+
+        std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+        if (stop_.load() || !opened_.load() || !code_handle_ || !frame_) {
+            return nullptr;
+        }
+
+        const auto clear_output = [this]() {
+            const auto ret = bmvpu_dec_clear_output(code_handle_, frame_.get());
+            if (ret != BM_ERR_VDEC_SUCCESS) {
+                LOG_ERRO("{} bmvpu_dec_clear_output failed: {}", idx_name_, ret);
+                return false;
+            }
+            return true;
+        };
 
         // cppcheck-suppress knownConditionTrueFalse
-        while (!stop_) {
+        while (!stop_.load()) {
             auto ret = bmvpu_dec_get_output(code_handle_, frame_.get());
             if (ret != BMVidDecRetStatus::BM_ERR_VDEC_SUCCESS) {
-                if (ret != BMVidDecRetStatus::BM_ERR_VDEC_BUF_EMPTY) {
-                    LOG_WARN("bmvpu_dec_get_output failed: {}", ret);
+                if (ret == BMVidDecRetStatus::BM_ERR_VDEC_BUF_EMPTY) {
+                    return nullptr;
                 }
+                const auto status = bmvpu_dec_get_status(code_handle_);
+                if (ret == BMVidDecRetStatus::BM_ERR_VDEC_ILLEGAL_PARAM &&
+                    status == BMDecStatus::BMDEC_WRONG_RESOLUTION && output_warmup_attempts_remaining_ > 0) {
+                    --output_warmup_attempts_remaining_;
+                    return nullptr;
+                }
+                LOG_WARN("{} bmvpu_dec_get_output failed: {}, status: {}, warmup attempts remaining: {}",
+                         idx_name_, ret, status, output_warmup_attempts_remaining_);
                 return nullptr;
             }
 
+            if (output_warmup_attempts_remaining_ > 0) {
+                --output_warmup_attempts_remaining_;
+            }
+
             auto pkt_cnt = bmvpu_dec_get_pkt_in_buf_cnt(code_handle_);
+            if (pkt_cnt < 0) {
+                LOG_WARN("{} bmvpu_dec_get_pkt_in_buf_cnt failed: {}", idx_name_, pkt_cnt);
+                (void)clear_output();
+                return nullptr;
+            }
             if (static_cast<size_t>(pkt_cnt) > cache_size_ / 2) {
                 LOG_WARN("{}", "throw away a frame");
-                bmvpu_dec_clear_output(code_handle_, frame_.get());
+                if (!clear_output()) {
+                    return nullptr;
+                }
                 continue;
             }
             break;
         }
 
+        if (stop_.load()) {
+            return nullptr;
+        }
+
         BmImagePtr vpu_frame_image(new bm_image());
         if (!AttachVideoFrame(vpu_frame_image.get(), frame_.get())) {
-            bmvpu_dec_clear_output(code_handle_, frame_.get());
+            (void)clear_output();
             return nullptr;
         }
 
         width_                    = frame_->width;
         height_                   = frame_->height;
         VideoFramePtr video_frame = std::make_shared<VideoFrame>(width_, height_, PixelFormat::PIXEL_I420);
+        if (!VideoFrameValid(video_frame, true)) {
+            (void)clear_output();
+            return nullptr;
+        }
 
         BmImagePtr output_frame_image(new bm_image());
         if (!AttachOutputFrame(output_frame_image.get(), frame_.get(), video_frame)) {
             video_frame.reset();
-            bmvpu_dec_clear_output(code_handle_, frame_.get());
+            (void)clear_output();
             return nullptr;
         }
 
-        (void)bmcv_image_storage_convert(bm_handle_, 1, vpu_frame_image.get(), output_frame_image.get());
-        bmvpu_dec_clear_output(code_handle_, frame_.get());
+        const auto frame_index = frame_->dts;
+        const auto convert_ret =
+            bmcv_image_storage_convert(bm_handle_, 1, vpu_frame_image.get(), output_frame_image.get());
+        const bool clear_success = clear_output();
+        if (convert_ret != BM_SUCCESS || !clear_success) {
+            LOG_ERRO("{} decoded frame conversion/clear failed: convert={}", idx_name_, convert_ret);
+            return nullptr;
+        }
 
-        video_frame->SetFrameIndex(frame_->dts);
+        video_frame->SetFrameIndex(frame_index);
 
         return video_frame;
     }
 
     bool VideoDecoderSophon::AttachVideoFrame(bm_image* image, BMVidFrame* frame) {
+        if (image == nullptr || frame == nullptr || frame->width == 0 || frame->height == 0 ||
+            frame->width > static_cast<unsigned int>(kVideoMaxWidth) ||
+            frame->height > static_cast<unsigned int>(kVideoMaxHeight) || (frame->width % 2) != 0 ||
+            (frame->height % 2) != 0 || frame->stride[4] < static_cast<int>(frame->width) ||
+            frame->stride[5] < static_cast<int>(frame->width / 2) ||
+            frame->stride[6] < static_cast<int>(frame->width / 2) || frame->buf[4] == nullptr ||
+            frame->buf[5] == nullptr || frame->buf[6] == nullptr) {
+            LOG_ERRO("{} invalid decoded frame layout", idx_name_);
+            return false;
+        }
+
         auto status =
             bm_image_create(bm_handle_, static_cast<int>(frame->height), static_cast<int>(frame->width),
                             bm_image_format_ext::FORMAT_YUV420P, DATA_TYPE_EXT_1N_BYTE, image, frame->stride);
@@ -195,20 +307,28 @@ namespace media {
             return false;
         }
 
-        auto y_stride = frame->stride[4];
-        auto c_stride = frame->stride[5];
+        const auto y_stride = static_cast<size_t>(frame->stride[4]);
+        const auto u_stride = static_cast<size_t>(frame->stride[5]);
+        const auto v_stride = static_cast<size_t>(frame->stride[6]);
 
-        size_t y_size = static_cast<size_t>(y_stride) * frame->height;
+        const size_t y_size = y_stride * frame->height;
+        const size_t u_size = u_stride * frame->height / 2;
+        const size_t v_size = v_stride * frame->height / 2;
+        if (y_size == 0 || u_size == 0 || v_size == 0 || y_size > std::numeric_limits<unsigned int>::max() ||
+            u_size > std::numeric_limits<unsigned int>::max() ||
+            v_size > std::numeric_limits<unsigned int>::max()) {
+            LOG_ERRO("{} decoded frame planes exceed device descriptor limits", idx_name_);
+            return false;
+        }
 
         bm_device_mem_t devs[3];
         devs[0] = bm_mem_from_device(reinterpret_cast<unsigned long long>(frame->buf[4]),
                                      static_cast<unsigned int>(y_size));
 
-        size_t c_size = static_cast<size_t>(c_stride) * frame->height / 2;
-        devs[1]       = bm_mem_from_device(reinterpret_cast<unsigned long long>(frame->buf[5]),
-                                           static_cast<unsigned int>(c_size));
-        devs[2]       = bm_mem_from_device(reinterpret_cast<unsigned long long>(frame->buf[6]),
-                                           static_cast<unsigned int>(c_size));
+        devs[1] = bm_mem_from_device(reinterpret_cast<unsigned long long>(frame->buf[5]),
+                                     static_cast<unsigned int>(u_size));
+        devs[2] = bm_mem_from_device(reinterpret_cast<unsigned long long>(frame->buf[6]),
+                                     static_cast<unsigned int>(v_size));
 
         status = bm_image_attach(*image, devs);
         if (status != bm_status_t::BM_SUCCESS) {
@@ -220,8 +340,23 @@ namespace media {
     }
 
     bool VideoDecoderSophon::AttachOutputFrame(bm_image* image, BMVidFrame* frame, VideoFramePtr frame_ptr) {
-        auto image_width  = frame->width;
-        auto image_height = frame->height;
+        if (image == nullptr || frame == nullptr || !VideoFrameValid(frame_ptr, true) || frame->width == 0 ||
+            frame->height == 0 || frame->width > static_cast<unsigned int>(kVideoMaxWidth) ||
+            frame->height > static_cast<unsigned int>(kVideoMaxHeight) || (frame->width % 2) != 0 ||
+            (frame->height % 2) != 0) {
+            LOG_ERRO("{} invalid output frame layout", idx_name_);
+            return false;
+        }
+
+        auto image_width         = frame->width;
+        auto image_height        = frame->height;
+        const auto expected_size = PixelFormatUtils::CalculateFrameSize(
+            static_cast<int>(image_width), static_cast<int>(image_height), PixelFormat::PIXEL_I420);
+        if (!expected_size || *expected_size != frame_ptr->GetSize() ||
+            *expected_size > std::numeric_limits<unsigned int>::max()) {
+            LOG_ERRO("{} output frame size is invalid", idx_name_);
+            return false;
+        }
 
         auto status =
             bm_image_create(bm_handle_, static_cast<int>(frame->height), static_cast<int>(frame->width),
@@ -236,19 +371,23 @@ namespace media {
             LOG_ERRO("{}", "get bm_mem_desc_t failed");
             return false;
         }
+        if (bm_mem_get_device_size(*frame_device_mem) < *expected_size) {
+            LOG_ERRO("{} output frame allocation is too small", idx_name_);
+            return false;
+        }
 
-        auto addr = bm_mem_get_device_addr(*frame_device_mem);
+        const auto addr     = bm_mem_get_device_addr(*frame_device_mem);
+        const size_t y_size = static_cast<size_t>(image_width) * image_height;
+        const size_t c_size = y_size / 4;
 
         bm_device_mem_t devs[3];
-        devs[0] = bm_mem_from_device(addr, image_width * image_height);
+        devs[0] = bm_mem_from_device(addr, static_cast<unsigned int>(y_size));
 
-        auto u_addr = reinterpret_cast<unsigned long long>(reinterpret_cast<uint8_t*>(addr) +
-                                                           image_width * image_height);
-        devs[1]     = bm_mem_from_device(u_addr, image_width * image_height / 4);
+        const auto u_addr = addr + y_size;
+        devs[1]           = bm_mem_from_device(u_addr, static_cast<unsigned int>(c_size));
 
-        auto v_addr = reinterpret_cast<unsigned long long>(reinterpret_cast<uint8_t*>(u_addr) +
-                                                           image_width * image_height / 4);
-        devs[2]     = bm_mem_from_device(v_addr, image_width * image_height / 4);
+        const auto v_addr = u_addr + c_size;
+        devs[2]           = bm_mem_from_device(v_addr, static_cast<unsigned int>(c_size));
 
         status = bm_image_attach(*image, devs);
         if (status != bm_status_t::BM_SUCCESS) {

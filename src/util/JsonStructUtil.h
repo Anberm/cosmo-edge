@@ -89,7 +89,7 @@ template <typename Type>
     if (!EncodeJson(t, content)) {
         return false;
     }
-    return WriteFile(file_path, content);
+    return WriteFileAtomically(file_path, content);
 }
 
 }  // namespace cosmo::util

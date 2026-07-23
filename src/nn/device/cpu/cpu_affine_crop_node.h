@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
 
 #include "nn/node/node.h"
 
@@ -44,4 +44,4 @@ private:
 
 }  // namespace cosmo::nn
 
-#endif  // COSMO_NN_USE_CPU_BACKEND
+#endif  // COSMO_NN_USE_HOST_BACKEND

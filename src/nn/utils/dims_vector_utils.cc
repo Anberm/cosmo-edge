@@ -1,15 +1,29 @@
 #include "nn/utils/dims_vector_utils.h"
 
+#include <limits>
+
 namespace cosmo::nn {
 
 int DimsVectorUtils::Count(const DimsVector& dims, int start, int end) {
-    if (end == -1 || end > dims.size()) {
+    if (start < 0 || start > static_cast<int>(dims.size()) || end < -1) {
+        return -1;
+    }
+
+    if (end == -1 || end > static_cast<int>(dims.size())) {
         end = static_cast<int>(dims.size());
+    }
+
+    if (start > end) {
+        return -1;
     }
 
     int result = 1;
     for (int index = start; index < end; ++index) {
-        result *= dims.at(index);
+        const int dim = dims.at(index);
+        if (dim < 0 || (dim != 0 && result > std::numeric_limits<int>::max() / dim)) {
+            return -1;
+        }
+        result *= dim;
     }
 
     return result;

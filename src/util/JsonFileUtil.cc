@@ -32,12 +32,10 @@ cosmo::util::ErrorEnum JsonFileUtil::WriteJsonFile(const std::string& file_path,
         LOG_ERRO("Failed to create directory: {}", dir_path);
         return cosmo::util::ErrorEnum::Failed;
     }
-    std::ofstream ofs(file_path);
-    if (!ofs.is_open()) {
-        LOG_ERRO("Failed to open file for writing: {}", file_path);
+    if (!cosmo::util::WriteFileAtomically(file_path, doc.dump(2))) {
+        LOG_ERRO("Failed to write file atomically: {}", file_path);
         return cosmo::util::ErrorEnum::Failed;
     }
-    ofs << doc.dump(2);
     return cosmo::util::ErrorEnum::Success;
 }
 

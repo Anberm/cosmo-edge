@@ -24,7 +24,11 @@ public:
     bool SupportsRoute(const std::string& /*uri*/) override {
         return false;
     }
-    bool DispatchRequest(const std::string& /*uri*/, const std::string& /*mtk*/, const std::string& /*body*/,
+    cosmo::RequestAdmission InspectRequest(cosmo::RequestDispatchContext& /*context*/,
+                                           bool /*require_known_route*/) override {
+        return cosmo::RequestAdmission::kRouteNotFound;
+    }
+    bool DispatchRequest(const cosmo::RequestDispatchContext& /*context*/, const std::string& /*body*/,
                          std::string& /*response*/) override {
         return false;
     }
@@ -82,6 +86,7 @@ TEST_CASE("NetworkServiceImpl: HttpInit and Stop lifecycle", "[network-service]"
                            []() { return std::make_unique<StubDispatcher>(); });
 
     SECTION("StopHttpServer without Init is safe") {
+        REQUIRE_NOTHROW(sut.RequestHttpStop());
         REQUIRE_NOTHROW(sut.StopHttpServer());
     }
 
@@ -118,6 +123,19 @@ TEST_CASE("NetworkServiceImpl: IsMqttRegistered and IsMqttEnabled initial state"
 
     SECTION("MqttStop before MqttStart is safe") {
         REQUIRE_NOTHROW(sut.MqttStop());
+    }
+
+    SECTION("MqttShutdown is safe and idempotent") {
+        REQUIRE_NOTHROW(sut.MqttShutdown());
+        REQUIRE_NOTHROW(sut.MqttShutdown());
+        REQUIRE_NOTHROW(sut.MqttStart());
+    }
+
+    SECTION("StopAsyncApply is safe and idempotent without an update") {
+        REQUIRE_NOTHROW(sut.StopAsyncApply());
+        REQUIRE_NOTHROW(sut.StopAsyncApply());
+        cosmo::platform::NetCardInfo info;
+        REQUIRE_NOTHROW(sut.ApplyCardInfoAsync(info));
     }
 
     std::filesystem::current_path(oldPath);

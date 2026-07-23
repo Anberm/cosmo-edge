@@ -5,6 +5,7 @@
 
 #include <list>
 #include <mutex>
+#include <shared_mutex>
 
 #include "network/http/HttpRequest.h"
 #include "service/event/IAlarmPushService.h"
@@ -32,13 +33,14 @@ public:
 
     // IAlarmPushService
     void Init() override;
+    void Stop() override;
     bool IsEnabled() override;
     std::string GetUrl() override;
     cosmo::util::ErrorEnum SetPush(bool enable, const std::string& url) override;
 
 private:
     AlarmPushParam GetInfo();
-    void SaveCfg();
+    bool SaveCfg(const AlarmPushParam& config);
     void AppendHeader(cosmo::network::http::HttpRequest& hrt);
     template <typename IN, typename OUT>
     bool Submit(std::string url, IN& rgtIn, OUT& rgtOut, int timeout_sec = 10);
@@ -47,6 +49,8 @@ private:
     bool OnEvents(cosmo::CMsgOnEventsReq&& reqEvent);
     void OfflinePush();
     bool OfflinePushData(AlarmEventRecord& data);
+    std::mutex lifecycle_mtx_;
+    bool stop_requested_{false};
     std::shared_mutex mtx_;
     std::string conf_file_name_{"HttpAlarmPush.json"};
     std::unique_ptr<cosmo::PeriodicTimer> timer_;

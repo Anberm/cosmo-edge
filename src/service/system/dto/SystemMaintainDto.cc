@@ -54,6 +54,7 @@ void to_json(nlohmann::json& j, const MsgUpgradeRecv& v) {
     j["contentLength"] = v.contentLength;
     j["fileName"]      = v.fileName;
     j["filePath"]      = v.filePath;
+    j["uploadId"]      = v.uploadId;
     j["fileUrl"]       = v.fileUrl;
 }
 
@@ -62,6 +63,7 @@ void from_json(const nlohmann::json& j, MsgUpgradeRecv& v) {
     JSON_OPT(j, v, contentLength);
     JSON_OPT(j, v, fileName);
     JSON_OPT(j, v, filePath);
+    JSON_OPT(j, v, uploadId);
     JSON_OPT(j, v, fileUrl);
 }
 

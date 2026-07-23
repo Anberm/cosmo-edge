@@ -6,12 +6,17 @@
  * 测试策略: 不调用 InitCameraEntities（需要文件系统和DI），
  * 仅测试不依赖外部状态的纯逻辑路径。
  */
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <thread>
 #include <vector>
 
 #include "mock/MockServiceRegistry.h"
+#include "mock/MockTaskService.h"
 #include "service/camera/impl/CameraServiceImpl.h"
 
 using namespace cosmo::service;
@@ -27,6 +32,18 @@ TEST_CASE("CameraServiceImpl: construction and destruction without Init", "[Came
         CameraServiceImpl svc;
         // destructor runs here
     }());
+}
+
+TEST_CASE("CameraServiceImpl: Stop is safe and idempotent without Init", "[CameraService][lifecycle]") {
+    CameraServiceImpl svc;
+    REQUIRE_NOTHROW(svc.Stop());
+    REQUIRE_NOTHROW(svc.Stop());
+    REQUIRE_NOTHROW(svc.InitCameraEntities());
+
+    MsgCameraInfo config;
+    config.videoChannelId = "camera-after-stop";
+    std::string id;
+    REQUIRE(svc.Add(config, id) == cosmo::util::ErrorEnum::SysErr);
 }
 
 // ============================================================
@@ -183,6 +200,61 @@ TEST_CASE("CameraServiceImpl: concurrent Query calls are safe", "[CameraService]
     }
 
     REQUIRE(readCount.load() > 0);
+}
+
+TEST_CASE("CameraServiceImpl: concurrent explicit-id Add creates one camera",
+          "[CameraService][concurrency]") {
+    const auto test_base = "/tmp/cosmo_camera_add_concurrency_" +
+                           std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_base);
+    cosmo::path::OverrideRootPathForTest(test_base, test_base);
+
+    cosmo::test::MockServiceRegistry mocks;
+    ALLOW_CALL(mocks.taskSvc, TaskCreate(trompeloeil::_, trompeloeil::_, trompeloeil::_, trompeloeil::_))
+        .RETURN(cosmo::util::ErrorEnum::Success);
+    ALLOW_CALL(mocks.taskSvc, TaskChannelSetUrl(trompeloeil::_, trompeloeil::_));
+
+    CameraServiceImpl svc;
+    std::atomic<bool> go{false};
+    std::array<cosmo::util::ErrorEnum, 2> results{};
+    std::vector<std::thread> adders;
+    for (size_t i = 0; i < results.size(); ++i) {
+        adders.emplace_back([&, i]() {
+            MsgCameraInfo config;
+            config.videoChannelId = "fixed-camera-id";
+            config.channelName    = "camera";
+            config.url            = "rtsp://127.0.0.1:1/test";
+            config.channelType    = MsgCameraType::MsgCameraTypeLive;
+            std::string id;
+            while (!go.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            results[i] = svc.Add(config, id);
+        });
+    }
+    go.store(true, std::memory_order_release);
+    for (auto& adder : adders) {
+        adder.join();
+    }
+
+    const auto success_count   = std::count(results.begin(), results.end(), cosmo::util::ErrorEnum::Success);
+    const auto duplicate_count = std::count(results.begin(), results.end(), cosmo::util::ErrorEnum::IDExist);
+    REQUIRE(success_count == 1);
+    REQUIRE(duplicate_count == 1);
+
+    size_t total = 0;
+    auto cameras = svc.Query("", -1, 1, 10, total);
+    REQUIRE(total == 1);
+    REQUIRE(cameras.size() == 1);
+
+    REQUIRE_CALL(mocks.taskSvc, TaskStop("fixed-camera-id-ChannelTask")).RETURN(true);
+    REQUIRE_CALL(mocks.taskSvc, TaskDelete("fixed-camera-id-ChannelTask"))
+        .RETURN(cosmo::util::ErrorEnum::Success);
+    REQUIRE_NOTHROW(svc.Stop());
+    REQUIRE_NOTHROW(svc.Stop());
+
+    std::filesystem::remove_all(test_base);
+    cosmo::path::OverrideRootPathForTest("/tmp/cosmo_test", "/tmp/cosmo_test_app");
 }
 
 // ============================================================

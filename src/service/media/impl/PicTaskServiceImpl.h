@@ -52,11 +52,15 @@ public:
 
 private:
     std::string GetRealTask(const std::string& taskId);
+    void DestroyTask(const cosmo::PTaskElementPtr& task) noexcept;
+    void DeleteAllTasksImpl();
 
     std::shared_mutex mtx_;
+    std::mutex shutdown_mtx_;
     std::unique_ptr<cosmo::PTaskBase> task_base_;
     std::string node_algorithm_check_sum_;
     std::map<std::string, cosmo::PTaskElementPtr> tasks_;
+    bool stopping_{false};
 };
 
 }  // namespace cosmo::service

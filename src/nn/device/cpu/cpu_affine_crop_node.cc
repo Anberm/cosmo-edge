@@ -1,4 +1,4 @@
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
 
 #include "nn/device/cpu/cpu_affine_crop_node.h"
 
@@ -211,4 +211,4 @@ Status CpuAffineCropNode::Forward(std::vector<std::shared_ptr<Blob>>& /*bottom_b
 
 }  // namespace cosmo::nn
 
-#endif  // COSMO_NN_USE_CPU_BACKEND
+#endif  // COSMO_NN_USE_HOST_BACKEND

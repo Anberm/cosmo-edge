@@ -6,12 +6,14 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <regex>
 #include <sstream>
+#include <string_view>
 #include <unordered_set>
 
 #include "service/model/impl/ModelConfigParser.h"
@@ -27,6 +29,102 @@
 #include "util/TimeUtil.h"
 
 namespace cosmo::service {
+
+namespace {
+
+    constexpr size_t kMaxLegacyModelArchiveEntries         = 10000;
+    constexpr std::uintmax_t kMaxLegacyModelFileBytes      = 500ULL * 1024 * 1024;
+    constexpr std::uintmax_t kMaxLegacyModelExtractedBytes = 1024ULL * 1024 * 1024;
+
+    bool IsSafeArchiveMemberPath(std::string member) {
+        if (member.empty() || member.size() > 512 || member.front() == '/' ||
+            member.find('\\') != std::string::npos) {
+            return false;
+        }
+        while (!member.empty() && member.back() == '/') {
+            member.pop_back();
+        }
+        std::stringstream stream(member);
+        std::string component;
+        while (std::getline(stream, component, '/')) {
+            if (!cosmo::path::IsSafePathComponent(component)) {
+                return false;
+            }
+        }
+        return !member.empty();
+    }
+
+    bool ValidateZipMemberPaths(const std::string& archive_path) {
+        std::string listing;
+        if (cosmo::util::Exec({"unzip", "-Z", "-l", archive_path}, listing) != 0) {
+            return false;
+        }
+        size_t count              = 0;
+        size_t declared_count     = 0;
+        bool has_declared_count   = false;
+        std::uintmax_t total_size = 0;
+        std::istringstream stream(listing);
+        std::string line;
+        while (std::getline(stream, line)) {
+            constexpr std::string_view kEntryCountMarker = "number of entries:";
+            const auto count_pos                         = line.find(kEntryCountMarker);
+            if (line.compare(0, 14, "Zip file size:") == 0 && count_pos != std::string::npos) {
+                std::istringstream count_stream(line.substr(count_pos + kEntryCountMarker.size()));
+                if (!(count_stream >> declared_count) || declared_count > kMaxLegacyModelArchiveEntries) {
+                    return false;
+                }
+                has_declared_count = true;
+                continue;
+            }
+            if (line.size() < 10 || std::string("-dlcbpsh").find(line.front()) == std::string::npos) {
+                continue;
+            }
+            if (line.front() != '-' && line.front() != 'd') {
+                return false;
+            }
+
+            std::istringstream line_stream(line);
+            std::string permissions;
+            std::string version;
+            std::string system;
+            std::string text_mode;
+            std::string compressed_size;
+            std::string method;
+            std::string date;
+            std::string time;
+            std::string member;
+            std::uintmax_t entry_size = 0;
+            if (!(line_stream >> permissions >> version >> system >> entry_size >> text_mode >>
+                  compressed_size >> method >> date >> time)) {
+                return false;
+            }
+            std::getline(line_stream >> std::ws, member);
+            if (++count > kMaxLegacyModelArchiveEntries || entry_size > kMaxLegacyModelFileBytes ||
+                entry_size > kMaxLegacyModelExtractedBytes - total_size || !IsSafeArchiveMemberPath(member)) {
+                return false;
+            }
+            total_size += entry_size;
+        }
+        return count > 0 && has_declared_count && count == declared_count;
+    }
+
+    bool ValidateExtractedModelTree(const std::string& root) {
+        return cosmo::path::ValidateDirectoryTreeWithinRoot(
+            root, kMaxLegacyModelArchiveEntries, kMaxLegacyModelFileBytes, kMaxLegacyModelExtractedBytes);
+    }
+
+    bool IsZipFile(const std::string& path) {
+        std::ifstream stream(path, std::ios::binary);
+        std::array<unsigned char, 4> header{};
+        if (!stream.read(reinterpret_cast<char*>(header.data()), header.size())) {
+            return false;
+        }
+        return header[0] == 'P' && header[1] == 'K' &&
+               ((header[2] == 3 && header[3] == 4) || (header[2] == 5 && header[3] == 6) ||
+                (header[2] == 7 && header[3] == 8));
+    }
+
+}  // namespace
 
 struct ModelServiceImpl::ModelJsonOutputInfo {
     std::string label;
@@ -132,15 +230,48 @@ void ModelServiceImpl::Init() {
 }
 
 std::string ModelServiceImpl::UpzipModelFile(std::string filePath) {
-    std::string upload_path = cosmo::util::RemoveExtension(filePath);
-    std::vector<std::string> argv{"unzip", "-q", "-d", upload_path, filePath};
+    namespace fs           = std::filesystem;
+    const auto upload_root = cosmo::path::GetUploadPath();
+    std::string managed_archive;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(
+            upload_root, filePath, cosmo::path::PathEntryType::kRegularFile, managed_archive)) {
+        LOG_WARN("{}", "Reject unmanaged or unsafe legacy model archive");
+        return {};
+    }
+    std::error_code archive_ec;
+    const auto archive_size = fs::file_size(managed_archive, archive_ec);
+    if (archive_ec || archive_size == 0 || archive_size > kMaxLegacyModelFileBytes ||
+        !IsZipFile(managed_archive) || !ValidateZipMemberPaths(managed_archive)) {
+        LOG_WARN("{}", "Reject invalid legacy model archive");
+        return {};
+    }
+
+    std::string upload_path;
+    if (!cosmo::path::ResolvePathWithinRoot(upload_root, cosmo::util::RemoveExtension(managed_archive),
+                                            upload_path)) {
+        return {};
+    }
+    std::error_code ec;
+    const auto status = fs::symlink_status(upload_path, ec);
+    if ((!ec && fs::exists(status)) || fs::is_symlink(status)) {
+        LOG_WARN("Legacy model extraction destination already exists: {}", upload_path);
+        return {};
+    }
+
+    std::vector<std::string> argv{"unzip", "-q", "-d", upload_path, managed_archive};
     std::string out_str;
     auto ret = cosmo::util::Exec(argv, out_str);
     if (ret != 0) {
-        LOG_WARN("unzip -q -d {} {} Failed Result:{}", upload_path, filePath, out_str);
+        LOG_WARN("unzip legacy model into {} failed: {}", upload_path, out_str);
+        fs::remove_all(upload_path, ec);
         return "";
     }
-    LOG_INFO("unzip -q -d {} {} OK", upload_path, filePath);
+    if (!ValidateExtractedModelTree(upload_path)) {
+        LOG_WARN("Legacy model archive extracted unsafe entries into {}", upload_path);
+        fs::remove_all(upload_path, ec);
+        return "";
+    }
+    LOG_INFO("Unpacked managed legacy model archive into {}", upload_path);
     return upload_path;
 }
 
@@ -228,13 +359,26 @@ cosmo::util::ErrorEnum ModelServiceImpl::ModelAdd(const std::string& filePath) {
     }
 
     // Move the unzipped model to the models directory
+    const auto destination_name = cosmo::util::GetFileName(un_zip_file);
+    std::string model_path;
+    if (!cosmo::path::IsSafePathComponent(destination_name, 200) ||
+        !cosmo::path::ResolvePathWithinRoot(
+            GetModelPath(), (std::filesystem::path(GetModelPath()) / destination_name).string(),
+            model_path)) {
+        LOG_WARN("Reject unsafe legacy model destination: {}", destination_name);
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    std::error_code destination_ec;
+    const auto destination_status = std::filesystem::symlink_status(model_path, destination_ec);
+    if (!destination_ec && std::filesystem::exists(destination_status)) {
+        LOG_WARN("Refusing to merge legacy model into existing destination: {}", model_path);
+        return cosmo::util::ErrorEnum::ExistedName;
+    }
     auto temp = cosmo::util::FileMove(un_zip_file, GetModelPath());
     if (!temp) {
         LOG_WARN("Move {} to file {} Failed", un_zip_file, GetModelPath());
         return cosmo::util::ErrorEnum::FileMoveFailed;
     }
-    auto model_path =
-        (std::filesystem::path(GetModelPath()) / cosmo::util::GetFileName(un_zip_file)).string();
     SetModelPathMapping(modelInfo.algorithm_code, model_path);
 
     LOG_INFO("ModelAdd {} -> {} Success", filePath, model_path);

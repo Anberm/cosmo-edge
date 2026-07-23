@@ -1,4 +1,4 @@
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_HOST_BACKEND
 
 #include "nn/device/cpu/cpu_sequence_node.h"
 
@@ -195,4 +195,4 @@ Status CpuSequenceNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs
 
 }  // namespace cosmo::nn
 
-#endif  // COSMO_NN_USE_CPU_BACKEND
+#endif  // COSMO_NN_USE_HOST_BACKEND

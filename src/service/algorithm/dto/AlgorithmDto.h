@@ -82,6 +82,7 @@ namespace Algorithm {
         std::string contentLength;
         std::string fileName;
         std::string filePath;
+        std::string uploadId;
     };
 
     void to_json(nlohmann::json& j, const MsgUploadRecv& v);

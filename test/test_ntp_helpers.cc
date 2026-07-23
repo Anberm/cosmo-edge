@@ -128,6 +128,39 @@ TEST_CASE("NtpHelpers: InitPacket sets correct NTP client fields", "[ntp][helper
     }
 }
 
+TEST_CASE("NtpHelpers: validates NTP response identity and server state", "[ntp][helpers]") {
+    NtpTime request_time{};
+    TimevalToTimestamp(request_time, 1700000000, 123456);
+
+    NtpPacket response{};
+    response.li_vn_mode   = static_cast<int8_t>((4 << 3) | 4);
+    response.stratum      = 2;
+    response.originate_ts = request_time;
+    TimevalToTimestamp(response.receive_ts, 1700000000, 223456);
+    TimevalToTimestamp(response.transmit_ts, 1700000000, 323456);
+
+    REQUIRE(ValidateNtpResponse(response, request_time));
+
+    SECTION("Rejects an unrelated response") {
+        ++response.originate_ts.fraction;
+        REQUIRE_FALSE(ValidateNtpResponse(response, request_time));
+    }
+    SECTION("Rejects unsynchronized and kiss-o-death servers") {
+        response.li_vn_mode = static_cast<int8_t>((3 << 6) | (4 << 3) | 4);
+        REQUIRE_FALSE(ValidateNtpResponse(response, request_time));
+        response.li_vn_mode = static_cast<int8_t>((4 << 3) | 4);
+        response.stratum    = 0;
+        REQUIRE_FALSE(ValidateNtpResponse(response, request_time));
+    }
+    SECTION("Rejects client-mode and invalid timestamp ordering") {
+        response.li_vn_mode = static_cast<int8_t>((4 << 3) | 3);
+        REQUIRE_FALSE(ValidateNtpResponse(response, request_time));
+        response.li_vn_mode  = static_cast<int8_t>((4 << 3) | 4);
+        response.transmit_ts = NtpTime{};
+        REQUIRE_FALSE(ValidateNtpResponse(response, request_time));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Byte-order conversion tests
 // ---------------------------------------------------------------------------
@@ -213,6 +246,30 @@ TEST_CASE("NtpHelpers: ParseTimeZoneString parses timezone offsets", "[ntp][help
     SECTION("Rejects missing colon") {
         REQUIRE_FALSE(ParseTimeZoneString("+08000", is_west, offset));
     }
+
+    SECTION("Rejects non-digits and out-of-range offsets") {
+        REQUIRE_FALSE(ParseTimeZoneString("+ab:cd", is_west, offset));
+        REQUIRE_FALSE(ParseTimeZoneString("+15:00", is_west, offset));
+        REQUIRE_FALSE(ParseTimeZoneString("+14:30", is_west, offset));
+        REQUIRE_FALSE(ParseTimeZoneString("+12:60", is_west, offset));
+    }
+}
+
+TEST_CASE("NtpHelpers: validates NTP host names without shell syntax", "[ntp][helpers]") {
+    REQUIRE(IsValidNtpHost("ntp.aliyun.com"));
+    REQUIRE(IsValidNtpHost("192.0.2.1"));
+    REQUIRE_FALSE(IsValidNtpHost(""));
+    REQUIRE_FALSE(IsValidNtpHost("-ntp.example"));
+    REQUIRE_FALSE(IsValidNtpHost("ntp..example"));
+    REQUIRE_FALSE(IsValidNtpHost("ntp.example;reboot"));
+    REQUIRE_FALSE(IsValidNtpHost("ntp.example$(id)"));
+    REQUIRE_FALSE(IsValidNtpHost("999.999.999.999"));
+}
+
+TEST_CASE("NtpHelpers: DNS resolution observes cancellation promptly", "[ntp][helpers][lifecycle]") {
+    const auto started = std::chrono::steady_clock::now();
+    REQUIRE(ResolveDomain("cancelled-query.invalid", []() { return true; }).empty());
+    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(500));
 }
 
 // ---------------------------------------------------------------------------

@@ -31,7 +31,11 @@ public:
     /// @return true on success.
     virtual bool TaskStart(const std::string& taskId) = 0;
 
-    /// Delete all image analysis tasks.
+    /// Permanently stop the service and delete all image analysis tasks.
+    ///
+    /// The operation is idempotent. After it returns, new tasks cannot be
+    /// created or started. This terminal behavior makes the method suitable
+    /// for the application shutdown barrier before ServiceRegistry is cleared.
     virtual void TaskDeleteAll() = 0;
 
     /// Update the checksum for algorithm synchronization.

@@ -94,6 +94,11 @@
 import { ref, reactive, onMounted, getCurrentInstance } from 'vue'
 import { UploadFilled, WarningFilled, SuccessFilled } from '@element-plus/icons-vue'
 import { t } from '@/i18n'
+import {
+  uploadFileInChunks,
+  UploadPurpose,
+  UPLOAD_MAX_TOTAL_SIZE
+} from '@/utils/chunkUpload'
 
 // 定义组件名称
 defineOptions({
@@ -140,6 +145,8 @@ const isShowDialog = ref(false) // 批量上传中时，控制 dialog 是否显�
 // Methods
 function open() {
   formInline.fileList = []
+  isBeginUpload.value = false
+  isShowDialog.value = false
   uploadDialogVisible.value = true
 }
 
@@ -167,32 +174,46 @@ async function downloadFile(fileUrl) {
   window.URL.revokeObjectURL(url)
 }
 
-function httpRequest(event) {
+async function httpRequest(event) {
   const { file } = event
   isShowDialog.value = true
-  const formData = new FormData()
-  formData.append('importType', 2) // 1：升级包，2：人员批量导入
-  formData.append('faceLibId', props.faceLibId)
-  formData.append('file', file)
-  proxy.$API
-    .boxImportFile(formData)
-    .then(() => {
-      uploadProgress.value = 0
-      processedNumber.value = 0
-      successNum.value = 0
-      failedNum.value = 0
+  let stagedUpload
+  try {
+    stagedUpload = await uploadFileInChunks(file, {
+      purpose: UploadPurpose.FACE_IMPORT,
+      uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+    })
+    if (!stagedUpload.uploadId) throw new Error(t('validate.cannotGetFilePath'))
+    await proxy.$API.boxImportFile({
+      importType: 2,
+      faceLibId: props.faceLibId,
+      uploadId: stagedUpload.uploadId
+    })
+    uploadProgress.value = 0
+    processedNumber.value = 0
+    successNum.value = 0
+    failedNum.value = 0
 
-      getImportStatus()
-      // 清除
-      setTimeout(() => {
-        const upload = uploadRef.value
-        upload.clearFiles()
-      }, 350)
-    })
-    .catch(() => {
-      stopServerTipDialogVisible.value = false
-      uploadingDialogVisible.value = false
-    })
+    getImportStatus()
+    // 清除
+    setTimeout(() => {
+      const upload = uploadRef.value
+      upload.clearFiles()
+    }, 350)
+  } catch (error) {
+    if (stagedUpload?.uploadId) {
+      try {
+        await proxy.$API.cancelAtomicModelUpload({ uploadId: stagedUpload.uploadId })
+      } catch (_) {
+        // The staging service also expires abandoned sessions by TTL.
+      }
+    }
+    isBeginUpload.value = false
+    stopServerTipDialogVisible.value = false
+    uploadingDialogVisible.value = false
+    throw error
+  }
 }
 
 function getImportStatus() {
@@ -248,6 +269,7 @@ function getImportStatus() {
         break
       case 2:
         // 上传失败，接口其他错误
+        isBeginUpload.value = false
         proxy.$message.error(
           res.resData.importStatus.statusMsg || t('basePic.importError')
         )
@@ -271,8 +293,7 @@ function handleFileChange(file, fileList) {
     return
   }
 
-  const fileSize = fileInfo.size / 1024 / 1024
-  if (fileSize > 500) {
+  if (fileInfo.size > UPLOAD_MAX_TOTAL_SIZE) {
     proxy.$message.warning(t('basePic.fileSizeWarning'))
     const upload = uploadRef.value
     upload.clearFiles()
@@ -308,6 +329,8 @@ function openUploadingDialog() {
 }
 
 function closeDialog() {
+  isBeginUpload.value = false
+  isShowDialog.value = false
   successDialogVisible.value = false
   stopServerTipDialogVisible.value = false
   uploadDialogVisible.value = false
@@ -487,4 +510,3 @@ onMounted(() => {
   padding-bottom: 20px;
 }
 </style>
-

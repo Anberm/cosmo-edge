@@ -4,12 +4,14 @@
 #include "service/network/impl/MqttLifecycleServiceImpl.h"
 
 #include <arpa/inet.h>
-#include <netdb.h>
+#include <event2/dns.h>
+#include <event2/event.h>
+#include <event2/util.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
 #include <chrono>
-#include <future>
+#include <memory>
 #include <thread>
 
 #include "network/mqtt/MqttClient.h"
@@ -24,7 +26,6 @@
 #include "util/JsonStructUtil.h"
 #include "util/Log.h"
 #include "util/SafeParse.h"
-#include "util/TimingConstants.h"
 #include "util/UuidUtil.h"
 #include "util/Version.h"
 
@@ -41,7 +42,9 @@ static const std::string k_platform_to_device = "/p2d/aibox";
 // Reconnect retry interval in seconds
 static constexpr unsigned kReconnectRetrySec = 10;
 // DNS resolution timeout
-static constexpr int k_dns_timeout_sec = 5;
+static constexpr auto kDnsTimeout                 = chrono::seconds(5);
+static constexpr auto kDnsPollInterval            = chrono::milliseconds(50);
+static constexpr int kDnsCancelDrainMaxIterations = 4;
 // Heartbeat failure threshold before reconnect
 static constexpr uint32_t kHeartbeatFailMax = 5;
 // Sync publish ACK timeout (ms) for registration
@@ -53,6 +56,56 @@ static constexpr int k_register_repeat_interval_sec = 10;
 // Heartbeat interval (seconds)
 static constexpr int k_heart_beat_repeat_interval_sec = 30;
 
+namespace {
+
+    struct EventBaseDeleter {
+        void operator()(event_base* base) const {
+            if (base) {
+                event_base_free(base);
+            }
+        }
+    };
+
+    struct DnsBaseDeleter {
+        void operator()(evdns_base* base) const {
+            if (base) {
+                evdns_base_free(base, 0);
+            }
+        }
+    };
+
+    struct DnsResolutionResult {
+        ~DnsResolutionResult() {
+            if (addresses) {
+                evutil_freeaddrinfo(addresses);
+            }
+        }
+
+        bool completed{false};
+        int error{EVUTIL_EAI_FAIL};
+        evutil_addrinfo* addresses{nullptr};
+    };
+
+}  // namespace
+
+bool detail::CancelAndDrainDnsRequest(event_base* event_base_ptr, evdns_getaddrinfo_request* request,
+                                      const bool* completed) noexcept {
+    if (event_base_ptr == nullptr || request == nullptr || completed == nullptr) {
+        return false;
+    }
+
+    evdns_getaddrinfo_cancel(request);
+    for (int iteration = 0; iteration < kDnsCancelDrainMaxIterations && !*completed; ++iteration) {
+        // Cancellation queues a deferred callback. NONBLOCK keeps Stop bounded;
+        // ONCE prevents unrelated callbacks from keeping this private loop alive.
+        const int loop_status = event_base_loop(event_base_ptr, EVLOOP_NONBLOCK | EVLOOP_ONCE);
+        if (loop_status != 0) {
+            return false;
+        }
+    }
+    return *completed;
+}
+
 // ── Construction / Destruction ──────────────────────────────────────────
 
 MqttLifecycleServiceImpl::MqttLifecycleServiceImpl(DispatcherFactory dispatcher_factory)
@@ -63,36 +116,63 @@ MqttLifecycleServiceImpl::MqttLifecycleServiceImpl(DispatcherFactory dispatcher_
       message_queue_("Mqtt Message Handle", 100) {
     timer_->Start();
 
-    time_reconnect_ = TimePoint();
     mqtt_client_->MQTTClientSetCallbacks(
         mqtt_client_.get(),
         [this](mqtt::MessageArrived&& msg, void* usr) { OnMessageArrived(std::move(msg), usr); },
         [this](void* usr) { OnConnectionLost(usr); }, [this](void* usr) { OnReconnectSuccess(usr); });
 
     connect_queue_.SetProcessor([this](std::string&& /*data*/) {
+        if (shutting_down_.load(std::memory_order_acquire) ||
+            !desired_running_.load(std::memory_order_acquire)) {
+            return;
+        }
         Reconnect();
-        SetReconnectTimePoint();
     });
 
     message_queue_.SetProcessor([this](mqtt::MqttCommonMsgDl&& data) { HandleMessage(std::move(data)); });
 }
 
 MqttLifecycleServiceImpl::~MqttLifecycleServiceImpl() {
+    MqttLifecycleServiceImpl::MqttShutdown();
+    LOG_INFO("{}", "MqttLifecycleServiceImpl destroyed");
+}
+
+void MqttLifecycleServiceImpl::MqttShutdown() {
+    std::lock_guard<std::mutex> shutdown_lock(shutdown_mtx_);
+    if (shutdown_complete_) {
+        return;
+    }
+
+    shutting_down_.store(true, std::memory_order_release);
+    desired_running_.store(false, std::memory_order_release);
+
+    // Prevent Paho callbacks and queue workers from entering this object while
+    // its connection state and dispatcher are being torn down.
+    mqtt_client_->MQTTClientSetCallbacks(nullptr, nullptr, nullptr, nullptr);
+    {
+        std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+        Disconnect();
+    }
+    connect_queue_.Stop();
+    message_queue_.Stop();
+    connect_queue_.stop();
+    message_queue_.stop();
     if (heartbeat_task_id_ != cosmo::kInvalidTaskId) {
         timer_->Cancel(heartbeat_task_id_);
         heartbeat_task_id_ = cosmo::kInvalidTaskId;
     }
     if (timer_) {
         timer_->Destroy();
+        timer_.reset();
     }
-    Disconnect();
-    LOG_INFO("{}", "MqttLifecycleServiceImpl destroyed");
+    dispatcher_.reset();
+    shutdown_complete_ = true;
 }
 
 // ── IMqttLifecycle interface ────────────────────────────────────────────
 
 bool MqttLifecycleServiceImpl::IsMqttRegistered() {
-    return mqtt_client_->MQTTClientIsConnected() && registered_;
+    return mqtt_client_->MQTTClientIsConnected() && registered_.load(std::memory_order_acquire);
 }
 
 bool MqttLifecycleServiceImpl::IsMqttEnabled() {
@@ -100,11 +180,21 @@ bool MqttLifecycleServiceImpl::IsMqttEnabled() {
 }
 
 void MqttLifecycleServiceImpl::MqttStop() {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return;
+    }
     LOG_INFO("{}", "StopMqttServer");
+    desired_running_.store(false, std::memory_order_release);
     Disconnect();
 }
 
 void MqttLifecycleServiceImpl::MqttStart() {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return;
+    }
+    desired_running_.store(false, std::memory_order_release);
     // Lazily create the dispatcher on first use
     if (!dispatcher_ && dispatcher_factory_) {
         dispatcher_ = dispatcher_factory_();
@@ -120,6 +210,8 @@ void MqttLifecycleServiceImpl::MqttStart() {
     if (RunMode::RunModeStandAlone == run_mode) {
         auto mqtt_param = ServiceRegistry::Instance().Get<IConfigNetworkService>().GetMqttParam();
         if (!mqtt_param.enable) {
+            desired_running_.store(false, std::memory_order_release);
+            Disconnect();
             return;
         }
         url       = mqtt_param.url;
@@ -136,11 +228,11 @@ void MqttLifecycleServiceImpl::MqttStart() {
         LOG_INFO("RunMode IOTNetwork {}:{}", url, port);
     } else {
         LOG_ERRO("RunMode ({}) Un-Support", run_mode);
+        Disconnect();
         return;
     }
-    if (IsMqttEnabled()) {
-        Disconnect();
-    }
+    desired_running_.store(true, std::memory_order_release);
+    Disconnect();
     std::string device_sn = ServiceRegistry::Instance().Get<IDeviceInfoService>().GetDevSn();
     Connect(device_sn, url, port, auth_mode, client_id, user_name, passwd);
 }
@@ -164,24 +256,23 @@ void MqttLifecycleServiceImpl::Connect(const std::string& sn, const std::string&
     LOG_INFO("{}", "Now Start Loop Connection.");
     connect_running_.store(true, std::memory_order_release);
     connect_thread_ = std::thread([this, sn, ip, port, auth_mode, client_id, user_name, passwd]() {
-        size_t attempt_count = 0;
         while (connect_running_.load(std::memory_order_acquire)) {
-            // Retry every kReconnectRetrySec seconds
-            if (0 == attempt_count++ % kReconnectRetrySec) {
-                LOG_INFO("{}", "MQTT Loop Connection Thread...");
-                std::string url = ResolveHostToIP(ip);
-                if (url.empty()) {
-                    LOG_ERRO("Failed to resolve host [{}], will not connect MQTTServer", ip);
-                    continue;
-                }
-
-                if (MqttClientConnect(sn, url + ":" + std::to_string(port), auth_mode, client_id, user_name,
-                                      passwd)) {
-                    LOG_INFO("{}", "MQTT Loop Connection Success.");
-                    break;
-                }
+            LOG_INFO("{}", "MQTT Loop Connection Thread...");
+            std::string url = ResolveHostToIP(ip);
+            if (!connect_running_.load(std::memory_order_acquire)) {
+                break;
             }
-            std::this_thread::sleep_for(timing::kOneSecondInterval);
+            if (url.empty()) {
+                LOG_ERRO("Failed to resolve host [{}], will not connect MQTTServer", ip);
+            } else if (MqttClientConnect(sn, url + ":" + std::to_string(port), auth_mode, client_id,
+                                         user_name, passwd)) {
+                LOG_INFO("{}", "MQTT Loop Connection Success.");
+                break;
+            }
+
+            if (WaitForConnectStop(chrono::seconds(kReconnectRetrySec))) {
+                break;
+            }
         }
         if (!connect_running_.load(std::memory_order_acquire)) {
             LOG_INFO("{}", "MQTT Loop Connection Stop By Force.");
@@ -191,28 +282,45 @@ void MqttLifecycleServiceImpl::Connect(const std::string& sn, const std::string&
 
 void MqttLifecycleServiceImpl::Disconnect() {
     StopConnectThread();
+    registered_.store(false, std::memory_order_release);
+    if (heartbeat_task_id_ != cosmo::kInvalidTaskId) {
+        timer_->Cancel(heartbeat_task_id_);
+        heartbeat_task_id_ = cosmo::kInvalidTaskId;
+    }
     int ret = mqtt_client_->MQTTClientDestroy(50);
     LOG_INFO("Stop Thread and Destroy MqttClient [{}]", ret);
 }
 
 void MqttLifecycleServiceImpl::Reconnect() {
-    if (IsMqttEnabled()) {
-        Disconnect();
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    if (shutting_down_.load(std::memory_order_acquire) || !desired_running_.load(std::memory_order_acquire)) {
+        return;
     }
+    Disconnect();
     LOG_INFO("Reconnect To IP:{} Port:{}", ip_, port_);
     Connect(device_sn_, ip_, port_, auth_mode_, client_id_, user_name_, passwd_);
 }
 
 void MqttLifecycleServiceImpl::StopConnectThread() {
     connect_running_.store(false, std::memory_order_release);
+    connect_wait_cv_.notify_all();
     if (connect_thread_.joinable()) {
         connect_thread_.join();
     }
 }
 
+bool MqttLifecycleServiceImpl::WaitForConnectStop(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(connect_wait_mtx_);
+    return connect_wait_cv_.wait_for(lock, timeout,
+                                     [this]() { return !connect_running_.load(std::memory_order_acquire); });
+}
+
 // ── MQTT client callbacks ───────────────────────────────────────────────
 
 void MqttLifecycleServiceImpl::OnMessageArrived(mqtt::MessageArrived&& msg, void* /*ctx*/) {
+    if (shutting_down_.load(std::memory_order_acquire) || !desired_running_.load(std::memory_order_acquire)) {
+        return;
+    }
     mqtt::MqttCommonMsgDl dl_msg;
     if (!cosmo::util::DecodeJson(msg.payload, dl_msg)) {
         LOG_WARN("Receive {} Analysis Failed.", msg.payload);
@@ -223,12 +331,15 @@ void MqttLifecycleServiceImpl::OnMessageArrived(mqtt::MessageArrived&& msg, void
 }
 
 void MqttLifecycleServiceImpl::OnConnectionLost(void* /*ctx*/) {
+    registered_.store(false, std::memory_order_release);
     LOG_INFO("{}", "Mqtt Client Connect Lost");
 }
 
 void MqttLifecycleServiceImpl::OnReconnectSuccess(void* /*ctx*/) {
     LOG_INFO("{}", "Mqtt Client Reconnect Success");
-    connect_queue_.Insert("reconnect");
+    if (!shutting_down_.load(std::memory_order_acquire) && desired_running_.load(std::memory_order_acquire)) {
+        connect_queue_.Insert("reconnect");
+    }
 }
 
 // ── Internal connection ─────────────────────────────────────────────────
@@ -238,6 +349,9 @@ bool MqttLifecycleServiceImpl::MqttClientConnect(const std::string& sn, const st
                                                  const std::string& passwd) {
     if (!mqtt_client_) {
         LOG_ERRO("{}", "MQTTClient Handle is NULL");
+        return false;
+    }
+    if (!connect_running_.load(std::memory_order_acquire)) {
         return false;
     }
 
@@ -267,47 +381,105 @@ bool MqttLifecycleServiceImpl::MqttClientConnect(const std::string& sn, const st
         LOG_ERRO("MQTTClientCreate Failed, SN: [{}], serverURI: [{}]", sn, url);
         return false;
     }
+    if (!connect_running_.load(std::memory_order_acquire)) {
+        return false;
+    }
 
     LOG_INFO("MQTTClientCreate Success: [{}]", mqtt_client_->MQTTClientIsConnected());
-    RegisterBusiness();
-    return true;
+    return RegisterBusiness();
 }
 
 // ── DNS resolution ──────────────────────────────────────────────────────
 
 std::string MqttLifecycleServiceImpl::ResolveHostToIP(const std::string& host) {
-    auto future = std::async(std::launch::async, [host]() -> std::string {
-        struct addrinfo hints {};
-        hints.ai_family   = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
-
-        struct addrinfo* result = nullptr;
-        int ret                 = getaddrinfo(host.c_str(), nullptr, &hints, &result);
-        if (ret != 0 || result == nullptr) {
-            LOG_ERRO("getaddrinfo failed for host [{}]: {}", host, gai_strerror(ret));
-            return "";
-        }
-
-        char ip_str[INET6_ADDRSTRLEN] = {};
-        auto* addr                    = reinterpret_cast<struct sockaddr_in*>(result->ai_addr);
-        inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
-        freeaddrinfo(result);
-        return std::string(ip_str);
-    });
-
-    if (future.wait_for(std::chrono::seconds(k_dns_timeout_sec)) == std::future_status::ready) {
-        return future.get();
+    if (host.empty()) {
+        return {};
     }
 
-    LOG_ERRO("DNS resolution timeout for host [{}] after {}s", host, k_dns_timeout_sec);
-    return "";
+    in_addr numeric_address{};
+    if (inet_pton(AF_INET, host.c_str(), &numeric_address) == 1) {
+        return host;
+    }
+
+    std::unique_ptr<event_base, EventBaseDeleter> event_base_ptr(event_base_new());
+    if (!event_base_ptr) {
+        LOG_ERRO("Failed to create DNS event base for host [{}]", host);
+        return {};
+    }
+    std::unique_ptr<evdns_base, DnsBaseDeleter> dns_base_ptr(evdns_base_new(event_base_ptr.get(), 1));
+    if (!dns_base_ptr) {
+        LOG_ERRO("Failed to create DNS resolver for host [{}]", host);
+        return {};
+    }
+
+    evutil_addrinfo hints{};
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+
+    DnsResolutionResult result;
+    auto callback = [](int error, evutil_addrinfo* addresses, void* context) {
+        auto* resolution      = static_cast<DnsResolutionResult*>(context);
+        resolution->completed = true;
+        resolution->error     = error;
+        resolution->addresses = addresses;
+    };
+    auto* request = evdns_getaddrinfo(dns_base_ptr.get(), host.c_str(), nullptr, &hints, callback, &result);
+
+    const auto deadline = SteadyClock::now() + kDnsTimeout;
+    bool loop_failed    = false;
+    while (!result.completed && connect_running_.load(std::memory_order_acquire) &&
+           SteadyClock::now() < deadline) {
+        if (event_base_loop(event_base_ptr.get(), EVLOOP_NONBLOCK) < 0) {
+            loop_failed = true;
+            break;
+        }
+        // event_base_loop may synchronously run the DNS callback above.
+        // cppcheck-suppress knownConditionTrueFalse
+        if (!result.completed) {
+            (void)WaitForConnectStop(kDnsPollInterval);
+        }
+    }
+
+    const bool stopped = !connect_running_.load(std::memory_order_acquire);
+    if (!result.completed && request) {
+        if (!detail::CancelAndDrainDnsRequest(event_base_ptr.get(), request, &result.completed)) {
+            LOG_ERRO("Failed to drain cancelled DNS request for host [{}]", host);
+            loop_failed = true;
+        }
+    }
+    if (stopped) {
+        return {};
+    }
+    if (loop_failed) {
+        LOG_ERRO("DNS event loop failed for host [{}]", host);
+        return {};
+    }
+    if (!result.completed || result.error == EVUTIL_EAI_CANCEL) {
+        LOG_ERRO("DNS resolution timeout for host [{}] after {}s", host, kDnsTimeout.count());
+        return {};
+    }
+    if (result.error != 0 || !result.addresses) {
+        LOG_ERRO("DNS resolution failed for host [{}]: {}", host, evutil_gai_strerror(result.error));
+        return {};
+    }
+
+    for (auto* address = result.addresses; address != nullptr; address = address->ai_next) {
+        if (address->ai_family != AF_INET || !address->ai_addr) {
+            continue;
+        }
+        char ip_str[INET_ADDRSTRLEN] = {};
+        auto* socket_address         = reinterpret_cast<sockaddr_in*>(address->ai_addr);
+        if (inet_ntop(AF_INET, &socket_address->sin_addr, ip_str, sizeof(ip_str))) {
+            return ip_str;
+        }
+    }
+
+    LOG_ERRO("DNS resolution for host [{}] returned no IPv4 address", host);
+    return {};
 }
 
 // ── Business logic ──────────────────────────────────────────────────────
-
-void MqttLifecycleServiceImpl::SetReconnectTimePoint() {
-    time_reconnect_ = SteadyClock::now();
-}
 
 void MqttLifecycleServiceImpl::HeartBeatTimerStart() {
     if (heartbeat_task_id_ != cosmo::kInvalidTaskId) {
@@ -324,12 +496,15 @@ void MqttLifecycleServiceImpl::HeartBeatTimerStart() {
     }
 }
 
-void MqttLifecycleServiceImpl::RegisterBusiness() {
+bool MqttLifecycleServiceImpl::RegisterBusiness() {
+    if (!connect_running_.load(std::memory_order_acquire)) {
+        return false;
+    }
     // Subscribe to device-specific topics
     std::string topic = k_platform_to_device + "/" + device_sn_;
     if (mqtt_client_->MQTTClientSubscribe(topic, 1)) {
         LOG_ERRO("MQTTClientSubscribe Topic [{}] Failed", topic);
-        return;
+        return false;
     }
 
     topic = k_platform_to_device + "/heartbeat/" + device_sn_;
@@ -337,21 +512,20 @@ void MqttLifecycleServiceImpl::RegisterBusiness() {
         LOG_WARN("MQTTClientSubscribe Topic [{}] Failed", topic);
     }
 
-    while (!Register()) {
-        int wait_count = 0;
-        while (connect_running_.load(std::memory_order_acquire) &&
-               (wait_count < k_register_repeat_interval_sec)) {
-            std::this_thread::sleep_for(timing::kOneSecondInterval);
-            wait_count++;
-        }
-        if (!connect_running_.load(std::memory_order_acquire)) {
+    while (connect_running_.load(std::memory_order_acquire) && !Register()) {
+        if (WaitForConnectStop(chrono::seconds(k_register_repeat_interval_sec))) {
             LOG_WARN("{}", "MQTT Status is Released, Stop Register");
-            return;
+            return false;
         }
+    }
+    if (!connect_running_.load(std::memory_order_acquire)) {
+        LOG_WARN("{}", "MQTT Status is Released, Stop Register");
+        return false;
     }
 
     LOG_INFO("{}", "MQTT Register Ok, Start HeartBeat Timer.");
     HeartBeatTimerStart();
+    return true;
 }
 
 bool MqttLifecycleServiceImpl::Register() {
@@ -387,6 +561,10 @@ bool MqttLifecycleServiceImpl::Register() {
 }
 
 bool MqttLifecycleServiceImpl::HeartBeat() {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    if (shutting_down_.load(std::memory_order_acquire) || !desired_running_.load(std::memory_order_acquire)) {
+        return true;
+    }
     mqtt::MqttMessage pub_msg;
     pub_msg.qos   = 1;
     pub_msg.topic = k_device_to_platform + "/heartbeat";
@@ -434,6 +612,15 @@ bool MqttLifecycleServiceImpl::HeartBeat() {
 // ── Message handling ────────────────────────────────────────────────────
 
 void MqttLifecycleServiceImpl::HandleMessage(mqtt::MqttCommonMsgDl&& msg) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mtx_);
+    if (shutting_down_.load(std::memory_order_acquire) || !desired_running_.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (!IsMqttRegistered()) {
+        LOG_WARN("Drop MQTT request before device registration. Action:{}", msg.head.action);
+        return;
+    }
+
     if (msg.head.device_sn != device_sn_) {
         LOG_WARN("RECV MSG DeviceSn:{} Local Device:{} Action:{}", msg.head.device_sn, device_sn_,
                  msg.head.action);
@@ -451,8 +638,10 @@ void MqttLifecycleServiceImpl::HandleMessage(mqtt::MqttCommonMsgDl&& msg) {
     response.head.action     = msg.head.action;
     response.head.device_sn  = msg.head.device_sn;
     response.head.msg_type   = "response";
-    // Use IRequestDispatcher interface with empty mtk (MQTT routes skip auth validation)
-    dispatcher_->DispatchRequest(msg.head.action, /*mtk=*/"", msg.body, response.body);
+    RequestDispatchContext context;
+    context.uri       = msg.head.action;
+    context.transport = RequestTransport::kMqtt;
+    dispatcher_->DispatchRequest(context, msg.body, response.body);
 
     std::string res_string;
     (void)cosmo::util::EncodeJson(response, res_string);

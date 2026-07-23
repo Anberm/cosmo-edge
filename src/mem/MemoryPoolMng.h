@@ -49,19 +49,19 @@ public:
     [[nodiscard]] std::string OutputMallocBuf() const;
 
 private:
-    std::shared_ptr<FixedBlockPool> CreatePoolInst(int size);
-    [[nodiscard]] std::shared_ptr<FixedBlockPool> GetPoolInst(int size) const;
+    std::shared_ptr<FixedBlockPool> CreatePoolInst(size_t size);
+    [[nodiscard]] std::shared_ptr<FixedBlockPool> GetPoolInst(size_t size) const;
 
     void RealMalloc(BlockOp&& op);  // Allocate when pool runs low
     void RealFree(BlockOp&& op);    // Free when pool has too many idle blocks
-    [[nodiscard]] int GetPoolSize(int size) const;
+    [[nodiscard]] size_t GetPoolSize(size_t size) const;
 
     void CleanAllPool();
 
 private:
     mutable std::shared_mutex mtx_;
-    std::vector<int> pool_block_size_;
-    std::map<int, std::shared_ptr<FixedBlockPool>> pools_;
+    std::vector<size_t> pool_block_size_;
+    std::map<size_t, std::shared_ptr<FixedBlockPool>> pools_;
 
     // Iterate pools_ under a shared lock: keeps the map structure stable and
     // each node's shared_ptr alive for the duration of fn, mutually exclusive

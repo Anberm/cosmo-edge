@@ -90,7 +90,11 @@ void RecordAlgDataUrl(const std::string& taskId, const std::string& url) {
     }
     recStr.append("\n");
 
-    auto path     = cosmo::path::GetTaskOverviewDataPath(taskId);
+    auto path = cosmo::path::GetTaskOverviewDataPath(taskId);
+    if (path.empty()) {
+        LOG_WARN("{}", "Reject invalid overview task ID");
+        return;
+    }
     auto fileName = path + "/url" + ".json";
     util::WriteFile(fileName, recStr);
     return;
@@ -109,7 +113,11 @@ void RecordAlgDataAlarm(const std::string& taskId, const MsgRecAlarm& data) {
     }
     recStr.append("\n");
 
-    auto path     = cosmo::path::GetTaskOverviewDataPath(taskId);
+    auto path = cosmo::path::GetTaskOverviewDataPath(taskId);
+    if (path.empty()) {
+        LOG_WARN("{}", "Reject invalid overview task ID");
+        return;
+    }
     auto fileName = path + "/alarm" + ".json";
     util::WriteFileAppend(fileName, recStr);
     return;
@@ -121,7 +129,11 @@ void RecordAlgTaskInfo(const std::string& taskId, const MsgTaskCreateRecv& data)
         return;
     }
 
-    auto path     = cosmo::path::GetTaskOverviewDataPath(taskId);
+    auto path = cosmo::path::GetTaskOverviewDataPath(taskId);
+    if (path.empty()) {
+        LOG_WARN("{}", "Reject invalid overview task ID");
+        return;
+    }
     auto fileName = path + "/taskInfo" + ".json";
     util::WriteFile(fileName, recStr);
     return;
@@ -137,7 +149,11 @@ void RecordAlgTaskAction(const std::string& taskId, ActionAlgPtr data) {
         return;
     }
 
-    auto path     = cosmo::path::GetTaskOverviewDataPath(taskId);
+    auto path = cosmo::path::GetTaskOverviewDataPath(taskId);
+    if (path.empty()) {
+        LOG_WARN("{}", "Reject invalid overview task ID");
+        return;
+    }
     auto fileName = path + "/taskAction" + ".json";
     util::WriteFile(fileName, recStr);
     return;
@@ -149,7 +165,11 @@ void RecordAlgDataClearTaskData(const std::string& taskId) {
         return;
     }
 
-    auto path = cosmo::path::GetTaskOverviewDataPath(taskId);
+    auto path = cosmo::path::GetTaskOverviewDataPath(taskId, false);
+    if (path.empty()) {
+        LOG_WARN("{}", "Reject invalid overview task ID");
+        return;
+    }
     std::error_code err;
     std::filesystem::remove_all(path, err);
 }

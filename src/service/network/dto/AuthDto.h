@@ -32,6 +32,7 @@ namespace Auth {
 
     // Modify password request
     struct MsgModifyPasswordRecv : public MsgRecvHead {
+        // Deprecated compatibility field. HTTP uses the authenticated header MTK.
         std::string mtk;
         std::string passwdOld;
         std::string passwdNew;

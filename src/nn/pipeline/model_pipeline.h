@@ -91,6 +91,8 @@ public:
 
     // Typed output parsing — subclasses override as needed, default returns UNSUPPORTED
     virtual Status ParseDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs);
+    virtual Status ParseDinoDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs,
+                                            float text_threshold, float box_threshold);
     virtual Status ParseClassifyOutput(std::vector<std::vector<ObjectInfoV1>>& outputs);
     virtual Status ParseFeatureOutput(std::vector<std::vector<float>>& outputs);
     virtual Status ParseKeypointsOutput(std::vector<std::vector<ObjectInfoV1>>& outputs);

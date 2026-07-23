@@ -35,8 +35,10 @@ struct MsgAddVideoRecv : public MsgRecvHead {
     std::string contentLength;
     std::string fileName;
     std::string filePath;
+    std::string uploadId;
     std::string channelCode;
     std::string channelName;
+    bool channelCodeConflict{false};
 };
 
 void to_json(nlohmann::json& j, const MsgAddVideoRecv& v);

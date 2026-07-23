@@ -210,6 +210,11 @@ import {
   onUnmounted
 } from 'vue'
 import { t, localeColon, currentLocale } from '@/i18n'
+import {
+  uploadFileInChunks,
+  UploadPurpose,
+  UPLOAD_MAX_TOTAL_SIZE
+} from '@/utils/chunkUpload'
 import { resolveResourceAlgorithmName } from '@/utils/i18nResource'
 import TopBar from './components/algorithmTopBar.vue'
 import chanelDetailDialog from './components/chanelDetailDialog.vue'
@@ -390,7 +395,7 @@ const handleRemove = () => {
 }
 
 const beforeVideoUpload = (file) => {
-  const isLimit = file.size / 1024 / 1024 < 1024
+  const isLimit = file.size > 0 && file.size <= UPLOAD_MAX_TOTAL_SIZE
   // Validate by extension, not MIME: browsers report inconsistent/empty MIME
   // for .avi and .dav, and the backend gates on extension anyway.
   const lowerName = (file.name || '').toLowerCase()
@@ -402,7 +407,7 @@ const beforeVideoUpload = (file) => {
     return false
   }
   if (!isLimit) {
-    proxy.$message.error(t('validate.videoMaxSize', { n: 1024 }))
+    proxy.$message.error(t('validate.videoMaxSize', { n: 500 }))
     return false
   }
   return true
@@ -415,50 +420,17 @@ const composeUsbUrl = (deviceIndex, tier) => {
 }
 
 const uploadVideoByChunk = async (file) => {
-  const CHUNK_SIZE = 32 * 1024 * 1024
-  const totalSize = file.size || 0
-  const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE))
-  const uploadId = `${Date.now()}_${Math.random().toString(16).slice(2)}`
-  let lastResp = null
-  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-    const start = chunkIndex * CHUNK_SIZE
-    const end = Math.min(totalSize, start + CHUNK_SIZE)
-    const blob = file.slice(start, end)
-    const uploadFormData = new FormData()
-    uploadFormData.append('file', blob, file.name)
-    uploadFormData.append('uploadId', uploadId)
-    uploadFormData.append('chunkIndex', String(chunkIndex))
-    uploadFormData.append('totalChunks', String(totalChunks))
-    uploadFormData.append('totalSize', String(totalSize))
-    uploadFormData.append('chunkSize', String(end - start))
-    lastResp = await proxy.$API.uploadAtomicModelTemp(uploadFormData)
-    const respData = lastResp?.resData || lastResp?.data
-    if (!respData) {
-      throw new Error(t('validate.tempUploadNoResponse'))
-    }
-    const resCode = respData?.resCode ?? respData?.resData?.resCode
-    if (resCode !== undefined && resCode !== 1) {
-      const msg =
-        (respData.resMsg && respData.resMsg[0] && respData.resMsg[0].msgText) ||
-        (respData.resData &&
-          respData.resData.resMsg &&
-          respData.resData.resMsg[0] &&
-          respData.resData.resMsg[0].msgText) ||
-        t('validate.tempUploadFailed')
-      throw new Error(msg)
-    }
-  }
-  const finalData = lastResp?.resData || lastResp?.data
-  let tempFilePath = ''
-  if (finalData?.resData?.filePath) {
-    tempFilePath = finalData.resData.filePath
-  } else if (finalData?.filePath) {
-    tempFilePath = finalData.filePath
-  }
-  if (!tempFilePath) {
+  const result = await uploadFileInChunks(file, {
+    purpose: UploadPurpose.VIDEO,
+    uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+    cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+  })
+  if (!result.uploadId) {
     throw new Error(t('validate.tempVideoPathMissing'))
   }
-  return { filePath: tempFilePath, totalSize }
+  return {
+    uploadId: result.uploadId
+  }
 }
 
 const submitAddChannel = () => {
@@ -486,14 +458,22 @@ const submitAddChannel = () => {
           }
           const rawFile = channelForm.videoFileList[0]
           const file = rawFile.raw || rawFile
-          const { filePath, totalSize } = await uploadVideoByChunk(file)
+          const stagedVideo = await uploadVideoByChunk(file)
           const payload = {
             channelName: channelForm.channelName,
-            externalChannelNo: channelForm.externalChannelNo,
-            filePath,
-            contentLength: String(totalSize)
+            channelCode: channelForm.externalChannelNo,
+            uploadId: stagedVideo.uploadId
           }
-          await proxy.$API.boxAddVideoChannel(payload)
+          try {
+            await proxy.$API.boxAddVideoChannel(payload)
+          } catch (error) {
+            try {
+              await proxy.$API.cancelAtomicModelUpload({ uploadId: stagedVideo.uploadId })
+            } catch (_) {
+              // Preserve the consumer failure; server-side cleanup is idempotent/TTL-backed.
+            }
+            throw error
+          }
         } else if (channelDialogMode.value === 'edit') {
           await proxy.$API.boxUpdateCamera(channelForm)
         } else {

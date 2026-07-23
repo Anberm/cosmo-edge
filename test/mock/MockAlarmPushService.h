@@ -13,6 +13,7 @@ namespace cosmo::test {
 class MockAlarmPushService : public cosmo::service::IAlarmPushService {
 public:
     MAKE_MOCK0(Init, void(), override);
+    MAKE_MOCK0(Stop, void(), override);
     MAKE_MOCK0(IsEnabled, bool(), override);
     MAKE_MOCK0(GetUrl, std::string(), override);
     MAKE_MOCK2(SetPush, cosmo::util::ErrorEnum(bool, const std::string&), override);

@@ -44,10 +44,10 @@ public:
                                          const std::vector<uint8_t>& logoImg,
                                          const std::string& bigScreenName) override;
     void SetDebugMode(bool enable) override;
-    void SetShieldedActions(const std::vector<std::string>& actions) override;
-    void SetPopUpParam(int popUpSwitch, int audioPlay, int popUpDuration) override;
-    void SetRunMode(cosmo::RunMode mode) override;
-    void SetResourceLimit(bool enable) override;
+    cosmo::util::ErrorEnum SetShieldedActions(const std::vector<std::string>& actions) override;
+    cosmo::util::ErrorEnum SetPopUpParam(int popUpSwitch, int audioPlay, int popUpDuration) override;
+    cosmo::util::ErrorEnum SetRunMode(cosmo::RunMode mode) override;
+    cosmo::util::ErrorEnum SetResourceLimit(bool enable) override;
 
     // ---- IConfigNetworkService ----
     HttpPushParam GetHttpInterfaceParam() override;
@@ -55,7 +55,8 @@ public:
     MqttParam GetMqttParam() override;
     cosmo::util::ErrorEnum SetMqttParam(const MqttParam& param) override;
     IotNetworkParam GetIotNetworkParam() override;
-    void SetIotNetworkParam(const std::string& httpUrl, const std::string& mqttIp, int mqttPort) override;
+    cosmo::util::ErrorEnum SetIotNetworkParam(const std::string& httpUrl, const std::string& mqttIp,
+                                              int mqttPort) override;
 
 private:
     // Alarm config state (migrated from CfgAlarmParam singleton)
@@ -64,14 +65,14 @@ private:
     cosmo::CfgAlarmParamOverviewInfo overview_config_;
     cosmo::CfgAlarmParamVideoRecordInfo video_record_config_;
 
-    void SaveAlarmCfg(const CfgAlarmParamInfo& cfg);
+    bool SaveAlarmCfg(const CfgAlarmParamInfo& cfg);
 
     // Reboot config state (migrated from CfgRebootParam singleton)
     mutable std::shared_mutex reboot_mtx_;
     std::string reboot_cfg_file_{"devRebootParam.json"};
     cosmo::CfgRebootParamInfo reboot_config_;
 
-    void SaveRebootCfg(const cosmo::CfgRebootParamInfo& cfg);
+    bool SaveRebootCfg(const cosmo::CfgRebootParamInfo& cfg);
 
     // System config state (migrated from CfgSystemParam singleton)
     struct SysConfigState;

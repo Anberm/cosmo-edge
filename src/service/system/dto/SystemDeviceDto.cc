@@ -58,11 +58,13 @@ void to_json(nlohmann::json& j, const MsgQueryHardwareResourceSend::Item& v) {
 void from_json(const nlohmann::json& j, MsgQueryHardwareResourceSend::ResData& v) {
     JSON_OPT(j, v, customScore);
     JSON_OPT(j, v, itemList);
+    JSON_OPT(j, v, accelerator);
 }
 
 void to_json(nlohmann::json& j, const MsgQueryHardwareResourceSend::ResData& v) {
     j["customScore"] = v.customScore;
     j["itemList"]    = v.itemList;
+    j["accelerator"] = v.accelerator;
 }
 
 }  // namespace cosmo::System

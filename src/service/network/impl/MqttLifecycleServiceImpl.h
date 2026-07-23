@@ -6,8 +6,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -17,12 +19,24 @@
 #include "util/IRequestDispatcher.h"
 #include "util/PeriodicTimer.h"
 
+struct event_base;
+struct evdns_getaddrinfo_request;
+
 namespace cosmo::network::mqtt {
 class CMvMQTTClient;
 struct MessageArrived;
 }  // namespace cosmo::network::mqtt
 
 namespace cosmo::service {
+
+namespace detail {
+
+    // libevent delivers evdns_getaddrinfo_cancel() through a deferred callback.
+    // Drain that callback on the request's private event base before destroying it.
+    bool CancelAndDrainDnsRequest(event_base* event_base_ptr, evdns_getaddrinfo_request* request,
+                                  const bool* completed) noexcept;
+
+}  // namespace detail
 
 class MqttLifecycleServiceImpl final : public IMqttLifecycle {
 public:
@@ -41,10 +55,10 @@ public:
     bool IsMqttEnabled() override;
     void MqttStop() override;
     void MqttStart() override;
+    void MqttShutdown() override;
 
 private:
     using SteadyClock = std::chrono::steady_clock;
-    using TimePoint   = SteadyClock::time_point;
 
     // — MQTT connection lifecycle —
     void Connect(const std::string& sn, const std::string& ip, int port, int authMode,
@@ -63,21 +77,30 @@ private:
                            const std::string& passwd);
 
     // — Business logic —
-    void SetReconnectTimePoint();
     void HeartBeatTimerStart();
-    void RegisterBusiness();
+    bool RegisterBusiness();
     bool Register();
     bool HeartBeat();
     void HandleMessage(network::mqtt::MqttCommonMsgDl&& msg);
     bool SendAsyncData(const std::string& topic, const std::string& data);
 
     // — DNS resolution —
-    static std::string ResolveHostToIP(const std::string& host);
+    std::string ResolveHostToIP(const std::string& host);
 
     // — Connection thread management —
     std::thread connect_thread_;
     std::atomic_bool connect_running_{false};
     void StopConnectThread();
+    bool WaitForConnectStop(std::chrono::milliseconds timeout);
+    std::mutex connect_wait_mtx_;
+    std::condition_variable connect_wait_cv_;
+    // Serializes public start/stop, reconnect callbacks and heartbeat-driven
+    // transitions. Recursive because HeartBeat may request Reconnect inline.
+    std::recursive_mutex lifecycle_mtx_;
+    std::mutex shutdown_mtx_;
+    bool shutdown_complete_{false};
+    std::atomic_bool desired_running_{false};
+    std::atomic_bool shutting_down_{false};
 
     // — Core components —
     DispatcherFactory dispatcher_factory_;
@@ -88,14 +111,13 @@ private:
 
     // — Connection state —
     std::string device_sn_;
-    TimePoint time_reconnect_;
     std::string ip_;
     int port_{0};
     int auth_mode_{0};
     std::string client_id_;
     std::string user_name_;
     std::string passwd_;
-    bool registered_{false};
+    std::atomic_bool registered_{false};
     uint32_t heartbeat_failed_count_{0};
 
     // — Async work queues —

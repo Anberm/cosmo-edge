@@ -139,6 +139,7 @@ TEST_CASE("PicTaskServiceImpl: TaskDelete input validation", "[PicTaskService]")
     SECTION("Delete existing task succeeds and decrements count") {
         auto alg = std::make_shared<cosmo::ActionAlg>();
         sut.TaskCreate("del_test", alg);
+        REQUIRE(sut.TaskStart("del_test"));
         REQUIRE(sut.TaskCount() == 1);
 
         auto result = sut.TaskDelete("del_test");
@@ -151,7 +152,8 @@ TEST_CASE("PicTaskServiceImpl: TaskDelete input validation", "[PicTaskService]")
 // TaskDeleteAll
 // ============================================================================
 
-TEST_CASE("PicTaskServiceImpl: TaskDeleteAll clears all tasks", "[PicTaskService]") {
+TEST_CASE("PicTaskServiceImpl: TaskDeleteAll is a terminal idempotent shutdown",
+          "[PicTaskService][lifecycle]") {
     cosmo::test::MockServiceRegistry mocks;
     PicTaskServiceImpl sut;
 
@@ -159,11 +161,30 @@ TEST_CASE("PicTaskServiceImpl: TaskDeleteAll clears all tasks", "[PicTaskService
     auto alg2 = std::make_shared<cosmo::ActionAlg>();
     sut.TaskCreate("t1", alg1);
     sut.TaskCreate("t2", alg2);
+    REQUIRE(sut.TaskStart("t1"));
+    REQUIRE(sut.QueryTasks(true) == std::vector<std::string>{"t1"});
     REQUIRE(sut.TaskCount() == 2);
 
     sut.TaskDeleteAll();
     REQUIRE(sut.TaskCount() == 0);
     REQUIRE(sut.QueryTasks(false).empty());
+
+    REQUIRE(sut.TaskCreate("after_shutdown", std::make_shared<cosmo::ActionAlg>()) ==
+            cosmo::util::ErrorEnum::ServiceNotInit);
+    REQUIRE_FALSE(sut.TaskStart("after_shutdown"));
+    REQUIRE(sut.TaskCount() == 0);
+    REQUIRE_NOTHROW(sut.TaskDeleteAll());
+}
+
+TEST_CASE("PicTaskServiceImpl: destructor drains started tasks", "[PicTaskService][lifecycle]") {
+    cosmo::test::MockServiceRegistry mocks;
+    {
+        PicTaskServiceImpl sut;
+        auto alg = std::make_shared<cosmo::ActionAlg>();
+        REQUIRE(sut.TaskCreate("started", alg) == cosmo::util::ErrorEnum::Success);
+        REQUIRE(sut.TaskStart("started"));
+    }
+    SUCCEED();
 }
 
 // ============================================================================

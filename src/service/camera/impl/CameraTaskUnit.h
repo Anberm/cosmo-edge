@@ -100,6 +100,9 @@ private:
     size_t enable_sign_{0};  // Set to m_modifySign when applied to the task
     size_t modify_sign_{
         100};  // Incremented on each modification; initial value forces parameter setup on start
+    // Ownership is acquired only after TaskCreate succeeds.  A failed duplicate
+    // constructor must never stop/delete the already existing task in its destructor.
+    bool task_created_{false};
 };
 
 using CameraTaskUnitPtr = std::shared_ptr<CameraTaskUnit>;

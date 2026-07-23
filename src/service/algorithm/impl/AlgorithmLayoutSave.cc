@@ -17,17 +17,107 @@
 #include "util/JsonFileUtil.h"
 #include "util/Log.h"
 #include "util/PathUtil.h"
+#include "util/UuidUtil.h"
 
 namespace cosmo::service::detail {
 namespace alg = algorithm;
 
+namespace {
+
+    bool ResolveAlgorithmRoot(std::string& root) {
+        const auto configured = cosmo::path::GetAlgorithmPath();
+        return cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetResourcePath(), configured,
+                                                          cosmo::path::PathEntryType::kDirectory, root);
+    }
+
+    bool AllocateExportDirectory(const std::string& prefix, std::string& directory) {
+        directory.clear();
+        const auto temporary_root = cosmo::path::GetTemporaryDirPath();
+        std::string resolved_root;
+        if (!cosmo::path::ResolveExistingPathWithinRoot(
+                temporary_root, temporary_root, cosmo::path::PathEntryType::kDirectory, resolved_root)) {
+            return false;
+        }
+
+        const auto name      = prefix + cosmo::util::GenerateUUID();
+        const auto candidate = (std::filesystem::path(resolved_root) / name).string();
+        std::error_code error;
+        if (!std::filesystem::create_directory(candidate, error) || error) {
+            return false;
+        }
+        std::filesystem::permissions(candidate, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::replace, error);
+        if (error || !cosmo::path::ResolveExistingPathWithinRoot(
+                         resolved_root, candidate, cosmo::path::PathEntryType::kDirectory, directory)) {
+            std::error_code cleanup_error;
+            std::filesystem::remove(candidate, cleanup_error);
+            directory.clear();
+            return false;
+        }
+        return true;
+    }
+
+    bool ResolveNewExportFile(const std::string& name, std::string& path) {
+        path.clear();
+        if (!cosmo::path::IsSafePathComponent(name)) {
+            return false;
+        }
+        const auto root = cosmo::path::GetTemporaryDirPath();
+        if (!cosmo::path::ResolvePathWithinRoot(root, (std::filesystem::path(root) / name).string(), path)) {
+            return false;
+        }
+        std::error_code error;
+        const auto status = std::filesystem::symlink_status(path, error);
+        return error == std::errc::no_such_file_or_directory || (!error && !std::filesystem::exists(status));
+    }
+
+    void RemoveManagedExportDirectory(const std::string& directory) {
+        std::string resolved;
+        if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetTemporaryDirPath(), directory,
+                                                        cosmo::path::PathEntryType::kDirectory, resolved)) {
+            return;
+        }
+        std::error_code error;
+        std::filesystem::remove_all(resolved, error);
+    }
+
+    void RemoveManagedExportFile(const std::string& file) {
+        std::string resolved;
+        if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetTemporaryDirPath(), file,
+                                                        cosmo::path::PathEntryType::kRegularFile, resolved)) {
+            return;
+        }
+        std::error_code error;
+        std::filesystem::remove(resolved, error);
+    }
+
+    bool MakePrivateExportFile(const std::string& file) {
+        std::error_code error;
+        std::filesystem::permissions(file,
+                                     std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                                     std::filesystem::perm_options::replace, error);
+        return !error;
+    }
+
+}  // namespace
+
 cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutExportSingle(
     const std::string& code, const std::string& name, const std::string& /*category*/,
     const std::string& /*supplier*/, const std::string& /*versionId*/, alg::LayoutExportResult& outResult) {
-    std::string algorithmDir = cosmo::path::GetAlgorithmPath();
+    if (!cosmo::path::IsSafePathComponent(code, 128)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    std::string algorithmDir;
+    if (!ResolveAlgorithmRoot(algorithmDir)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     std::string jsonFilePath = cosmo::util::FindPrefixedJsonFile(algorithmDir, code);
-    if (jsonFilePath.empty())
+    std::string resolvedJsonFilePath;
+    if (jsonFilePath.empty() ||
+        !cosmo::path::ResolveExistingPathWithinRoot(
+            algorithmDir, jsonFilePath, cosmo::path::PathEntryType::kRegularFile, resolvedJsonFilePath))
         return cosmo::util::ErrorEnum::ParameterException;
+    jsonFilePath              = resolvedJsonFilePath;
     std::string algorithmName = name;
     if (algorithmName.empty()) {
         nlohmann::json nameDoc;
@@ -46,33 +136,45 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutExportSingle(
     }
     if (cleanAlgorithmName.empty())
         cleanAlgorithmName = "algorithm";
-    std::string tempDir = cosmo::path::GetTemporaryDirPath() + "/algorithm_export_" + code + "_" +
-                          std::to_string(time(nullptr));
-    std::error_code ec;
-    std::filesystem::create_directories(tempDir, ec);
-    if (ec)
+    if (!cosmo::path::IsSafePathComponent(cleanAlgorithmName, 120)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    std::string tempDir;
+    if (!AllocateExportDirectory("algorithm_export_", tempDir)) {
         return cosmo::util::ErrorEnum::ParameterException;
+    }
+    std::error_code ec;
 
     std::string destJsonFile =
         (std::filesystem::path(tempDir) / (code + "_" + cleanAlgorithmName + ".json")).string();
-    std::filesystem::copy_file(jsonFilePath, destJsonFile, std::filesystem::copy_options::overwrite_existing,
-                               ec);
+    std::filesystem::copy_file(jsonFilePath, destJsonFile, std::filesystem::copy_options::none, ec);
     if (ec) {
-        std::filesystem::remove_all(tempDir, ec);
+        RemoveManagedExportDirectory(tempDir);
         return cosmo::util::ErrorEnum::ParameterException;
     }
-    std::string timestamp = std::to_string(time(nullptr));
-    std::string archiveFilePath =
-        cosmo::path::GetTemporaryDirPath() + "/algorithm_" + code + "_" + timestamp + ".tar.gz";
+    std::string archiveFilePath;
+    if (!ResolveNewExportFile("algorithm_" + cosmo::util::GenerateUUID() + ".tar.gz", archiveFilePath)) {
+        RemoveManagedExportDirectory(tempDir);
+        return cosmo::util::ErrorEnum::ParameterException;
+    }
     std::string jsonFileName = code + "_" + cleanAlgorithmName + ".json";
     std::string outStr;
     if (cosmo::util::Exec({"tar", "-czf", archiveFilePath, "-C", tempDir, jsonFileName}, outStr) != 0) {
-        std::filesystem::remove_all(tempDir, ec);
+        RemoveManagedExportDirectory(tempDir);
+        RemoveManagedExportFile(archiveFilePath);
         return cosmo::util::ErrorEnum::ParameterException;
     }
-    std::filesystem::remove_all(tempDir, ec);
-    outResult.filePath = archiveFilePath;
-    outResult.fileName = cosmo::util::GetFileName(archiveFilePath);
+    RemoveManagedExportDirectory(tempDir);
+    std::string resolvedArchive;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetTemporaryDirPath(), archiveFilePath,
+                                                    cosmo::path::PathEntryType::kRegularFile,
+                                                    resolvedArchive) ||
+        !MakePrivateExportFile(resolvedArchive)) {
+        RemoveManagedExportFile(archiveFilePath);
+        return cosmo::util::ErrorEnum::ParameterException;
+    }
+    outResult.filePath = resolvedArchive;
+    outResult.fileName = code + "_" + cleanAlgorithmName + ".tar.gz";
     return cosmo::util::ErrorEnum::Success;
 }
 
@@ -130,8 +232,16 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutExportAll(const std::string& al
                                                            const std::string& algorithmCategory,
                                                            const std::vector<std::string>& algorithmIds,
                                                            alg::LayoutExportResult& outResult) {
-    std::string algorithmDir = cosmo::path::GetAlgorithmPath();
-    DIR* dir                 = opendir(algorithmDir.c_str());
+    if (algorithmIds.size() > 10000 ||
+        std::any_of(algorithmIds.begin(), algorithmIds.end(),
+                    [](const std::string& id) { return !cosmo::path::IsSafePathComponent(id, 128); })) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    std::string algorithmDir;
+    if (!ResolveAlgorithmRoot(algorithmDir)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
+    DIR* dir = opendir(algorithmDir.c_str());
     if (!dir) {
         LOG_ERRO("LayoutExportAll: cannot open algorithm directory {}", algorithmDir);
         return cosmo::util::ErrorEnum::ParameterException;
@@ -143,13 +253,11 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutExportAll(const std::string& al
                         !algorithmUsage.empty() || !algorithmCategory.empty();
 
     // Create temp directory for export
-    std::string timestamp = std::to_string(time(nullptr));
-    std::string tempDir   = cosmo::path::GetTemporaryDirPath() + "/algorithm_export_all_" + timestamp;
+    std::string tempDir;
     std::error_code ec;
-    std::filesystem::create_directories(tempDir, ec);
-    if (ec) {
+    if (!AllocateExportDirectory("algorithm_export_all_", tempDir)) {
         closedir(dir);
-        LOG_ERRO("LayoutExportAll: cannot create temp directory {}", tempDir);
+        LOG_ERRO("{}", "LayoutExportAll: cannot create private temp directory");
         return cosmo::util::ErrorEnum::ParameterException;
     }
 
@@ -163,7 +271,15 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutExportAll(const std::string& al
             filename == "algorithms.json")
             continue;
 
-        std::string jsonFilePath = algorithmDir + (algorithmDir.back() == '/' ? "" : "/") + filename;
+        if (!cosmo::path::IsSafePathComponent(filename)) {
+            continue;
+        }
+        const auto candidate = (std::filesystem::path(algorithmDir) / filename).string();
+        std::string jsonFilePath;
+        if (!cosmo::path::ResolveExistingPathWithinRoot(
+                algorithmDir, candidate, cosmo::path::PathEntryType::kRegularFile, jsonFilePath)) {
+            continue;
+        }
 
         if (hasAnyFilter) {
             nlohmann::json doc;
@@ -175,39 +291,55 @@ cosmo::util::ErrorEnum AlgorithmLayoutMng::LayoutExportAll(const std::string& al
         }
 
         std::string destFile = (std::filesystem::path(tempDir) / filename).string();
-        std::filesystem::copy_file(jsonFilePath, destFile, std::filesystem::copy_options::overwrite_existing,
-                                   ec);
+        ec.clear();
+        std::filesystem::copy_file(jsonFilePath, destFile, std::filesystem::copy_options::none, ec);
         if (!ec)
             fileCount++;
     }
     closedir(dir);
 
     if (fileCount == 0) {
-        std::filesystem::remove_all(tempDir, ec);
+        RemoveManagedExportDirectory(tempDir);
         LOG_WARN("{}", "LayoutExportAll: no algorithm files found to export");
         return cosmo::util::ErrorEnum::ParameterException;
     }
 
     // Package as tar.gz
-    std::string archiveFilePath =
-        cosmo::path::GetTemporaryDirPath() + "/algorithms_export_" + timestamp + ".tar.gz";
+    const std::string archive_name = "algorithms_export_" + cosmo::util::GenerateUUID() + ".tar.gz";
+    std::string archiveFilePath;
+    if (!ResolveNewExportFile(archive_name, archiveFilePath)) {
+        RemoveManagedExportDirectory(tempDir);
+        return cosmo::util::ErrorEnum::ParameterException;
+    }
     std::string outStr;
     if (cosmo::util::Exec({"tar", "-czf", archiveFilePath, "-C", tempDir, "."}, outStr) != 0) {
         LOG_ERRO("LayoutExportAll: tar failed: {}", outStr);
-        std::filesystem::remove_all(tempDir, ec);
+        RemoveManagedExportDirectory(tempDir);
+        RemoveManagedExportFile(archiveFilePath);
         return cosmo::util::ErrorEnum::ParameterException;
     }
 
-    std::filesystem::remove_all(tempDir, ec);
-    outResult.filePath = archiveFilePath;
-    outResult.fileName = "algorithms_export_" + timestamp + ".tar.gz";
+    RemoveManagedExportDirectory(tempDir);
+    std::string resolvedArchive;
+    if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetTemporaryDirPath(), archiveFilePath,
+                                                    cosmo::path::PathEntryType::kRegularFile,
+                                                    resolvedArchive) ||
+        !MakePrivateExportFile(resolvedArchive)) {
+        RemoveManagedExportFile(archiveFilePath);
+        return cosmo::util::ErrorEnum::ParameterException;
+    }
+    outResult.filePath = resolvedArchive;
+    outResult.fileName = archive_name;
     LOG_INFO("LayoutExportAll: exported {} algorithm(s) to {}", fileCount, archiveFilePath);
     return cosmo::util::ErrorEnum::Success;
 }
 
 cosmo::util::ErrorEnum AlgorithmLayoutMng::GetAtomicActionList(int actionUsage, const std::string& filePath,
                                                                alg::AtomicActionListResult& outResult) {
-    const std::string actionsFilePath = filePath.empty() ? cosmo::path::GetActionsJsonPath() : filePath;
+    std::string actionsFilePath;
+    if (!ResolveActionsFile(filePath, actionsFilePath)) {
+        return cosmo::util::ErrorEnum::InvalidParam;
+    }
     nlohmann::json doc;
     if (cosmo::util::JsonFileUtil::ReadJsonArray(actionsFilePath, doc) != cosmo::util::ErrorEnum::Success) {
         return cosmo::util::ErrorEnum::Success;

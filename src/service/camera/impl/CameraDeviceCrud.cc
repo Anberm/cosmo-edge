@@ -56,7 +56,13 @@ static int DetermineTaskStatus(int current_status, int data_status, MsgCameraTyp
 // ============================================================
 
 util::ErrorEnum CameraServiceImpl::Add(MsgCameraInfo& config, std::string& id) {
-    // Generate channel ID under exclusive lock to prevent duplicate IDs from concurrent Add() calls
+    std::lock_guard<std::mutex> crud_lock(camera_crud_mtx_);
+    if (stopping_.load(std::memory_order_acquire)) {
+        LOG_WARN("{}", "Reject camera creation during service shutdown");
+        return util::ErrorEnum::SysErr;
+    }
+    // Generate and reserve the channel ID logically while CRUD operations are
+    // serialized. Slow file/task/probe work is performed without mtx_ held.
     {
         std::lock_guard<std::shared_mutex> lock(mtx_);
         if (cameras_.size() >= max_camera_count_) {
@@ -76,48 +82,59 @@ util::ErrorEnum CameraServiceImpl::Add(MsgCameraInfo& config, std::string& id) {
             config.videoChannelId = oss.str();
         }
         id = config.videoChannelId;
+        if (std::any_of(cameras_.begin(), cameras_.end(), [&](const CameraEntityPtr& camera) {
+                return camera && camera->videoChannelId == id;
+            })) {
+            return util::ErrorEnum::IDExist;
+        }
     }
 
-    if (GetCamera(id)) {
-        return util::ErrorEnum::IDExist;
+    CameraEntityPtr camera = std::make_shared<service::CameraEntity>();
+    camera->videoChannelId = config.videoChannelId;
+    camera->channelCode    = config.channelCode;
+    camera->channelName    = config.channelName;
+    if (MsgCameraType::MsgCameraTypeLocalVideo == config.channelType) {
+        if (!util::FileExist(config.url)) {
+            return util::ErrorEnum::FileNotExist;
+        }
+        camera->url = GetVideoFileName(id, config.url);
+        LOG_INFO("camera->url:{}", camera->url);
+        if (!util::FileMoveWithRename(config.url, camera->url)) {
+            LOG_WARN("Failed to move local video {} to {}", config.url, camera->url);
+            return util::ErrorEnum::FileMoveFailed;
+        }
+    } else {
+        camera->url = util::NormalizeRtspUrl(config.url);
+        config.url  = camera->url;
     }
 
+    camera->channelType = static_cast<int>(config.channelType);
+    InitCameraChannel(camera);
     {
         std::lock_guard<std::shared_mutex> lock(mtx_);
-
-        CameraEntityPtr camera = std::make_shared<service::CameraEntity>();
-        camera->videoChannelId = config.videoChannelId;
-        camera->channelCode    = config.channelCode;
-        camera->channelName    = config.channelName;
-        if (MsgCameraType::MsgCameraTypeLocalVideo == config.channelType) {
-            if (!util::FileExist(config.url)) {
-                return util::ErrorEnum::FileNotExist;
-            }
-            camera->url = GetVideoFileName(id, config.url);
-            LOG_INFO("camera->url:{}", camera->url);
-            util::FileMoveWithRename(config.url, camera->url);
-        } else {
-            camera->url = util::NormalizeRtspUrl(config.url);
-            config.url  = camera->url;
-        }
-
-        camera->channelType = static_cast<int>(config.channelType);
-        InitCameraChannel(camera);
         cameras_.push_back(camera);
-
-        // Immediately trigger a health probe to quickly update channel status to online
-        ProbeCameraOnlineStatusNow(camera);
     }
+
+    // Immediately trigger a health probe to quickly update channel status to online.
+    // This may block for up to the TCP probe timeout, so it must not hold mtx_.
+    ProbeCameraOnlineStatusNow(camera);
     SaveConfig();
     return util::ErrorEnum::Success;
 }
 
 util::ErrorEnum CameraServiceImpl::Update(MsgCameraInfo& config) {
+    std::lock_guard<std::mutex> crud_lock(camera_crud_mtx_);
     auto camera = GetCamera(config.videoChannelId);
     if (!camera) {
         LOG_INFO("{} Not Exist", config.videoChannelId);
         return util::ErrorEnum::CameraNotExist;
     }
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
+        return util::ErrorEnum::CameraNotExist;
+    }
+    camera->WaitForSwitchThread();
+    bool channel_url_changed = false;
     {
         std::lock_guard<std::shared_mutex> lock(mtx_);
 
@@ -130,21 +147,22 @@ util::ErrorEnum CameraServiceImpl::Update(MsgCameraInfo& config) {
             config.url  = camera->url;
         }
         // Update channel URL directly (inlined from CameraTaskMng::SetChannelUrl)
-        if (camera->channel_url_ != camera->url) {
-            ServiceRegistry::Instance().Get<ITaskChannel>().TaskChannelSetUrl(camera->videoChannelId,
-                                                                              camera->url);
-        }
+        channel_url_changed  = camera->channel_url_ != camera->url;
         camera->channel_url_ = camera->url;
         LOG_INFO("{}/{} Update", config.videoChannelId, config.channelName);
-
-        // Editing channel may have changed URL; trigger immediate probe to update status
-        ProbeCameraOnlineStatusNow(camera);
     }
+    if (channel_url_changed) {
+        ServiceRegistry::Instance().Get<ITaskChannel>().TaskChannelSetUrl(camera->videoChannelId,
+                                                                          camera->url);
+    }
+    // Editing channel may have changed URL; trigger immediate probe to update status.
+    ProbeCameraOnlineStatusNow(camera);
     SaveConfig();
     return util::ErrorEnum::Success;
 }
 
 util::ErrorEnum CameraServiceImpl::Delete(const std::string& videoChannelId) {
+    std::lock_guard<std::mutex> crud_lock(camera_crud_mtx_);
     LOG_INFO("Delete started for camera: {}", videoChannelId);
 
     // Fast lookup and remove (minimize lock scope)
@@ -152,30 +170,30 @@ util::ErrorEnum CameraServiceImpl::Delete(const std::string& videoChannelId) {
     bool need_remove_file = false;
     std::string file_to_remove;
 
+    target = GetCamera(videoChannelId);
+    if (!target) {
+        LOG_INFO("Camera {} not found for deletion", videoChannelId);
+        return util::ErrorEnum::CameraNotExist;
+    }
     {
-        std::lock_guard<std::shared_mutex> lock(mtx_);
-        LOG_DEBUG("{}", "Write lock acquired");
-
-        auto it = std::find_if(cameras_.begin(), cameras_.end(), [&](const CameraEntityPtr& cfg) {
-            return cfg->videoChannelId == videoChannelId;
-        });
-
-        if (it == cameras_.end()) {
-            LOG_INFO("Camera {} not found for deletion", videoChannelId);
-            return util::ErrorEnum::CameraNotExist;
-        }
-
-        target = *it;  // Save shared_ptr (increment refcount); destructor runs outside lock scope
+        // command_mtx_ is always acquired before mtx_. This matches Update()
+        // and avoids a delete-vs-command ABBA deadlock.
+        std::lock_guard<std::mutex> command_lock(target->command_mtx_);
+        target->deleting_ = true;
         need_remove_file =
             (MsgCameraType::MsgCameraTypeLocalVideo == static_cast<MsgCameraType>(target->channelType));
         if (need_remove_file) {
             file_to_remove = target->url;  // Copy URL to avoid accessing object later
         }
 
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        auto it = std::find(cameras_.begin(), cameras_.end(), target);
+        if (it == cameras_.end()) {
+            return util::ErrorEnum::CameraNotExist;
+        }
         LOG_INFO("Deleting camera: {}/{}", target->videoChannelId, target->channelName);
         cameras_.erase(it);
-        LOG_DEBUG("{}", "Camera removed from container");
-    }  // Lock released here
+    }
 
     // Destroy channel tasks (stop algo tasks + channel task)
     DestroyCameraChannel(target);

@@ -27,6 +27,7 @@ public:
     // IHttpLifecycle
     void InitHttpServer(const std::string& host, uint16_t port) override;
     void RunHttpLoop() override;
+    void RequestHttpStop() noexcept override;
     void StopHttpServer() override;
 
     // IMqttLifecycle
@@ -34,6 +35,7 @@ public:
     bool IsMqttEnabled() override;
     void MqttStop() override;
     void MqttStart() override;
+    void MqttShutdown() override;
 
     // INetworkConfig
     void Init() override;
@@ -41,6 +43,7 @@ public:
     std::vector<cosmo::platform::NetCardInfo> GetCardRealInfos() override;
     bool SetCardInfo(const cosmo::platform::NetCardInfo& info) override;
     void ApplyCardInfoAsync(const cosmo::platform::NetCardInfo& info) override;
+    void StopAsyncApply() override;
     std::vector<std::string> GetCfgDns() override;
     bool SetDnss(std::vector<std::string> dnss) override;
     bool SearchSetNewInfo(cosmo::platform::NetCardInfo& netCard, const std::string& dns1,

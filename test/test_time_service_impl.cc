@@ -1,15 +1,29 @@
 #include "catch_amalgamated.hpp"
-#include "util/PathUtil.h"
 // Unit tests for TimeServiceImpl — validates NTP config management,
 // timezone application, and time status queries.
 // Uses temp JSON config files to isolate from production config.
 
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "mock/MockServiceRegistry.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/system/impl/TimeServiceImpl.h"
+#include "util/PathUtil.h"
+#include "util/TimeUtil.h"
 
 namespace fs = std::filesystem;
 
@@ -47,14 +61,6 @@ struct TimeServiceTestConfig {
         fs::remove_all(dir);
     }
 };
-
-// Helper: create TimeServiceImpl with config dir properly set.
-// The TestServiceTestConfig constructor calls OverrideRootPathForTest
-// to redirect cosmo::path::GetCfgPath() to the test config directory.
-std::unique_ptr<cosmo::service::TimeServiceImpl> MakeTimeService(cosmo::test::MockServiceRegistry& mocks,
-                                                                 const std::string& cfgDir) {
-    return std::make_unique<cosmo::service::TimeServiceImpl>();
-}
 
 }  // namespace
 
@@ -119,7 +125,7 @@ TEST_CASE("TimeServiceImpl: SyncNtp updates in-memory state", "[time][service]")
     SECTION("SyncNtp with enable=1 updates server/port/interval in state") {
         cosmo::service::NtpConfig ntpCfg;
         ntpCfg.enable   = 1;
-        ntpCfg.server   = "time.google.com";
+        ntpCfg.server   = "127.0.0.1";
         ntpCfg.port     = 456;
         ntpCfg.interval = 120;
 
@@ -130,7 +136,7 @@ TEST_CASE("TimeServiceImpl: SyncNtp updates in-memory state", "[time][service]")
         std::vector<cosmo::service::TimeZoneItem> zones;
         auto status = timeSvc.GetTimeStatus(zones);
         REQUIRE(status.ntp.enable == 1);
-        REQUIRE(status.ntp.server == "time.google.com");
+        REQUIRE(status.ntp.server == "127.0.0.1");
         REQUIRE(status.ntp.port == 456);
         REQUIRE(status.ntp.interval == 120);
     }
@@ -139,19 +145,43 @@ TEST_CASE("TimeServiceImpl: SyncNtp updates in-memory state", "[time][service]")
         cosmo::service::NtpConfig ntpCfg;
         ntpCfg.enable = 0;
 
-        // Change to Tokyo (ID=9, +09:00)
-        auto result = timeSvc.SyncNtp(ntpCfg, 9);
+        // Change to Tokyo (ID=81, +09:00)
+        auto result = timeSvc.SyncNtp(ntpCfg, 81);
         REQUIRE(result == cosmo::util::ErrorEnum::Success);
 
         std::vector<cosmo::service::TimeZoneItem> zones;
         auto status = timeSvc.GetTimeStatus(zones);
-        REQUIRE(status.timeZoneId == 9);
-        // If city list loaded, value should be "+09:00"; if not, it stays at default
-        // We only verify the ID was updated (which is always set regardless of city list)
+        REQUIRE(status.timeZoneId == 81);
+        REQUIRE(status.timeZoneValue == "+09:00");
     }
 }
 
-TEST_CASE("TimeServiceImpl: SetTime disables NTP", "[time][service]") {
+TEST_CASE("TimeServiceImpl: rejects invalid NTP configuration at service boundary", "[time][service]") {
+    cosmo::test::MockServiceRegistry mocks;
+    TimeServiceTestConfig cfg;
+    cosmo::service::TimeServiceImpl timeSvc;
+
+    cosmo::service::NtpConfig ntpCfg;
+    ntpCfg.enable   = 1;
+    ntpCfg.server   = "ntp.example;reboot";
+    ntpCfg.port     = 123;
+    ntpCfg.interval = 60;
+    REQUIRE(timeSvc.SyncNtp(ntpCfg, 75) == cosmo::util::ErrorEnum::InvalidParam);
+
+    ntpCfg.server = "ntp.example";
+    ntpCfg.port   = 0;
+    REQUIRE(timeSvc.SyncNtp(ntpCfg, 75) == cosmo::util::ErrorEnum::InvalidParam);
+
+    ntpCfg.port     = 123;
+    ntpCfg.interval = 1441;
+    REQUIRE(timeSvc.SyncNtp(ntpCfg, 75) == cosmo::util::ErrorEnum::InvalidParam);
+
+    ntpCfg.interval = 60;
+    REQUIRE(timeSvc.SyncNtp(ntpCfg, 96) == cosmo::util::ErrorEnum::InvalidParam);
+}
+
+TEST_CASE("TimeServiceImpl: SetTime commits configuration only when the clock update succeeds",
+          "[time][service]") {
     cosmo::test::MockServiceRegistry mocks;
     TimeServiceTestConfig cfg;
 
@@ -161,34 +191,124 @@ TEST_CASE("TimeServiceImpl: SetTime disables NTP", "[time][service]") {
         // First enable NTP via SyncNtp
         cosmo::service::NtpConfig ntpCfg;
         ntpCfg.enable   = 1;
-        ntpCfg.server   = "ntp.aliyun.com";
+        ntpCfg.server   = "127.0.0.1";
         ntpCfg.port     = 123;
         ntpCfg.interval = 60;
         timeSvc.SyncNtp(ntpCfg, 75);
 
-        // Now SetTime — should disable NTP
-        int64_t timestamp = 1700000000000;  // 2023-11-14
-        auto result       = timeSvc.SetTime(timestamp, 75);
+        const auto timestamp = cosmo::util::GetMilliseconds();
+        auto result          = timeSvc.SetTime(timestamp, 75);
         REQUIRE((result == cosmo::util::ErrorEnum::Success ||
                  result == cosmo::util::ErrorEnum::OperationNotSupport ||
                  result == cosmo::util::ErrorEnum::SysErr));
 
         std::vector<cosmo::service::TimeZoneItem> zones;
         auto status = timeSvc.GetTimeStatus(zones);
-        REQUIRE(status.ntp.enable == 0);
+        REQUIRE(status.ntp.enable == (result == cosmo::util::ErrorEnum::Success ? 0 : 1));
     }
 
-    SECTION("SetTime updates timezone ID") {
-        int64_t timestamp = 1700000000000;
-        auto result       = timeSvc.SetTime(timestamp, 9);
+    SECTION("SetTime rolls back timezone ID when the platform rejects the clock update") {
+        const auto timestamp = cosmo::util::GetMilliseconds();
+        auto result          = timeSvc.SetTime(timestamp, 81);
         REQUIRE((result == cosmo::util::ErrorEnum::Success ||
                  result == cosmo::util::ErrorEnum::OperationNotSupport ||
                  result == cosmo::util::ErrorEnum::SysErr));
 
         std::vector<cosmo::service::TimeZoneItem> zones;
         auto status = timeSvc.GetTimeStatus(zones);
-        REQUIRE(status.timeZoneId == 9);
+        REQUIRE(status.timeZoneId == (result == cosmo::util::ErrorEnum::Success ? 81 : 75));
     }
+}
+
+TEST_CASE("TimeServiceImpl: persistence failure does not split runtime configuration",
+          "[time][service][persistence]") {
+    cosmo::test::MockServiceRegistry mocks;
+    TimeServiceTestConfig cfg("/tmp/cosmo_time_persistence_test");
+    cosmo::service::TimeServiceImpl timeSvc;
+
+    const std::string old_environment = std::getenv("TZ") == nullptr ? "" : std::getenv("TZ");
+
+    // A directory at the target pathname lets the NTP write succeed and forces
+    // the subsequent atomic timezone rename to fail.
+    const auto timezone_path = cfg.dir + "/conf/TimeZoneInfo.json";
+    fs::remove(timezone_path);
+    fs::create_directory(timezone_path);
+
+    cosmo::service::NtpConfig ntpCfg;
+    ntpCfg.enable   = 1;
+    ntpCfg.server   = "127.0.0.1";
+    ntpCfg.port     = 123;
+    ntpCfg.interval = 60;
+    REQUIRE(timeSvc.SyncNtp(ntpCfg, 81) == cosmo::util::ErrorEnum::SysErr);
+
+    std::vector<cosmo::service::TimeZoneItem> zones;
+    const auto status = timeSvc.GetTimeStatus(zones);
+    REQUIRE(status.ntp.enable == 0);
+    REQUIRE(status.ntp.server == "ntp.aliyun.com");
+    REQUIRE(status.timeZoneId == 75);
+    REQUIRE((std::getenv("TZ") == nullptr ? "" : std::getenv("TZ")) == old_environment);
+
+    std::ifstream ntp_file(cfg.dir + "/conf/NTPStatusConfig.json");
+    const auto persisted = nlohmann::json::parse(ntp_file);
+    REQUIRE(persisted.at("enable") == 0);
+    REQUIRE(persisted.at("ntpServer") == "ntp.aliyun.com");
+}
+
+TEST_CASE("TimeServiceImpl: stopping an NTP receive is prompt", "[time][service][ntp][lifecycle]") {
+    cosmo::test::MockServiceRegistry mocks;
+    TimeServiceTestConfig cfg("/tmp/cosmo_time_lifecycle_test");
+
+    const int server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    REQUIRE(server >= 0);
+
+    sockaddr_in address{};
+    address.sin_family      = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port        = 0;
+    REQUIRE(bind(server, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0);
+
+    socklen_t address_size = sizeof(address);
+    REQUIRE(getsockname(server, reinterpret_cast<sockaddr*>(&address), &address_size) == 0);
+    timeval receive_timeout{};
+    receive_timeout.tv_sec = 2;
+    REQUIRE(setsockopt(server, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout)) == 0);
+
+    auto timeSvc = std::make_unique<cosmo::service::TimeServiceImpl>();
+    cosmo::service::NtpConfig ntpCfg;
+    ntpCfg.enable   = 1;
+    ntpCfg.server   = "127.0.0.1";
+    ntpCfg.port     = ntohs(address.sin_port);
+    ntpCfg.interval = 60;
+    REQUIRE(timeSvc->SyncNtp(ntpCfg, 75) == cosmo::util::ErrorEnum::Success);
+
+    std::array<uint8_t, 64> request{};
+    REQUIRE(recv(server, request.data(), request.size(), 0) == 48);
+
+    const auto started = std::chrono::steady_clock::now();
+    timeSvc.reset();
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    REQUIRE(elapsed < std::chrono::milliseconds(500));
+    close(server);
+}
+
+TEST_CASE("TimeServiceImpl: invalid persisted configuration is sanitized", "[time][service][load]") {
+    cosmo::test::MockServiceRegistry mocks;
+    TimeServiceTestConfig cfg("/tmp/cosmo_time_invalid_load_test");
+    WriteJsonFile(
+        cfg.dir + "/conf/TimeZoneInfo.json",
+        R"({"m_nTzWest":99,"m_nTZOffset":9999,"m_nTZCitys":999,"m_strContent":"bad","m_value":"bad"})");
+    WriteJsonFile(cfg.dir + "/conf/NTPStatusConfig.json",
+                  R"({"enable":7,"ntpServer":"bad;host","NTPPort":0,"interval":99999})");
+
+    cosmo::service::TimeServiceImpl timeSvc;
+    std::vector<cosmo::service::TimeZoneItem> zones;
+    const auto status = timeSvc.GetTimeStatus(zones);
+    REQUIRE(status.timeZoneId == 75);
+    REQUIRE(status.timeZoneValue == "+08:00");
+    REQUIRE(status.ntp.enable == 0);
+    REQUIRE(status.ntp.server == "ntp.aliyun.com");
+    REQUIRE(status.ntp.port == 123);
+    REQUIRE(status.ntp.interval == 60);
 }
 
 TEST_CASE("TimeServiceImpl: Construction with missing config files", "[time][service]") {

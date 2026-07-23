@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "network/msg/MsgTask.h"
@@ -59,6 +61,7 @@ enum class HttpResponseCode {
     kNeedAuthenticate   = 401,
     kNotFound           = 404,
     kBadMethod          = 405,
+    kPayloadTooLarge    = 413,
     kInternalError      = 500,
     kServiceUnavailable = 503,
 };
@@ -71,6 +74,7 @@ inline const std::map<int, std::string>& GetHttpResCodeMsg() {
         {static_cast<int>(HttpResponseCode::kNeedAuthenticate), "NEED AUTHENTICATE"},
         {static_cast<int>(HttpResponseCode::kNotFound), "NOT FOUND"},
         {static_cast<int>(HttpResponseCode::kBadMethod), "METHOD NOT FOR THIS URI"},
+        {static_cast<int>(HttpResponseCode::kPayloadTooLarge), "PAYLOAD TOO LARGE"},
         {static_cast<int>(HttpResponseCode::kInternalError), "INTERNAL SERVER ERROR"},
         {static_cast<int>(HttpResponseCode::kServiceUnavailable), "SERVICE UNAVAILABLE"},
     };
@@ -84,9 +88,16 @@ struct HttpReqTask : cosmo::MsgTask {
     std::string interface;
     std::string x_forwarded_for;
     std::string mtk;
+    std::string principal;
     std::string body;
     bool has_tmp_path{false};
     std::string tmp_file_path;
+    std::string multipart_file_path;
+    std::string multipart_file_name;
+    std::uint64_t multipart_file_size{0};
+    // Keeps the server-side multipart spool quota reserved until this task is
+    // processed, rejected, or drained during shutdown.
+    std::shared_ptr<void> multipart_spool_reservation;
 
     ~HttpReqTask() override = default;
 };
@@ -112,6 +123,7 @@ struct HttpAckTask : cosmo::MsgTask {
 struct HttpServerCallbacks {
     std::function<std::string()> get_upload_tmp_path;
     std::function<std::string()> get_user_data_path;
+    std::function<std::string()> get_log_path;
 };
 
 }  // namespace cosmo::network::http

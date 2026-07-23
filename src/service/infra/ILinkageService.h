@@ -22,6 +22,10 @@ class ILinkageService {
 public:
     virtual ~ILinkageService() = default;
 
+    /// Permanently stop asynchronous alarm dispatch. Safe to call more than
+    /// once; new alarm events are rejected after this returns.
+    virtual void Stop() = 0;
+
     /// Add a new linkage strategy.
     /// @param name     Strategy display name.
     /// @param workFlow Workflow definition JSON.

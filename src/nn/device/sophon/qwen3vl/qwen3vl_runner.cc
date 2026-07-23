@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <sstream>
 
@@ -338,7 +341,7 @@ int Qwen3VLRunner_GetMaxBatchSize(const Qwen3VLRunner* r) {
 
 Status Qwen3VLRunner::Init(const std::string& model_path, const std::string& tokenizer_path, int device_id,
                            const std::string& model_config_json_path, const std::string& model_type) {
-    impl_.reset(new Impl());
+    impl_             = std::make_unique<Impl>();
     impl_->model_path = model_path;
     impl_->model_type = model_type;
     impl_->device_id  = device_id;
@@ -365,23 +368,31 @@ Status Qwen3VLRunner::Init(const std::string& model_path, const std::string& tok
               << " id_vision_start=" << impl_->ID_VISION_START << " image_pad=" << impl_->IMAGE_PAD_TOKEN
               << std::endl;
 
-    // Instantiate different underlying models based on model_type
-    if (impl_->is_qwen35()) {
-        impl_->model_35.reset(new qwen3_5::Qwen3_5Model());
-        impl_->model_35->init(device_id, model_path, impl_->do_sample, model_config_json_path);
-        impl_->config.SEQLEN             = impl_->model_35->SEQLEN;
-        impl_->config.MAX_INPUT_LENGTH   = impl_->model_35->MAX_INPUT_LENGTH;
-        impl_->config.MAX_PREFILL_LENGTH = impl_->model_35->MAX_INPUT_LENGTH;
-        impl_->config.MAX_PIXELS         = impl_->model_35->MAX_PIXELS;
-        impl_->config.MAX_PATCHES        = impl_->model_35->MAX_PATCHES;
-    } else {
-        impl_->model_vl.reset(new qwen3vl::Qwen3VLModel());
-        impl_->model_vl->init(device_id, model_path, impl_->do_sample, model_config_json_path);
-        impl_->config.SEQLEN             = impl_->model_vl->SEQLEN;
-        impl_->config.MAX_INPUT_LENGTH   = impl_->model_vl->MAX_INPUT_LENGTH;
-        impl_->config.MAX_PREFILL_LENGTH = impl_->model_vl->MAX_INPUT_LENGTH;
-        impl_->config.MAX_PIXELS         = impl_->model_vl->MAX_PIXELS;
-        impl_->config.MAX_PATCHES        = impl_->model_vl->MAX_PATCHES;
+    try {
+        // Instantiate different underlying models based on model_type
+        if (impl_->is_qwen35()) {
+            impl_->model_35 = std::make_unique<qwen3_5::Qwen3_5Model>();
+            impl_->model_35->init(device_id, model_path, impl_->do_sample, model_config_json_path);
+            impl_->config.SEQLEN             = impl_->model_35->SEQLEN;
+            impl_->config.MAX_INPUT_LENGTH   = impl_->model_35->MAX_INPUT_LENGTH;
+            impl_->config.MAX_PREFILL_LENGTH = impl_->model_35->MAX_INPUT_LENGTH;
+            impl_->config.MAX_PIXELS         = impl_->model_35->MAX_PIXELS;
+            impl_->config.MAX_PATCHES        = impl_->model_35->MAX_PATCHES;
+        } else {
+            impl_->model_vl = std::make_unique<qwen3vl::Qwen3VLModel>();
+            impl_->model_vl->init(device_id, model_path, impl_->do_sample, model_config_json_path);
+            impl_->config.SEQLEN             = impl_->model_vl->SEQLEN;
+            impl_->config.MAX_INPUT_LENGTH   = impl_->model_vl->MAX_INPUT_LENGTH;
+            impl_->config.MAX_PREFILL_LENGTH = impl_->model_vl->MAX_INPUT_LENGTH;
+            impl_->config.MAX_PIXELS         = impl_->model_vl->MAX_PIXELS;
+            impl_->config.MAX_PATCHES        = impl_->model_vl->MAX_PATCHES;
+        }
+    } catch (const std::bad_alloc&) {
+        impl_.reset();
+        return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "Qwen model initialization ran out of memory");
+    } catch (const std::exception& error) {
+        impl_.reset();
+        return Status(COSMO_NN_ERR_LOAD_MODEL, error.what());
     }
     impl_->config.temporal_patch_size = 2;
     impl_->config.spatial_merge_size  = SPATIAL_MERGE_SIZE;
@@ -408,7 +419,7 @@ Status Qwen3VLRunner::Init(const std::string& model_path, const std::string& tok
             impl_->config.MAX_PIXELS = QWEN35_DEFAULT_MAX_PIXELS;
         }
     }
-    impl_->maker.reset(new qwen3vl::Maker(impl_->config));
+    impl_->maker    = std::make_unique<qwen3vl::Maker>(impl_->config);
     impl_->inited   = true;
     max_batch_size_ = 1;
     std::cerr << "[Qwen3VLRunner] model limits model_type=" << impl_->model_type
@@ -431,6 +442,8 @@ Status Qwen3VLRunner::RunImpl(Model& model, Qwen3VLRunner::Impl& impl,
     text_outputs.resize(images.size());
 
     for (size_t i = 0; i < images.size(); i++) {
+        if (!images[i] || !prompts[i])
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "image or prompt blob is null");
         Blob* image_blob     = images[i].get();
         Blob* prompt_blob    = prompts[i].get();
         std::string question = GetPromptFromBlob(prompt_blob);
@@ -449,6 +462,23 @@ Status Qwen3VLRunner::RunImpl(Model& model, Qwen3VLRunner::Impl& impl,
         std::vector<float> pixel_values;
         if (!GetPixelValuesFromImageBlob(image_blob, bm_handle, impl.config, pixel_values))
             return Status(COSMO_NN_ERR_INVALID_INPUT, "failed to process image");
+        if (impl.config.grid_thw.size() != 3 || impl.config.grid_thw[0] <= 0 ||
+            impl.config.grid_thw[1] <= 0 || impl.config.grid_thw[2] <= 0 || model.VIT_DIMS <= 0) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "invalid vision patch grid");
+        }
+        size_t patch_count = static_cast<size_t>(impl.config.grid_thw[0]);
+        for (size_t grid_index = 1; grid_index < impl.config.grid_thw.size(); ++grid_index) {
+            const size_t dimension = static_cast<size_t>(impl.config.grid_thw[grid_index]);
+            if (patch_count > std::numeric_limits<size_t>::max() / dimension) {
+                return Status(COSMO_NN_ERR_INVALID_INPUT, "vision patch count overflow");
+            }
+            patch_count *= dimension;
+        }
+        if (patch_count > static_cast<size_t>(model.MAX_PATCHES) ||
+            patch_count > std::numeric_limits<size_t>::max() / static_cast<size_t>(model.VIT_DIMS) ||
+            pixel_values.size() != patch_count * static_cast<size_t>(model.VIT_DIMS)) {
+            return Status(COSMO_NN_ERR_INVALID_INPUT, "vision tensor size does not match patch grid");
+        }
 
         std::vector<std::vector<int>> grid_thws = {impl.config.grid_thw};
         std::string sentence_input    = qwen3vl::BuildImagePrompt(question, grid_thws, impl.is_qwen35());
@@ -457,11 +487,11 @@ Status Qwen3VLRunner::RunImpl(Model& model, Qwen3VLRunner::Impl& impl,
         std::cerr << "[Qwen3VLRunner] prompt built model_type=" << impl.model_type
                   << " append_empty_think=" << (impl.is_qwen35() ? 1 : 0) << " grid_thw=["
                   << impl.config.grid_thw[0] << "," << impl.config.grid_thw[1] << ","
-                  << impl.config.grid_thw[2] << "]"
-                  << " pixel_values=" << pixel_values.size() << " tokens=" << tokens.size()
-                  << " token_preview=" << TokenPreview(tokens) << " prompt=\""
+                  << impl.config.grid_thw[2] << "]" << " pixel_values=" << pixel_values.size()
+                  << " tokens=" << tokens.size() << " token_preview=" << TokenPreview(tokens) << " prompt=\""
                   << EscapeForLog(sentence_input, 512) << "\"" << std::endl;
-        if (static_cast<int>(tokens.size()) > model.MAX_INPUT_LENGTH)
+        if (tokens.empty() || tokens.size() > static_cast<size_t>(model.MAX_INPUT_LENGTH) ||
+            tokens.size() >= static_cast<size_t>(model.SEQLEN))
             return Status(COSMO_NN_ERR_INVALID_INPUT, "input tokens exceed max length");
 
         std::vector<int> vit_offset = qwen3vl::FindTokenOffset(tokens, impl.ID_VISION_START);
@@ -536,8 +566,7 @@ Status Qwen3VLRunner::RunImpl(Model& model, Qwen3VLRunner::Impl& impl,
         std::string tag    = impl.is_qwen35() ? "Qwen3_5" : "Qwen3VL";
         std::cerr << "[" << tag << "] generated " << num_tokens << " tokens in " << std::fixed
                   << std::setprecision(2) << elapsed_s << " s, " << std::setprecision(1) << tok_per_sec
-                  << " tok/s"
-                  << " stop=" << stop_reason << " raw_text=\"" << EscapeForLog(text, 512) << "\""
+                  << " tok/s" << " stop=" << stop_reason << " raw_text=\"" << EscapeForLog(text, 512) << "\""
                   << std::endl;
         text_outputs[i].resize(1);
         text_outputs[i][0] = FilterOutput(text);
@@ -555,10 +584,15 @@ Status Qwen3VLRunner::Run(const std::vector<std::vector<std::shared_ptr<Blob>>>&
     if (images.size() != prompts.size() || images.empty())
         return Status(COSMO_NN_ERR_INVALID_INPUT, "images and prompts size mismatch");
 
-    if (impl_->is_qwen35())
-        return RunImpl(*impl_->model_35, *impl_, inputs, text_outputs_);
-    else
+    try {
+        if (impl_->is_qwen35())
+            return RunImpl(*impl_->model_35, *impl_, inputs, text_outputs_);
         return RunImpl(*impl_->model_vl, *impl_, inputs, text_outputs_);
+    } catch (const std::bad_alloc&) {
+        return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "Qwen inference ran out of memory");
+    } catch (const std::exception& error) {
+        return Status(COSMO_NN_ERR_NET, error.what());
+    }
 }
 
 }  // namespace cosmo::nn

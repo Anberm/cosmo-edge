@@ -24,6 +24,7 @@ MODE=""
 STAGED_ONLY=false
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLANG_FORMAT="${CLANG_FORMAT:-clang-format}"
+REQUIRED_CLANG_FORMAT_MAJOR=18
 
 # ── Parse arguments ─────────────────────────────────────────────────
 usage() {
@@ -57,15 +58,6 @@ if [[ -z "$MODE" ]]; then
     usage
 fi
 
-# ── Verify clang-format is available ────────────────────────────────
-if ! command -v "$CLANG_FORMAT" &> /dev/null; then
-    echo -e "${RED}Error: clang-format not found. Install it or set CLANG_FORMAT env var.${NC}"
-    exit 1
-fi
-
-VERSION=$("$CLANG_FORMAT" --version 2>&1)
-echo -e "${CYAN}Using: ${VERSION}${NC}"
-
 # ── Collect files ───────────────────────────────────────────────────
 collect_files() {
     if [[ "$STAGED_ONLY" == true ]]; then
@@ -92,6 +84,27 @@ TOTAL=${#FILES[@]}
 if [[ $TOTAL -eq 0 ]]; then
     echo -e "${YELLOW}No files to check.${NC}"
     exit 0
+fi
+
+# ── Verify clang-format is available ────────────────────────────────
+if ! command -v "$CLANG_FORMAT" &> /dev/null; then
+    echo -e "${RED}Error: clang-format not found. Install it or set CLANG_FORMAT env var.${NC}"
+    exit 1
+fi
+
+VERSION=$("$CLANG_FORMAT" --version 2>&1)
+echo -e "${CYAN}Using: ${VERSION}${NC}"
+
+if [[ ! "$VERSION" =~ version[[:space:]]+([0-9]+)([.]|$) ]]; then
+    echo -e "${RED}Error: unable to determine the clang-format major version.${NC}"
+    exit 1
+fi
+
+CLANG_FORMAT_MAJOR="${BASH_REMATCH[1]}"
+if [[ "$CLANG_FORMAT_MAJOR" -ne "$REQUIRED_CLANG_FORMAT_MAJOR" ]]; then
+    echo -e "${RED}Error: clang-format ${REQUIRED_CLANG_FORMAT_MAJOR} is required; found major version ${CLANG_FORMAT_MAJOR}.${NC}"
+    echo -e "${CYAN}Install clang-format-${REQUIRED_CLANG_FORMAT_MAJOR} or set CLANG_FORMAT=clang-format-${REQUIRED_CLANG_FORMAT_MAJOR}.${NC}"
+    exit 1
 fi
 
 echo -e "${CYAN}Scanning ${BOLD}${TOTAL}${NC}${CYAN} files...${NC}"

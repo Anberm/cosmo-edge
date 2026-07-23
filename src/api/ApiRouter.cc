@@ -126,46 +126,61 @@ ApiRouter::ApiRouter(MessageFromType from)
 
 void ApiRouter::RegisterCoreRoutes() {
     // ── Core API (No Auth, /v1/cwai/aihost/) ──────────────────────────
-    ROUTE_CORE("/v1/cwai/aihost/", InterfaceTest);
-    ROUTE_CORE("/v1/cwai/aihost/", TaskCreate);
-    ROUTE_CORE("/v1/cwai/aihost/", TaskCancle);
-    ROUTE_CORE("/v1/cwai/aihost/", PTaskCreate);
-    ROUTE_CORE("/v1/cwai/aihost/", PTaskCancle);
-    ROUTE_CORE("/v1/cwai/aihost/", PTaskDetectPic);
-    ROUTE_CORE("/v1/cwai/aihost/", OperateNode);
-    ROUTE_CORE("/v1/cwai/aihost/", Info);
-    ROUTE_CORE("/v1/cwai/aihost/", Probe);
-    ROUTE_CORE("/v1/cwai/aihost/", ViewRoutes);
-    ROUTE_CORE("/v1/cwai/aihost/", GraphicsMemory);
-    ROUTE_CORE("/v1/cwai/aihost/", OverviewStructrueRecord);
-    ROUTE_CORE("/v1/cwai/aihost/", LoadLocalAlgorithmAction);
-    ROUTE_CORE("/v1/cwai/aihost/", LogicTest);
-    ROUTE_CORE("/v1/cwai/aihost/", QueryTaskOverviewFile);
-    ROUTE_CORE("/v1/cwai/aihost/", QueryTaskStatus);
-    ROUTE_CORE("/v1/cwai/aihost/", QueryTaskInfo);
-    ROUTE_CORE("/v1/cwai/aihost/", QueryDeviceMemStatus);
-    ROUTE_CORE("/v1/cwai/aihost/", QueryLogs);
+    // Probe is the only anonymous Core endpoint. MQTT requests are authenticated
+    // by the broker connection before they reach this router.
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, InterfaceTest);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, TaskCreate);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, TaskCancle);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, PTaskCreate);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, PTaskCancle);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, PTaskDetectPic);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, OperateNode);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, Info);
+    ROUTE_CORE("/v1/cwai/aihost/", kNoAuth, Probe);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, ViewRoutes);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, GraphicsMemory);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, OverviewStructrueRecord);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, LoadLocalAlgorithmAction);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, LogicTest);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, QueryTaskOverviewFile);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, QueryTaskStatus);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, QueryTaskInfo);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, QueryDeviceMemStatus);
+    ROUTE_CORE("/v1/cwai/aihost/", kAuth, QueryLogs);
 
     // ── Core API compatible route (unified /gtw/cwai/ prefix for frontend) ────────────
     url_map_[util::ToLower("/gtw/cwai/aihost/PTaskCreate")] = {
-        kNoAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
+        kAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
             return detail::DispatchJson<MsgPTaskCreateSend, MsgPTaskCreateRecv>(GetMessageFrom(), *handler_,
                                                                                 jsonStr, errc);
         }};
     url_map_[util::ToLower("/gtw/cwai/aihost/PTaskCancle")] = {
-        kNoAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
+        kAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
             return detail::DispatchJson<MsgPTaskCancleSend, MsgPTaskCancleRecv>(GetMessageFrom(), *handler_,
                                                                                 jsonStr, errc);
         }};
     url_map_[util::ToLower("/gtw/cwai/aihost/PTaskDetectPic")] = {
-        kNoAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
+        kAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
             return detail::DispatchJson<MsgPTaskDetectPicSend, MsgPTaskDetectPicRecv>(
                 GetMessageFrom(), *handler_, jsonStr, errc);
         }};
 
     // ── Login (No Auth) ─────────────────────────────────────────────────
     ROUTE("/gtw/cwai/login/", kNoAuth, auth_handler_, Auth, DoLogin);
-    ROUTE("/gtw/cwai/login/", kNoAuth, auth_handler_, Auth, ModifyPassword);
+    url_map_[util::ToLower("/gtw/cwai/login/ModifyPassword")] = {
+        kAuth,
+        {},
+        [this](const RequestDispatchContext& context, const std::string& json_str,
+               std::error_condition& errc) {
+            std::string authenticated_json = json_str.empty() ? "{}" : json_str;
+            auto doc                       = nlohmann::json::parse(authenticated_json, nullptr, false);
+            if (doc.is_object()) {
+                doc["mtk"]         = context.credential;
+                authenticated_json = doc.dump();
+            }
+            return detail::DispatchJson<Auth::MsgModifyPasswordSend, Auth::MsgModifyPasswordRecv>(
+                GetMessageFrom(), *auth_handler_, authenticated_json, errc);
+        }};
 }
 
 void ApiRouter::RegisterNetworkRoutes() {
@@ -181,7 +196,7 @@ void ApiRouter::RegisterNetworkRoutes() {
 void ApiRouter::RegisterAlgorithmRoutes() {
     // ── Algorithm Management ──────────────────────────────────────────────────────
     ROUTE("/gtw/cwai/Algorithm/", kAuth, algorithm_handler_, Algorithm, Page);
-    ROUTE("/gtw/cwai/Algorithm/", kAuth, algorithm_handler_, Algorithm, Upload);
+    ROUTE_CONTEXT("/gtw/cwai/Algorithm/", kAuth, algorithm_handler_, Algorithm, Upload);
     ROUTE("/gtw/cwai/Algorithm/", kAuth, algorithm_handler_, Algorithm, Update);
     ROUTE("/gtw/cwai/Algorithm/", kAuth, algorithm_handler_, Algorithm, Delete);
     ROUTE("/gtw/cwai/Algorithm/", kAuth, algorithm_handler_, Algorithm, Add);

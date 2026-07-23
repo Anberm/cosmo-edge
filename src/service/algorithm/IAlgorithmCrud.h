@@ -34,7 +34,8 @@ public:
     /// @param algorithmUsage    Usage code (e.g. detection / recognition).
     /// @param remark            Optional description text.
     /// @param eventType         Event type identifier for alarm binding.
-    /// @param filePath          Path to the algorithm archive.
+    /// @param filePath          Legacy field; ignored. JSON layouts are always written to the managed
+    ///                          algorithm directory.
     /// @return ErrorEnum::kSuccess on success.
     virtual cosmo::util::ErrorEnum AddFromJson(const std::string& algorithmName, int algorithmCategory,
                                                int algorithmUsage, const std::string& remark,

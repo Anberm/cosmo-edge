@@ -29,6 +29,7 @@ namespace {
 class MockTaskService : public cosmo::service::ITaskService {
 public:
     // ITaskLifecycle
+    void Shutdown() override {}
     cosmo::util::ErrorEnum TaskCreate(const std::string&, const std::string&, const std::string&,
                                       cosmo::ActionAlgPtr) override {
         return cosmo::util::ErrorEnum::Success;

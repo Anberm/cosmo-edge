@@ -24,6 +24,12 @@ namespace cosmo::service {
 NetworkConfigServiceImpl::NetworkConfigServiceImpl() = default;
 
 NetworkConfigServiceImpl::~NetworkConfigServiceImpl() {
+    NetworkConfigServiceImpl::StopAsyncApply();
+}
+
+void NetworkConfigServiceImpl::StopAsyncApply() {
+    std::lock_guard<std::mutex> lifecycle_lock(apply_lifecycle_mtx_);
+    stop_async_apply_.store(true, std::memory_order_release);
     if (apply_thread_.joinable()) {
         apply_thread_.join();
     }
@@ -290,12 +296,23 @@ bool NetworkConfigServiceImpl::SetCardInfo(const platform::NetCardInfo& info) {
 }
 
 void NetworkConfigServiceImpl::ApplyCardInfoAsync(const platform::NetCardInfo& info) {
+    std::lock_guard<std::mutex> lifecycle_lock(apply_lifecycle_mtx_);
+    if (stop_async_apply_.load(std::memory_order_acquire)) {
+        LOG_WARN("{}", "Reject async network configuration while service is stopping");
+        return;
+    }
     if (apply_thread_.joinable()) {
         apply_thread_.join();
     }
     apply_thread_ = std::thread([this, info]() {
         std::this_thread::sleep_for(timing::kOneSecondInterval);
+        if (stop_async_apply_.load(std::memory_order_acquire)) {
+            return;
+        }
         if (SetCardInfo(info)) {
+            if (stop_async_apply_.load(std::memory_order_acquire)) {
+                return;
+            }
             ServiceRegistry::Instance().Get<ISystemOperationService>().RebootDevice("Interface Reboot");
         } else {
             LOG_ERRO("Set netcard {} failed, skip interface reboot", info.eth_name);

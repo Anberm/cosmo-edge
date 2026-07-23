@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <thread>
 
@@ -26,6 +27,38 @@
 static constexpr const char* kTag = "DINO-DETECTER ";
 
 namespace cosmo {
+namespace {
+
+    bool ParseDinoConfidence(const std::string& text, float& value) {
+        try {
+            std::size_t consumed = 0;
+            const float parsed   = std::stof(text, &consumed);
+            if (consumed != text.size() || !std::isfinite(parsed) || parsed < 0.0f || parsed > 1.0f)
+                return false;
+            value = parsed;
+            return true;
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    bool IsDinoPromptParam(const MsgDynamicKeyValue& param) {
+        const std::string key = param.key.ToString();
+        return key == "keywords" || key == "prompt" || (!param.keys.empty() && param.keys[0] == "keywords") ||
+               (param.keys.size() >= 2 && param.keys[1] == "prompt");
+    }
+
+    bool NormalizeDinoPrompt(const std::string& text, std::string& prompt) {
+        const auto first = text.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos)
+            return false;
+        const auto last = text.find_last_not_of(" \t\r\n");
+        prompt          = text.substr(first, last - first + 1);
+        return !prompt.empty();
+    }
+
+}  // namespace
+
 DinoDetector::~DinoDetector() {
     is_detector_inst_init_ = false;
     LOG_INFO("{}[{} {}] Stop", kTag, alg_code_, uuid);
@@ -96,7 +129,7 @@ bool DinoDetector::DinoSdkInit() {
     std::string cfgPath   = "";
     std::string modelPath = "";
     auto cfgRet           = service::ServiceRegistry::Instance().Get<service::IModelService>().GetModelCfg(
-                  alg_code_, cfgPath, modelPath);
+        alg_code_, cfgPath, modelPath);
     if (!cfgRet) {
         LOG_WARN("{}Get Model Configure Failed. AlgCode:{} code:{}", kTag, alg_code_, cfgRet);
         return false;
@@ -147,9 +180,13 @@ bool DinoDetector::AnalysisKey(const std::string& /*channel_id*/, const std::str
                     (param.keys.size() >= 1 && param.keys[0] == "keywords") ||
                     (param.keys.size() >= 2 && param.keys[1] == "prompt");
     if (isPrompt) {
-        std::string value = param.value.ToString();
-        auto it           = std::find_if(params_.param.begin(), params_.param.end(),
-                                         [&taskId](const DinoDetectorParamEl& el) { return el.task_id == taskId; });
+        std::string value;
+        if (!NormalizeDinoPrompt(param.value.ToString(), value)) {
+            LOG_WARN("ModifyParam [{} {}] Task:{} DINO prompt is empty", alg_code_, uuid, taskId);
+            return false;
+        }
+        auto it = std::find_if(params_.param.begin(), params_.param.end(),
+                               [&taskId](const DinoDetectorParamEl& el) { return el.task_id == taskId; });
         if (it != params_.param.end()) {
             it->prompt = value;
             LOG_INFO(
@@ -171,7 +208,12 @@ bool DinoDetector::AnalysisKey(const std::string& /*channel_id*/, const std::str
 
     // Parse confidence parameters: aiParam.box.confidence / aiParam.text.confidence
     if ((param.keys.size() == 3) && (key::AI_PARAM == param.keys[0]) && (key::CONFIDENCE == param.keys[2])) {
-        float confValue    = util::ParseFloat(param.value.ToString());
+        float confValue = 0.0f;
+        if (!ParseDinoConfidence(param.value.ToString(), confValue)) {
+            LOG_WARN("ModifyParam [{} {}] Task:{} invalid {} confidence: {}", alg_code_, uuid, taskId,
+                     param.keys[1], param.value.ToString());
+            return false;
+        }
         std::string subKey = param.keys[1];  // "box" or "text"
         auto it            = std::find_if(params_.param.begin(), params_.param.end(),
                                           [&taskId](const DinoDetectorParamEl& el) { return el.task_id == taskId; });
@@ -194,10 +236,9 @@ bool DinoDetector::AnalysisKey(const std::string& /*channel_id*/, const std::str
                 alg_code_, uuid, taskId, it->text_confidence, confValue);
             it->text_confidence = confValue;
         } else {
-            LOG_DEBUG(
-                "ModifyParam "
-                "[{} {}] Task:{} unknown aiParam subKey: {}",
-                alg_code_, uuid, taskId, subKey);
+            LOG_WARN("ModifyParam [{} {}] Task:{} unknown aiParam subKey: {}", alg_code_, uuid, taskId,
+                     subKey);
+            return false;
         }
         return true;
     }
@@ -208,57 +249,71 @@ bool DinoDetector::AnalysisKey(const std::string& /*channel_id*/, const std::str
 bool DinoDetector::ModifyParam(const std::string& channel_id, const std::string& taskId,
                                std::vector<MsgDynamicKeyValue>& params) {
     std::lock_guard<std::shared_mutex> lock(mtx);
+    const auto original = params_;
+    if (!ApplyParamsUnlocked(channel_id, taskId, params)) {
+        params_ = original;
+        return false;
+    }
+    params_.param_modify_sign++;
+    return true;
+}
+
+bool DinoDetector::ApplyParamsUnlocked(const std::string& channel_id, const std::string& taskId,
+                                       std::vector<MsgDynamicKeyValue>& params) {
+    bool valid = true;
     for (auto& param : params) {
         // Parse keywords/prompt even if keys is empty (orchestration may only have key/value)
-        std::string keyStr = param.key.ToString();
-        bool isPromptKey   = (keyStr == "keywords") || (keyStr == "prompt") ||
-                           (param.keys.size() >= 1 && param.keys[0] == "keywords") ||
-                           (param.keys.size() >= 2 && param.keys[1] == "prompt");
-        if (isPromptKey) {
-            AnalysisKey(channel_id, taskId, param);
+        if (IsDinoPromptParam(param)) {
+            valid = AnalysisKey(channel_id, taskId, param) && valid;
             continue;
         }
         // Also parse aiParam.box.confidence / aiParam.text.confidence parameters
         bool isAiParam =
             (param.keys.size() == 3) && (!param.keys.empty()) && (key::AI_PARAM == param.keys[0]);
         if (isAiParam) {
-            AnalysisKey(channel_id, taskId, param);
+            valid = AnalysisKey(channel_id, taskId, param) && valid;
             continue;
         }
         if (!ValidKey(param)) {
             continue;
         }
-        AnalysisKey(channel_id, taskId, param);
+        valid = AnalysisKey(channel_id, taskId, param) && valid;
     }
-    params_.param_modify_sign++;
-    return true;
+    return valid;
 }
 
 bool DinoDetector::SetParam(const std::string& channel_id, const std::string& taskId,
                             std::vector<MsgDynamicKeyValue>& params) {
+    std::lock_guard<std::shared_mutex> lock(mtx);
+    const auto original = params_;
     std::string savedPrompt;
-    {
-        std::lock_guard<std::shared_mutex> lock(mtx);
-        auto it = std::find_if(params_.param.begin(), params_.param.end(),
-                               [&taskId](const auto& p) { return p.task_id == taskId; });
-        if (it != params_.param.end()) {
-            savedPrompt = it->prompt;
-        }
-        params_.param.clear();
+    auto it = std::find_if(params_.param.begin(), params_.param.end(),
+                           [&taskId](const auto& p) { return p.task_id == taskId; });
+    if (it != params_.param.end()) {
+        savedPrompt = it->prompt;
+        params_.param.erase(it);
     }
-    bool ret = ModifyParam(channel_id, taskId, params);
-    if (!savedPrompt.empty()) {
-        std::lock_guard<std::shared_mutex> lock(mtx);
-        auto it = std::find_if(params_.param.begin(), params_.param.end(),
-                               [&taskId](const DinoDetectorParamEl& el) { return el.task_id == taskId; });
+
+    if (!ApplyParamsUnlocked(channel_id, taskId, params)) {
+        params_ = original;
+        return false;
+    }
+    const bool replaces_prompt =
+        std::any_of(params.begin(), params.end(), [](const auto& param) { return IsDinoPromptParam(param); });
+    if (!replaces_prompt && !savedPrompt.empty()) {
+        it = std::find_if(params_.param.begin(), params_.param.end(),
+                          [&taskId](const DinoDetectorParamEl& el) { return el.task_id == taskId; });
         if (it == params_.param.end()) {
             DinoDetectorParamEl el;
             el.task_id = taskId;
             el.prompt  = savedPrompt;
             params_.param.push_back(el);
+        } else {
+            it->prompt = savedPrompt;
         }
     }
-    return ret;
+    params_.param_modify_sign++;
+    return true;
 }
 
 bool DinoDetector::SetArea(const std::string& /*channel_id*/, const std::string& taskId,
@@ -330,6 +385,10 @@ bool DinoDetector::RemoveTask(const std::string& channel_id, const std::string& 
             // Clean up associated data to prevent map growth / memory leak on repeated add/remove
             task_areas_.erase(task);
             overview_rec_insts_.erase(task);
+            params_.param.erase(
+                std::remove_if(params_.param.begin(), params_.param.end(),
+                               [&task](const DinoDetectorParamEl& param) { return param.task_id == task; }),
+                params_.param.end());
             return true;
         }
     }

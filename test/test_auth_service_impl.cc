@@ -4,6 +4,8 @@
 // Uses a unique temp config directory per test to isolate from device state.
 
 #include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 #include "mock/MockServiceRegistry.h"
 #include "service/network/impl/AuthServiceImpl.h"
@@ -65,6 +67,12 @@ TEST_CASE("AuthServiceImpl: Login", "[auth-service]") {
         REQUIRE(err1 == cosmo::util::ErrorEnum::Success);
         REQUIRE(err2 == cosmo::util::ErrorEnum::Success);
         REQUIRE(token1 != token2);
+        std::string principal1;
+        std::string principal2;
+        REQUIRE(sut.ResolvePrincipal(token1, principal1));
+        REQUIRE(sut.ResolvePrincipal(token2, principal2));
+        REQUIRE(principal1 == "admin");
+        REQUIRE(principal2 == principal1);
     }
 }
 
@@ -80,11 +88,53 @@ TEST_CASE("AuthServiceImpl: Token validation", "[auth-service]") {
 
     SECTION("Unknown token is rejected") {
         REQUIRE_FALSE(sut.IsValidToken("nonexistent-token"));
+        std::string principal = "stale";
+        REQUIRE_FALSE(sut.ResolvePrincipal("nonexistent-token", principal));
+        REQUIRE(principal.empty());
     }
 
     SECTION("Empty token is rejected") {
         REQUIRE_FALSE(sut.IsValidToken(""));
     }
+}
+
+TEST_CASE("AuthServiceImpl: Sessions are process local", "[auth-service]") {
+    IsolatedAuthEnv env;
+    AuthServiceImpl first_instance;
+
+    auto [token, login_error] = first_instance.Login("admin", Md5Upper("admin"));
+    REQUIRE(login_error == cosmo::util::ErrorEnum::Success);
+    REQUIRE(first_instance.IsValidToken(token));
+
+    std::ifstream auth_file(env.tmpDir + "/conf/auth.json");
+    REQUIRE(auth_file.is_open());
+    nlohmann::json persisted;
+    auth_file >> persisted;
+    REQUIRE(persisted.contains("userPasswd"));
+    REQUIRE_FALSE(persisted.contains("token"));
+
+    AuthServiceImpl restarted_instance;
+    REQUIRE_FALSE(restarted_instance.IsValidToken(token));
+}
+
+TEST_CASE("AuthServiceImpl: Legacy persisted sessions are discarded", "[auth-service]") {
+    IsolatedAuthEnv env;
+    const auto auth_path = env.tmpDir + "/conf/auth.json";
+    {
+        std::ofstream auth_file(auth_path);
+        REQUIRE(auth_file.is_open());
+        auth_file << nlohmann::json{
+            {"userPasswd", {{"admin", Md5Upper("admin")}}},
+            {"token", nlohmann::json::array({{{"user", "admin"}, {"token", "legacy-session"}}})}};
+    }
+
+    AuthServiceImpl sut;
+    REQUIRE_FALSE(sut.IsValidToken("legacy-session"));
+
+    std::ifstream auth_file(auth_path);
+    nlohmann::json persisted;
+    auth_file >> persisted;
+    REQUIRE_FALSE(persisted.contains("token"));
 }
 
 TEST_CASE("AuthServiceImpl: Change password", "[auth-service]") {
@@ -100,6 +150,7 @@ TEST_CASE("AuthServiceImpl: Change password", "[auth-service]") {
 
         auto changeErr = sut.ChangePasswd(token, defaultPwdMd5, newPwdMd5);
         REQUIRE(changeErr == cosmo::util::ErrorEnum::Success);
+        REQUIRE_FALSE(sut.IsValidToken(token));
 
         // Old password should no longer work
         auto [token2, err2] = sut.Login("admin", defaultPwdMd5);
@@ -122,4 +173,29 @@ TEST_CASE("AuthServiceImpl: Change password", "[auth-service]") {
         auto changeErr = sut.ChangePasswd(token, Md5Upper("wrong_old"), newPwdMd5);
         REQUIRE(changeErr == cosmo::util::ErrorEnum::OldPasswdWrong);
     }
+}
+
+TEST_CASE("AuthServiceImpl: Password change revokes every session for that user", "[auth-service]") {
+    IsolatedAuthEnv env;
+    const auto operator_password = Md5Upper("operator-password");
+    {
+        std::ofstream auth_file(env.tmpDir + "/conf/auth.json");
+        REQUIRE(auth_file.is_open());
+        auth_file << nlohmann::json{
+            {"userPasswd", {{"admin", Md5Upper("admin")}, {"operator", operator_password}}}};
+    }
+
+    AuthServiceImpl sut;
+    auto [admin_token_a, admin_error_a]   = sut.Login("admin", Md5Upper("admin"));
+    auto [admin_token_b, admin_error_b]   = sut.Login("admin", Md5Upper("admin"));
+    auto [operator_token, operator_error] = sut.Login("operator", operator_password);
+    REQUIRE(admin_error_a == cosmo::util::ErrorEnum::Success);
+    REQUIRE(admin_error_b == cosmo::util::ErrorEnum::Success);
+    REQUIRE(operator_error == cosmo::util::ErrorEnum::Success);
+
+    REQUIRE(sut.ChangePasswd(admin_token_a, Md5Upper("admin"), Md5Upper("new-admin-password")) ==
+            cosmo::util::ErrorEnum::Success);
+    REQUIRE_FALSE(sut.IsValidToken(admin_token_a));
+    REQUIRE_FALSE(sut.IsValidToken(admin_token_b));
+    REQUIRE(sut.IsValidToken(operator_token));
 }

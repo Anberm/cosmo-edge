@@ -1,3 +1,8 @@
+#include <atomic>
+#include <system_error>
+#include <thread>
+#include <vector>
+
 #include "catch_amalgamated.hpp"
 #include "mock/MockAlgorithmService.h"
 #include "mock/MockAppInfoService.h"
@@ -72,6 +77,38 @@ TEST_CASE("TaskServiceImpl: TaskDelete lifecycle", "[TaskService]") {
     }
 }
 
+TEST_CASE("TaskServiceImpl: concurrent delete has one owner", "[TaskService][concurrency]") {
+    cosmo::test::MockServiceRegistry mocks;
+    ALLOW_CALL(mocks.appInfoSvc, GetNumber()).RETURN(1);
+    TaskServiceImpl svc;
+    auto alg           = std::make_shared<cosmo::ActionAlg>();
+    alg->algorithmCode = "test_alg";
+    ALLOW_CALL(mocks.algSvc, GetAlgorithm("test_alg")).RETURN(alg);
+
+    REQUIRE(svc.TaskCreate("ch1", "channel_name", "task1", alg) == cosmo::util::ErrorEnum::Success);
+
+    std::atomic<int> deleted{0};
+    std::atomic<int> missing{0};
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([&]() {
+            auto result = svc.TaskDelete("task1");
+            if (result == cosmo::util::ErrorEnum::Success) {
+                deleted.fetch_add(1, std::memory_order_relaxed);
+            } else if (result == cosmo::util::ErrorEnum::NotInit) {
+                missing.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    REQUIRE(deleted.load(std::memory_order_relaxed) == 1);
+    REQUIRE(missing.load(std::memory_order_relaxed) == 7);
+    REQUIRE(svc.TaskCount() == 0);
+}
+
 TEST_CASE("TaskServiceImpl: TaskStart/TaskStop", "[TaskService]") {
     cosmo::test::MockServiceRegistry mocks;
     ALLOW_CALL(mocks.appInfoSvc, GetNumber()).RETURN(1);
@@ -108,6 +145,30 @@ TEST_CASE("TaskServiceImpl: TaskStart/TaskStop", "[TaskService]") {
         // Idempotent
         REQUIRE(svc.TaskStop("task1"));
     }
+}
+
+TEST_CASE("TaskServiceImpl: Shutdown is idempotent and rejects new work", "[TaskService][lifecycle]") {
+    cosmo::test::MockServiceRegistry mocks;
+    ALLOW_CALL(mocks.appInfoSvc, GetNumber()).RETURN(1);
+    TaskServiceImpl svc;
+    auto alg           = std::make_shared<cosmo::ActionAlg>();
+    alg->algorithmCode = "test_alg";
+
+    REQUIRE(svc.TaskCreate("ch1", "channel_name", "task1", alg) == cosmo::util::ErrorEnum::Success);
+    REQUIRE(svc.TaskCount() == 1);
+    REQUIRE(svc.TaskStart("ch1", "task1"));
+    REQUIRE(svc.TaskIsStart("task1"));
+    REQUIRE_NOTHROW(svc.Shutdown());
+    REQUIRE_NOTHROW(svc.Shutdown());
+    REQUIRE(svc.TaskCount() == 0);
+    REQUIRE(svc.TaskCreate("ch1", "channel_name", "task2", alg) == cosmo::util::ErrorEnum::SysErr);
+    REQUIRE_FALSE(svc.TaskStart("ch1", "task1"));
+
+    cosmo::MsgTaskCreateRecv request;
+    request.taskId             = "task3";
+    std::error_condition error = cosmo::util::ErrorEnum::Success;
+    svc.ProcessTaskCreate(request, error);
+    REQUIRE(error == cosmo::util::ErrorEnum::SysErr);
 }
 
 TEST_CASE("TaskServiceImpl: Query methods", "[TaskService]") {

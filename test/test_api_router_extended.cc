@@ -126,11 +126,6 @@ TEST_CASE("ApiRouter: MQTT source bypasses auth check", "[ApiRouter][auth]") {
     ALLOW_CALL(mocks.scheduleSvc, Query(trompeloeil::_, trompeloeil::_, trompeloeil::_, trompeloeil::_))
         .RETURN(dummyRet);
 
-    // NOTE: m_from is not assigned from constructor arg (production bug),
-    // so MtkValid always checks auth. We mock IsValidToken to verify
-    // the route dispatch itself works regardless of auth outcome.
-    ALLOW_CALL(mocks.authSvc, IsValidToken(trompeloeil::_)).RETURN(true);
-
     bool ret =
         mqttRouter.HandMessage("/gtw/cwai/schedule/Page", invalidMtk, R"({"msgId":"1","data":{}})", response);
     REQUIRE(ret == true);
@@ -156,23 +151,27 @@ TEST_CASE("ApiRouter: HandMessage(4-arg) unsupported route", "[ApiRouter]") {
     REQUIRE(response.find("Interface Not Support") != std::string::npos);
 }
 
-TEST_CASE("ApiRouter: HandMessage(3-arg) unsupported route", "[ApiRouter]") {
+TEST_CASE("ApiRouter: rejects a spoofed transport context", "[ApiRouter][auth]") {
     test::MockServiceRegistry mocks;
     ApiRouter router(MessageFromType::MessageFromHttp);
 
+    RequestDispatchContext context;
+    context.uri       = "/v1/cwai/aihost/Probe";
+    context.transport = RequestTransport::kMqtt;
     std::string response;
-    bool ret = router.HandMessage("/nonexistent/route", "{}", response);
+    bool ret = router.DispatchRequest(context, "{}", response);
 
     REQUIRE(ret == false);
+    REQUIRE(response.find("Auth Failed") != std::string::npos);
 }
 
 TEST_CASE("ApiRouter: DispatchJson with malformed JSON", "[ApiRouter][dispatch]") {
     test::MockServiceRegistry mocks;
     ApiRouter router(MessageFromType::MessageFromHttp);
 
-    // Send malformed JSON to a core (no-auth) route
+    ALLOW_CALL(mocks.authSvc, IsValidToken("valid-token")).RETURN(true);
     std::string response;
-    bool ret = router.HandMessage("/v1/cwai/aihost/InterfaceTest", "{{not json}}", response);
+    bool ret = router.HandMessage("/v1/cwai/aihost/InterfaceTest", "valid-token", "{{not json}}", response);
 
     REQUIRE(ret == true);
     // Should get an error response (legacy JSON parse error) rather than crash
@@ -183,8 +182,10 @@ TEST_CASE("ApiRouter: InterfaceTest returns success for valid JSON", "[ApiRouter
     test::MockServiceRegistry mocks;
     ApiRouter router(MessageFromType::MessageFromHttp);
 
+    ALLOW_CALL(mocks.authSvc, IsValidToken("valid-token")).RETURN(true);
     std::string response;
-    bool ret = router.HandMessage("/v1/cwai/aihost/InterfaceTest", R"({"test":"hello"})", response);
+    bool ret =
+        router.HandMessage("/v1/cwai/aihost/InterfaceTest", "valid-token", R"({"test":"hello"})", response);
 
     REQUIRE(ret == true);
     REQUIRE(response.find("resCode") != std::string::npos);
@@ -195,8 +196,10 @@ TEST_CASE("ApiRouter: InterfaceTest with error trigger", "[ApiRouter][handler]")
     ApiRouter router(MessageFromType::MessageFromHttp);
 
     // test == "111" triggers ParameterLenError in MessageHandler::Handle
+    ALLOW_CALL(mocks.authSvc, IsValidToken("valid-token")).RETURN(true);
     std::string response;
-    bool ret = router.HandMessage("/v1/cwai/aihost/InterfaceTest", R"({"test":"111"})", response);
+    bool ret =
+        router.HandMessage("/v1/cwai/aihost/InterfaceTest", "valid-token", R"({"test":"111"})", response);
 
     REQUIRE(ret == true);
     // Response should contain failed resCode
@@ -208,7 +211,7 @@ TEST_CASE("ApiRouter: Probe returns empty success", "[ApiRouter][handler]") {
     ApiRouter router(MessageFromType::MessageFromHttp);
 
     std::string response;
-    bool ret = router.HandMessage("/v1/cwai/aihost/Probe", "{}", response);
+    bool ret = router.HandMessage("/v1/cwai/aihost/Probe", "", "{}", response);
 
     REQUIRE(ret == true);
     REQUIRE(response.find("resCode") != std::string::npos);

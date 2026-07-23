@@ -32,6 +32,9 @@ public:
     template <typename T>
     Status ParseOutput(std::vector<std::vector<T>>& outputs);
 
+    Status ParseDinoOutput(std::vector<std::vector<ObjectInfoV1>>& outputs, float text_threshold,
+                           float box_threshold);
+
     int GetMaxBatchSize() const;
 
     Status SetThreshold(int id, float threshold);

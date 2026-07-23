@@ -2,6 +2,8 @@
 
 #include "service/network/impl/HttpLifecycleServiceImpl.h"
 
+#include <stdexcept>
+
 #include "network/http/HttpServer.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/system/IAppInfoService.h"
@@ -24,9 +26,13 @@ void HttpLifecycleServiceImpl::InitHttpServer(const std::string& host, uint16_t 
     network::http::HttpServerCallbacks cbs{
         []() { return cosmo::path::GetUploadTmpPath(); },
         [&reg]() { return reg.Get<IAppInfoService>().UserDataPath(); },
+        [&reg]() { return reg.Get<IAppInfoService>().LogPath(); },
     };
 
-    http_server_->Initialize(host, port, dispatcher_factory_, std::move(cbs));
+    if (!http_server_->Initialize(host, port, dispatcher_factory_, std::move(cbs))) {
+        http_server_.reset();
+        throw std::runtime_error("failed to initialize HTTP server on " + host + ":" + std::to_string(port));
+    }
 
     LOG_INFO("HttpServer initialized on {}:{}", host, port);
 }
@@ -37,6 +43,12 @@ void HttpLifecycleServiceImpl::RunHttpLoop() {
         std::abort();
     }
     http_server_->DispatchMsg();
+}
+
+void HttpLifecycleServiceImpl::RequestHttpStop() noexcept {
+    if (http_server_) {
+        http_server_->RequestStop();
+    }
 }
 
 void HttpLifecycleServiceImpl::StopHttpServer() {

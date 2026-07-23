@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -57,7 +58,10 @@ struct TaskAction {
 };
 
 struct TaskElement {
-    bool is_started{false};
+    // Read by status/query threads while lifecycle operations run on control threads.
+    // TaskServiceImpl serializes lifecycle transitions; atomic keeps read-only status
+    // snapshots race-free without holding the lifecycle mutex for their full duration.
+    std::atomic<bool> is_started{false};
     std::string channelId;           // Channel ID
     std::string channelName;         // Channel name
     std::string taskId;              // Task ID globally unique
@@ -114,7 +118,7 @@ public:
     void GetCameraInfo(std::vector<MsgCameraInfo>& cameraInfos);
 
 private:
-    void TaskRegist(TaskElementPtr task);
+    bool TaskRegist(TaskElementPtr task);
     void TaskUnRegist(TaskElementPtr task);
     void RegisterActionHandlers();
     void RegisterMngProviders();

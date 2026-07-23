@@ -143,6 +143,12 @@ enum class ErrorEnum : uint32_t {
 
     ImageEncodeFailed,  // Image encoding failed
 
+    // Live preview transport errors use an explicit range so adding them does
+    // not renumber any of the established public API error values above.
+    LiveStreamPublishFailed = 0x3200,  // RTMP/SRS publisher connection or write failed
+    LiveStreamReadyTimeout,            // Publisher did not deliver a first decodable frame in time
+    LiveStreamStopped,                 // Preview startup was cancelled or the viewer was stopped
+
     FaceIsNotInTheMiddle = 0x4000,  // Face is not in the middle
     FaceIsTooSmall,                 // Face is incomplete
     FaceIsIncomplete,               // Face is incomplete

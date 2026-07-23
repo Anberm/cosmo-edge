@@ -250,7 +250,7 @@
   </div>
 </template>
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import beepOgg from '@/assets/beep.ogg'
 import { Search } from '@element-plus/icons-vue'
 import flv from '../components/flvVideo.vue'
@@ -377,18 +377,25 @@ const handleFullScreenChange = () => {
     !!document.mozFullScreenElement
 }
 
-const handleFullScreen = () => {
+const handleFullScreen = async () => {
   const dom = document.body
-  if (dom.requestFullscreen) {
-    dom.requestFullscreen()
-  } else if (dom.mozRequestFullScreen) {
-    dom.mozRequestFullScreen()
-  } else if (dom.webkitRequestFullScreen) {
-    dom.webkitRequestFullScreen()
+  try {
+    if (dom.requestFullscreen) {
+      await dom.requestFullscreen()
+    } else if (dom.mozRequestFullScreen) {
+      await dom.mozRequestFullScreen()
+    } else if (dom.webkitRequestFullScreen) {
+      await dom.webkitRequestFullScreen()
+    } else {
+      return false
+    }
+    return true
+  } catch {
+    return false
   }
 }
 
-const handleExitFullScreen = () => {
+const handleExitFullScreen = async () => {
   // 检查是否处于全屏状态
   if (!document.fullscreenElement && 
       !document.webkitFullscreenElement && 
@@ -399,16 +406,15 @@ const handleExitFullScreen = () => {
   const dom = document
   try {
     if (dom.exitFullscreen) {
-      dom.exitFullscreen().catch(err => {
-        console.log('退出全屏失败:', err)
-      })
+      await dom.exitFullscreen()
     } else if (dom.mozCancelFullScreen) {
-      dom.mozCancelFullScreen()
+      await dom.mozCancelFullScreen()
     } else if (dom.webkitCancelFullScreen) {
-      dom.webkitCancelFullScreen()
+      await dom.webkitCancelFullScreen()
     }
-  } catch (err) {
-    console.log('退出全屏异常:', err)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -425,17 +431,16 @@ const queryPopUpParam = () => {
   })
 }
 
-const toggleFullScreen = () => {
-  if (!document.fullscreenElement) {
-    handleFullScreen()
+const toggleFullScreen = async () => {
+  if (!isFullScreen.value) {
+    await handleFullScreen()
   } else {
-    handleExitFullScreen()
+    await handleExitFullScreen()
   }
-  isFullScreen.value = !isFullScreen.value
 }
 
-const exitFullScreen = () => {
-  handleExitFullScreen()
+const exitFullScreen = async () => {
+  await handleExitFullScreen()
   proxy.$router.back()
 }
 
@@ -620,6 +625,34 @@ const initPlayedCamera = (childCameras) => {
         playedCameraList.value[index] = item
       }
     })
+  }
+
+  // The home page links to this screen with the running task context. Honour
+  // that context after restoring the user's saved layout so "View" opens a
+  // useful OSD preview instead of four empty windows.
+  const routeQuery = proxy.$route?.query || {}
+  const queryValue = (value) => Array.isArray(value) ? value[0] : value
+  const requestedChannelId = queryValue(routeQuery.channelId)
+  const requestedAlgorithmId = queryValue(routeQuery.algorithmId)
+  const requestedCamera = childCameras.find(
+    (camera) => String(camera.id) === String(requestedChannelId || '')
+  )
+
+  if (requestedCamera) {
+    const taskList = Array.isArray(requestedCamera.taskList)
+      ? requestedCamera.taskList
+      : []
+    const requestedTask = taskList.find(
+      (task) => String(task.algorithmId) === String(requestedAlgorithmId || '')
+    )
+
+    playedCameraList.value[0] = {
+      id: requestedCamera.id,
+      name: requestedCamera.label,
+      taskList,
+      runAlgorithmId: requestedTask ? requestedAlgorithmId : ''
+    }
+    currentSelectedIndex.value = 0
   }
 }
 
@@ -911,13 +944,6 @@ onMounted(() => {
 
   // 点击通道列表外部时自动收起
   document.addEventListener('click', handleClickOutside)
-
-  // 自动进入全屏
-  nextTick(() => {
-    if (!document.fullscreenElement) {
-      handleFullScreen()
-    }
-  })
 })
 
 onBeforeUnmount(() => {

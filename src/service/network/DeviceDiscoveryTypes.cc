@@ -20,11 +20,13 @@ void from_json(const nlohmann::json& j, DiscoveryVagueMsg& v) {
 }
 
 void to_json(nlohmann::json& j, const DiscoveryProbeSend& v) {
+    to_json(j, static_cast<const DiscoveryBaseMsg&>(v));
     to_json(j, static_cast<const DiscoverySendHead&>(v));
     j["resData"] = v.resData;
 }
 
 void from_json(const nlohmann::json& j, DiscoveryProbeSend& v) {
+    from_json(j, static_cast<DiscoveryBaseMsg&>(v));
     from_json(j, static_cast<DiscoverySendHead&>(v));
     if (j.contains("resData") && !j["resData"].is_null())
         j.at("resData").get_to(v.resData);
@@ -66,11 +68,13 @@ void from_json(const nlohmann::json& j, HWInfoWriteRequest& v) {
 }
 
 void to_json(nlohmann::json& j, const HWInfoWriteResponse& v) {
+    to_json(j, static_cast<const DiscoveryBaseMsg&>(v));
     to_json(j, static_cast<const DiscoverySendHead&>(v));
     j["devHWInfo"] = v.devHWInfo;
 }
 
 void from_json(const nlohmann::json& j, HWInfoWriteResponse& v) {
+    from_json(j, static_cast<DiscoveryBaseMsg&>(v));
     from_json(j, static_cast<DiscoverySendHead&>(v));
     if (j.contains("devHWInfo") && !j["devHWInfo"].is_null())
         j.at("devHWInfo").get_to(v.devHWInfo);

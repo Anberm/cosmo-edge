@@ -50,7 +50,8 @@ public:
     /// @param httpUrl Platform HTTP API URL.
     /// @param mqttIp  MQTT broker IP address.
     /// @param mqttPort MQTT broker port.
-    virtual void SetIotNetworkParam(const std::string& httpUrl, const std::string& mqttIp, int mqttPort) = 0;
+    virtual cosmo::util::ErrorEnum SetIotNetworkParam(const std::string& httpUrl, const std::string& mqttIp,
+                                                      int mqttPort) = 0;
 };
 
 }  // namespace cosmo::service

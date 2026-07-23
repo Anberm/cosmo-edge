@@ -35,7 +35,7 @@ src/api/ApiRouterRoutes.cc
 /gtw/cwai/aihost/...
 ```
 
-该组路由标记为 `kNoAuth`（免鉴权），注册在 `src/api/ApiRouter.cc` 的 `RegisterCoreRoutes()`。`/v1/cwai/aihost/` 下共 19 个端点：
+该组路由注册在 `src/api/ApiRouter.cc` 的 `RegisterCoreRoutes()`。除最小存活检查 `Probe` 为 `kNoAuth` 外，其余端点均为 `kAuth`，HTTP 调用必须携带有效 `mtk`。`/v1/cwai/aihost/` 下共 19 个端点：
 
 ```text
 InterfaceTest             TaskCreate                TaskCancle
@@ -47,13 +47,13 @@ QueryTaskStatus           QueryTaskInfo             QueryDeviceMemStatus
 QueryLogs
 ```
 
-另外为前端统一前缀提供了 3 个 `/gtw/cwai/aihost/` 兼容路由：`PTaskCreate`、`PTaskCancle`、`PTaskDetectPic`（同样 `kNoAuth`）。
+另外为前端统一前缀提供了 3 个 `/gtw/cwai/aihost/` 兼容路由：`PTaskCreate`、`PTaskCancle`、`PTaskDetectPic`（均为 `kAuth`）。
 
 ## API 类别
 
 | 类别 | 路由前缀 | 说明 |
 | --- | --- | --- |
-| 登录 | `/gtw/cwai/login/` | 登录和密码修改 |
+| 登录 | `/gtw/cwai/login/` | 登录免鉴权；密码修改需要 header `mtk`，成功后该用户所有会话失效 |
 | 网络 | `/gtw/cwai/network/` | 网卡、DNS、网络质量和连通性检查 |
 | 算法 | `/gtw/cwai/Algorithm/` | 算法分页、上传、新增、更新、删除、客流算法列表 |
 | 算法编排 | `/gtw/cwai/algorithm/layout/` | 编排算法保存、详情、列表、导出单个算法(`exportSingleAlg`，zip)和导出全部(`export`，tar.gz) |
@@ -74,7 +74,7 @@ QueryLogs
 
 ## 认证
 
-路由注册中存在 `kAuth` 和 `kNoAuth` 两类标记。HTTP 请求会校验 `mtk` token；MQTT 下发请求通过 `ApiRouter` 分发时使用空 `mtk`，不会走 HTTP token 校验。
+路由注册中存在 `kAuth` 和 `kNoAuth` 两类标记。HTTP 请求会校验 `mtk` token；MQTT 只有在内部客户端按配置建立连接并完成设备注册后，才会以受信 transport 上下文进入同一路由器，不重复使用 HTTP `mtk` 校验。
 
 公开 API 文档中仍需要补充：
 

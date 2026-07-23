@@ -20,6 +20,13 @@ ModelPipeline::~ModelPipeline() {
 Status ModelPipeline::ParseDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs) {
     return Status(COSMO_NN_ERR_NET, "Unsupported output type for this pipeline");
 }
+Status ModelPipeline::ParseDinoDetectionOutput(std::vector<std::vector<ObjectInfoV1>>& outputs,
+                                               float text_threshold, float box_threshold) {
+    (void)outputs;
+    (void)text_threshold;
+    (void)box_threshold;
+    return Status(COSMO_NN_ERR_NET, "Pipeline does not support GroundingDINO thresholds");
+}
 Status ModelPipeline::ParseClassifyOutput(std::vector<std::vector<ObjectInfoV1>>& outputs) {
     return Status(COSMO_NN_ERR_NET, "Unsupported output type for this pipeline");
 }

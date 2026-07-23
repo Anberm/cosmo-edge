@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 #include "flow/face/FaceManager.h"
 #include "service/detail/ServiceRegistry.h"
@@ -74,10 +75,17 @@ util::ErrorEnum FaceManager::ExportPersonToPath(const std::string& query_id,
     MsgQueryFacesR query_cond{};
     {
         std::shared_lock<std::shared_mutex> lock(mtx_);
-        if (person_id_list.empty() && query_id != query_cond_.first) {
-            throw util::ErrorMessage(util::ErrorEnum::NoSuchId, "Please query before exporting");
+        if (person_id_list.empty()) {
+            if (!query_cond_.second || query_id != query_cond_.first) {
+                throw util::ErrorMessage(util::ErrorEnum::NoSuchId, "Please query before exporting");
+            }
+            query_cond = *query_cond_.second;
+        } else if (query_cond_.second && query_id == query_cond_.first) {
+            // Preserve the active filters when the selected IDs came from a
+            // preceding query.  Explicit IDs may also be exported without a
+            // prior query; in that case the default condition scans all rows.
+            query_cond = *query_cond_.second;
         }
-        query_cond = *query_cond_.second;
     }
 
     query_cond.pageNum  = 1;
@@ -109,6 +117,11 @@ util::ErrorEnum FaceManager::ExportPersonToPath(const std::string& query_id,
                     }
                 }
             }
+        }
+        out_file.flush();
+        if (!out_file) {
+            LOG_ERRO("{} write failed.", path);
+            return util::ErrorEnum::Failed;
         }
         return util::ErrorEnum::Success;
     }

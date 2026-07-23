@@ -1,5 +1,6 @@
 // Unit tests for util/Exec — argv-based (no-shell) execution, ExecShell, ShellEscape.
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,26 @@ TEST_CASE("Exec(argv) captures combined stdout+stderr", "[exec]") {
     REQUIRE(rc == 0);
     REQUIRE(out.find("outpart") != std::string::npos);
     REQUIRE(out.find("errpart") != std::string::npos);
+}
+
+TEST_CASE("ExecWithOutputLimit bounds capture and terminates the child", "[exec][security]") {
+    SECTION("an exact-size output succeeds and preserves existing output") {
+        std::string out = "prefix:";
+        const int rc    = ExecWithOutputLimit({"printf", "%s", "hello"}, out, 5);
+        REQUIRE(rc == 0);
+        REQUIRE(out == "prefix:hello");
+    }
+
+    SECTION("excess output terminates and reaps a child that would not exit") {
+        std::string out;
+        const auto start = std::chrono::steady_clock::now();
+        const int rc     = ExecWithOutputLimit({"sh", "-c", "printf %s 123456; while :; do :; done"}, out, 5);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+
+        REQUIRE(rc == 0x7F);
+        REQUIRE(out == "12345");
+        REQUIRE(elapsed < std::chrono::seconds(5));
+    }
 }
 
 TEST_CASE("Exec(argv) does not interpret shell metacharacters", "[exec]") {

@@ -16,11 +16,13 @@ public:
     MAKE_MOCK0(IsMqttEnabled, bool(), override);
     MAKE_MOCK0(MqttStop, void(), override);
     MAKE_MOCK0(MqttStart, void(), override);
+    MAKE_MOCK0(MqttShutdown, void(), override);
     MAKE_MOCK0(Init, void(), override);
     MAKE_MOCK1(GetCardRealInfo, cosmo::platform::NetCardInfo(bool), override);
     MAKE_MOCK0(GetCardRealInfos, std::vector<cosmo::platform::NetCardInfo>(), override);
     MAKE_MOCK1(SetCardInfo, bool(const cosmo::platform::NetCardInfo&), override);
     MAKE_MOCK1(ApplyCardInfoAsync, void(const cosmo::platform::NetCardInfo&), override);
+    MAKE_MOCK0(StopAsyncApply, void(), override);
     MAKE_MOCK0(GetCfgDns, std::vector<std::string>(), override);
     MAKE_MOCK1(SetDnss, bool(std::vector<std::string>), override);
     MAKE_MOCK3(SearchSetNewInfo, bool(cosmo::platform::NetCardInfo&, const std::string&, const std::string&),
@@ -29,6 +31,7 @@ public:
     MAKE_MOCK0(GetHostIpAddress, std::string(), override);
     MAKE_MOCK2(InitHttpServer, void(const std::string&, uint16_t), override);
     MAKE_MOCK0(RunHttpLoop, void(), override);
+    MAKE_MOCK0(RequestHttpStop, void(), override);
     MAKE_MOCK0(StopHttpServer, void(), override);
     MAKE_MOCK2(ProbeNetworkQuality,
                cosmo::service::INetworkConfig::PingQualityResult(const std::string&, int), override);

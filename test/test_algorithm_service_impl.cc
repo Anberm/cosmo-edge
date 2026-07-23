@@ -6,8 +6,11 @@
  * 仅测试不依赖外部状态的纯逻辑路径。
  */
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -15,8 +18,97 @@
 #include "service/algorithm/impl/AlgorithmPacketLoader.h"
 #include "service/algorithm/impl/AlgorithmServiceImpl.h"
 #include "service/detail/ServiceRegistry.h"
+#include "util/Exec.h"
 
 using namespace cosmo::service;
+
+namespace {
+
+uint32_t ZipCrc32(std::string_view data) {
+    uint32_t crc = 0xffffffffU;
+    for (const unsigned char byte : data) {
+        crc ^= byte;
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1U) ^ (0xedb88320U & (0U - (crc & 1U)));
+        }
+    }
+    return ~crc;
+}
+
+void WriteLe16(std::ostream& stream, uint16_t value) {
+    stream.put(static_cast<char>(value & 0xffU));
+    stream.put(static_cast<char>((value >> 8U) & 0xffU));
+}
+
+void WriteLe32(std::ostream& stream, uint32_t value) {
+    for (unsigned int shift = 0; shift < 32; shift += 8) {
+        stream.put(static_cast<char>((value >> shift) & 0xffU));
+    }
+}
+
+bool WriteStoredZip(const std::filesystem::path& archive_path, std::string_view member,
+                    std::string_view contents) {
+    if (member.size() > std::numeric_limits<uint16_t>::max() ||
+        contents.size() > std::numeric_limits<uint32_t>::max()) {
+        return false;
+    }
+
+    std::ofstream stream(archive_path, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+        return false;
+    }
+    const auto crc          = ZipCrc32(contents);
+    const auto member_size  = static_cast<uint16_t>(member.size());
+    const auto content_size = static_cast<uint32_t>(contents.size());
+
+    WriteLe32(stream, 0x04034b50U);
+    WriteLe16(stream, 20);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0x21);
+    WriteLe32(stream, crc);
+    WriteLe32(stream, content_size);
+    WriteLe32(stream, content_size);
+    WriteLe16(stream, member_size);
+    WriteLe16(stream, 0);
+    stream.write(member.data(), static_cast<std::streamsize>(member.size()));
+    stream.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+
+    const auto central_offset = static_cast<uint32_t>(static_cast<std::streamoff>(stream.tellp()));
+    WriteLe32(stream, 0x02014b50U);
+    WriteLe16(stream, 0x0314);
+    WriteLe16(stream, 20);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0x21);
+    WriteLe32(stream, crc);
+    WriteLe32(stream, content_size);
+    WriteLe32(stream, content_size);
+    WriteLe16(stream, member_size);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe32(stream, 0100644U << 16U);
+    WriteLe32(stream, 0);
+    stream.write(member.data(), static_cast<std::streamsize>(member.size()));
+
+    const auto central_size =
+        static_cast<uint32_t>(static_cast<std::streamoff>(stream.tellp())) - central_offset;
+    WriteLe32(stream, 0x06054b50U);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 0);
+    WriteLe16(stream, 1);
+    WriteLe16(stream, 1);
+    WriteLe32(stream, central_size);
+    WriteLe32(stream, central_offset);
+    WriteLe16(stream, 0);
+    return stream.good();
+}
+
+}  // namespace
 
 // ============================================================
 // 构造 / 析构安全
@@ -258,6 +350,115 @@ TEST_CASE("AlgorithmPacketLoader: LoadFromJsonDirectory scans nested folders",
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("AlgorithmPacketLoader validates archives before extraction",
+          "[AlgorithmService][AlgorithmPacketLoader][archive]") {
+    namespace fs    = std::filesystem;
+    const auto root = fs::temp_directory_path() / "cosmo_algorithm_archive_validation_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root);
+
+    SECTION("accepts a valid stored ZIP archive") {
+        const auto archive = root / "valid.zip";
+        REQUIRE(WriteStoredZip(archive, "packet.json", R"({"algorithmId":"1003"})"));
+
+        const auto extracted =
+            cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string());
+
+        REQUIRE(extracted == (root / "valid").string());
+        REQUIRE(fs::is_regular_file(fs::path(extracted) / "packet.json"));
+    }
+
+    SECTION("accepts a valid tar.gz archive") {
+        const auto source = root / "valid_tar_source";
+        fs::create_directories(source);
+        std::ofstream(source / "packet.json") << R"({"algorithmId":"1004"})";
+        const auto archive = root / "valid_tar.tar.gz";
+        std::string output;
+        REQUIRE(cosmo::util::Exec({"tar", "-czf", archive.string(), "-C", source.string(), "packet.json"},
+                                  output) == 0);
+
+        const auto extracted =
+            cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string());
+
+        REQUIRE(extracted == (root / "valid_tar").string());
+        REQUIRE(fs::is_regular_file(fs::path(extracted) / "packet.json"));
+    }
+
+    SECTION("rejects a ZIP member that traverses above the destination") {
+        const auto archive = root / "traversal.zip";
+        REQUIRE(WriteStoredZip(archive, "../archive_escape.json", "unsafe"));
+
+        REQUIRE(cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string()).empty());
+        REQUIRE_FALSE(fs::exists(root / "archive_escape.json"));
+        REQUIRE_FALSE(fs::exists(root / "traversal"));
+    }
+
+    SECTION("rejects a tar archive containing a symbolic link") {
+        const auto source = root / "symlink_source";
+        fs::create_directories(source);
+        fs::create_symlink(root.parent_path() / "outside-target", source / "unsafe-link", ec);
+        REQUIRE(!ec);
+        const auto archive = root / "symlink.tar.gz";
+        std::string output;
+        REQUIRE(cosmo::util::Exec({"tar", "-czf", archive.string(), "-C", source.string(), "unsafe-link"},
+                                  output) == 0);
+
+        REQUIRE(cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string()).empty());
+        REQUIRE_FALSE(fs::exists(root / "symlink"));
+    }
+
+    SECTION("rejects duplicate tar member names") {
+        const auto source = root / "duplicate_source";
+        fs::create_directories(source);
+        std::ofstream(source / "packet.json") << R"({"algorithmId":"1005"})";
+        const auto archive = root / "duplicate.tgz";
+        std::string output;
+        REQUIRE(cosmo::util::Exec(
+                    {"tar", "-czf", archive.string(), "-C", source.string(), "packet.json", "packet.json"},
+                    output) == 0);
+
+        REQUIRE(cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string()).empty());
+        REQUIRE_FALSE(fs::exists(root / "duplicate"));
+    }
+
+    SECTION("rejects an extraction destination that is already a symlink") {
+        const auto outside = root.parent_path() / "cosmo_algorithm_archive_outside";
+        fs::remove_all(outside, ec);
+        fs::create_directories(outside);
+        const auto archive = root / "occupied.zip";
+        REQUIRE(WriteStoredZip(archive, "packet.json", R"({"algorithmId":"1006"})"));
+        fs::create_directory_symlink(outside, root / "occupied", ec);
+        REQUIRE(!ec);
+
+        REQUIRE(cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string()).empty());
+        REQUIRE(fs::is_empty(outside));
+        fs::remove_all(outside, ec);
+    }
+
+    SECTION("rejects a sparse member whose declared size exceeds the per-file limit") {
+        const auto source = root / "oversize_source";
+        fs::create_directories(source);
+        const auto sparse_file = source / "oversize.bin";
+        {
+            std::ofstream stream(sparse_file, std::ios::binary);
+            REQUIRE(stream.good());
+        }
+        fs::resize_file(sparse_file, 500ULL * 1024 * 1024 + 1, ec);
+        REQUIRE(!ec);
+        const auto archive = root / "oversize.tar.gz";
+        std::string output;
+        REQUIRE(cosmo::util::Exec(
+                    {"tar", "--sparse", "-czf", archive.string(), "-C", source.string(), "oversize.bin"},
+                    output) == 0);
+
+        REQUIRE(cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string()).empty());
+        REQUIRE_FALSE(fs::exists(root / "oversize"));
+    }
+
+    fs::remove_all(root, ec);
 }
 
 // ============================================================

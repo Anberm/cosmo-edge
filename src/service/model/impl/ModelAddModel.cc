@@ -20,6 +20,7 @@
 #include "util/Exception.h"
 #include "util/FileUtil.h"
 #include "util/NnBackendConstants.h"
+#include "util/PathUtil.h"
 
 namespace cosmo::service {
 
@@ -84,6 +85,29 @@ namespace {
 
         const int class_count = outputs[0].shape.back();
         return class_count > 0 ? class_count : 0;
+    }
+
+    bool ResolveManagedUploadFile(const std::string& path, std::string& resolved) {
+        return cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetModelUploadTmpDir(), path,
+                                                          cosmo::path::PathEntryType::kRegularFile,
+                                                          resolved) ||
+               cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetUploadPath(), path,
+                                                          cosmo::path::PathEntryType::kRegularFile, resolved);
+    }
+
+    void CleanupManagedUploadFiles(const std::vector<std::string>& paths) {
+        for (const auto& path : paths) {
+            std::string resolved;
+            if (!ResolveManagedUploadFile(path, resolved)) {
+                LOG_WARN("[AddModel] Refusing to clean unmanaged upload path: {}", path);
+                continue;
+            }
+            std::error_code ec;
+            std::filesystem::remove(resolved, ec);
+            if (ec) {
+                LOG_WARN("[AddModel] Failed to clean upload file {}: {}", resolved, ec.message());
+            }
+        }
     }
 
 }  // namespace
@@ -167,7 +191,7 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
         return util::ErrorEnum::InvalidParam;
     }
 
-    if (modelName.find('_') != std::string::npos) {
+    if (!cosmo::path::IsSafePathComponent(modelName, 64) || modelName.find('_') != std::string::npos) {
         LOG_WARN("{}", "[AddModel] Model name must not contain underscores");
         return util::ErrorEnum::InvalidParam;
     }
@@ -188,24 +212,29 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
         return util::ErrorEnum::InvalidParam;
     }
 
-    if (modelType == "dino" && vocabFilePath.empty()) {
-        LOG_WARN("{}", "[AddModel] DINO model requires a vocab.txt file");
+    std::string resolved_auxiliary_path;
+    if (modelType == "dino" &&
+        (vocabFilePath.empty() || !ResolveManagedUploadFile(vocabFilePath, resolved_auxiliary_path))) {
+        LOG_WARN("{}", "[AddModel] DINO model requires a managed vocab.txt upload");
         return util::ErrorEnum::InvalidParam;
     }
-    if ((modelType == "qwen3vl" || modelType == "qwen3_5") && tokenizerFilePath.empty()) {
-        LOG_WARN("{}", "[AddModel] This model type requires a tokenizer.json file");
+    if ((modelType == "qwen3vl" || modelType == "qwen3_5") &&
+        (tokenizerFilePath.empty() ||
+         !ResolveManagedUploadFile(tokenizerFilePath, resolved_auxiliary_path))) {
+        LOG_WARN("{}", "[AddModel] This model type requires a managed tokenizer.json upload");
         return util::ErrorEnum::InvalidParam;
     }
     if (modelType == "ocr") {
-        if (characterTableFilePath.empty()) {
-            LOG_WARN("{}", "[AddModel] OCR model requires a character table");
+        if (characterTableFilePath.empty() ||
+            !ResolveManagedUploadFile(characterTableFilePath, resolved_auxiliary_path)) {
+            LOG_WARN("{}", "[AddModel] OCR model requires a managed character table upload");
             return util::ErrorEnum::InvalidParam;
         }
-        if (!IsTextFile(characterTableFilePath)) {
+        if (!IsTextFile(resolved_auxiliary_path)) {
             LOG_WARN("[AddModel] OCR character table must be a .txt file: {}", characterTableFilePath);
             return util::ErrorEnum::InvalidParam;
         }
-        if (!fs::is_regular_file(characterTableFilePath) || fs::file_size(characterTableFilePath) == 0) {
+        if (fs::file_size(resolved_auxiliary_path) == 0) {
             LOG_WARN("[AddModel] OCR character table does not exist or is empty: {}", characterTableFilePath);
             return util::ErrorEnum::FileNotExist;
         }
@@ -216,12 +245,13 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
 
     // Check all bmodel files exist
     for (const auto& bmodelFile : bmodel_files) {
-        if (!fs::exists(bmodelFile.filePath)) {
-            LOG_WARN("[AddModel] bmodel file does not exist: {}", bmodelFile.filePath);
+        std::string resolved_path;
+        if (!ResolveManagedUploadFile(bmodelFile.filePath, resolved_path)) {
+            LOG_WARN("[AddModel] bmodel file is not a managed upload: {}", bmodelFile.filePath);
             return util::ErrorEnum::FileNotExist;
         }
-        bmodel_paths.push_back(bmodelFile.filePath);
-        LOG_INFO("[AddModel] bmodel file: role={}, path={}", bmodelFile.role, bmodelFile.filePath);
+        bmodel_paths.push_back(std::move(resolved_path));
+        LOG_INFO("[AddModel] bmodel file: role={}, path={}", bmodelFile.role, bmodel_paths.back());
     }
 
     return util::ErrorEnum::Success;
@@ -296,7 +326,7 @@ util::ErrorEnum ModelImportExporter::WriteNnFile(const std::string& modelType,
                                                  const std::string& model_dir) {
     namespace fs = std::filesystem;
 
-#ifdef COSMO_NN_USE_CPU_BACKEND
+#ifdef COSMO_NN_USE_ONNX_BACKEND
     // CPU/x86: copy .onnx file directly; no Sophon wrapper needed.
     std::string convert_error;
     if (modelType == "sam2") {
@@ -451,7 +481,7 @@ util::ErrorEnum ModelImportExporter::AddAtomicModel(
         temp_files_to_cleanup.push_back(characterTableFilePath);
 
     auto cleanup_and_return = [&](util::ErrorEnum err) -> util::ErrorEnum {
-        cosmo::BmodelTool::CleanupTempFiles(temp_files_to_cleanup);
+        CleanupManagedUploadFiles(temp_files_to_cleanup);
         return err;
     };
 
@@ -463,6 +493,18 @@ util::ErrorEnum ModelImportExporter::AddAtomicModel(
                                tokenizerFilePath, characterTableFilePath, resolved_model_code, bmodel_paths);
     if (err != util::ErrorEnum::Success)
         return cleanup_and_return(err);
+
+    std::string resolved_vocab_path;
+    std::string resolved_tokenizer_path;
+    std::string resolved_character_table_path;
+    if ((!vocabFilePath.empty() && !ResolveManagedUploadFile(vocabFilePath, resolved_vocab_path)) ||
+        (!tokenizerFilePath.empty() &&
+         !ResolveManagedUploadFile(tokenizerFilePath, resolved_tokenizer_path)) ||
+        (!characterTableFilePath.empty() &&
+         !ResolveManagedUploadFile(characterTableFilePath, resolved_character_table_path))) {
+        LOG_WARN("{}", "[AddModel] Auxiliary file is not a managed upload");
+        return cleanup_and_return(util::ErrorEnum::FileNotExist);
+    }
 
     // 3. Read template file
     std::string template_path = (fs::path(template_dir) / (modelType + ".json")).string();
@@ -497,7 +539,7 @@ util::ErrorEnum ModelImportExporter::AddAtomicModel(
         return cleanup_and_return(err);
 
     if (modelType == "ocr") {
-        err = ConfigureOcrCharacterTable(templateDoc, bmodel_infos, characterTableFilePath);
+        err = ConfigureOcrCharacterTable(templateDoc, bmodel_infos, resolved_character_table_path);
         if (err != util::ErrorEnum::Success)
             return cleanup_and_return(err);
     }
@@ -513,7 +555,13 @@ util::ErrorEnum ModelImportExporter::AddAtomicModel(
 
     std::string folder_name = std::string(cosmo::util::kNewDirPrefix) + resolved_model_code + "_" +
                               clean_model_name + "_" + version_str;
-    std::string model_dir = (fs::path(models_dir) / folder_name).string();
+    std::string model_dir;
+    if (!cosmo::path::IsSafePathComponent(folder_name, 200) ||
+        !cosmo::path::ResolvePathWithinRoot(models_dir, (fs::path(models_dir) / folder_name).string(),
+                                            model_dir)) {
+        LOG_WARN("[AddModel] Refusing unsafe model directory component: {}", folder_name);
+        return cleanup_and_return(util::ErrorEnum::InvalidParam);
+    }
 
     LOG_INFO("[AddModel] Creating model directory: {}", model_dir);
     if (!util::CreateDir(model_dir)) {
@@ -539,7 +587,7 @@ util::ErrorEnum ModelImportExporter::AddAtomicModel(
                 fs::remove_all(model_dir);
             } catch (const std::exception&) {
             }
-            cosmo::BmodelTool::CleanupTempFiles(temp_files_to_cleanup);
+            CleanupManagedUploadFiles(temp_files_to_cleanup);
             throw;  // re-throw to preserve original exception behavior
         }
     }
@@ -558,12 +606,13 @@ util::ErrorEnum ModelImportExporter::AddAtomicModel(
     }
 
     // 9.1 Copy auxiliary files
-    err = CopyAuxiliaryFiles(modelType, vocabFilePath, tokenizerFilePath, characterTableFilePath, model_dir);
+    err = CopyAuxiliaryFiles(modelType, resolved_vocab_path, resolved_tokenizer_path,
+                             resolved_character_table_path, model_dir);
     if (err != util::ErrorEnum::Success)
         return cleanup_and_return(err);
 
     // 10. Clean up temp files
-    cosmo::BmodelTool::CleanupTempFiles(temp_files_to_cleanup);
+    CleanupManagedUploadFiles(temp_files_to_cleanup);
 
     // 11. Update memory mapping so service can find it without restart
     if (set_model_path_mapping_) {

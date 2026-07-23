@@ -22,9 +22,9 @@ struct DinoDetectorParamEl {
     std::string task_id;
     std::string atomic_code;
     float fps{1.0};
-    std::string prompt{"detect objects"};  // Detection prompt for Dino
-    float box_confidence{0.25f};           // Object detection confidence threshold
-    float text_confidence{0.3f};           // Text matching confidence threshold
+    std::string prompt{"person"};  // Detection prompt for GroundingDINO
+    float box_confidence{0.3f};    // Query/object confidence threshold
+    float text_confidence{0.25f};  // Prompt-token matching threshold
 };
 
 struct DinoDetectorParam {
@@ -43,7 +43,7 @@ public:
     // Modify parameters — update on top of existing parameters
     bool ModifyParam(const std::string& channel_id, const std::string& taskId,
                      std::vector<MsgDynamicKeyValue>& params) override;
-    // Set parameters — clear previous parameters, set all new parameters
+    // Set one task's parameters; preserve its prompt when an update omits it.
     bool SetParam(const std::string& channel_id, const std::string& taskId,
                   std::vector<MsgDynamicKeyValue>& params) override;
 
@@ -88,6 +88,8 @@ private:
     bool ValidKey(const MsgDynamicKeyValue& param) const;
     bool AnalysisKey(const std::string& channel_id, const std::string& taskId,
                      const MsgDynamicKeyValue& param);
+    bool ApplyParamsUnlocked(const std::string& channel_id, const std::string& taskId,
+                             std::vector<MsgDynamicKeyValue>& params);
     DinoDetectorParamEl FoundLocalParamByTask(const AlgTaskUnit& task) const;
 
     DinoDetectorParamEl GetTaskParams(const std::string& taskId) const;

@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <queue>
 
 #include "bm_vpuenc_interface.h"
@@ -44,11 +45,11 @@ namespace media {
         bm_handle_t handle_;
 
         BmVpuEncoder* encoder_ = nullptr;
-        BmVpuEncParams enc_params_;
+        BmVpuEncParams enc_params_{};
 
-        BmVpuEncOpenParams open_params_;
+        BmVpuEncOpenParams open_params_{};
 
-        BmVpuEncInitialInfo initial_info_;
+        BmVpuEncInitialInfo initial_info_{};
 
         BmVpuCodecFormat codec_fmt_ = BM_VPU_CODEC_FORMAT_H265;
 
@@ -56,19 +57,24 @@ namespace media {
         uint32_t bs_buffer_alignment_ = 0;
 
         std::unique_ptr<BmVpuEncDMABuffer> bs_dma_buffer_;
+        bool bs_dma_allocated_ = false;
+        bool vpu_loaded_       = false;
 
-        int num_src_fb_ = 0;
+        int num_src_fb_              = 0;
+        int allocated_src_dma_count_ = 0;
         std::unique_ptr<BmVpuFramebuffer[]> src_fbs_;
         std::unique_ptr<BmVpuEncDMABuffer[]> src_dma_bufs_;
 
         std::queue<BmVpuFramebuffer*> frame_unused_queue_;
 
-        BmVpuRawFrame input_frame_;
-        BmVpuEncodedFrame output_frame_;
+        BmVpuRawFrame input_frame_{};
+        BmVpuEncodedFrame output_frame_{};
 
+        std::queue<VideoPacketPtr> pending_packets_;
         bool first_pkt_received_ = false;
 
-        bool closed_ = false;
+        bool closed_ = true;
+        std::mutex operation_mutex_;
     };
 
 }  // namespace media

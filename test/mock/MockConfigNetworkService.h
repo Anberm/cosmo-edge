@@ -17,7 +17,8 @@ public:
     MAKE_MOCK0(GetMqttParam, cosmo::service::MqttParam(), override);
     MAKE_MOCK1(SetMqttParam, cosmo::util::ErrorEnum(const cosmo::service::MqttParam&), override);
     MAKE_MOCK0(GetIotNetworkParam, cosmo::service::IotNetworkParam(), override);
-    MAKE_MOCK3(SetIotNetworkParam, void(const std::string&, const std::string&, int), override);
+    MAKE_MOCK3(SetIotNetworkParam, cosmo::util::ErrorEnum(const std::string&, const std::string&, int),
+               override);
 };
 
 }  // namespace cosmo::test

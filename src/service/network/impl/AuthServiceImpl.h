@@ -8,7 +8,6 @@
 #include <nlohmann/json_fwd.hpp>
 #include <shared_mutex>
 #include <string>
-#include <vector>
 
 #include "service/network/IAuthService.h"
 
@@ -25,6 +24,7 @@ public:
     cosmo::util::ErrorEnum ChangePasswd(const std::string& token, const std::string& passwdMd5Old,
                                         const std::string& passwdMd5New) override;
     bool IsValidToken(const std::string& token) override;
+    bool ResolvePrincipal(const std::string& token, std::string& principal) override;
     bool IsDefaultPassword() const override;
 
 private:
@@ -38,16 +38,9 @@ private:
 
 public:
     // ── Persistent data structures (public for JSON serialization friend access) ──
-    struct TokenPair {
-        std::string user;
-        std::string token;
-        friend void to_json(nlohmann::json& j, const TokenPair& v);
-        friend void from_json(const nlohmann::json& j, TokenPair& v);
-    };
-
     struct PersistData {
         std::map<std::string, std::string> userPasswd;
-        std::vector<TokenPair> token;
+        bool had_legacy_token{false};
 
         friend void to_json(nlohmann::json& j, const PersistData& v);
         friend void from_json(const nlohmann::json& j, PersistData& v);
@@ -57,10 +50,11 @@ private:
     // ── Internal methods (caller must hold mtx_) ──
     std::string CreateToken(const std::string& userName);
     bool PurgeExpiredTokens(TimePoint now);
+    void RevokeUserTokens(const std::string& user_name);
     std::string FindUserByToken(const std::string& token) const;
 
     void Load();
-    void Save();
+    bool Save();
 
     static constexpr int kTokenExpireSec   = 3600;
     static constexpr size_t kMaxTokenCount = 1000;

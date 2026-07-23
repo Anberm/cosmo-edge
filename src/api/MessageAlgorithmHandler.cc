@@ -2,11 +2,16 @@
 
 #include "api/MessageAlgorithmHandler.h"
 
+#include <utility>
+
+#include "api/HttpUploadClaim.h"
 #include "service/algorithm/AlgorithmMapper.h"
 #include "service/algorithm/IAlgorithmCrud.h"
 #include "service/algorithm/IAlgorithmLayout.h"
 #include "service/algorithm/IAlgorithmQuery.h"
 #include "service/camera/ICameraTaskConfig.h"
+#include "service/detail/ServiceRegistry.h"
+#include "service/path/IUploadStagingService.h"
 #include "service/task/ITaskQuery.h"
 #include "util/DateTimeFormat.h"
 #include "util/ErrorCode.h"
@@ -69,6 +74,33 @@ Algorithm::MsgUploadSend MessageAlgorithmHandler::Handle(Algorithm::MsgUploadRec
     Algorithm::MsgUploadSend retData{};
     errc = algorithm_crud_.Add(data.filePath);
     return retData;
+}
+
+Algorithm::MsgUploadSend MessageAlgorithmHandler::Handle(Algorithm::MsgUploadRecv&& data,
+                                                         const RequestDispatchContext& context,
+                                                         std::error_condition& errc) const {
+    Algorithm::MsgUploadSend result{};
+    if (context.transport != RequestTransport::kHttp || context.principal.empty()) {
+        errc = util::ErrorEnum::InvalidParam;
+        return result;
+    }
+
+    service::StagedFileLease lease;
+    if (!data.uploadId.empty()) {
+        errc = service::ServiceRegistry::Instance().Get<service::IUploadStagingService>().Consume(
+            context.principal, data.uploadId, service::UploadPurpose::kAlgorithm, lease);
+    } else {
+        errc = detail::ClaimHttpUpload(context, data.filePath, service::UploadPurpose::kAlgorithm, lease);
+    }
+    if (errc) {
+        return result;
+    }
+    if (!lease.Revalidate()) {
+        errc = util::ErrorEnum::FileAnalysisFailed;
+        return result;
+    }
+    data.filePath = lease.Path();
+    return Handle(std::move(data), errc);
 }
 
 // Algorithm edit

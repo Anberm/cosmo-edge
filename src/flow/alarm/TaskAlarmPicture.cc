@@ -70,7 +70,7 @@ void TaskAlarm::HandBestInfoPicture(CMsgOnEventsReq& msg, AlgDataPtr /*algData*/
             scaleParam.scale_side = m_param.faceScaleParam;
             roi                   = DoScaleBox(bestInfo.box, scaleParam, m_width, m_height);
 
-            if (roi.width * roi.height > 0) {
+            if (!roi.empty()) {
                 auto cutImg = service::ServiceRegistry::Instance().Get<service::IVideoFrameTransform>().Crop(
                     bestInfo.bestFrame, roi);
                 auto cutJpeg =
@@ -171,7 +171,7 @@ void TaskAlarm::HandPicture(CMsgOnEventsReq& msg, AlgDataPtr algData, DataAlarmU
     auto timpointCrop    = std::chrono::high_resolution_clock::now();
     auto timpointcutJpeg = std::chrono::high_resolution_clock::now();
 #endif
-    if (roi.width * roi.height > 0) {
+    if (!roi.empty()) {
         auto cutImg =
             service::ServiceRegistry::Instance().Get<service::IVideoFrameTransform>().Crop(origImg, roi);
 #ifdef DURATION_LOG

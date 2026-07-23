@@ -1,6 +1,8 @@
 // TaskAlarmLlmReview.cc — LLM-based alarm review.
 // Implementation partition of TaskAlarm (declared in flow/alarm/TaskAlarm.h).
 
+#include <algorithm>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <sstream>
 
@@ -142,18 +144,21 @@ bool TaskAlarm::LlmReviewAlarm(const DataAlarmUnit& alarmUnit, const VideoFrameP
         return true;
     }
 
-    int imgW                 = static_cast<int>(srcFrame->GetWidth());
-    int imgH                 = static_cast<int>(srcFrame->GetHeight());
-    const int pad            = 48;
-    int x0                   = std::max(0, static_cast<int>(alarmUnit.box.x) - pad);
-    int y0                   = std::max(0, static_cast<int>(alarmUnit.box.y) - pad);
-    int x1                   = std::min(imgW, static_cast<int>(alarmUnit.box.x + alarmUnit.box.width) + pad);
-    int y1                   = std::min(imgH, static_cast<int>(alarmUnit.box.y + alarmUnit.box.height) + pad);
-    int cropW                = x1 - x0;
-    int cropH                = y1 - y0;
+    const int imgW                 = static_cast<int>(srcFrame->GetWidth());
+    const int imgH                 = static_cast<int>(srcFrame->GetHeight());
+    constexpr int64_t kCropPadding = 48;
+    const int64_t x0 = std::max<int64_t>(0, static_cast<int64_t>(alarmUnit.box.x) - kCropPadding);
+    const int64_t y0 = std::max<int64_t>(0, static_cast<int64_t>(alarmUnit.box.y) - kCropPadding);
+    const int64_t x1 =
+        std::min<int64_t>(imgW, static_cast<int64_t>(alarmUnit.box.x) + alarmUnit.box.width + kCropPadding);
+    const int64_t y1 =
+        std::min<int64_t>(imgH, static_cast<int64_t>(alarmUnit.box.y) + alarmUnit.box.height + kCropPadding);
+    const int64_t cropW      = x1 - x0;
+    const int64_t cropH      = y1 - y0;
     VideoFramePtr inputFrame = srcFrame;
     if (cropW > 0 && cropH > 0 && (cropW < imgW || cropH < imgH)) {
-        util::Box roi(x0, y0, cropW, cropH);
+        util::Box roi(static_cast<int>(x0), static_cast<int>(y0), static_cast<int>(cropW),
+                      static_cast<int>(cropH));
         auto cropped =
             service::ServiceRegistry::Instance().Get<service::IVideoFrameTransform>().Crop(srcFrame, roi);
         if (VideoFrameValid(cropped))

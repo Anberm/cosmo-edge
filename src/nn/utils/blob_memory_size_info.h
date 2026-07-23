@@ -9,6 +9,6 @@ struct BlobMemorySizeInfo {
     std::vector<int> dims;
 };
 
-int64_t GetBlobMemoryBytesSize(BlobMemorySizeInfo& info);
+int64_t GetBlobMemoryBytesSize(const BlobMemorySizeInfo& info);
 
 }  // namespace cosmo::nn

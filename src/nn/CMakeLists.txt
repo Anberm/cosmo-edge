@@ -34,7 +34,10 @@ if(COSMO_NN_USE_CPU_BACKEND)
     file(GLOB_RECURSE NN_CPU_SRC
         "${NN_DIR}/device/cpu/*.h" "${NN_DIR}/device/cpu/*.cc"
     )
-    list(APPEND NN_ALL_SRC ${NN_CPU_SRC})
+    file(GLOB_RECURSE NN_HOST_SRC
+        "${NN_DIR}/device/host/*.h" "${NN_DIR}/device/host/*.cc"
+    )
+    list(APPEND NN_ALL_SRC ${NN_CPU_SRC} ${NN_HOST_SRC})
 endif()
 
 # ── Build cosmo_nn OBJECT library ──
@@ -57,7 +60,10 @@ if(COSMO_MODEL_GUARD)
 endif()
 
 if(COSMO_NN_USE_CPU_BACKEND)
-    target_compile_definitions(cosmo_nn PRIVATE COSMO_NN_USE_CPU_BACKEND)
+    target_compile_definitions(cosmo_nn PRIVATE
+        COSMO_NN_USE_CPU_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_ONNX_BACKEND)
     # ORT headers provided by onnxruntime IMPORTED target
 endif()
 

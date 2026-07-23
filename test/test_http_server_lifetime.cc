@@ -6,15 +6,21 @@
 #include <condition_variable>
 #include <csignal>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "catch_amalgamated.hpp"
 #include "network/http/HttpServer.h"
+#include "nlohmann/json.hpp"
+#include "util/ErrorCode.h"
 #include "util/IRequestDispatcher.h"
+#include "util/MsgBaseTypes.h"
 
 namespace cosmo::network::http {
 namespace {
@@ -25,19 +31,32 @@ namespace {
 
     class BlockingDispatchState {
     public:
-        void Enter(std::string interface, std::string mtk, std::string body) {
+        void Enter(const cosmo::RequestDispatchContext& context, std::string body) {
             std::unique_lock<std::mutex> lock(mutex_);
-            interface_  = std::move(interface);
-            mtk_        = std::move(mtk);
-            body_       = std::move(body);
-            is_entered_ = true;
+            interface_           = context.uri;
+            mtk_                 = context.credential;
+            body_                = std::move(body);
+            multipart_file_path_ = context.multipart_file_path;
+            multipart_file_name_ = context.multipart_file_name;
+            multipart_file_size_ = context.multipart_file_size;
+            is_entered_          = true;
+            ++entered_count_;
             condition_.notify_all();
             condition_.wait(lock, [this]() { return is_released_; });
         }
 
         bool WaitUntilEntered() {
+            return WaitUntilEnteredCount(1);
+        }
+
+        bool WaitUntilEnteredCount(std::size_t count) {
             std::unique_lock<std::mutex> lock(mutex_);
-            return condition_.wait_for(lock, 2s, [this]() { return is_entered_; });
+            return condition_.wait_for(lock, 2s, [this, count]() { return entered_count_ >= count; });
+        }
+
+        bool Entered() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return is_entered_;
         }
 
         void Release() {
@@ -61,14 +80,33 @@ namespace {
             return body_;
         }
 
+        std::string MultipartFilePath() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return multipart_file_path_;
+        }
+
+        std::string MultipartFileName() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return multipart_file_name_;
+        }
+
+        std::uint64_t MultipartFileSize() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return multipart_file_size_;
+        }
+
     private:
         mutable std::mutex mutex_;
         std::condition_variable condition_;
         bool is_entered_{false};
         bool is_released_{false};
+        std::size_t entered_count_{0};
         std::string interface_;
         std::string mtk_;
         std::string body_;
+        std::string multipart_file_path_;
+        std::string multipart_file_name_;
+        std::uint64_t multipart_file_size_{0};
     };
 
     class BlockingDispatcher final : public cosmo::IRequestDispatcher {
@@ -80,9 +118,21 @@ namespace {
             return interface == "/test/request-lifetime";
         }
 
-        bool DispatchRequest(const std::string& interface, const std::string& mtk, const std::string& body,
+        cosmo::RequestAdmission InspectRequest(cosmo::RequestDispatchContext& context,
+                                               bool require_known_route) override {
+            if (context.credential == "rejected-token") {
+                return cosmo::RequestAdmission::kUnauthorized;
+            }
+            if (require_known_route && !SupportsRoute(context.uri)) {
+                return cosmo::RequestAdmission::kRouteNotFound;
+            }
+            context.principal = "test-user";
+            return cosmo::RequestAdmission::kAllowed;
+        }
+
+        bool DispatchRequest(const cosmo::RequestDispatchContext& context, const std::string& body,
                              std::string& response) override {
-            state_->Enter(interface, mtk, body);
+            state_->Enter(context, body);
             response = R"({"ok":true})";
             return true;
         }
@@ -118,10 +168,15 @@ namespace {
         HttpServerRunner(const HttpServerRunner&)            = delete;
         HttpServerRunner& operator=(const HttpServerRunner&) = delete;
 
-        bool Start(std::uint16_t port) {
+        bool Start(std::uint16_t port, std::string log_root = "/tmp") {
             HttpServerCallbacks callbacks{
-                []() { return std::string("/tmp/cosmo-http-lifetime-test"); },
+                []() {
+                    std::error_code error;
+                    std::filesystem::create_directories("/tmp/cosmo-http-lifetime-test", error);
+                    return error ? std::string{} : std::string("/tmp/cosmo-http-lifetime-test");
+                },
                 []() { return std::string("/tmp"); },
+                [log_root = std::move(log_root)]() { return log_root; },
             };
             if (!server_.Initialize(
                     "127.0.0.1", port,
@@ -129,12 +184,24 @@ namespace {
                     std::move(callbacks))) {
                 return false;
             }
-            event_thread_ = std::thread([this]() { server_.DispatchMsg(); });
+            event_thread_ = std::thread([this]() {
+                server_.DispatchMsg();
+                {
+                    std::lock_guard<std::mutex> lock(event_thread_mutex_);
+                    event_thread_exited_ = true;
+                }
+                event_thread_condition_.notify_all();
+            });
             return true;
         }
 
         HttpServer& Server() {
             return server_;
+        }
+
+        bool WaitUntilExited(std::chrono::milliseconds timeout) {
+            std::unique_lock<std::mutex> lock(event_thread_mutex_);
+            return event_thread_condition_.wait_for(lock, timeout, [this]() { return event_thread_exited_; });
         }
 
         void Join() {
@@ -147,6 +214,9 @@ namespace {
         std::shared_ptr<BlockingDispatchState> state_;
         HttpServer server_;
         std::thread event_thread_;
+        std::mutex event_thread_mutex_;
+        std::condition_variable event_thread_condition_;
+        bool event_thread_exited_{false};
     };
 
     class ScopedFd {
@@ -258,6 +328,23 @@ namespace {
         return true;
     }
 
+    std::string ReadAll(int socket_fd) {
+        timeval timeout{};
+        timeout.tv_sec = 2;
+        setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+        std::string response;
+        char buffer[4096];
+        while (true) {
+            const auto size = recv(socket_fd, buffer, sizeof(buffer), 0);
+            if (size <= 0) {
+                break;
+            }
+            response.append(buffer, static_cast<size_t>(size));
+        }
+        return response;
+    }
+
 }  // namespace
 
 TEST_CASE("HttpServer keeps libevent requests on the event thread during shutdown", "[http-server][thread]") {
@@ -299,6 +386,281 @@ TEST_CASE("HttpServer keeps libevent requests on the event thread during shutdow
     CHECK(state->Interface() == "/test/request-lifetime");
     CHECK(state->Mtk() == "lifetime-token");
     CHECK(state->Body() == body);
+}
+
+TEST_CASE("HttpServer control-thread stop leaves cleanup on the event thread",
+          "[http-server][lifecycle][thread]") {
+    ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+    auto state = std::make_shared<BlockingDispatchState>();
+    HttpServerRunner runner(state);
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+    REQUIRE(runner.Start(port));
+
+    auto client = Connect(port);
+    REQUIRE(client.Get() >= 0);
+    REQUIRE(SendAll(client.Get(),
+                    "GET /unknown HTTP/1.1\r\n"
+                    "Host: 127.0.0.1\r\n"
+                    "mtk: test-token\r\n"
+                    "Connection: close\r\n\r\n"));
+    CHECK(ReadAll(client.Get()).find("400") != std::string::npos);
+
+    REQUIRE_NOTHROW(runner.Server().RequestStop());
+    REQUIRE_NOTHROW(runner.Server().RequestStop());
+    const bool exited = runner.WaitUntilExited(2s);
+    if (!exited) {
+        runner.Server().UnInitialize();
+    }
+    runner.Join();
+    REQUIRE(exited);
+    REQUIRE_NOTHROW(runner.Server().UnInitialize());
+    REQUIRE_NOTHROW(runner.Server().UnInitialize());
+}
+
+TEST_CASE("HttpServer log download rejects a symlink escape", "[http-server][security]") {
+    namespace fs = std::filesystem;
+
+    ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+    const auto suffix      = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const fs::path root    = fs::path("/tmp") / ("cosmo-http-log-root-" + suffix);
+    const fs::path outside = fs::path("/tmp") / ("cosmo-http-log-outside-" + suffix + ".log");
+    fs::create_directories(root);
+    std::ofstream(outside) << "secret";
+    fs::create_symlink(outside, root / "escape.log");
+
+    auto state = std::make_shared<BlockingDispatchState>();
+    HttpServerRunner runner(state);
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+    REQUIRE(runner.Start(port, root.string()));
+
+    auto client = Connect(port);
+    REQUIRE(client.Get() >= 0);
+    REQUIRE(SendAll(client.Get(),
+                    "GET /logs/escape.log HTTP/1.1\r\n"
+                    "Host: 127.0.0.1\r\n"
+                    "mtk: test-token\r\n"
+                    "Connection: close\r\n\r\n"));
+    const auto response = ReadAll(client.Get());
+    CHECK(response.find("404") != std::string::npos);
+    CHECK(response.find("secret") == std::string::npos);
+
+    runner.Server().UnInitialize();
+    runner.Join();
+    fs::remove_all(root);
+    fs::remove(outside);
+}
+
+TEST_CASE("HttpServer rejects unauthorized multipart before parsing or dispatch", "[http-server][security]") {
+    ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+    auto state = std::make_shared<BlockingDispatchState>();
+    HttpServerRunner runner(state);
+
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+    REQUIRE(runner.Start(port));
+
+    auto client = Connect(port);
+    REQUIRE(client.Get() >= 0);
+
+    const std::string body = "this is deliberately not multipart data";
+    const std::string request =
+        "POST /test/request-lifetime HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Content-Type: multipart/form-data; boundary=test-boundary\r\n"
+        "mtk: rejected-token\r\n"
+        "Content-Length: " +
+        std::to_string(body.size()) +
+        "\r\n"
+        "Connection: close\r\n\r\n" +
+        body;
+    REQUIRE(SendAll(client.Get(), request));
+
+    const auto response = ReadAll(client.Get());
+    CHECK(response.find("401") != std::string::npos);
+    CHECK(response.find("Content-Type: application/json") != std::string::npos);
+    const auto body_position = response.find("\r\n\r\n");
+    REQUIRE(body_position != std::string::npos);
+    const auto response_json = nlohmann::json::parse(response.substr(body_position + 4), nullptr, false);
+    REQUIRE_FALSE(response_json.is_discarded());
+    CHECK(response_json.at("resCode") == cosmo::kServerRspFailed);
+    REQUIRE(response_json.at("resMsg").is_array());
+    REQUIRE(response_json.at("resMsg").size() == 1);
+    CHECK(response_json.at("resMsg").at(0).at("msgCode") ==
+          std::to_string(static_cast<int>(cosmo::util::ErrorEnum::AuthFailed)));
+    CHECK(response_json.at("resMsg").at(0).at("messageKey") == "api.error.AuthFailed");
+    CHECK(response.find("rejected-token") == std::string::npos);
+    CHECK_FALSE(state->Entered());
+
+    runner.Server().UnInitialize();
+    runner.Join();
+}
+
+TEST_CASE("HttpServer reports payload limits as 413 before dispatch", "[http-server][multipart][security]") {
+    ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+    auto state = std::make_shared<BlockingDispatchState>();
+    HttpServerRunner runner(state);
+
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+    REQUIRE(runner.Start(port));
+
+    SECTION("libevent transport limit preserves 413 when the URI is cleared") {
+        auto client = Connect(port);
+        REQUIRE(client.Get() >= 0);
+        constexpr std::size_t kOversizedBody = 10 * 1024 * 1024 + 1;
+        const std::string request =
+            "POST /test/request-lifetime HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            "Content-Type: application/json\r\n"
+            "mtk: test-token\r\n"
+            "Content-Length: " +
+            std::to_string(kOversizedBody) + "\r\nConnection: close\r\n\r\n";
+        REQUIRE(SendAll(client.Get(), request));
+        CHECK(ReadAll(client.Get()).find("413") != std::string::npos);
+        CHECK_FALSE(state->Entered());
+    }
+
+    SECTION("multipart file limit preserves 413 below the transport limit") {
+        auto client = Connect(port);
+        REQUIRE(client.Get() >= 0);
+        const std::string boundary = "oversized-file-boundary";
+        std::string body           = "--" + boundary +
+                           "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"large.bin\"\r\n"
+                           "Content-Type: application/octet-stream\r\n\r\n";
+        body.append(8 * 1024 * 1024 + 1, 'x');
+        body += "\r\n--" + boundary + "--\r\n";
+        const std::string headers =
+            "POST /test/request-lifetime HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            "Content-Type: multipart/form-data; boundary=" +
+            boundary + "\r\nmtk: test-token\r\nContent-Length: " + std::to_string(body.size()) +
+            "\r\nConnection: close\r\n\r\n";
+        REQUIRE(SendAll(client.Get(), headers));
+        REQUIRE(SendAll(client.Get(), body));
+        CHECK(ReadAll(client.Get()).find("413") != std::string::npos);
+        CHECK_FALSE(state->Entered());
+    }
+
+    runner.Server().UnInitialize();
+    runner.Join();
+}
+
+TEST_CASE("HttpServer passes server-only multipart provenance to the dispatcher",
+          "[http-server][multipart][security]") {
+    namespace fs = std::filesystem;
+
+    ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+    const fs::path upload_root = "/tmp/cosmo-http-lifetime-test";
+    std::error_code cleanup_error;
+    fs::remove_all(upload_root, cleanup_error);
+    REQUIRE(fs::create_directory(upload_root));
+
+    auto state = std::make_shared<BlockingDispatchState>();
+    HttpServerRunner runner(state);
+    ReleaseGuard release_guard(state);
+
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+    REQUIRE(runner.Start(port));
+
+    const std::string boundary = "provenance-boundary";
+    const std::string payload  = "server-owned-payload";
+    const std::string body =
+        "--" + boundary + "\r\nContent-Disposition: form-data; name=\"filePath\"\r\n\r\n/tmp/forged\r\n--" +
+        boundary + "--\r\n";
+
+    // Reserved metadata is rejected before dispatch and therefore cannot
+    // manufacture provenance.
+    auto rejected_client = Connect(port);
+    REQUIRE(rejected_client.Get() >= 0);
+    const std::string rejected_request =
+        "POST /test/request-lifetime HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Content-Type: multipart/form-data; boundary=" +
+        boundary + "\r\nmtk: test-token\r\nContent-Length: " + std::to_string(body.size()) +
+        "\r\nConnection: close\r\n\r\n" + body;
+    REQUIRE(SendAll(rejected_client.Get(), rejected_request));
+    CHECK(ReadAll(rejected_client.Get()).find("400") != std::string::npos);
+    CHECK_FALSE(state->Entered());
+
+    const std::string valid_body =
+        "--" + boundary + "\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nalgorithm\r\n--" +
+        boundary +
+        "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"../safe.bin\"\r\n"
+        "Content-Type: application/octet-stream\r\n\r\n" +
+        payload + "\r\n--" + boundary + "--\r\n";
+    auto client = Connect(port);
+    REQUIRE(client.Get() >= 0);
+    const std::string request =
+        "POST /test/request-lifetime HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Content-Type: multipart/form-data; boundary=" +
+        boundary + "\r\nmtk: test-token\r\nContent-Length: " + std::to_string(valid_body.size()) +
+        "\r\nConnection: close\r\n\r\n" + valid_body;
+    REQUIRE(SendAll(client.Get(), request));
+    REQUIRE(state->WaitUntilEntered());
+
+    CHECK(state->MultipartFileName() == "safe.bin");
+    CHECK(state->MultipartFileSize() == payload.size());
+    REQUIRE_FALSE(state->MultipartFilePath().empty());
+    CHECK(fs::path(state->MultipartFilePath()).parent_path() == upload_root);
+    CHECK(fs::is_regular_file(state->MultipartFilePath()));
+    CHECK(state->Body().find("/tmp/forged") == std::string::npos);
+
+    state->Release();
+    CHECK(ReadAll(client.Get()).find("200") != std::string::npos);
+    runner.Server().UnInitialize();
+    runner.Join();
+    CHECK_FALSE(fs::exists(upload_root));
+}
+
+TEST_CASE("HttpServer bounds authenticated multipart spool reservations before writing more files",
+          "[http-server][multipart][quota]") {
+    ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+    auto state = std::make_shared<BlockingDispatchState>();
+    HttpServerRunner runner(state);
+    ReleaseGuard release_guard(state);
+
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+    REQUIRE(runner.Start(port));
+
+    const std::string boundary = "spool-quota-boundary";
+    const std::string body     = "--" + boundary +
+                             "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"chunk.bin\"\r\n"
+                             "Content-Type: application/octet-stream\r\n\r\ndata\r\n--" +
+                             boundary + "--\r\n";
+    const std::string headers =
+        "POST /test/request-lifetime HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Content-Type: multipart/form-data; boundary=" +
+        boundary + "\r\nmtk: test-token\r\nContent-Length: " + std::to_string(body.size()) +
+        "\r\nConnection: close\r\n\r\n";
+
+    std::vector<ScopedFd> accepted_clients;
+    for (std::size_t index = 0; index < 2; ++index) {
+        auto client = Connect(port);
+        REQUIRE(client.Get() >= 0);
+        REQUIRE(SendAll(client.Get(), headers));
+        REQUIRE(SendAll(client.Get(), body));
+        accepted_clients.emplace_back(std::move(client));
+    }
+    REQUIRE(state->WaitUntilEnteredCount(2));
+
+    auto rejected_client = Connect(port);
+    REQUIRE(rejected_client.Get() >= 0);
+    REQUIRE(SendAll(rejected_client.Get(), headers));
+    REQUIRE(SendAll(rejected_client.Get(), body));
+    CHECK(ReadAll(rejected_client.Get()).find("503") != std::string::npos);
+
+    state->Release();
+    for (auto& client : accepted_clients) {
+        CHECK(ReadAll(client.Get()).find("200") != std::string::npos);
+    }
+    runner.Server().UnInitialize();
+    runner.Join();
 }
 
 }  // namespace cosmo::network::http

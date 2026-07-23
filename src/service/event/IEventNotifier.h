@@ -63,6 +63,10 @@ public:
     /// @param que Reference to the alarm event queue.
     virtual void SetEventPostQue(cosmo::AsyncQueue<cosmo::CMsgOnEventsReq>& que) = 0;
 
+    /// Clear the alarm delivery queue when it is still the currently registered
+    /// instance. This prevents producers from retaining a pointer past teardown.
+    virtual void ClearEventPostQue(const cosmo::AsyncQueue<cosmo::CMsgOnEventsReq>& que) = 0;
+
     /// Register the async queue for data collection report delivery.
     /// @param que Reference to the collection report queue.
     virtual void SetCollectPostQue(cosmo::AsyncQueue<cosmo::CMsgCollectRptReq>& que) = 0;

@@ -60,6 +60,11 @@ Status DefaultComponent::Forward(std::initializer_list<std::vector<std::shared_p
     return pipeline_->Forward(inputs);
 }
 
+Status DefaultComponent::ParseDinoOutput(std::vector<std::vector<ObjectInfoV1>>& outputs,
+                                         float text_threshold, float box_threshold) {
+    return pipeline_->ParseDinoDetectionOutput(outputs, text_threshold, box_threshold);
+}
+
 int DefaultComponent::GetMaxBatchSize() const {
     return pipeline_->GetMaxBatchSize();
 }
