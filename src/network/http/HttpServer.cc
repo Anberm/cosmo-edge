@@ -36,10 +36,15 @@ namespace cosmo::network::http {
 
 namespace {
 
-    constexpr auto kShutdownDrainTimeout                         = chrono::seconds(5);
-    constexpr std::size_t kMaxRequestTargetBytes                 = 2048;
-    constexpr std::size_t kMaxJsonBodyBytes                      = 1 * 1024 * 1024;
-    constexpr std::size_t kMaxHttpBodyBytes                      = 10 * 1024 * 1024;
+    constexpr auto kShutdownDrainTimeout         = chrono::seconds(5);
+    constexpr std::size_t kMaxRequestTargetBytes = 2048;
+    // JSON body cap. PTaskDetectPic (image test, /aihost/PTaskDetectPic) embeds the full
+    // image as base64 inside the JSON body, so a phone/camera photo (multi-MB base64) must
+    // fit. Keep aligned with kMaxHttpBodyBytes so the app layer never rejects what the
+    // transport already accepted. (6dd6324c originally set this to 1MB, which 413'd every
+    // non-tiny image and silently broke image analysis.)
+    constexpr std::size_t kMaxJsonBodyBytes                      = 32 * 1024 * 1024;
+    constexpr std::size_t kMaxHttpBodyBytes                      = 32 * 1024 * 1024;
     constexpr std::size_t kMaxHttpHeaderBytes                    = 32 * 1024;
     constexpr std::size_t kMaxMultipartSpoolRequests             = 8;
     constexpr std::size_t kMaxMultipartSpoolRequestsPerPrincipal = 2;
