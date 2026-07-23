@@ -47,8 +47,7 @@ namespace media {
 
         size_t cache_size_ = 5;
 
-        unsigned int output_warmup_attempts_remaining_ = 0;
-        int64_t last_input_frame_index_                = -1;
+        unsigned int wrong_resolution_errors_remaining_ = 0;
 
         std::mutex operation_mutex_;
         std::atomic_bool stop_{true};
