@@ -206,6 +206,9 @@ bool AlarmPushServiceImpl::OfflinePushData(AlarmEventRecord& data) {
             unit.bHaveProperty = true;
         }
     }
+    if (!data.targets.empty() && !cosmo::util::DecodeJson(data.targets, unit.targets)) {
+        LOG_WARN("Failed to decode targets for event {}", data.id);
+    }
     std::vector<std::string> files;
     if (!cosmo::util::DecodeJson(data.extraFiles, files)) {
         LOG_WARN("Failed to decode extraFiles for event {}", data.id);

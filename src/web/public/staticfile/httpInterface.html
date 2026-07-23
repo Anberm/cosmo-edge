@@ -43,6 +43,14 @@
   "recordId": "1",
   "isRetryMessage": false,
   "category": "behavior",
+  "targets": [
+    {
+      "label": "category0",
+      "confidence": 0.93,
+      "trackId": "qsddf123",
+      "box": {"x": 120, "y": 80, "width": 240, "height": 360}
+    }
+  ],
   "property": {
     "behavior": {
       "targetId": "qsddf123",
@@ -74,7 +82,16 @@
 <tr><td><code>recordId</code></td><td>string</td><td data-i18n="http.field.recordId.desc">目标或告警记录 ID。开启跟踪时，同一目标通常保持不变。</td></tr>
 <tr><td><code>isRetryMessage</code></td><td>boolean</td><td data-i18n="http.field.isRetryMessage.desc">是否为离线重推消息。</td></tr>
 <tr><td><code>category</code></td><td>string</td><td data-i18n="http.field.category.desc">算法类别。</td></tr>
+<tr><td><code>targets</code></td><td>object[]</td><td data-i18n="http.field.targets.desc">触发本次事件的检测目标列表；无目标型统计事件中可能不出现。</td></tr>
 <tr><td><code>property</code></td><td>object</td><td data-i18n="http.field.property.desc">算法扩展属性。仅在对应算法有扩展属性时出现。</td></tr>
+</tbody></table>
+
+<h2 data-i18n="http.section.targetFields">targets 目标字段</h2>
+<table><thead><tr><th data-i18n="http.rootTable.field">字段</th><th data-i18n="http.rootTable.type">类型</th><th data-i18n="http.rootTable.desc">说明</th></tr></thead><tbody>
+<tr><td><code>label</code></td><td>string</td><td data-i18n="http.target.label.desc">模型检测标签名称，例如 category0、person 或 Pedestrian。</td></tr>
+<tr><td><code>confidence</code></td><td>number</td><td data-i18n="http.target.confidence.desc">该检测标签的置信度。</td></tr>
+<tr><td><code>trackId</code></td><td>string</td><td data-i18n="http.target.trackId.desc">目标跟踪 ID；未启用跟踪时可能不出现。</td></tr>
+<tr><td><code>box</code></td><td>object</td><td data-i18n="http.target.box.desc">像素坐标目标框，包含 x、y、width、height。</td></tr>
 </tbody></table>
 
 <h2 data-i18n="http.section.propertyRules">property 输出规则</h2>

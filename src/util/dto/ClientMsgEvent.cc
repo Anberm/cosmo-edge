@@ -116,6 +116,21 @@ void from_json(const nlohmann::json& j, CMsgOnEventsProperty& p) {
     }
 }
 
+void to_json(nlohmann::json& j, const CMsgOnEventsTarget& v) {
+    j["label"]      = v.label;
+    j["confidence"] = v.confidence;
+    j["box"]        = v.box;
+    if (!v.trackId.empty())
+        j["trackId"] = v.trackId;
+}
+
+void from_json(const nlohmann::json& j, CMsgOnEventsTarget& v) {
+    JSON_OPT(j, v, label);
+    JSON_OPT(j, v, confidence);
+    JSON_OPT(j, v, trackId);
+    JSON_OPT(j, v, box);
+}
+
 void to_json(nlohmann::json& j, const CMsgOnEventsReq& r) {
     to_json(j, static_cast<const MsgRecvHead&>(r));
     j["messageId"]       = r.messageId;
@@ -138,6 +153,8 @@ void to_json(nlohmann::json& j, const CMsgOnEventsReq& r) {
     j["recordId"]        = r.recordId;
     j["isRetryMessage"]  = r.isRetryMessage;
     j["category"]        = r.category;
+    if (!r.targets.empty())
+        j["targets"] = r.targets;
     if (r.bHaveProperty)
         j["property"] = r.property;
 }
@@ -164,6 +181,7 @@ void from_json(const nlohmann::json& j, CMsgOnEventsReq& r) {
     JSON_OPT(j, r, recordId);
     JSON_OPT(j, r, isRetryMessage);
     JSON_OPT(j, r, category);
+    JSON_OPT(j, r, targets);
     if (auto it = j.find("property"); it != j.end() && !it->is_null()) {
         r.bHaveProperty = true;
         it->get_to(r.property);

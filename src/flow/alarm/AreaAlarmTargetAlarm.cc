@@ -31,9 +31,18 @@ DataAlarmUnit AreaAlarm::BuildAlarmUnit(const TrackIdData& idData, const MsgTask
     unit.haveRelated = idData.det_el.relatedEl.bActive;
     unit.relatedBox  = idData.det_el.relatedEl.box;
     unit.feature     = idData.det_el.feature;
+    unit.targets.push_back(MakeOnEventsTarget(idData.det_el));
 
     for (const auto& subEl : idData.det_el.subs) {
         unit.boxs.push_back(subEl.box);
+        CMsgOnEventsTarget subTarget;
+        subTarget.label      = subEl.confidence.label;
+        subTarget.confidence = subEl.confidence.confidence;
+        subTarget.box.x      = subEl.box.x;
+        subTarget.box.y      = subEl.box.y;
+        subTarget.box.width  = subEl.box.width;
+        subTarget.box.height = subEl.box.height;
+        unit.targets.push_back(std::move(subTarget));
     }
 
     if (unit.haveRelated) {
@@ -170,6 +179,7 @@ void AreaAlarm::AreaTargetAlarmHandLine(AlgDataPtr algData, TrackIdData& idData)
             alarmUnit.strTrackId   = idData.det_el.trackIdInfo;
             alarmUnit.box          = idData.det_el.box;
             alarmUnit.boxs.push_back(idData.det_el.box);
+            alarmUnit.targets.push_back(MakeOnEventsTarget(idData.det_el));
             alarmUnit.targetHistory = idData.det_els;
             if (CheckBreakAllArea(idData.pos_break_line_areas, task_area_.areas, alarmUnit.areaId,
                                   alarmUnit.areaName)) {
@@ -187,6 +197,7 @@ void AreaAlarm::AreaTargetAlarmHandLine(AlgDataPtr algData, TrackIdData& idData)
             alarmUnit.strTrackId   = idData.det_el.trackIdInfo;
             alarmUnit.box          = idData.det_el.box;
             alarmUnit.boxs.push_back(idData.det_el.box);
+            alarmUnit.targets.push_back(MakeOnEventsTarget(idData.det_el));
             alarmUnit.targetHistory = idData.det_els;
             idData.neg_break_line_areas.push_back(line.area_id);
             if (CheckBreakAllArea(idData.neg_break_line_areas, task_area_.areas, alarmUnit.areaId,
@@ -268,9 +279,11 @@ void AreaAlarm::HandFriendTargetAlarm(AlgDataPtr algData, DataDetTrackClassifyPt
             alarmUnit.areaId       = area.area_id;
             alarmUnit.areaName     = area.area_name;
             alarmUnit.box          = target.genTarget.box;
+            alarmUnit.targets.push_back(MakeOnEventsTarget(target.genTarget));
             for (auto& friendTarget : target.srcTargets) {
                 alarmUnit.friends.push_back(friendTarget.box);
                 alarmUnit.boxs.push_back(friendTarget.box);
+                alarmUnit.targets.push_back(MakeOnEventsTarget(friendTarget));
             }
 
             FillAlarmData(algData, alarmUnit);

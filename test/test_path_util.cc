@@ -269,6 +269,23 @@ TEST_CASE("PathUtil: extracted tree validation enforces type and size limits", "
     REQUIRE_FALSE(ValidateDirectoryTreeWithinRoot(root.string(), 3, 16, 32));
 }
 
+TEST_CASE("PathUtil: extracted tree validation accepts safe internal symlinks", "[path-util][security]") {
+    TestPathFixture fix;
+    const auto root = std::filesystem::path(fix.test_dir) / "extracted";
+    std::filesystem::create_directories(root / "lib");
+
+    // Shared-library versioning chain, all relative and confined to lib/.
+    std::ofstream(root / "lib" / "libfoo.so.1.0.0") << "payload";
+    std::filesystem::create_symlink("libfoo.so.1.0.0", root / "lib" / "libfoo.so.1");
+    std::filesystem::create_symlink("libfoo.so.1", root / "lib" / "libfoo.so");
+
+    REQUIRE(ValidateDirectoryTreeWithinRoot(root.string(), 10, 1024, 1024));
+
+    // A symlink whose target escapes the root must still be rejected.
+    std::filesystem::create_symlink("../../etc/passwd", root / "lib" / "escape");
+    REQUIRE_FALSE(ValidateDirectoryTreeWithinRoot(root.string(), 10, 1024, 1024));
+}
+
 TEST_CASE("PathUtil: task overview path rejects traversal without side effects", "[path-util][security]") {
     TestPathFixture fix;
     const auto expected_root = fix.test_dir + "/cwai/overview";

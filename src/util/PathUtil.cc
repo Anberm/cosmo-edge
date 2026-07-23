@@ -373,8 +373,31 @@ std::string GetBaseDir() {
         }
 
         const auto link_status = it->symlink_status(ec);
-        if (ec || fs::is_symlink(link_status) ||
-            (!fs::is_directory(link_status) && !fs::is_regular_file(link_status))) {
+        if (ec) {
+            return false;
+        }
+        if (fs::is_symlink(link_status)) {
+            // Permit symlinks whose targets resolve inside the root (the
+            // normal shared-library versioning chains). Reject absolute or
+            // root-escaping targets so an archive cannot write outside it.
+            std::error_code read_ec;
+            const fs::path target = fs::read_symlink(it->path(), read_ec);
+            if (read_ec || target.empty() || target.is_absolute()) {
+                return false;
+            }
+            fs::path resolved = it->path().parent_path() / target;
+            const auto rel    = fs::relative(resolved, resolved_root, ec);
+            if (ec || rel.empty()) {
+                return false;
+            }
+            for (const auto& component : rel) {
+                if (component == "..") {
+                    return false;
+                }
+            }
+            continue;  // a symlink itself contributes no extracted bytes
+        }
+        if (!fs::is_directory(link_status) && !fs::is_regular_file(link_status)) {
             return false;
         }
 

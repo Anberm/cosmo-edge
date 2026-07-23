@@ -76,6 +76,18 @@ struct CMsgAiAttr {
     friend void from_json(const nlohmann::json& j, CMsgAiAttr& v);
 };
 
+// Detection target that caused an event. Kept separate from algorithm-specific
+// property data so generic HTTP consumers can always identify the model class.
+struct CMsgOnEventsTarget {
+    std::string label;
+    float confidence{0.0F};
+    std::string trackId;
+    MsgRectReal box;
+
+    friend void to_json(nlohmann::json& j, const CMsgOnEventsTarget& v);
+    friend void from_json(const nlohmann::json& j, CMsgOnEventsTarget& v);
+};
+
 struct CMsgOnEventsPropertyVehicle {
     std::string plateColor;    // License plate color
     std::string vehicleColor;  // Vehicle body color
@@ -199,29 +211,30 @@ void from_json(const nlohmann::json& j, CMsgOnEventsProperty& p);
 // Analysis machine reporting event interface
 struct CMsgOnEventsReq : public MsgRecvHead {
     std::string messageId;
-    std::string devId;               // Device ID
-    std::string taskId;              // Task ID
-    std::string videoChannelId;      // Channel
-    std::string channelName;         // Channel name
-    std::string timestamp;           // UTC timestamp ms
-    int64_t itimestamp{0};           // Timestamp ms
-    std::string algorithmId;         // Algorithm ID
-    std::string algorithmCode;       // Algorithm Code
-    std::string algorithmName;       // Algorithm name
-    std::string areaId;              // Area ID
-    std::string areaName;            // Area name
-    std::string orignalPicture;      // Original picture URL
-    std::string fullPicture;         // Full picture URL
-    std::string detectedPicture;     // Detected picture URL
-    std::string video;               // Alarm video URL
-    std::string videostructured;     // Video structured file URL
-    std::string overviewFile;        // Video structured overview file URL
-    std::string recordId;            // Alarm record ID (trackId?)
-    std::vector<std::string> files;  // Recorded files
-    bool isRetryMessage{false};      // Whether it is a retried message
-    bool bHaveProperty{false};       // Whether property field exists
-    CMsgOnEventsProperty property;   // Property
-    std::string category;            // Category
+    std::string devId;                        // Device ID
+    std::string taskId;                       // Task ID
+    std::string videoChannelId;               // Channel
+    std::string channelName;                  // Channel name
+    std::string timestamp;                    // UTC timestamp ms
+    int64_t itimestamp{0};                    // Timestamp ms
+    std::string algorithmId;                  // Algorithm ID
+    std::string algorithmCode;                // Algorithm Code
+    std::string algorithmName;                // Algorithm name
+    std::string areaId;                       // Area ID
+    std::string areaName;                     // Area name
+    std::string orignalPicture;               // Original picture URL
+    std::string fullPicture;                  // Full picture URL
+    std::string detectedPicture;              // Detected picture URL
+    std::string video;                        // Alarm video URL
+    std::string videostructured;              // Video structured file URL
+    std::string overviewFile;                 // Video structured overview file URL
+    std::string recordId;                     // Alarm record ID (trackId?)
+    std::vector<std::string> files;           // Recorded files
+    bool isRetryMessage{false};               // Whether it is a retried message
+    bool bHaveProperty{false};                // Whether property field exists
+    CMsgOnEventsProperty property;            // Property
+    std::vector<CMsgOnEventsTarget> targets;  // Detection targets that triggered this event
+    std::string category;                     // Category
 };
 
 // Conditional: CC(bHaveProperty, property)

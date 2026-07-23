@@ -84,6 +84,14 @@ A typical event payload:
   "recordId": "RECORD_ID",
   "isRetryMessage": false,
   "category": "alarm",
+  "targets": [
+    {
+      "label": "category0",
+      "confidence": 0.93,
+      "trackId": "TARGET_TRACK_ID",
+      "box": {"x": 120, "y": 80, "width": 240, "height": 360}
+    }
+  ],
   "property": {}
 }
 ```
@@ -91,6 +99,19 @@ A typical event payload:
 For field details, see [API Fields](api-fields.md#event-report-payload).
 
 > Note: The DTO also defines the `itimestamp` and `files` fields, but the current outbound `to_json` serialization does not emit them, so they are intentionally omitted from the payload above.
+
+## Detection Targets
+
+`targets` lists the detection targets that triggered the event:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `label` | string | Model detection label, such as `category0`, `person`, or `Pedestrian` |
+| `confidence` | number | Detection confidence |
+| `trackId` | string | Target tracking ID; may be omitted when tracking is disabled |
+| `box` | object | Pixel-coordinate bounding box with `x`, `y`, `width`, and `height` |
+
+Aggregate events without individual targets may omit `targets`. Initial HTTP delivery and offline retries use the same structure.
 
 ## Property Object
 

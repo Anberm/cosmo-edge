@@ -54,6 +54,18 @@ struct DataAlarmTargetConfidence {
     TargetPosition targetPos{TargetPosition::kBottom};
 };
 
+inline CMsgOnEventsTarget MakeOnEventsTarget(const AiDetectRstEl& target) {
+    CMsgOnEventsTarget result;
+    result.label      = target.confidence.label;
+    result.confidence = target.confidence.confidence;
+    result.trackId    = target.trackIdInfo;
+    result.box.x      = target.box.x;
+    result.box.y      = target.box.y;
+    result.box.width  = target.box.width;
+    result.box.height = target.box.height;
+    return result;
+}
+
 struct DataAlarmPassFlow {
     int enterNumber{0};    // Cumulative entered people per hour, overwrites previous data if repeatedly sent
     int leaveNumber{0};    // Cumulative departed people per hour, overwrites previous data if repeatedly sent
@@ -92,10 +104,11 @@ struct DataAlarmUnit {
     std::vector<util::Box> friends;
     bool haveRelated{false};
     util::Box relatedBox;
-    std::vector<AiConfidence> confidence;  // Classification confidence
-    std::vector<AiAttribute> attrRsts;     // Classification attribute results
-    AiFeature feature;                     // Feature values for face comparison
-    std::vector<util::Box> boxs;           // Alarms without tracking (multiple detections in one area)
+    std::vector<AiConfidence> confidence;     // Classification confidence
+    std::vector<CMsgOnEventsTarget> targets;  // Detection targets that caused the alarm
+    std::vector<AiAttribute> attrRsts;        // Classification attribute results
+    AiFeature feature;                        // Feature values for face comparison
+    std::vector<util::Box> boxs;              // Alarms without tracking (multiple detections in one area)
     std::vector<AiDetectBestEl> bestInfos;
     std::vector<DataAlarmTargetConfidence> targetHistory;  // Target confidence during sensitivity calculation
     RetroDirect retroDirect{RetroDirect::RetroDirectNone};  // No direction

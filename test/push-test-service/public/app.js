@@ -493,11 +493,39 @@ tabs.forEach(tab => {
 
 // --- HTTP Alerts ---
 
+// 渲染检测目标列表，对应设备推送 payload 里的 `targets` 字段（commit 3fcabdc8，
+// PR #51）。每个目标含 label / confidence / trackId / box。无独立目标的统计类
+// 事件设备端不会下发 targets，此时返回空串，卡片上不占位。
+function buildTargetsHtml(alert) {
+    const targets = Array.isArray(alert.targets) ? alert.targets : [];
+    if (targets.length === 0) return '';
+
+    const items = targets.map((t, idx) => {
+        const label = escapeHtml(t.label || `目标 ${idx + 1}`);
+        const conf = typeof t.confidence === 'number'
+            ? `<span class="alert-target-conf">${Math.round(t.confidence * 100)}%</span>`
+            : '';
+        const track = t.trackId
+            ? `<span class="alert-target-track">#${escapeHtml(t.trackId)}</span>`
+            : '';
+        const b = t.box || {};
+        const hasBox = b.x != null || b.y != null || b.width != null || b.height != null;
+        const boxTitle = hasBox
+            ? ` title="目标框 (x, y, w, h): ${b.x ?? '-'}, ${b.y ?? '-'}, ${b.width ?? '-'}, ${b.height ?? '-'} px"`
+            : '';
+        return `<span class="alert-target"${boxTitle}><span class="alert-target-label">${label}</span>${conf}${track}</span>`;
+    }).join('');
+
+    return `<p class="alert-targets-row"><strong>检测目标:</strong> <span class="alert-targets">${items}</span></p>`;
+}
+
 function addAlertToUI(alert, prepend = false) {
     const card = document.createElement('div');
     card.className = 'alert-card';
     
     const time = new Date(alert._receivedAt || Date.now()).toLocaleTimeString();
+    const targetCount = Array.isArray(alert.targets) ? alert.targets.length : 0;
+    const targetsHtml = buildTargetsHtml(alert);
     
     let imagesHtml = '';
     if (alert.orignalPicture) imagesHtml += `<div class="alert-img-container"><img src="data:image/jpeg;base64,${alert.orignalPicture}" onclick="showDetail('image', '${alert.orignalPicture}')"></div>`;
@@ -506,7 +534,10 @@ function addAlertToUI(alert, prepend = false) {
 
     card.innerHTML = `
         <div class="alert-header">
-            <span>${alert.algorithmName || '未知算法'}</span>
+            <span>
+                ${alert.algorithmName || '未知算法'}
+                ${targetCount > 0 ? `<span class="alert-target-count" title="检测目标数">🎯 ${targetCount}</span>` : ''}
+            </span>
             <span>${time}</span>
         </div>
         <div class="alert-body">
@@ -515,6 +546,7 @@ function addAlertToUI(alert, prepend = false) {
                 <p><strong>设备 ID:</strong> ${alert.devId || 'N/A'}</p>
                 <p><strong>通道:</strong> ${alert.channelName || alert.videoChannelId || 'N/A'}</p>
                 <p><strong>类别:</strong> ${alert.category || 'N/A'}</p>
+                ${targetsHtml}
                 ${alert.video ? `<button class="btn btn-primary btn-sm" onclick="showDetail('video', '${alert.video}')">播放视频</button>` : ''}
             </div>
         </div>
