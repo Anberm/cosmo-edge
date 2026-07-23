@@ -343,7 +343,7 @@ bool TaskAlarm::FillAlarmData(AlgDataPtr algData) {
         areaData.haveReport    = true;
 
         // Build event
-        auto eventData = BuildBaseEventData(algData, alarmUnit);
+        auto eventData    = BuildBaseEventData(algData, alarmUnit);
         eventData.targets = alarmUnit.targets;
         AttachAlarmMedia(eventData, algData, alarmUnit);
         FillEventProperty(eventData, algData, alarmUnit, idData);

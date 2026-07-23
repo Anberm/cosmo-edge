@@ -11,9 +11,9 @@
 #include "util/JsonStructUtil.h"
 #include "util/MsgBaseTypes.h"
 #include "util/MsgDynamicElement.h"
+#include "util/dto/ClientMsgEvent.h"
 #include "util/dto/ServerMsgTypes.h"
 #include "util/dto/TaskCreateTypes.h"
-#include "util/dto/ClientMsgEvent.h"
 
 // ---------------------------------------------------------------------------
 // Helper: parse JSON string into nlohmann::json for field-level assertions

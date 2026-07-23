@@ -204,7 +204,8 @@ bool TaskEventDao::Insert(const TaskEventData& data) {
         .append(
             " (rec_id, category, algorithm_code, create_time, camera_id, camera_outid, camera_name, area_id, "
             "area_name,"
-            " disk_id, isreported, target_id, pic_url, fullpic_url, originepic_url, extraFiles, property, targets, "
+            " disk_id, isreported, target_id, pic_url, fullpic_url, originepic_url, extraFiles, property, "
+            "targets, "
             "libPersionName, libPersionNumber, libFacesID, video_flag,"
             " x, y, width, height, eventFrame, propStr, propColor, propRelatedColor, propType, propDirection"
             " ) values ("

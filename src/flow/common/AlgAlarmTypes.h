@@ -104,11 +104,11 @@ struct DataAlarmUnit {
     std::vector<util::Box> friends;
     bool haveRelated{false};
     util::Box relatedBox;
-    std::vector<AiConfidence> confidence;  // Classification confidence
+    std::vector<AiConfidence> confidence;     // Classification confidence
     std::vector<CMsgOnEventsTarget> targets;  // Detection targets that caused the alarm
-    std::vector<AiAttribute> attrRsts;     // Classification attribute results
-    AiFeature feature;                     // Feature values for face comparison
-    std::vector<util::Box> boxs;           // Alarms without tracking (multiple detections in one area)
+    std::vector<AiAttribute> attrRsts;        // Classification attribute results
+    AiFeature feature;                        // Feature values for face comparison
+    std::vector<util::Box> boxs;              // Alarms without tracking (multiple detections in one area)
     std::vector<AiDetectBestEl> bestInfos;
     std::vector<DataAlarmTargetConfidence> targetHistory;  // Target confidence during sensitivity calculation
     RetroDirect retroDirect{RetroDirect::RetroDirectNone};  // No direction
