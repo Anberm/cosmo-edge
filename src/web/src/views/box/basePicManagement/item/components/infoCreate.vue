@@ -3,7 +3,7 @@
     <div>
       <el-form class="form-wrap" :model="ruleForm" :rules="rules" ref="ruleFormRef" :label-width="currentLocale === 'en-US' ? '160px' : '125px'">
         <el-form-item prop="photo" :label="t('basePic.photo')">
-          <Upload :fileList="fileList" :limit="5" @click="onProgress" />
+          <Upload :fileList="fileList" :limit="5" @click="onProgress" @delete="onDelete" />
         </el-form-item>
       </el-form>
       <span style="font-size: 12px; color: #1890FF; margin-left: 125px;">{{ t('basePic.photoSizeTip') }}</span>
@@ -20,6 +20,7 @@
 import { ref, reactive, watch, getCurrentInstance } from 'vue'
 import Upload from './Upload.vue'
 import { t, currentLocale } from '@/i18n'
+import { uploadFileInChunks, UploadPurpose } from '@/utils/chunkUpload'
 
 const { proxy } = getCurrentInstance()
 
@@ -50,7 +51,6 @@ const ruleForm = reactive({
 
 const fileList = ref([])
 const personLibList = ref([])
-const ImageBase64 = ref('')
 
 const rules = {
   personName: [
@@ -131,6 +131,7 @@ function validateSerial(rule, value, callback) {
 }
 
 function handleClose() {
+  clearPendingPreviews()
   Object.assign(ruleForm, {
     serialNumber: '',
     personName: '',
@@ -149,6 +150,7 @@ function validatePass(rule, value, callback) {
 }
 
 function initData() {
+  clearPendingPreviews()
   ruleForm.serialNumber = props.data.serialNumber
   ruleForm.personName = props.data.name
   const faceLibId = []
@@ -158,70 +160,101 @@ function initData() {
   ruleForm.faceLibId = faceLibId
   const fileListData = []
   props.data.pictureList.forEach((element) => {
-    fileListData.push(element.url)
+    fileListData.push({
+      pictureUrl: element.url,
+      pictureName: element.pictureName || ''
+    })
   })
   fileList.value = fileListData
 }
 
 function onProgress(file, index) {
-  console.log(file, 'file')
-  console.log(index, 'index')
-  const isJPG = file.type === 'image/jpeg'
-  const isPNG = file.type === 'image/png'
-  const isBMP = file.type === 'image/jpg'
-  const isLt2M = file.size / 1024 / 1024 < 3
-
-  if (!isJPG && !isPNG && !isBMP) {
+  const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/bmp'])
+  if (!file || !supportedTypes.has(file.type)) {
     return proxy.$message.error(t('basePic.photoFormatError'))
   }
-  if (!isLt2M) {
-    return proxy.$message.error(t('basePic.photoSizeError'))
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+    return proxy.$message.error(t('api.error.UpLoadDataEmpty'))
   }
 
-  const reader = new FileReader()
-  reader.readAsDataURL(file)
-  reader.onload = (e) => {
-    let base64
-    if (e.target.result.indexOf(',') > -1) {
-      base64 = e.target.result.substring(e.target.result.indexOf(',') + 1)
-    } else {
-      base64 = e.target.result
-    }
-
-    if (index || index == 0) {
-      fileList.value[index] = {
-        pictureBase64: base64,
-        pictureName: ''
-      }
-    } else {
-      fileList.value.push({ pictureBase64: base64, pictureName: '' })
-    }
+  const entry = {
+    rawFile: file,
+    previewUrl: URL.createObjectURL(file),
+    pictureName: ''
+  }
+  if (index || index === 0) {
+    releasePreview(fileList.value[index])
+    fileList.value[index] = entry
+  } else {
+    fileList.value.push(entry)
   }
 }
 
-function submitForm(formName) {
-  ruleFormRef.value.validate((valid) => {
-    if (valid) {
-      let params = {
-        thingsOperation: 1,
-        thingsLibId: props.data.thingsLibId,
-        thingsList: fileList.value
-      }
+function releasePreview(entry) {
+  if (entry?.previewUrl) URL.revokeObjectURL(entry.previewUrl)
+}
 
-      proxy.$API.addLibThings(params).then((res) => {
-        datasuccess.value = true
-        dialogVisible.value = false
-        emit('updateLib')
-        proxy.$message.success(t('common.operationSucceeded'))
-        Object.assign(ruleForm, {
-          serialNumber: '',
-          personName: '',
-          faceLibId: []
+function clearPendingPreviews() {
+  fileList.value.forEach(releasePreview)
+}
+
+function onDelete(entry) {
+  releasePreview(entry)
+}
+
+async function submitForm() {
+  try {
+    await ruleFormRef.value.validate()
+  } catch (_) {
+    return
+  }
+
+  const stagedUploads = []
+  try {
+    const thingsList = []
+    for (const entry of fileList.value) {
+      if (!entry.rawFile) {
+        thingsList.push({
+          pictureUrl: entry.pictureUrl,
+          pictureName: entry.pictureName || ''
         })
-        fileList.value = []
+        continue
+      }
+      const staged = await uploadFileInChunks(entry.rawFile, {
+        purpose: UploadPurpose.IMAGE,
+        uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+        cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+        getCapabilities: () => proxy.$API.getUploadCapabilities()
+      })
+      stagedUploads.push(staged)
+      thingsList.push({
+        pictureUploadId: staged.uploadId,
+        pictureName: entry.pictureName || ''
       })
     }
-  })
+
+    await proxy.$API.addLibThings({
+      thingsOperation: 1,
+      thingsLibId: props.data.thingsLibId,
+      thingsList
+    })
+    datasuccess.value = true
+    dialogVisible.value = false
+    emit('updateLib')
+    proxy.$message.success(t('common.operationSucceeded'))
+    Object.assign(ruleForm, {
+      serialNumber: '',
+      personName: '',
+      faceLibId: []
+    })
+    clearPendingPreviews()
+    fileList.value = []
+  } catch (error) {
+    await Promise.allSettled(stagedUploads.map(upload =>
+      proxy.$API.cancelAtomicModelUpload({ uploadId: upload.uploadId })
+    ))
+    throw error
+  }
 }
 </script>
 

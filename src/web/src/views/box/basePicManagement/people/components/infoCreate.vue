@@ -4,7 +4,7 @@
     <div>
       <el-form class="form-wrap" :model="ruleFormData" :rules="rules" ref="ruleForm" :label-width="currentLocale === 'en-US' ? '160px' : '125px'">
         <el-form-item prop="photo" :label="t('basePic.photo')">
-          <Upload :fileList="fileList" :limit="3" @click="onProgress" />
+          <Upload :fileList="fileList" :limit="3" @click="onProgress" @delete="onDelete" />
           <div class="upload-tip">{{ t('basePic.uploadFaceTip') }}
             <el-icon class="pic_tip" @click="dialogVisibleother=true"><QuestionFilled /></el-icon>
           </div>
@@ -83,6 +83,7 @@ import { QuestionFilled } from '@element-plus/icons-vue'
 import Upload from '@/components/Upload.vue'
 import miniInput from '@/components/miniInput.vue'
 import { t, localeColon, currentLocale } from '@/i18n'
+import { uploadFileInChunks, UploadPurpose } from '@/utils/chunkUpload'
 
 // 定义组件名称
 defineOptions({
@@ -117,7 +118,7 @@ const ruleFormData = reactive({
 })
 
 const fileList = ref([])
-const ImageBase64 = ref('')
+const pendingFiles = new Map()
 
 // Validation functions
 function validatePass(rule, value, callback) {
@@ -196,6 +197,7 @@ function validatePersonID(rule, value, callback) {
 }
 
 function handleClose() {
+  clearPendingFiles()
   ruleFormData.serialNumber = ''
   ruleFormData.personName = ''
   ruleFormData.faceLibId = []
@@ -204,6 +206,7 @@ function handleClose() {
 }
 
 function hidclose() {
+  clearPendingFiles()
   ruleFormData.serialNumber = ''
   ruleFormData.personName = ''
   ruleFormData.faceLibId = []
@@ -212,6 +215,7 @@ function hidclose() {
 }
 
 function initData() {
+  clearPendingFiles()
   ruleFormData.faceLibId = props.data.faceLibId
   if (props.data?.personId) {
     ruleFormData.serialNumber = props.data.serialNumber
@@ -225,76 +229,92 @@ function initData() {
 }
 
 function onProgress(file, index) {
-  const isJPG = file.type === 'image/jpeg'
-  const isPNG = file.type === 'image/png'
-  const isBMP = file.type === 'image/jpg'
-  const isLt2M = file.size / 1024 / 1024 < 3
-
-  if (!isJPG && !isPNG && !isBMP) {
+  const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/bmp'])
+  if (!file || !supportedTypes.has(file.type)) {
     return proxy.$message.error(t('basePic.photoFormatError'))
   }
-  if (!isLt2M) {
-    return proxy.$message.error(t('basePic.photoSizeError'))
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+    return proxy.$message.error(t('api.error.UpLoadDataEmpty'))
   }
-  const reader = new FileReader()
-  reader.readAsDataURL(file)
-  reader.onload = function () {
-    if (index || index == 0) {
-      fileList.value[index] = this.result
-    } else {
-      fileList.value.push(this.result)
-    }
-    nextTick(() => {
-      ruleForm.value.validateField('photo')
-    })
+
+  const previewUrl = URL.createObjectURL(file)
+  if (index || index === 0) {
+    releasePendingFile(fileList.value[index])
+    fileList.value[index] = previewUrl
+  } else {
+    fileList.value.push(previewUrl)
   }
+  pendingFiles.set(previewUrl, file)
+  nextTick(() => {
+    ruleForm.value.validateField('photo')
+  })
 }
 
-function submitForm(formName) {
-  ruleForm.value.validate((valid) => {
-    if (valid) {
-      const pictureBase64 = []
-      fileList.value.forEach((element) => {
-        if (element.indexOf(',') > -1) {
-          pictureBase64.push(element.substring(element.indexOf(',') + 1))
-        } else {
-          pictureBase64.push(element)
-        }
+function releasePendingFile(previewUrl) {
+  if (!pendingFiles.has(previewUrl)) return
+  URL.revokeObjectURL(previewUrl)
+  pendingFiles.delete(previewUrl)
+}
+
+function clearPendingFiles() {
+  for (const previewUrl of pendingFiles.keys()) {
+    URL.revokeObjectURL(previewUrl)
+  }
+  pendingFiles.clear()
+}
+
+function onDelete(previewUrl) {
+  releasePendingFile(previewUrl)
+}
+
+async function submitForm() {
+  try {
+    await ruleForm.value.validate()
+  } catch (_) {
+    return
+  }
+
+  const stagedUploads = []
+  try {
+    for (const previewUrl of fileList.value) {
+      const file = pendingFiles.get(previewUrl)
+      if (!file) continue
+      const staged = await uploadFileInChunks(file, {
+        purpose: UploadPurpose.IMAGE,
+        uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+        cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+        getCapabilities: () => proxy.$API.getUploadCapabilities()
       })
-      let params = {
-        personId: props.data.personId ? props.data.personId : '',
-        personOperation: !props.data?.personId ? 1 : 2, // 1：添加，2更新
-        faceLibId: ruleFormData.faceLibId,
-        serialNumber: ruleFormData.serialNumber,
-        personName: ruleFormData.personName
-      }
-      !props.data?.personId && delete params.personId
-      let old = [],
-        arr = []
-      for (let index = 0; index < pictureBase64.length; index++) {
-        const element = pictureBase64[index]
-        if (element.length > 100) {
-          arr.push(element)
-        } else {
-          old.push(element)
-        }
-      }
-      params.pictureBase64 = arr
-      params.retainPictureId = old
-      proxy.$API.modifyFacePicLib(params).then(() => {
-        proxy.$message.success(t('common.operationSucceeded'))
-        datasuccess.value = true
-        dialogVisible.value = false
-        emit('updatePage')
-        fileList.value = []
-        ruleFormData.serialNumber = ''
-        ruleFormData.personName = ''
-        ruleFormData.faceLibId = []
-      })
-    } else {
-      return false
+      stagedUploads.push(staged)
     }
-  })
+
+    const params = {
+      personId: props.data.personId ? props.data.personId : '',
+      personOperation: !props.data?.personId ? 1 : 2,
+      faceLibId: ruleFormData.faceLibId,
+      serialNumber: ruleFormData.serialNumber,
+      personName: ruleFormData.personName,
+      pictureUploadIds: stagedUploads.map(upload => upload.uploadId),
+      retainPictureId: fileList.value.filter(item => !pendingFiles.has(item))
+    }
+    if (!props.data?.personId) delete params.personId
+
+    await proxy.$API.modifyFacePicLib(params)
+    proxy.$message.success(t('common.operationSucceeded'))
+    datasuccess.value = true
+    dialogVisible.value = false
+    emit('updatePage')
+    clearPendingFiles()
+    fileList.value = []
+    ruleFormData.serialNumber = ''
+    ruleFormData.personName = ''
+    ruleFormData.faceLibId = []
+  } catch (error) {
+    await Promise.allSettled(stagedUploads.map(upload =>
+      proxy.$API.cancelAtomicModelUpload({ uploadId: upload.uploadId })
+    ))
+    throw error
+  }
 }
 
 // Lifecycle

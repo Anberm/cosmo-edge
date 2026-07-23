@@ -16,6 +16,7 @@ extern "C" {
 }
 #endif
 
+#include "media/EncodedImageInfo.h"
 #include "media/PixelFormatUtils.h"
 #include "util/Log.h"
 #include "util/VideoInfo.h"
@@ -577,6 +578,11 @@ namespace media {
     VideoFramePtr VideoFrameProcCpu::DecodeJpeg(const std::vector<u_int8_t>& data) {
         if (data.empty()) {
             LOG_ERRO("{}", "DecodeJpeg() - empty data");
+            return nullptr;
+        }
+        EncodedImageInfo image_info;
+        if (!InspectEncodedImage(data, image_info) || !IsEncodedImageWithinFrameCapability(image_info)) {
+            LOG_WARN("{}", "DecodeJpeg() - invalid or unsupported encoded dimensions");
             return nullptr;
         }
 

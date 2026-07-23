@@ -22,6 +22,8 @@ public:
 
 class HttpStringHandler : public HttpRequestHandler {
 public:
+    /// Bounds responses intentionally buffered in memory. Callers handling a
+    /// domain payload should pass that domain's resource or protocol budget.
     explicit HttpStringHandler(size_t max_size = 16U * 1024 * 1024) : max_size_(max_size) {}
     size_t AppendData(const char* data, size_t size) override;
     const std::string& GetData() const;
@@ -33,6 +35,8 @@ private:
 
 class HttpFileHandler : public HttpRequestHandler {
 public:
+    /// Streams the response directly to disk; no in-memory body-size quota is
+    /// applied here. Filesystem admission remains the caller's responsibility.
     explicit HttpFileHandler(const std::string& filename);
     size_t AppendData(const char* data, size_t size) override;
     void Flush() override;
@@ -43,6 +47,9 @@ private:
 
 class HttpImageHandler : public HttpRequestHandler {
 public:
+    /// Bounds encoded image bytes held in memory. Production image downloads
+    /// pass a live memory/media capability budget instead of relying on this
+    /// compatibility default.
     explicit HttpImageHandler(size_t max_size = 16U * 1024 * 1024) : max_size_(max_size) {}
     size_t AppendData(const char* data, size_t size) override;
     const std::vector<u_char>& GetImageData() const;

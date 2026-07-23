@@ -96,8 +96,7 @@ import { UploadFilled, WarningFilled, SuccessFilled } from '@element-plus/icons-
 import { t } from '@/i18n'
 import {
   uploadFileInChunks,
-  UploadPurpose,
-  UPLOAD_MAX_TOTAL_SIZE
+  UploadPurpose
 } from '@/utils/chunkUpload'
 
 // 定义组件名称
@@ -182,9 +181,10 @@ async function httpRequest(event) {
     stagedUpload = await uploadFileInChunks(file, {
       purpose: UploadPurpose.FACE_IMPORT,
       uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
-      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+      getCapabilities: () => proxy.$API.getUploadCapabilities()
     })
-    if (!stagedUpload.uploadId) throw new Error(t('validate.cannotGetFilePath'))
+    if (!stagedUpload.uploadId) throw new Error(t('validate.missingUploadId'))
     await proxy.$API.boxImportFile({
       importType: 2,
       faceLibId: props.faceLibId,
@@ -293,8 +293,8 @@ function handleFileChange(file, fileList) {
     return
   }
 
-  if (fileInfo.size > UPLOAD_MAX_TOTAL_SIZE) {
-    proxy.$message.warning(t('basePic.fileSizeWarning'))
+  if (!Number.isSafeInteger(fileInfo.size) || fileInfo.size <= 0) {
+    proxy.$message.warning(t('api.error.UpLoadDataEmpty'))
     const upload = uploadRef.value
     upload.clearFiles()
     return

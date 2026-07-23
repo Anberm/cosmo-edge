@@ -2,6 +2,7 @@ import axios from 'axios' // 引入 axios
 import { message } from '@/utils/message'
 import actions from '@/micro/state.js'
 import { currentLocale, t, translateApiMessage } from '@/i18n'
+import { formatActionableApiError, normalizeApiError } from '@/utils/apiError'
 
 const longTimeoutApi = [
   '/gtw/cwai/System/Upgrade',
@@ -72,10 +73,8 @@ export const request = params => {
       .then(res => {
         const data = res?.data || {}
         const resCode = data?.resCode
-        const firstMsg = Array.isArray(data?.resMsg) ? data.resMsg[0] : {}
-        const msgCode = firstMsg?.msgCode
-        const messageKey = firstMsg?.messageKey || firstMsg?.msgKey || data?.messageKey || data?.msgKey
-        const msgText = translateApiMessage(messageKey, firstMsg?.msgText || data?.message || data?.msg)
+        const apiError = formatActionableApiError(data, translateApiMessage, t)
+        const msgCode = apiError.code
         if (resCode === 1) {
           resolve(data)
         } else {
@@ -83,22 +82,26 @@ export const request = params => {
             message.error(t('api.loginExpired'))
             clearLoginInfo()
           } else if (!params.silentError) {
-            message.error(msgText)
+            message.error(apiError.displayMessage)
           }
           reject(data)
         }
       })
       .catch(err => {
-        const status = err?.response?.status ?? err?.status
-        const msgCode = err?.response?.data?.resMsg?.[0]?.msgCode
+        const normalized = normalizeApiError(err)
+        const status = normalized.status
+        const msgCode = normalized.code
         if (status === 401 || msgCode === '10005') {
           message.error(t('api.loginExpired'))
           clearLoginInfo()
           return reject(err)
         }
-        if (status === 502 || status === 500 || status === 404 || status === 400) {
+        if (err?.response && status >= 400) {
           if (params.url === '/gtw/cwai/System/QueryDeviceStatus') return reject(err)
-          if (!params.silentError) message.error(t('api.networkError'))
+          if (!params.silentError) {
+            const actionable = formatActionableApiError(err, translateApiMessage, t)
+            message.error(actionable.displayMessage || t('api.networkError'))
+          }
           return reject(err)
         }
         return reject(err)

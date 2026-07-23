@@ -20,6 +20,12 @@ struct ArchiveListingLimits {
     std::uintmax_t max_total_bytes;
 };
 
+struct ArchiveListingInspection {
+    size_t entry_count{0};
+    std::uintmax_t largest_file_bytes{0};
+    std::uintmax_t total_bytes{0};
+};
+
 /// Validate already-captured output from `unzip -Z -l` or
 /// `tar -tzvf --quoting-style=escape`. Every output line must match the
 /// selected format. Member names are normalized only for common leading
@@ -31,5 +37,13 @@ struct ArchiveListingLimits {
 /// the archive.
 [[nodiscard]] bool ValidateArchiveListingFile(const std::string& archive_path, ArchiveListingFormat format,
                                               const ArchiveListingLimits& limits);
+
+/// Strictly inspect paths, entry types, duplicate names, and entry count while
+/// reporting the declared uncompressed resource requirement. No arbitrary byte
+/// ceiling is imposed; callers compare the result with a runtime resource budget.
+[[nodiscard]] bool InspectArchiveListingOutput(std::string_view listing, ArchiveListingFormat format,
+                                               size_t max_entries, ArchiveListingInspection& inspection);
+[[nodiscard]] bool InspectArchiveListingFile(const std::string& archive_path, ArchiveListingFormat format,
+                                             size_t max_entries, ArchiveListingInspection& inspection);
 
 }  // namespace cosmo::util

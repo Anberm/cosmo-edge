@@ -1,6 +1,7 @@
 # Common (backend-agnostic) source files
 set(MEDIA_COMMON_SRC
     Color.h
+    EncodedImageInfo.cc           EncodedImageInfo.h
     FileDemuxStrategy.cc         FileDemuxStrategy.h
     IDemuxStrategy.h
     IOsdTextRenderer.h

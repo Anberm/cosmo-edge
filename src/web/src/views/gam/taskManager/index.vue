@@ -168,7 +168,7 @@
         <el-form-item :label="t('glossary.uploadVideo') + localeColon" prop="videoFileList" v-if="channelForm.channelType === 3 && channelDialogMode !== 'edit'">
           <el-upload id="onboarding-upload-video" class="form-item-content" drag action="" :http-request="handleVideoUpload" :file-list="channelForm.videoFileList" :limit="1" :on-remove="handleRemove" :before-upload="beforeVideoUpload" accept=".avi,.mp4,.mkv,.dav">
             <i class="el-icon-upload"></i>
-            <div class="el-upload__text">{{ t('validate.dragUploadHint', { clickUpload: t('action.clickUpload'), n: 1 }) }}</div>
+            <div class="el-upload__text">{{ t('validate.dragUploadHint', { clickUpload: t('action.clickUpload') }) }}</div>
           </el-upload>
         </el-form-item>
         <el-form-item v-if="false" :label="t('field.externalChannelNo') + localeColon" prop="externalChannelNo">
@@ -178,7 +178,7 @@
         <el-form-item v-if="channelForm.channelType === 3 && channelDialogMode !== 'edit'">
           <div class="form-item-content tip-content">
             <i class="el-icon-info"></i>
-            {{ t('validate.videoUploadTip', { types: 'AVI、MP4、MKV、DAV', n: 1 }) }}
+            {{ t('validate.videoUploadTip', { types: 'AVI、MP4、MKV、DAV' }) }}
           </div>
         </el-form-item>
       </el-form>
@@ -212,8 +212,7 @@ import {
 import { t, localeColon, currentLocale } from '@/i18n'
 import {
   uploadFileInChunks,
-  UploadPurpose,
-  UPLOAD_MAX_TOTAL_SIZE
+  UploadPurpose
 } from '@/utils/chunkUpload'
 import { resolveResourceAlgorithmName } from '@/utils/i18nResource'
 import TopBar from './components/algorithmTopBar.vue'
@@ -395,7 +394,7 @@ const handleRemove = () => {
 }
 
 const beforeVideoUpload = (file) => {
-  const isLimit = file.size > 0 && file.size <= UPLOAD_MAX_TOTAL_SIZE
+  const hasContent = Number.isSafeInteger(file.size) && file.size > 0
   // Validate by extension, not MIME: browsers report inconsistent/empty MIME
   // for .avi and .dav, and the backend gates on extension anyway.
   const lowerName = (file.name || '').toLowerCase()
@@ -406,8 +405,8 @@ const beforeVideoUpload = (file) => {
     proxy.$message.error(t('validate.videoFormatSupported', { types: 'AVI, MP4, MKV, DAV' }))
     return false
   }
-  if (!isLimit) {
-    proxy.$message.error(t('validate.videoMaxSize', { n: 500 }))
+  if (!hasContent) {
+    proxy.$message.error(t('api.error.UpLoadDataEmpty'))
     return false
   }
   return true
@@ -423,7 +422,8 @@ const uploadVideoByChunk = async (file) => {
   const result = await uploadFileInChunks(file, {
     purpose: UploadPurpose.VIDEO,
     uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
-    cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+    cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+    getCapabilities: () => proxy.$API.getUploadCapabilities()
   })
   if (!result.uploadId) {
     throw new Error(t('validate.tempVideoPathMissing'))

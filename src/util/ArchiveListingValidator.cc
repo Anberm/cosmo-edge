@@ -195,80 +195,105 @@ namespace {
 
 }  // namespace
 
+namespace {
+
+    bool ValidateArchiveListingOutputImpl(std::string_view listing, ArchiveListingFormat format,
+                                          const ArchiveListingLimits& limits,
+                                          ArchiveListingInspection* inspection) {
+        if (inspection != nullptr) {
+            *inspection = {};
+        }
+        size_t listing_byte_limit = 0;
+        if (listing.empty() || limits.max_entries == 0 || limits.max_file_bytes == 0 ||
+            limits.max_total_bytes == 0 ||
+            !CalculateListingByteLimit(limits.max_entries, listing_byte_limit) ||
+            listing.size() > listing_byte_limit || !HasOnlyExpectedControls(listing)) {
+            return false;
+        }
+
+        enum class ZipPhase {
+            kHeader,
+            kCount,
+            kEntries,
+            kDone,
+        };
+        ZipPhase zip_phase          = ZipPhase::kHeader;
+        size_t declared_entry_count = 0;
+        size_t entry_count          = 0;
+        std::uintmax_t total_size   = 0;
+        std::uintmax_t largest_file = 0;
+        std::unordered_set<std::string> members;
+
+        std::istringstream lines{std::string(listing)};
+        std::string line;
+        while (std::getline(lines, line)) {
+            if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kHeader) {
+                if (line.compare(0, 8, "Archive:") != 0 || line.size() <= 9 || line[8] != ' ' ||
+                    line.find_first_not_of(' ', 8) == std::string::npos) {
+                    return false;
+                }
+                zip_phase = ZipPhase::kCount;
+                continue;
+            }
+            if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kCount) {
+                if (!ParseZipCountLine(line, declared_entry_count) ||
+                    declared_entry_count > limits.max_entries) {
+                    return false;
+                }
+                zip_phase = ZipPhase::kEntries;
+                continue;
+            }
+            if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kDone) {
+                return false;
+            }
+
+            if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kEntries &&
+                !line.empty() && std::isdigit(static_cast<unsigned char>(line.front())) != 0) {
+                size_t footer_entry_count        = 0;
+                std::uintmax_t footer_total_size = 0;
+                if (!ParseZipFooter(line, footer_entry_count, footer_total_size) ||
+                    footer_entry_count != entry_count || footer_total_size != total_size) {
+                    return false;
+                }
+                zip_phase = ZipPhase::kDone;
+                continue;
+            }
+
+            std::uintmax_t entry_size = 0;
+            bool is_directory         = false;
+            std::string member;
+            std::string normalized;
+            if (!ParseArchiveEntry(line, format, entry_size, is_directory, member) ||
+                ++entry_count > limits.max_entries || entry_size > limits.max_file_bytes ||
+                total_size > limits.max_total_bytes || entry_size > limits.max_total_bytes - total_size ||
+                !NormalizeArchiveMember(std::move(member), is_directory, normalized) ||
+                !members.insert(normalized).second) {
+                return false;
+            }
+            total_size += entry_size;
+            if (!is_directory) {
+                largest_file = std::max(largest_file, entry_size);
+            }
+        }
+
+        if (entry_count == 0) {
+            return false;
+        }
+        const bool valid = format == ArchiveListingFormat::kTarVerbose ||
+                           (zip_phase == ZipPhase::kDone && entry_count == declared_entry_count);
+        if (valid && inspection != nullptr) {
+            inspection->entry_count        = entry_count;
+            inspection->largest_file_bytes = largest_file;
+            inspection->total_bytes        = total_size;
+        }
+        return valid;
+    }
+
+}  // namespace
+
 bool ValidateArchiveListingOutput(std::string_view listing, ArchiveListingFormat format,
                                   const ArchiveListingLimits& limits) {
-    size_t listing_byte_limit = 0;
-    if (listing.empty() || limits.max_entries == 0 || limits.max_file_bytes == 0 ||
-        limits.max_total_bytes == 0 || !CalculateListingByteLimit(limits.max_entries, listing_byte_limit) ||
-        listing.size() > listing_byte_limit || !HasOnlyExpectedControls(listing)) {
-        return false;
-    }
-
-    enum class ZipPhase {
-        kHeader,
-        kCount,
-        kEntries,
-        kDone,
-    };
-    ZipPhase zip_phase          = ZipPhase::kHeader;
-    size_t declared_entry_count = 0;
-    size_t entry_count          = 0;
-    std::uintmax_t total_size   = 0;
-    std::unordered_set<std::string> members;
-
-    std::istringstream lines{std::string(listing)};
-    std::string line;
-    while (std::getline(lines, line)) {
-        if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kHeader) {
-            if (line.compare(0, 8, "Archive:") != 0 || line.size() <= 9 || line[8] != ' ' ||
-                line.find_first_not_of(' ', 8) == std::string::npos) {
-                return false;
-            }
-            zip_phase = ZipPhase::kCount;
-            continue;
-        }
-        if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kCount) {
-            if (!ParseZipCountLine(line, declared_entry_count) || declared_entry_count > limits.max_entries) {
-                return false;
-            }
-            zip_phase = ZipPhase::kEntries;
-            continue;
-        }
-        if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kDone) {
-            return false;
-        }
-
-        if (format == ArchiveListingFormat::kZipVerbose && zip_phase == ZipPhase::kEntries && !line.empty() &&
-            std::isdigit(static_cast<unsigned char>(line.front())) != 0) {
-            size_t footer_entry_count        = 0;
-            std::uintmax_t footer_total_size = 0;
-            if (!ParseZipFooter(line, footer_entry_count, footer_total_size) ||
-                footer_entry_count != entry_count || footer_total_size != total_size) {
-                return false;
-            }
-            zip_phase = ZipPhase::kDone;
-            continue;
-        }
-
-        std::uintmax_t entry_size = 0;
-        bool is_directory         = false;
-        std::string member;
-        std::string normalized;
-        if (!ParseArchiveEntry(line, format, entry_size, is_directory, member) ||
-            ++entry_count > limits.max_entries || entry_size > limits.max_file_bytes ||
-            total_size > limits.max_total_bytes || entry_size > limits.max_total_bytes - total_size ||
-            !NormalizeArchiveMember(std::move(member), is_directory, normalized) ||
-            !members.insert(normalized).second) {
-            return false;
-        }
-        total_size += entry_size;
-    }
-
-    if (entry_count == 0) {
-        return false;
-    }
-    return format == ArchiveListingFormat::kTarVerbose ||
-           (zip_phase == ZipPhase::kDone && entry_count == declared_entry_count);
+    return ValidateArchiveListingOutputImpl(listing, format, limits, nullptr);
 }
 
 bool ValidateArchiveListingFile(const std::string& archive_path, ArchiveListingFormat format,
@@ -284,6 +309,29 @@ bool ValidateArchiveListingFile(const std::string& archive_path, ArchiveListingF
             : std::vector<std::string>{"tar", "-tzvf", archive_path, "--quoting-style=escape"};
     return cosmo::util::ExecWithOutputLimit(argv, listing, listing_byte_limit) == 0 &&
            ValidateArchiveListingOutput(listing, format, limits);
+}
+
+bool InspectArchiveListingOutput(std::string_view listing, ArchiveListingFormat format, size_t max_entries,
+                                 ArchiveListingInspection& inspection) {
+    const ArchiveListingLimits limits{max_entries, std::numeric_limits<std::uintmax_t>::max(),
+                                      std::numeric_limits<std::uintmax_t>::max()};
+    return ValidateArchiveListingOutputImpl(listing, format, limits, &inspection);
+}
+
+bool InspectArchiveListingFile(const std::string& archive_path, ArchiveListingFormat format,
+                               size_t max_entries, ArchiveListingInspection& inspection) {
+    size_t listing_byte_limit = 0;
+    if (max_entries == 0 || !CalculateListingByteLimit(max_entries, listing_byte_limit)) {
+        inspection = {};
+        return false;
+    }
+    std::string listing;
+    const std::vector<std::string> argv =
+        format == ArchiveListingFormat::kZipVerbose
+            ? std::vector<std::string>{"unzip", "-Z", "-l", archive_path}
+            : std::vector<std::string>{"tar", "-tzvf", archive_path, "--quoting-style=escape"};
+    return cosmo::util::ExecWithOutputLimit(argv, listing, listing_byte_limit) == 0 &&
+           InspectArchiveListingOutput(listing, format, max_entries, inspection);
 }
 
 }  // namespace cosmo::util

@@ -11,6 +11,8 @@ class IVideoFrameCodec;
 
 namespace cosmo {
 
+struct RequestDispatchContext;
+
 class MessageThingsLibHandler {
 public:
     MessageThingsLibHandler(service::IArticlesReidDaoService& dao_svc,
@@ -27,6 +29,8 @@ public:
     ThingsLib::MsgGetThingsPictureSend Handle(ThingsLib::MsgGetThingsPictureRecv&& data,
                                               std::error_condition& errc);
     ThingsLib::MsgAddLibThingsSend Handle(ThingsLib::MsgAddLibThingsRecv&& data, std::error_condition& errc);
+    ThingsLib::MsgAddLibThingsSend Handle(ThingsLib::MsgAddLibThingsRecv&& data,
+                                          const RequestDispatchContext& context, std::error_condition& errc);
     ThingsLib::MsgBindTaskThingsLibSend Handle(ThingsLib::MsgBindTaskThingsLibRecv&& data,
                                                std::error_condition& errc);
     ThingsLib::MsgDeleteLibThingsSend Handle(ThingsLib::MsgDeleteLibThingsRecv&& data,

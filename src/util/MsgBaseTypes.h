@@ -2,7 +2,9 @@
 // Modular DTO header.
 #pragma once
 
+#include <cstdint>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -37,10 +39,30 @@ struct MsgRecvHead {
 void to_json(nlohmann::json& j, const MsgRecvHead& /*h*/);
 void from_json(const nlohmann::json& /*j*/, MsgRecvHead& /*h*/);
 
+struct MsgErrorDetails {
+    std::optional<std::uint64_t> actualBytes;
+    std::optional<std::uint64_t> limitBytes;
+    std::optional<std::uint64_t> requiredBytes;
+    std::optional<std::uint64_t> availableBytes;
+    std::optional<std::uint64_t> reserveBytes;
+    std::optional<std::uint64_t> actualCount;
+    std::optional<std::uint64_t> limitCount;
+    std::string resource;
+    std::string purpose;
+
+    [[nodiscard]] bool Empty() const noexcept;
+    friend void to_json(nlohmann::json& j, const MsgErrorDetails& v);
+    friend void from_json(const nlohmann::json& j, MsgErrorDetails& v);
+};
+
 struct MsgResBase {
     std::string msgCode;
     std::string messageKey;
     std::string msgText;
+    MsgErrorDetails details;
+    bool retryable{false};
+    std::string recommendedAction;
+    std::optional<std::uint32_t> retryAfterSeconds;
     friend void to_json(nlohmann::json& j, const MsgResBase& v);
     friend void from_json(const nlohmann::json& j, MsgResBase& v);
 };

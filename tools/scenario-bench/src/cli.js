@@ -167,8 +167,8 @@ async function runDoctor(args) {
 
     if (pkg.videoMode === 'local') {
       for (const src of pkg.videos.local ?? []) {
-        const ok = Boolean(src.filePath || (src.file && fs.existsSync(src.file)));
-        checkLine(ok, `local video ${src.name ?? src.file ?? src.filePath}`, src.filePath ?? src.file ?? '');
+        const ok = Boolean(src.file && fs.existsSync(src.file));
+        checkLine(ok, `local video ${src.name ?? src.file}`, src.file ?? '');
         if (!ok) failures++;
       }
     }

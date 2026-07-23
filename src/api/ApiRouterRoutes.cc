@@ -5,13 +5,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <cerrno>
-#include <cstdint>
-#include <cstring>
 #include <filesystem>
-#include <limits>
 #include <utility>
-#include <vector>
 
 #include "api/ApiRouter.h"
 #include "api/ApiRouterInternal.h"
@@ -25,8 +20,6 @@ namespace cosmo {
 namespace {
 
     namespace fs = std::filesystem;
-
-    constexpr std::uintmax_t kMaxDownloadBytes = 512ULL * 1024 * 1024;
 
     class ScopedFd {
     public:
@@ -48,8 +41,8 @@ namespace {
         int fd_;
     };
 
-    bool ReadManagedTemporaryDownload(const std::string& candidate, std::vector<std::uint8_t>& content) {
-        content.clear();
+    bool ResolveManagedTemporaryDownload(const std::string& candidate, std::string& resolved_path) {
+        resolved_path.clear();
         std::error_code path_error;
         const auto root = fs::canonical(path::GetTemporaryDirPath(), path_error);
         if (path_error || root.empty()) {
@@ -67,11 +60,15 @@ namespace {
             return false;
         }
         struct stat root_stat {};
-        if (fstat(root_fd.Get(), &root_stat) != 0 || !S_ISDIR(root_stat.st_mode) ||
-            root_stat.st_uid != geteuid()) {
+        if (fstat(root_fd.Get(), &root_stat) != 0 || !S_ISDIR(root_stat.st_mode)) {
             return false;
         }
 
+        // The data volume can be provisioned by the installation account while
+        // the engine runs as another account (root in the packaged service).
+        // Ownership of the final file, not the parent directory, is the trust
+        // boundary. The HTTP streamer reopens the file with O_NOFOLLOW and
+        // repeats the owner, link-count, and inode checks before sending it.
         const auto name = requested.filename().string();
         ScopedFd file_fd(openat(root_fd.Get(), name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW));
         if (file_fd.Get() < 0) {
@@ -79,47 +76,16 @@ namespace {
         }
         struct stat opened_stat {};
         if (fstat(file_fd.Get(), &opened_stat) != 0 || !S_ISREG(opened_stat.st_mode) ||
-            opened_stat.st_uid != geteuid() || opened_stat.st_nlink != 1 || opened_stat.st_size <= 0 ||
-            static_cast<std::uintmax_t>(opened_stat.st_size) > kMaxDownloadBytes ||
-            static_cast<std::uintmax_t>(opened_stat.st_size) > std::numeric_limits<std::size_t>::max()) {
+            opened_stat.st_uid != geteuid() || opened_stat.st_nlink != 1 || opened_stat.st_size <= 0) {
             return false;
-        }
-
-        content.resize(static_cast<std::size_t>(opened_stat.st_size));
-        std::size_t offset = 0;
-        while (offset < content.size()) {
-            const auto count = read(file_fd.Get(), content.data() + offset, content.size() - offset);
-            if (count < 0 && errno == EINTR) {
-                continue;
-            }
-            if (count <= 0) {
-                content.clear();
-                return false;
-            }
-            offset += static_cast<std::size_t>(count);
-        }
-        std::uint8_t extra{};
-        while (true) {
-            const auto count = read(file_fd.Get(), &extra, 1);
-            if (count < 0 && errno == EINTR) {
-                continue;
-            }
-            if (count != 0) {
-                content.clear();
-                return false;
-            }
-            break;
         }
 
         struct stat named_stat {};
         if (fstatat(root_fd.Get(), name.c_str(), &named_stat, AT_SYMLINK_NOFOLLOW) != 0 ||
             named_stat.st_dev != opened_stat.st_dev || named_stat.st_ino != opened_stat.st_ino) {
-            content.clear();
             return false;
         }
-        if (unlinkat(root_fd.Get(), name.c_str(), 0) != 0) {
-            LOG_WARN("Failed to remove managed temporary download: {}", std::strerror(errno));
-        }
+        resolved_path = (root / name).string();
         return true;
     }
 
@@ -147,6 +113,7 @@ void ApiRouter::RegisterModelRoutes() {
             return detail::DispatchJsonWithContext<Model::MsgCancelUploadSend, Model::MsgCancelUploadRecv>(
                 GetMessageFrom(), *model_handler_, context, jsonStr, errc);
         }};
+    ROUTE("/gtw/cwai/atomic/Model/", kAuth, model_handler_, Model, UploadCapabilities);
     ROUTE("/gtw/cwai/atomic/Model/", kAuth, model_handler_, Model, GetConfig);
     ROUTE("/gtw/cwai/atomic/Model/", kAuth, model_handler_, Model, SaveConfig);
     ROUTE("/gtw/cwai/atomic/Model/", kAuth, model_handler_, Model, GetModelComponents);
@@ -157,11 +124,10 @@ void ApiRouter::RegisterModelRoutes() {
     // Export model config (special handling: return zip file content for download)
     url_map_[util::ToLower("/gtw/cwai/atomic/model/exportConfig")] = {
         kAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
-            std::string jsonResponse =
-                detail::DispatchJson<Model::MsgExportConfigSend, Model::MsgExportConfigRecv>(
-                    GetMessageFrom(), *model_handler_, jsonStr, errc);
-            return DispatchFileDownload(jsonResponse);
+            return detail::DispatchJson<Model::MsgExportConfigSend, Model::MsgExportConfigRecv>(
+                GetMessageFrom(), *model_handler_, jsonStr, errc);
         }};
+    file_download_routes_.insert(util::ToLower("/gtw/cwai/atomic/model/exportConfig"));
 }
 
 void ApiRouter::RegisterScheduleRoutes() {
@@ -261,7 +227,7 @@ void ApiRouter::RegisterSystemRoutes() {
 void ApiRouter::RegisterLibraryRoutes() {
     // ── Face Library ────────────────────────────────────────────────────────
     ROUTE("/gtw/cwai/Library/", kAuth, lib_handler_, Lib, ModifyFaceLib);
-    ROUTE("/gtw/cwai/Library/", kAuth, lib_handler_, Lib, ModifyFacePicLib);
+    ROUTE_CONTEXT("/gtw/cwai/Library/", kAuth, lib_handler_, Lib, ModifyFacePicLib);
     ROUTE("/gtw/cwai/Library/", kAuth, lib_handler_, Lib, QueryFaceLibInfo);
     ROUTE("/gtw/cwai/Library/", kAuth, lib_handler_, Lib, DeleteFaceLib);
     ROUTE("/gtw/cwai/Library/", kAuth, lib_handler_, Lib, QueryFaces);
@@ -275,7 +241,7 @@ void ApiRouter::RegisterLibraryRoutes() {
     ROUTE("/gtw/cwai/BodyLibrary/", kAuth, body_lib_handler_, BodyLib, AddLibPerson);
     ROUTE("/gtw/cwai/BodyLibrary/", kAuth, body_lib_handler_, BodyLib, BindTaskPersonLib);
     ROUTE("/gtw/cwai/BodyLibrary/", kAuth, body_lib_handler_, BodyLib, DeleteLibPerson);
-    ROUTE("/gtw/cwai/BodyLibrary/", kAuth, body_lib_handler_, BodyLib, DetectPerson);
+    ROUTE_CONTEXT("/gtw/cwai/BodyLibrary/", kAuth, body_lib_handler_, BodyLib, DetectPerson);
     ROUTE("/gtw/cwai/BodyLibrary/", kAuth, body_lib_handler_, BodyLib, GetPersonPicture);
 
     // ── Things Library ────────────────────────────────────────────────────────
@@ -284,7 +250,7 @@ void ApiRouter::RegisterLibraryRoutes() {
     ROUTE("/gtw/cwai/ThingsLibrary/", kAuth, things_lib_handler_, ThingsLib, QueryThingsLibInfo);
     ROUTE("/gtw/cwai/ThingsLibrary/", kAuth, things_lib_handler_, ThingsLib, QueryThingsPictures);
     ROUTE("/gtw/cwai/ThingsLibrary/", kAuth, things_lib_handler_, ThingsLib, GetThingsPicture);
-    ROUTE("/gtw/cwai/ThingsLibrary/", kAuth, things_lib_handler_, ThingsLib, AddLibThings);
+    ROUTE_CONTEXT("/gtw/cwai/ThingsLibrary/", kAuth, things_lib_handler_, ThingsLib, AddLibThings);
     ROUTE("/gtw/cwai/ThingsLibrary/", kAuth, things_lib_handler_, ThingsLib, BindTaskThingsLib);
     ROUTE("/gtw/cwai/ThingsLibrary/", kAuth, things_lib_handler_, ThingsLib, DeleteLibThings);
 }
@@ -329,20 +295,31 @@ void ApiRouter::RegisterOnboardingRoutes() {
     ROUTE("/gtw/cwai/Onboarding/", kAuth, onboarding_handler_, Onboarding, Reset);
 }
 
-std::string ApiRouter::DispatchFileDownload(const std::string& jsonResponse) {
-    auto doc = nlohmann::json::parse(jsonResponse, nullptr, false);
+bool ApiRouter::ResolveFileDownload(const std::string& json_response, RequestDispatchResponse& response) {
+    auto doc = nlohmann::json::parse(json_response, nullptr, false);
     if (doc.is_object() && doc.contains("filePath") && doc["filePath"].is_string()) {
-        std::string filePath = doc["filePath"].get<std::string>();
-        if (!filePath.empty()) {
-            std::vector<std::uint8_t> file_content;
-            if (!ReadManagedTemporaryDownload(filePath, file_content)) {
-                LOG_WARN("{}", "Reject unmanaged download response path");
-                return jsonResponse;
-            }
-            return {file_content.begin(), file_content.end()};
+        const auto file_path = doc["filePath"].get<std::string>();
+        std::string resolved_path;
+        if (file_path.empty() || !ResolveManagedTemporaryDownload(file_path, resolved_path)) {
+            LOG_WARN("{}", "Reject unmanaged download response path");
+            return false;
         }
+
+        std::string file_name = fs::path(resolved_path).filename().string();
+        if (doc.contains("fileName") && doc["fileName"].is_string()) {
+            const auto candidate_name = doc["fileName"].get<std::string>();
+            if (path::IsSafePathComponent(candidate_name)) {
+                file_name = candidate_name;
+            }
+        }
+
+        response.file_path              = std::move(resolved_path);
+        response.file_name              = std::move(file_name);
+        response.delete_file_after_send = true;
+        response.body.clear();
+        return true;
     }
-    return jsonResponse;
+    return false;
 }
 
 bool ApiRouter::SupportsRoute(const std::string& interface) {
@@ -405,6 +382,31 @@ bool ApiRouter::DispatchRequest(const RequestDispatchContext& context, const std
         response = it->second.context_func(authorized_context, message, errc);
     } else {
         response = it->second.func(message, errc);
+    }
+    return true;
+}
+
+bool ApiRouter::DispatchRequestResponse(const RequestDispatchContext& context, const std::string& message,
+                                        RequestDispatchResponse& response) {
+    if (!DispatchRequest(context, message, response.body)) {
+        return false;
+    }
+    if (context.transport != RequestTransport::kHttp ||
+        file_download_routes_.count(util::ToLower(context.uri)) == 0) {
+        return true;
+    }
+    const auto result = nlohmann::json::parse(response.body, nullptr, false);
+    if (result.is_object() && result.value("resCode", kServerRspFailed) != kServerRspSuccess) {
+        // Preserve business-policy failures such as DefaultCantBeExport. Only a
+        // successful export is required to resolve to a managed attachment.
+        return true;
+    }
+    if (!ResolveFileDownload(response.body, response)) {
+        // A successful handler response may contain an internal temporary path.
+        // Never return that path to the client when it cannot be converted into
+        // a managed download.
+        std::error_condition errc = util::ErrorEnum::FileOpenFailed;
+        response.body = detail::ErroResult("Export file is unavailable for download", errc);
     }
     return true;
 }

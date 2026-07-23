@@ -1,13 +1,68 @@
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+
 #include "api/ApiRouter.h"
+#include "api/ApiRouterInternal.h"
 #include "catch_amalgamated.hpp"
 #include "mock/MockAuthService.h"
+#include "mock/MockModelService.h"
 #include "mock/MockScheduleService.h"
 #include "mock/MockServiceRegistry.h"
 #include "util/ErrorCode.h"
+#include "util/Exception.h"
 #include "util/MsgBaseTypes.h"  // For MessageFromType
 
 // 为了测试，我们需要使用 ApiRouter 的基本结构
 using namespace cosmo;
+
+TEST_CASE("ApiRouter: Actionable transfer errors retain machine-readable facts",
+          "[ApiRouter][resource-policy]") {
+    SECTION("storage admission") {
+        std::error_condition error;
+        const util::ResourceLimitError exception("Safe storage reserve reached", "upload-staging",
+                                                 "model-archive", 100, 40, 20);
+        const auto response = nlohmann::json::parse(detail::ErroResult(exception, error));
+        REQUIRE(error == util::ErrorEnum::ResourceLimit);
+        REQUIRE(response["resMsg"].size() == 1);
+        const auto& message = response["resMsg"][0];
+        CHECK(message["msgCode"] == "STORAGE_RESERVE_REACHED");
+        CHECK(message["messageKey"] == "api.error.storageReserveReached");
+        CHECK(message["details"]["requiredBytes"] == 100);
+        CHECK(message["details"]["availableBytes"] == 40);
+        CHECK(message["details"]["reserveBytes"] == 20);
+        CHECK(message["retryable"] == true);
+        CHECK(message["recommendedAction"] == "FREE_DISK_SPACE");
+    }
+
+    SECTION("encoded image capability") {
+        std::error_condition error;
+        const util::ImageInputLimitError exception(101, 100);
+        const auto response = nlohmann::json::parse(detail::ErroResult(exception, error));
+        REQUIRE(error == util::ErrorEnum::ImageContentSizeInvalid);
+        REQUIRE(response["resMsg"].size() == 1);
+        const auto& message = response["resMsg"][0];
+        CHECK(message["msgCode"] == "IMAGE_INPUT_TOO_LARGE");
+        CHECK(message["messageKey"] == "api.error.imageInputTooLarge");
+        CHECK(message["details"]["actualBytes"] == 101);
+        CHECK(message["details"]["limitBytes"] == 100);
+        CHECK(message["recommendedAction"] == "RESIZE_OR_RECOMPRESS_IMAGE");
+    }
+
+    SECTION("decoded image capability") {
+        std::error_condition error;
+        const util::ImageResolutionLimitError exception(101, 100);
+        const auto response = nlohmann::json::parse(detail::ErroResult(exception, error));
+        REQUIRE(error == util::ErrorEnum::ImageContentSizeInvalid);
+        REQUIRE(response["resMsg"].size() == 1);
+        const auto& message = response["resMsg"][0];
+        CHECK(message["msgCode"] == "IMAGE_RESOLUTION_TOO_LARGE");
+        CHECK(message["messageKey"] == "api.error.imageResolutionTooLarge");
+        CHECK(message["details"]["actualCount"] == 101);
+        CHECK(message["details"]["limitCount"] == 100);
+        CHECK(message["recommendedAction"] == "RESIZE_IMAGE");
+    }
+}
 
 TEST_CASE("ApiRouter: Basic Routing and Dispatch", "[ApiRouter]") {
     cosmo::test::MockServiceRegistry mocks;
@@ -45,6 +100,101 @@ TEST_CASE("ApiRouter: Basic Routing and Dispatch", "[ApiRouter]") {
 
     SECTION("DispatchFileDownload should be able to transform local file payload") {
         REQUIRE(router.SupportsRoute("/gtw/cwai/algorithm/layout/export") == true);
+    }
+
+    SECTION("HTTP file exports stay on disk for bounded streaming") {
+        namespace fs = std::filesystem;
+
+        const std::string valid_token = "stream-export-token";
+        ALLOW_CALL(mocks.authSvc, IsValidToken(valid_token)).RETURN(true);
+
+        const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        const fs::path export_path =
+            fs::path(cosmo::path::GetTemporaryDirPath()) / ("router-export-" + suffix + ".tar.gz");
+        std::ofstream(export_path, std::ios::binary) << "streamed-export";
+
+        REQUIRE_CALL(mocks.modelSvc,
+                     ExportModelConfig("model-code", "model-name", trompeloeil::_, trompeloeil::_))
+            .SIDE_EFFECT(_3 = export_path.string())
+            .SIDE_EFFECT(_4 = "model-name.tar.gz")
+            .RETURN(util::ErrorEnum::Success);
+
+        RequestDispatchContext context;
+        context.uri        = "/gtw/cwai/atomic/model/exportConfig";
+        context.credential = valid_token;
+        context.transport  = RequestTransport::kHttp;
+        RequestDispatchResponse response;
+        REQUIRE(router.DispatchRequestResponse(
+            context, R"({"msgId":"1","modelCode":"model-code","modelName":"model-name"})", response));
+        CHECK(response.body.empty());
+        CHECK(response.file_path == export_path.string());
+        CHECK(response.file_name == "model-name.tar.gz");
+        CHECK(response.delete_file_after_send);
+        CHECK(fs::exists(export_path));
+
+        std::error_code cleanup_error;
+        fs::remove(export_path, cleanup_error);
+    }
+
+    SECTION("HTTP file exports reject unmanaged paths without leaking them") {
+        namespace fs = std::filesystem;
+
+        const std::string valid_token = "rejected-export-token";
+        ALLOW_CALL(mocks.authSvc, IsValidToken(valid_token)).RETURN(true);
+
+        const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        const fs::path unmanaged_path =
+            fs::temp_directory_path() / ("router-unmanaged-export-" + suffix + ".tar.gz");
+        std::ofstream(unmanaged_path, std::ios::binary) << "must-not-leak";
+
+        REQUIRE_CALL(mocks.modelSvc,
+                     ExportModelConfig("model-code", "model-name", trompeloeil::_, trompeloeil::_))
+            .SIDE_EFFECT(_3 = unmanaged_path.string())
+            .SIDE_EFFECT(_4 = "model-name.tar.gz")
+            .RETURN(util::ErrorEnum::Success);
+
+        RequestDispatchContext context;
+        context.uri        = "/gtw/cwai/atomic/model/exportConfig";
+        context.credential = valid_token;
+        context.transport  = RequestTransport::kHttp;
+        RequestDispatchResponse response;
+        REQUIRE(router.DispatchRequestResponse(
+            context, R"({"msgId":"1","modelCode":"model-code","modelName":"model-name"})", response));
+        CHECK(response.file_path.empty());
+        CHECK_FALSE(response.delete_file_after_send);
+        CHECK(response.body.find(unmanaged_path.string()) == std::string::npos);
+
+        const auto body = nlohmann::json::parse(response.body);
+        CHECK(body["resCode"] == kServerRspFailed);
+        REQUIRE(body["resMsg"].size() == 1);
+        CHECK(body["resMsg"][0]["messageKey"] == "api.error.FileOpenFailed");
+
+        std::error_code cleanup_error;
+        fs::remove(unmanaged_path, cleanup_error);
+    }
+
+    SECTION("HTTP file exports preserve non-exportable model policy errors") {
+        const std::string valid_token = "non-exportable-token";
+        ALLOW_CALL(mocks.authSvc, IsValidToken(valid_token)).RETURN(true);
+
+        REQUIRE_CALL(mocks.modelSvc,
+                     ExportModelConfig("preset-model", "preset-name", trompeloeil::_, trompeloeil::_))
+            .RETURN(util::ErrorEnum::DefaultCantBeExport);
+
+        RequestDispatchContext context;
+        context.uri        = "/gtw/cwai/atomic/model/exportConfig";
+        context.credential = valid_token;
+        context.transport  = RequestTransport::kHttp;
+        RequestDispatchResponse response;
+        REQUIRE(router.DispatchRequestResponse(
+            context, R"({"msgId":"1","modelCode":"preset-model","modelName":"preset-name"})", response));
+        CHECK(response.file_path.empty());
+        CHECK_FALSE(response.delete_file_after_send);
+
+        const auto body = nlohmann::json::parse(response.body);
+        CHECK(body["resCode"] == kServerRspFailed);
+        REQUIRE(body["resMsg"].size() == 1);
+        CHECK(body["resMsg"][0]["messageKey"] == "api.error.DefaultCantBeExport");
     }
 }
 

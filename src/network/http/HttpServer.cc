@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -34,12 +36,28 @@ namespace chrono = std::chrono;
 
 namespace cosmo::network::http {
 
+HttpAckTask::~HttpAckTask() {
+    if (!delete_file_after_send || file_path.empty()) {
+        return;
+    }
+    std::error_code error;
+    std::filesystem::remove(file_path, error);
+    if (error) {
+        LOG_WARN("Failed to clean temporary download {}: {}", file_path, error.message());
+    }
+}
+
 namespace {
 
-    constexpr auto kShutdownDrainTimeout                         = chrono::seconds(5);
-    constexpr std::size_t kMaxRequestTargetBytes                 = 2048;
-    constexpr std::size_t kMaxJsonBodyBytes                      = 1 * 1024 * 1024;
-    constexpr std::size_t kMaxHttpBodyBytes                      = 10 * 1024 * 1024;
+    constexpr auto kShutdownDrainTimeout         = chrono::seconds(5);
+    constexpr std::size_t kMaxRequestTargetBytes = 2048;
+    constexpr std::size_t kMaxJsonBodyBytes      = 1 * 1024 * 1024;
+    constexpr std::size_t kMaxHttpBodyBytes      = 10 * 1024 * 1024;
+    // Keep libevent's non-customizable emergency backstop above every
+    // application boundary. Requests that cross the JSON/multipart limits
+    // reach ComGenCb and receive the structured, actionable error contract;
+    // only clearly abusive bodies fall through to libevent's built-in 413.
+    constexpr std::size_t kMaxHttpTransportBodyBytes             = 12 * 1024 * 1024;
     constexpr std::size_t kMaxHttpHeaderBytes                    = 32 * 1024;
     constexpr std::size_t kMaxMultipartSpoolRequests             = 8;
     constexpr std::size_t kMaxMultipartSpoolRequestsPerPrincipal = 2;
@@ -62,6 +80,75 @@ namespace {
         std::transform(result.begin(), result.end(), result.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return result;
+    }
+
+    enum class RangeResult {
+        kFull,
+        kPartial,
+        kInvalid,
+    };
+
+    struct ByteRange {
+        std::uint64_t first{0};
+        std::uint64_t last{0};
+    };
+
+    bool ParseUnsigned(std::string_view value, std::uint64_t& result) {
+        if (value.empty()) {
+            return false;
+        }
+        const auto* begin = value.data();
+        const auto* end   = begin + value.size();
+        const auto parsed = std::from_chars(begin, end, result);
+        return parsed.ec == std::errc{} && parsed.ptr == end;
+    }
+
+    RangeResult ParseRangeHeader(std::string_view header, std::uint64_t file_size, ByteRange& result) {
+        header = Trim(header);
+        if (header.empty()) {
+            if (file_size > 0) {
+                result.last = file_size - 1;
+            }
+            return RangeResult::kFull;
+        }
+
+        constexpr std::string_view kPrefix{"bytes="};
+        if (header.size() <= kPrefix.size() || ToLower(header.substr(0, kPrefix.size())) != kPrefix ||
+            header.find(',') != std::string_view::npos || file_size == 0) {
+            return RangeResult::kInvalid;
+        }
+
+        const auto value = Trim(header.substr(kPrefix.size()));
+        const auto dash  = value.find('-');
+        if (dash == std::string_view::npos || value.find('-', dash + 1) != std::string_view::npos) {
+            return RangeResult::kInvalid;
+        }
+        const auto first_text = Trim(value.substr(0, dash));
+        const auto last_text  = Trim(value.substr(dash + 1));
+
+        if (first_text.empty()) {
+            std::uint64_t suffix{0};
+            if (!ParseUnsigned(last_text, suffix) || suffix == 0) {
+                return RangeResult::kInvalid;
+            }
+            const auto length = std::min(suffix, file_size);
+            result.first      = file_size - length;
+            result.last       = file_size - 1;
+            return RangeResult::kPartial;
+        }
+
+        if (!ParseUnsigned(first_text, result.first) || result.first >= file_size) {
+            return RangeResult::kInvalid;
+        }
+        if (last_text.empty()) {
+            result.last = file_size - 1;
+            return RangeResult::kPartial;
+        }
+        if (!ParseUnsigned(last_text, result.last) || result.last < result.first) {
+            return RangeResult::kInvalid;
+        }
+        result.last = std::min(result.last, file_size - 1);
+        return RangeResult::kPartial;
     }
 
     const char* FindHeader(struct evkeyvalq* headers, const char* name) {
@@ -182,12 +269,12 @@ void HttpServer::ComGenCb(struct evhttp_request* req, void* arg) {
     if (http_server == nullptr) {
         return;
     }
-    // Libevent clears the URI before invoking the generic callback when its
-    // transport-level body limit is exceeded, while preserving response_code.
-    // Inspect that condition before parsing the request target so a valid 413
-    // is not accidentally rewritten as 400.
+    // Libevent has already generated the response when its emergency
+    // transport limit is exceeded. It clears the URI before invoking the
+    // generic callback, so leave that response untouched rather than trying to
+    // send a second reply through an already-finalized request.
     if (evhttp_request_get_response_code(req) == static_cast<int>(HttpResponseCode::kPayloadTooLarge)) {
-        http_server->SendImmediateError(req, HttpResponseCode::kPayloadTooLarge);
+        LOG_WARN("{}", "Reject HTTP request at libevent emergency body limit");
         return;
     }
     if (!http_server->is_accepting_requests_) {
@@ -310,6 +397,9 @@ std::unique_ptr<HttpReqTask> HttpServer::BuildHttpReqTask(struct evhttp_request*
     auto* input_headers = evhttp_request_get_input_headers(req);
     if (const auto* forwarded_for = FindHeader(input_headers, "x-forwarded-for")) {
         task->x_forwarded_for = forwarded_for;
+    }
+    if (const auto* range = FindHeader(input_headers, "Range")) {
+        task->range_request = range;
     }
     const auto* content_type = FindHeader(input_headers, "Content-Type");
     if (IsMultipartContentType(content_type)) {
@@ -513,9 +603,10 @@ bool HttpServer::Initialize(const std::string& host_ip, int port, DispatcherFact
         CleanupEventResources();
         return false;
     }
-    // Enforce the absolute transport limits while libevent is receiving the
-    // request, before it can buffer an oversized body or header block.
-    evhttp_set_max_body_size(event_http_, static_cast<ev_ssize_t>(kMaxHttpBodyBytes));
+    // The application limits below this value produce structured errors.
+    // This higher finite boundary is only an emergency memory-safety backstop
+    // while libevent is receiving a request.
+    evhttp_set_max_body_size(event_http_, static_cast<ev_ssize_t>(kMaxHttpTransportBodyBytes));
     evhttp_set_max_headers_size(event_http_, static_cast<ev_ssize_t>(kMaxHttpHeaderBytes));
 
     // 5ms tick: ensures max response latency is bounded, while blocking to yield CPU when idle
@@ -753,7 +844,56 @@ void HttpServer::SendImmediateError(struct evhttp_request* req, HttpResponseCode
     auto code_value           = static_cast<int>(code);
     auto it                   = code_messages.find(code_value);
     const char* message       = it == code_messages.end() ? "ERROR" : it->second.c_str();
-    evhttp_send_error(req, code_value, message);
+    if (code != HttpResponseCode::kPayloadTooLarge && code != HttpResponseCode::kServiceUnavailable) {
+        evhttp_send_error(req, code_value, message);
+        return;
+    }
+
+    MsgSendHead response;
+    response.resCode = kServerRspFailed;
+    MsgResBase error;
+    if (code == HttpResponseCode::kPayloadTooLarge) {
+        const auto* content_type = FindHeader(evhttp_request_get_input_headers(req), "Content-Type");
+        const auto limit     = IsMultipartContentType(content_type) ? kMaxHttpBodyBytes : kMaxJsonBodyBytes;
+        std::uint64_t actual = evbuffer_get_length(evhttp_request_get_input_buffer(req));
+        if (const auto* content_length =
+                FindHeader(evhttp_request_get_input_headers(req), "Content-Length")) {
+            std::uint64_t declared{0};
+            const std::string_view value(content_length);
+            if (ParseUnsigned(value, declared)) {
+                actual = std::max(actual, declared);
+            }
+        }
+        error.msgCode             = "HTTP_BODY_TOO_LARGE";
+        error.messageKey          = "api.error.httpBodyTooLarge";
+        error.msgText             = "HTTP request body exceeds the request boundary";
+        error.details.actualBytes = actual;
+        error.details.limitBytes  = limit;
+        error.recommendedAction =
+            IsMultipartContentType(content_type) ? "USE_CHUNKED_UPLOAD" : "REDUCE_REQUEST_BODY";
+    } else {
+        error.msgCode           = "HTTP_SERVICE_BUSY";
+        error.messageKey        = "api.error.httpServiceBusy";
+        error.msgText           = "HTTP transfer capacity is temporarily busy";
+        error.retryable         = true;
+        error.recommendedAction = "RETRY";
+        error.retryAfterSeconds = 1;
+    }
+    response.resMsg.push_back(std::move(error));
+
+    std::string response_body;
+    struct evbuffer* buffer = nullptr;
+    if (!cosmo::util::EncodeJson(response, response_body) || (buffer = evbuffer_new()) == nullptr ||
+        !AddHttpHeader(req, "")) {
+        if (buffer != nullptr) {
+            evbuffer_free(buffer);
+        }
+        evhttp_send_error(req, code_value, message);
+        return;
+    }
+    evbuffer_add(buffer, response_body.data(), response_body.size());
+    evhttp_send_reply(req, code_value, message, buffer);
+    evbuffer_free(buffer);
 }
 
 int HttpServer::DispatchJsonMsg(HttpAckTask* task) {
@@ -797,7 +937,8 @@ int HttpServer::DispatchFileMsg(HttpAckTask* task) {
     const int file_fd = open(task->file_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
     struct stat file_status {};
     if (file_fd < 0 || fstat(file_fd, &file_status) != 0 || !S_ISREG(file_status.st_mode) ||
-        file_status.st_size < 0) {
+        file_status.st_size < 0 ||
+        (task->delete_file_after_send && (file_status.st_uid != geteuid() || file_status.st_nlink != 1))) {
         if (file_fd >= 0) {
             close(file_fd);
         }
@@ -809,36 +950,79 @@ int HttpServer::DispatchFileMsg(HttpAckTask* task) {
         return 0;
     }
 
-    FILE* fp = fdopen(file_fd, "rb");
-    if (fp == nullptr) {
+    const auto file_size = static_cast<std::uint64_t>(file_status.st_size);
+    ByteRange range;
+    const auto range_result = ParseRangeHeader(task->range_request, file_size, range);
+    if (range_result == RangeResult::kInvalid) {
         close(file_fd);
-        SendImmediateError(ev_http_req, HttpResponseCode::kInternalError);
+        auto* headers = evhttp_request_get_output_headers(ev_http_req);
+        if (headers != nullptr) {
+            AddCommonHeaders(headers, task->request_id);
+            evhttp_add_header(headers, "Accept-Ranges", "bytes");
+            const auto content_range = "bytes */" + std::to_string(file_size);
+            evhttp_add_header(headers, "Content-Range", content_range.c_str());
+            evhttp_add_header(headers, "Content-Length", "0");
+        }
+        struct evbuffer* empty = evbuffer_new();
+        evhttp_send_reply(ev_http_req, 416, "Range Not Satisfiable", empty);
+        evbuffer_free(empty);
+        return 1;
+    }
+
+    const auto content_length = file_size == 0 ? 0 : range.last - range.first + 1;
+    if (!AddHttpOctetHeader(ev_http_req, task->request_id, task->file_name, content_length)) {
+        close(file_fd);
         return 0;
     }
-    if (file_status.st_size > std::numeric_limits<long>::max()) {
-        fclose(fp);
-        SendImmediateError(ev_http_req, HttpResponseCode::kInternalError);
-        return 0;
-    }
-    const auto fsize = static_cast<long>(file_status.st_size);
 
-    if (!AddHttpOctetHeader(ev_http_req, task->request_id, task->file_name, fsize)) {
-        fclose(fp);
-        return 0;
+    auto* headers = evhttp_request_get_output_headers(ev_http_req);
+    evhttp_add_header(headers, "Accept-Ranges", "bytes");
+    if (range_result == RangeResult::kPartial) {
+        const auto content_range = "bytes " + std::to_string(range.first) + "-" + std::to_string(range.last) +
+                                   "/" + std::to_string(file_size);
+        evhttp_add_header(headers, "Content-Range", content_range.c_str());
     }
 
-    evhttp_send_reply_start(ev_http_req, HTTP_OK, "OK");
+    if (task->delete_file_after_send) {
+        struct stat named_status {};
+        if (lstat(task->file_path.c_str(), &named_status) != 0 || named_status.st_dev != file_status.st_dev ||
+            named_status.st_ino != file_status.st_ino || unlink(task->file_path.c_str()) != 0) {
+            LOG_WARN("Could not unlink managed temporary download before streaming: {}", task->file_path);
+        } else {
+            task->delete_file_after_send = false;
+        }
+    }
 
-    char buf[8192];
-    size_t nread = 0;
-    while ((nread = fread(buf, 1, sizeof(buf), fp)) > 0) {
+    const int response_code   = range_result == RangeResult::kPartial ? 206 : HTTP_OK;
+    const char* response_text = range_result == RangeResult::kPartial ? "Partial Content" : "OK";
+    evhttp_send_reply_start(ev_http_req, response_code, response_text);
+
+    std::uint64_t position  = range.first;
+    std::uint64_t remaining = content_length;
+    char buf[64 * 1024];
+    while (remaining > 0) {
+        const auto requested = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, sizeof(buf)));
+        const auto nread     = pread(file_fd, buf, requested, static_cast<off_t>(position));
+        if (nread < 0 && errno == EINTR) {
+            continue;
+        }
+        if (nread <= 0) {
+            LOG_ERRO("Failed while streaming file {}", task->file_path);
+            break;
+        }
         struct evbuffer* chunk = evbuffer_new();
-        evbuffer_add(chunk, buf, nread);
+        if (chunk == nullptr) {
+            LOG_ERRO("{}", "Cannot allocate HTTP download chunk");
+            break;
+        }
+        evbuffer_add(chunk, buf, static_cast<std::size_t>(nread));
         evhttp_send_reply_chunk(ev_http_req, chunk);
         evbuffer_free(chunk);
+        position += static_cast<std::uint64_t>(nread);
+        remaining -= static_cast<std::uint64_t>(nread);
     }
     evhttp_send_reply_end(ev_http_req);
-    fclose(fp);
+    close(file_fd);
     return 1;
 }
 
@@ -960,7 +1144,7 @@ bool HttpServer::AddHttpHeader(struct evhttp_request* ev_http_req, const std::st
 }
 
 bool HttpServer::AddHttpOctetHeader(struct evhttp_request* ev_http_req, const std::string& req_id,
-                                    const std::string& file_name, long fsize) {
+                                    const std::string& file_name, std::uint64_t content_length_value) {
     auto* ev_header = evhttp_request_get_output_headers(ev_http_req);
     if (ev_header == nullptr) {
         LOG_ERRO("{}", "ev_header is nullptr!");
@@ -972,9 +1156,12 @@ bool HttpServer::AddHttpOctetHeader(struct evhttp_request* ev_http_req, const st
     }
 
     evhttp_add_header(ev_header, "Content-Type", "application/octet-stream");
-    std::string content_length = std::to_string(fsize);
+    std::string content_length = std::to_string(content_length_value);
     evhttp_add_header(ev_header, "Content-Length", content_length.c_str());
-    std::string attachmentFile = "attachment; filename=" + file_name;
+    std::string safe_file_name = file_name;
+    std::replace(safe_file_name.begin(), safe_file_name.end(), '"', '_');
+    std::replace(safe_file_name.begin(), safe_file_name.end(), '\\', '_');
+    std::string attachmentFile = "attachment; filename=\"" + safe_file_name + "\"";
     evhttp_add_header(ev_header, "Content-Disposition", attachmentFile.c_str());
     return true;
 }

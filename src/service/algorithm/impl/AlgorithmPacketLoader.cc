@@ -17,20 +17,20 @@
 #include "service/detail/ServiceRegistry.h"
 #include "util/ArchiveListingValidator.h"
 #include "util/DateTimeFormat.h"
+#include "util/Exception.h"
 #include "util/Exec.h"
 #include "util/FileUtil.h"
 #include "util/JsonFileUtil.h"
 #include "util/JsonStructUtil.h"
 #include "util/Log.h"
 #include "util/PathUtil.h"
+#include "util/ResourceBudget.h"
 
 namespace cosmo::service::detail {
 
 namespace {
 
-    constexpr size_t kMaxAlgorithmArchiveEntries         = 10000;
-    constexpr std::uintmax_t kMaxAlgorithmArchiveBytes   = 500ULL * 1024 * 1024;
-    constexpr std::uintmax_t kMaxAlgorithmExtractedBytes = 1024ULL * 1024 * 1024;
+    constexpr size_t kMaxAlgorithmArchiveEntries = 10000;
 
     enum class AlgorithmArchiveKind {
         kUnknown,
@@ -61,15 +61,27 @@ namespace {
         return AlgorithmArchiveKind::kUnknown;
     }
 
-    bool ValidateAlgorithmArchiveListing(const std::string& archive_path, AlgorithmArchiveKind kind) {
+    bool InspectAlgorithmArchiveListing(const std::string& archive_path, AlgorithmArchiveKind kind,
+                                        const std::string& extraction_root,
+                                        cosmo::util::ArchiveListingInspection& inspection) {
         const auto format = kind == AlgorithmArchiveKind::kZip
                                 ? cosmo::util::ArchiveListingFormat::kZipVerbose
                                 : cosmo::util::ArchiveListingFormat::kTarVerbose;
-        if (!cosmo::util::ValidateArchiveListingFile(
-                archive_path, format,
-                {kMaxAlgorithmArchiveEntries, kMaxAlgorithmArchiveBytes, kMaxAlgorithmExtractedBytes})) {
+        if (!cosmo::util::InspectArchiveListingFile(archive_path, format, kMaxAlgorithmArchiveEntries,
+                                                    inspection) ||
+            inspection.total_bytes == 0) {
             LOG_WARN("Failed to inspect algorithm archive: {}", archive_path);
             return false;
+        }
+        const auto budget = cosmo::util::InspectStorageResourceBudget(extraction_root);
+        if (!budget.valid) {
+            throw cosmo::util::ErrorMessage(cosmo::util::ErrorEnum::SysErr,
+                                            "Cannot inspect algorithm extraction storage");
+        }
+        if (inspection.total_bytes > budget.usable_bytes) {
+            throw cosmo::util::ResourceLimitError(
+                "Insufficient safe disk space to extract the algorithm archive", "archive-extraction",
+                "algorithm", inspection.total_bytes, budget.usable_bytes, budget.reserve_bytes);
         }
         return true;
     }
@@ -103,15 +115,17 @@ std::string AlgorithmPacketLoader::UnzipPackageFile(const std::string& filePath)
     }
 
     const auto archive_size = std::filesystem::file_size(archive_path, ec);
-    if (ec || archive_size == 0 || archive_size > kMaxAlgorithmArchiveBytes) {
+    if (ec || archive_size == 0) {
         LOG_WARN("Reject invalid algorithm archive size: {}", filePath);
         return {};
     }
 
     const std::string filename = absolute_archive.filename().string();
     const auto archive_kind    = DetectAlgorithmArchiveKind(archive_path, filename);
+    cosmo::util::ArchiveListingInspection inspection;
     if (archive_kind == AlgorithmArchiveKind::kUnknown ||
-        !ValidateAlgorithmArchiveListing(archive_path, archive_kind)) {
+        !InspectAlgorithmArchiveListing(archive_path, archive_kind, absolute_archive.parent_path().string(),
+                                        inspection)) {
         LOG_WARN("Reject invalid algorithm archive: {}", filePath);
         return {};
     }
@@ -156,8 +170,8 @@ std::string AlgorithmPacketLoader::UnzipPackageFile(const std::string& filePath)
     std::string output;
     const int exit_code = cosmo::util::Exec(extract_argv, output);
     if (exit_code != 0 || !cosmo::path::ValidateDirectoryTreeWithinRoot(
-                              upload_path, kMaxAlgorithmArchiveEntries, kMaxAlgorithmArchiveBytes,
-                              kMaxAlgorithmExtractedBytes)) {
+                              upload_path, kMaxAlgorithmArchiveEntries, inspection.largest_file_bytes,
+                              inspection.total_bytes)) {
         LOG_WARN("Extract algorithm archive {} failed or produced an unsafe tree: {}", filePath, output);
         std::error_code cleanup_ec;
         std::filesystem::remove_all(upload_path, cleanup_ec);

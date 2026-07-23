@@ -46,8 +46,7 @@ import RunningDetail from './components/RunningDetail.vue'
 import { t } from '@/i18n'
 import {
   uploadFileInChunks,
-  UploadPurpose,
-  UPLOAD_MAX_TOTAL_SIZE
+  UploadPurpose
 } from '@/utils/chunkUpload'
 
 const { proxy } = getCurrentInstance()
@@ -71,8 +70,8 @@ const beforeUpload = (file) => {
     ElMessage.error(t('systemManage.invalidUpgradeFile'))
     return false
   }
-  if (file.size > UPLOAD_MAX_TOTAL_SIZE) {
-    ElMessage.error(t('validate.fileMaxSize', { n: 500 }))
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+    ElMessage.error(t('api.error.UpLoadDataEmpty'))
     return false
   }
   fileName.value = file.name
@@ -90,8 +89,8 @@ const handleFileChange = (file) => {
       upload.value?.clearFiles()
       return
     }
-    if (rawFile.size > UPLOAD_MAX_TOTAL_SIZE) {
-      ElMessage.error(t('validate.fileMaxSize', { n: 500 }))
+    if (!Number.isSafeInteger(rawFile.size) || rawFile.size <= 0) {
+      ElMessage.error(t('api.error.UpLoadDataEmpty'))
       fileName.value = ''
       uploadFile.value = null
       upload.value?.clearFiles()
@@ -117,10 +116,11 @@ const handleUpgrade = async () => {
     stagedUpload = await uploadFileInChunks(uploadFile.value, {
       purpose: UploadPurpose.UPGRADE,
       uploadChunk: formData => $API.uploadAtomicModelTemp(formData),
-      cancelUpload: data => $API.cancelAtomicModelUpload(data)
+      cancelUpload: data => $API.cancelAtomicModelUpload(data),
+      getCapabilities: () => $API.getUploadCapabilities()
     })
     if (!stagedUpload.uploadId) {
-      throw new Error(t('validate.cannotGetFilePath'))
+      throw new Error(t('validate.missingUploadId'))
     }
     await $API.boxSystemUpgrade({
       uploadId: stagedUpload.uploadId

@@ -148,7 +148,6 @@ bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, const std::s
     }
     FilePost http_req(post_url);
     auto& http_post_req = http_req.GetHttpRequest();
-    http_post_req.SetContentType("multipart/form-data; boundary=" + http_req.GetBoundary());
     http_post_req.AppendHeader("bucket", bucket);
 
     // P0-5: read credentials under a single lock scope including is_https

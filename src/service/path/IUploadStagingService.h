@@ -1,5 +1,5 @@
 /// @file IUploadStagingService.h
-/// @brief Authenticated, bounded staging for inbound file uploads.
+/// @brief Authenticated, resource-aware staging for resumable inbound uploads.
 #pragma once
 
 #include <cstdint>
@@ -19,6 +19,7 @@ enum class UploadPurpose {
     kAudio,
     kAlgorithm,
     kUpgrade,
+    kImage,
 };
 
 [[nodiscard]] std::string_view UploadPurposeName(UploadPurpose purpose);
@@ -31,9 +32,30 @@ struct UploadBeginRequest {
     std::uint64_t total_size{0};
     std::uint32_t total_chunks{0};
     std::string sha256;
-    /// Optional R1 client-generated request identifier. This is an in-memory,
-    /// principal-scoped alias only and is never used as a filesystem path.
+    /// Optional R1 client-generated request identifier. This is a
+    /// principal-scoped alias, never a filesystem path. Persistent staging
+    /// implementations retain it so the same client request can resume after
+    /// a process restart.
     std::string client_request_id;
+};
+
+enum class UploadAdmissionFailure {
+    kNone = 0,
+    kFilePolicy,
+    kChunkPolicy,
+    kMetadataBudget,
+    kPrincipalSessions,
+    kGlobalSessions,
+    kStorageReserve,
+};
+
+struct UploadAdmissionInfo {
+    UploadAdmissionFailure failure{UploadAdmissionFailure::kNone};
+    std::uint64_t actual{0};
+    std::uint64_t limit{0};
+    std::uint64_t required_bytes{0};
+    std::uint64_t available_bytes{0};
+    std::uint64_t reserve_bytes{0};
 };
 
 struct UploadSessionInfo {
@@ -46,9 +68,27 @@ struct UploadSessionInfo {
     std::uint32_t next_chunk_index{0};
     std::int64_t expires_at_unix_ms{0};
     bool complete{false};
+    /// Populated when admission fails so API clients can present an actionable
+    /// explanation rather than a generic resource-limit message.
+    UploadAdmissionInfo admission;
     /// True only when the corresponding Begin call created this session.
     /// Alias replays always report false, even when no chunks have arrived.
     bool newly_created{false};
+};
+
+struct UploadCapabilities {
+    std::uint64_t max_total_size{0};
+    std::uint64_t max_chunk_size{0};
+    std::uint32_t max_chunks{0};
+    std::uint64_t idle_timeout_ms{0};
+    std::uint64_t absolute_timeout_ms{0};
+    std::uint64_t available_bytes{0};
+    std::uint64_t reserve_bytes{0};
+    std::uint64_t available_for_new_uploads_bytes{0};
+    std::uint64_t reserved_by_sessions_bytes{0};
+    std::uint64_t active_sessions{0};
+    bool resumable{true};
+    bool persistent_across_restart{false};
 };
 
 /// Move-only ownership of a completed staged file. Destroying the lease removes
@@ -140,6 +180,7 @@ public:
                                           UploadPurpose expected_purpose, std::string& path) = 0;
 
     virtual util::ErrorEnum Cancel(const std::string& principal, const std::string& upload_id) = 0;
+    virtual UploadCapabilities GetCapabilities()                                               = 0;
     virtual void CleanupExpired()                                                              = 0;
 };
 

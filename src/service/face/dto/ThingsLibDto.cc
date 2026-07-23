@@ -242,15 +242,17 @@ void from_json(const nlohmann::json& j, MsgTaskAreaRect& v) {
 }
 
 void to_json(nlohmann::json& j, const MsgAddLibThingsRecv::ArticlesReid& v) {
-    j["pictureUrl"]    = v.pictureUrl;
-    j["pictureName"]   = v.pictureName;
-    j["pictureBase64"] = v.pictureBase64;
+    j["pictureUrl"]      = v.pictureUrl;
+    j["pictureName"]     = v.pictureName;
+    j["pictureBase64"]   = v.pictureBase64;
+    j["pictureUploadId"] = v.pictureUploadId;
 }
 
 void from_json(const nlohmann::json& j, MsgAddLibThingsRecv::ArticlesReid& v) {
     JSON_OPT(j, v, pictureUrl);
     JSON_OPT(j, v, pictureName);
     JSON_OPT(j, v, pictureBase64);
+    JSON_OPT(j, v, pictureUploadId);
 }
 
 }  // namespace cosmo::ThingsLib

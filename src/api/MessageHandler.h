@@ -13,6 +13,8 @@
 
 namespace cosmo {
 
+struct RequestDispatchContext;
+
 // Route requests to appropriate handler methods based on message type
 class MessageHandler {
 public:
@@ -28,6 +30,8 @@ public:
                               std::error_condition& errc);  // Cancel task (image algorithm)
     MsgPTaskDetectPicSend Handle(MsgPTaskDetectPicRecv&& data,
                                  std::error_condition& errc);  // Image detection for image algorithms
+    MsgPTaskDetectPicSend Handle(MsgPTaskDetectPicRecv&& data, const RequestDispatchContext& context,
+                                 std::error_condition& errc);
     MsgDetectSend Handle(MsgDetectRecv&& data,
                          std::error_condition& errc);  // Image detection for image algorithms (China Mobile)
     MsgOperateNodeSend Handle(MsgOperateNodeRecv&& data,

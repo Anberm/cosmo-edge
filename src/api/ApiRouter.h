@@ -6,6 +6,7 @@
 #pragma once
 
 #include <mutex>
+#include <set>
 #include <shared_mutex>
 #include <thread>
 #include <utility>
@@ -59,6 +60,8 @@ public:
     RequestAdmission InspectRequest(RequestDispatchContext& context, bool require_known_route) override;
     bool DispatchRequest(const RequestDispatchContext& context, const std::string& message,
                          std::string& response) override;
+    bool DispatchRequestResponse(const RequestDispatchContext& context, const std::string& message,
+                                 RequestDispatchResponse& response) override;
 
     // Compatibility helper for callers that already own a transport-specific router.
     bool DispatchRequest(const std::string& interface, const std::string& credential,
@@ -88,7 +91,7 @@ private:
     void RegisterLiveStreamRoutes();
     void RegisterOnboardingRoutes();
 
-    std::string DispatchFileDownload(const std::string& jsonResponse);
+    bool ResolveFileDownload(const std::string& json_response, RequestDispatchResponse& response);
 
     std::unique_ptr<MessageHandler> handler_;
     std::unique_ptr<MessageAuthHandler> auth_handler_;
@@ -109,6 +112,7 @@ private:
     std::unique_ptr<MessageLinkageHandler> linkage_handler_;
     std::unique_ptr<MessageOnboardingHandler> onboarding_handler_;
     std::map<std::string, InterfaceMsgMapUnit> url_map_;
+    std::set<std::string> file_download_routes_;
     MessageFromType from_{MessageFromType::MessageFromHttp};
 };
 }  // namespace cosmo

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <exception>
 #include <future>
 #include <mutex>
@@ -46,8 +47,10 @@ public:
     std::string GetFailedUrl() const;
 
 private:
-    void DoImportFile(const std::string& file_name, FaceLibPtr facelib, const std::string& uuid);
-    bool UnzipArchive(const std::string& file_name, const std::string& work_dir);
+    void DoImportFile(const std::string& file_name, FaceLibPtr facelib, const std::string& uuid,
+                      std::uintmax_t largest_file_bytes, std::uintmax_t total_bytes);
+    bool UnzipArchive(const std::string& file_name, const std::string& work_dir,
+                      std::uintmax_t largest_file_bytes, std::uintmax_t total_bytes);
     void ProcessImages(const std::string& work_dir, FaceLibPtr facelib, std::ofstream& ofile);
     void Clean();
 

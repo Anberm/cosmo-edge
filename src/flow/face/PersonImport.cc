@@ -7,6 +7,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 #include "flow/face/FacePic.h"
 #include "flow/face/FaceRegLib.h"
@@ -25,6 +26,7 @@
 #include "util/FileUtil.h"
 #include "util/Log.h"
 #include "util/PathUtil.h"
+#include "util/ResourceBudget.h"
 #include "util/StringUtil.h"
 #include "util/TimeUtil.h"
 #include "util/Transcode.h"
@@ -40,9 +42,7 @@ static const std::vector<std::string> kValidImageExtensions{".png", ".jpg", ".jp
 
 namespace {
 
-    constexpr size_t kMaxImportArchiveEntries         = 10000;
-    constexpr std::uintmax_t kMaxImportFileBytes      = 500ULL * 1024 * 1024;
-    constexpr std::uintmax_t kMaxImportExtractedBytes = 1024ULL * 1024 * 1024;
+    constexpr size_t kMaxImportArchiveEntries = 10000;
 
     bool IsZipFile(const std::string& path) {
         std::ifstream stream(path, std::ios::binary);
@@ -55,13 +55,14 @@ namespace {
                 (header[2] == 7 && header[3] == 8));
     }
 
-    bool ValidateZipMemberPaths(const std::string& archive_path) {
-        return util::ValidateArchiveListingFile(
-            archive_path, util::ArchiveListingFormat::kZipVerbose,
-            {kMaxImportArchiveEntries, kMaxImportFileBytes, kMaxImportExtractedBytes});
+    bool InspectZipMemberPaths(const std::string& archive_path, util::ArchiveListingInspection& inspection) {
+        return util::InspectArchiveListingFile(archive_path, util::ArchiveListingFormat::kZipVerbose,
+                                               kMaxImportArchiveEntries, inspection) &&
+               inspection.total_bytes > 0;
     }
 
-    bool ValidateExtractedTree(const std::string& root) {
+    bool ValidateExtractedTree(const std::string& root, std::uintmax_t largest_file_bytes,
+                               std::uintmax_t expected_total_bytes) {
         size_t count              = 0;
         std::uintmax_t total_size = 0;
         std::error_code ec;
@@ -90,7 +91,8 @@ namespace {
             }
             if (fs::is_regular_file(status)) {
                 const auto size = fs::file_size(it->path(), ec);
-                if (ec || size > kMaxImportFileBytes || size > kMaxImportExtractedBytes - total_size) {
+                if (ec || size > largest_file_bytes || total_size > expected_total_bytes ||
+                    size > expected_total_bytes - total_size) {
                     return false;
                 }
                 total_size += size;
@@ -171,11 +173,26 @@ bool PersonImport::ImportFile(const std::string& file_name, const std::string& f
     }
     std::error_code archive_ec;
     const auto archive_size = fs::file_size(managed_upload, archive_ec);
-    if (archive_ec || archive_size == 0 || archive_size > kMaxImportFileBytes || !IsZipFile(managed_upload) ||
-        !ValidateZipMemberPaths(managed_upload)) {
+    util::ArchiveListingInspection inspection;
+    if (archive_ec || archive_size == 0 || !IsZipFile(managed_upload) ||
+        !InspectZipMemberPaths(managed_upload, inspection)) {
         LOG_ERRO("{} Reject invalid face import archive", kTag);
         RemoveManagedUpload(managed_upload);
         throw util::ErrorMessage(util::ErrorEnum::ParameterException, "File validation error");
+    }
+    const auto budget = util::InspectStorageResourceBudget(cosmo::path::GetTemporaryDirPath());
+    if (!budget.valid) {
+        RemoveManagedUpload(managed_upload);
+        throw util::ErrorMessage(util::ErrorEnum::SysErr, "Cannot inspect face import storage");
+    }
+    const auto max_value = std::numeric_limits<std::uintmax_t>::max();
+    const auto required_bytes =
+        inspection.total_bytes > max_value - archive_size ? max_value : inspection.total_bytes + archive_size;
+    if (required_bytes > budget.usable_bytes) {
+        RemoveManagedUpload(managed_upload);
+        throw util::ResourceLimitError("Insufficient safe disk space to copy and extract the face archive",
+                                       "archive-extraction", "face-import", required_bytes,
+                                       budget.usable_bytes, budget.reserve_bytes);
     }
 
     auto face_lib = service::ServiceRegistry::Instance().Get<service::IFaceLibRepo>().GetFaceLib(face_lib_id);
@@ -207,10 +224,10 @@ bool PersonImport::ImportFile(const std::string& file_name, const std::string& f
 
     completed_.store(false, std::memory_order_release);
     try {
-        future_ = async(std::launch::async, [this, temp_path, face_lib, id]() {
+        future_ = async(std::launch::async, [this, temp_path, face_lib, id, inspection]() {
             LOG_INFO("{} Ready to import face", kTag);
             try {
-                DoImportFile(temp_path, face_lib, id);
+                DoImportFile(temp_path, face_lib, id, inspection.largest_file_bytes, inspection.total_bytes);
             } catch (...) {
                 {
                     std::lock_guard<std::shared_mutex> lock(mtx_);
@@ -232,7 +249,8 @@ bool PersonImport::ImportFile(const std::string& file_name, const std::string& f
     return true;
 }
 
-bool PersonImport::UnzipArchive(const std::string& file_name, const std::string& work_dir) {
+bool PersonImport::UnzipArchive(const std::string& file_name, const std::string& work_dir,
+                                std::uintmax_t largest_file_bytes, std::uintmax_t total_bytes) {
     std::filesystem::create_directories(work_dir);
     // Fix occasional decompression garbled text issue on 1800, reference:
     // https://blog.csdn.net/guo_qiangqiang/article/details/107163832
@@ -242,7 +260,7 @@ bool PersonImport::UnzipArchive(const std::string& file_name, const std::string&
         LOG_WARN("{} unzip exit code {}: {}", kTag, unzip_ret, unzip_out);
         return false;
     }
-    if (!ValidateExtractedTree(work_dir)) {
+    if (!ValidateExtractedTree(work_dir, largest_file_bytes, total_bytes)) {
         LOG_WARN("{} Reject extracted face archive tree", kTag);
         return false;
     }
@@ -462,7 +480,8 @@ void PersonImport::ProcessImages(const std::string& work_dir, FaceLibPtr face_li
     feature_svc.ReleaseFaceModels();
 }
 
-void PersonImport::DoImportFile(const std::string& file_name, FaceLibPtr face_lib, const std::string& uuid) {
+void PersonImport::DoImportFile(const std::string& file_name, FaceLibPtr face_lib, const std::string& uuid,
+                                std::uintmax_t largest_file_bytes, std::uintmax_t total_bytes) {
     Clean();
     {
         std::lock_guard<std::shared_mutex> lock(mtx_);
@@ -472,7 +491,7 @@ void PersonImport::DoImportFile(const std::string& file_name, FaceLibPtr face_li
 
     auto work_dir = (fs::path(cosmo::path::GetTemporaryDirPath()) / query_id_ / "extracted").string();
 
-    if (!UnzipArchive(file_name, work_dir)) {
+    if (!UnzipArchive(file_name, work_dir, largest_file_bytes, total_bytes)) {
         std::error_code ec;
         std::filesystem::remove_all(fs::path(cosmo::path::GetTemporaryDirPath()) / query_id_, ec);
         throw util::ErrorMessage(util::ErrorEnum::UnZipFileFailed, "Failed to extract face archive");

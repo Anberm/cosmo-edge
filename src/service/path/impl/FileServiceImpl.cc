@@ -3,12 +3,15 @@
 #include "service/path/impl/FileServiceImpl.h"
 
 #include <fmt/format.h>
+#include <sys/sysinfo.h>
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <limits>
 #include <string_view>
 
+#include "media/EncodedImageInfo.h"
 #include "network/http/HttpRequest.h"
 #include "network/http/HttpRequestHandler.h"
 #include "service/path/dto/FileServerMsgTypes.h"
@@ -27,7 +30,35 @@ constexpr int kCheckUrlTimeMsec = 3000;
 constexpr int kMaxUrlSize       = 512;
 
 namespace {
-    constexpr std::uintmax_t kMaxPlatformUploadBytes = 256ULL * 1024 * 1024;
+    constexpr std::uint64_t kImageMemoryReserveBytes   = 256ULL * 1024 * 1024;
+    constexpr std::uint32_t kImageMemoryReservePercent = 10;
+
+    std::size_t ImageDownloadBudgetBytes() {
+        struct sysinfo status {};
+        if (sysinfo(&status) != 0 || status.mem_unit == 0) {
+            return 0;
+        }
+        const auto multiply = [unit = static_cast<std::uint64_t>(status.mem_unit)](unsigned long value) {
+            const auto max_value = std::numeric_limits<std::uint64_t>::max();
+            return static_cast<std::uint64_t>(value) > max_value / unit
+                       ? max_value
+                       : static_cast<std::uint64_t>(value) * unit;
+        };
+        const auto total     = multiply(status.totalram);
+        const auto free      = multiply(status.freeram);
+        const auto buffers   = multiply(status.bufferram);
+        const auto available = free > std::numeric_limits<std::uint64_t>::max() - buffers
+                                   ? std::numeric_limits<std::uint64_t>::max()
+                                   : free + buffers;
+        const auto percentage_reserve =
+            total > std::numeric_limits<std::uint64_t>::max() / kImageMemoryReservePercent
+                ? std::numeric_limits<std::uint64_t>::max() / 100
+                : total * kImageMemoryReservePercent / 100;
+        const auto reserve = std::max(kImageMemoryReserveBytes, percentage_reserve);
+        const auto usable  = available > reserve ? available - reserve : available / 2;
+        return static_cast<std::size_t>(std::min<std::uint64_t>(
+            {usable, media::kVideoFrameMaxSize, std::numeric_limits<std::size_t>::max()}));
+    }
 
     bool ContainsControlCharacter(std::string_view value) {
         return std::any_of(value.begin(), value.end(),
@@ -83,7 +114,7 @@ namespace {
         }
 
         const auto size = fs::file_size(resolved, ec);
-        if (ec || size == 0 || size > kMaxPlatformUploadBytes) {
+        if (ec || size == 0) {
             return false;
         }
         auto actual_extension = cosmo::util::ToLower(fs::path(resolved).extension().string());
@@ -268,7 +299,12 @@ bool FileServiceImpl::DownloadFile(const std::string& url, std::vector<uint8_t>&
         LOG_WARN("{} rejected invalid download URL", kTag);
         return false;
     }
-    cosmo::network::http::HttpImageHandler http_hnd;
+    const auto memory_budget = ImageDownloadBudgetBytes();
+    if (memory_budget == 0) {
+        LOG_WARN("{} cannot reserve memory for image download", kTag);
+        return false;
+    }
+    cosmo::network::http::HttpImageHandler http_hnd(memory_budget);
     cosmo::network::http::HttpRequest http_req(url, &http_hnd);
     http_req.SetTimeout(200);
     auto ret_code = static_cast<int>(http_req.Submit(cosmo::network::http::HttpRequestMethod::kGet));

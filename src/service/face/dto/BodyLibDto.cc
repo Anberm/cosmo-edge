@@ -146,11 +146,13 @@ void from_json(const nlohmann::json& j, MsgDeleteLibPersonSend& v) {
 void to_json(nlohmann::json& j, const MsgDetectPersonRecv& v) {
     to_json(j, static_cast<const MsgRecvHead&>(v));
     j["imageBase64"] = v.imageBase64;
+    j["uploadId"]    = v.uploadId;
 }
 
 void from_json(const nlohmann::json& j, MsgDetectPersonRecv& v) {
     from_json(j, static_cast<MsgRecvHead&>(v));
     JSON_OPT(j, v, imageBase64);
+    JSON_OPT(j, v, uploadId);
 }
 
 void to_json(nlohmann::json& j, const MsgDetectPersonSend& v) {

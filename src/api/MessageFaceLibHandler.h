@@ -16,6 +16,8 @@ class IVideoFrameCodec;
 
 namespace cosmo {
 
+struct RequestDispatchContext;
+
 class MessageFaceLibHandler {
 public:
     MessageFaceLibHandler(service::IFaceLibRepo& lib_repo, service::IPersonRepo& person_repo,
@@ -25,6 +27,9 @@ public:
     [[nodiscard]] Lib::MsgModifyFaceLibSend Handle(Lib::MsgModifyFaceLibRecv&& data,
                                                    std::error_condition& errc);
     [[nodiscard]] Lib::MsgModifyFacePicLibSend Handle(Lib::MsgModifyFacePicLibRecv&& data,
+                                                      std::error_condition& errc);
+    [[nodiscard]] Lib::MsgModifyFacePicLibSend Handle(Lib::MsgModifyFacePicLibRecv&& data,
+                                                      const RequestDispatchContext& context,
                                                       std::error_condition& errc);
     [[nodiscard]] Lib::MsgQueryFaceLibInfoSend Handle(Lib::MsgQueryFaceLibInfoRecv&& data,
                                                       std::error_condition& errc);

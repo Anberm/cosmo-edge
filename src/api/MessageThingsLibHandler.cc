@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "api/StagedImageInput.h"
 #include "db/TransactionGuard.h"
 #include "service/camera/ICameraTaskConfig.h"
 #include "service/face/IArticlesReidDaoService.h"
@@ -208,7 +209,9 @@ ThingsLib::MsgAddLibThingsSend MessageThingsLibHandler::Handle(ThingsLib::MsgAdd
     for (auto& thing : data.thingsList) {
         std::string thingId = util::GenerateUUID();
         std::vector<uint8_t> picBin;
-        if (!thing.pictureBase64.empty()) {
+        if (!thing.pictureData.empty()) {
+            picBin = std::move(thing.pictureData);
+        } else if (!thing.pictureBase64.empty()) {
             picBin = util::DecBase64Vec(thing.pictureBase64);
         } else if (!thing.pictureUrl.empty()) {
             // pictureUrl is joined under the base dir and must stay confined to it to block
@@ -251,6 +254,38 @@ ThingsLib::MsgAddLibThingsSend MessageThingsLibHandler::Handle(ThingsLib::MsgAdd
         ret.resData.thingsId.push_back(thingId);
     }
     return ret;
+}
+
+ThingsLib::MsgAddLibThingsSend MessageThingsLibHandler::Handle(ThingsLib::MsgAddLibThingsRecv&& data,
+                                                               const RequestDispatchContext& context,
+                                                               std::error_condition& errc) {
+    std::vector<std::string> upload_ids;
+    std::vector<std::size_t> upload_indices;
+    for (std::size_t index = 0; index < data.thingsList.size(); ++index) {
+        const auto& thing = data.thingsList[index];
+        if (thing.pictureUploadId.empty()) {
+            continue;
+        }
+        if (!thing.pictureBase64.empty() || !thing.pictureUrl.empty()) {
+            errc = util::ErrorEnum::InvalidParam;
+            return {};
+        }
+        upload_ids.push_back(thing.pictureUploadId);
+        upload_indices.push_back(index);
+    }
+    if (upload_ids.empty()) {
+        return Handle(std::move(data), errc);
+    }
+
+    std::vector<std::vector<std::uint8_t>> images;
+    errc = detail::ConsumeStagedImages(context, upload_ids, images);
+    if (errc != util::ErrorEnum::Success) {
+        return {};
+    }
+    for (std::size_t index = 0; index < images.size(); ++index) {
+        data.thingsList[upload_indices[index]].pictureData = std::move(images[index]);
+    }
+    return Handle(std::move(data), errc);
 }
 
 ThingsLib::MsgBindTaskThingsLibSend MessageThingsLibHandler::Handle(

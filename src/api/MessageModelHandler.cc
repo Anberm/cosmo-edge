@@ -13,10 +13,13 @@
 #include <vector>
 
 #include "api/HttpUploadClaim.h"
+#include "api/StagedImageInput.h"
+#include "media/EncodedImageInfo.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/model/IModelService.h"
 #include "service/path/IUploadStagingService.h"
 #include "util/ErrorCode.h"
+#include "util/VideoInfo.h"
 
 namespace cosmo {
 namespace {
@@ -63,6 +66,73 @@ namespace {
             purpose = service::UploadPurpose::kModelArchive;
         }
         return true;
+    }
+
+    MsgResBase MakeUploadAdmissionError(const service::UploadSessionInfo& info,
+                                        service::UploadPurpose purpose) {
+        MsgResBase message;
+        message.details.resource = "upload-staging";
+        message.details.purpose  = std::string(service::UploadPurposeName(purpose));
+        message.retryable        = true;
+
+        using Failure = service::UploadAdmissionFailure;
+        switch (info.admission.failure) {
+            case Failure::kFilePolicy:
+                message.msgCode             = "UPLOAD_FILE_POLICY_LIMIT";
+                message.messageKey          = "api.error.uploadFilePolicyLimit";
+                message.msgText             = "File exceeds the deployment upload policy";
+                message.details.actualBytes = info.admission.actual;
+                message.details.limitBytes  = info.admission.limit;
+                message.retryable           = false;
+                message.recommendedAction   = "CHANGE_DEPLOYMENT_POLICY";
+                break;
+            case Failure::kChunkPolicy:
+                message.msgCode             = "UPLOAD_CHUNK_POLICY_LIMIT";
+                message.messageKey          = "api.error.uploadChunkPolicyLimit";
+                message.msgText             = "Upload uses more chunks than the deployment policy";
+                message.details.actualCount = info.admission.actual;
+                message.details.limitCount  = info.admission.limit;
+                message.retryable           = false;
+                message.recommendedAction   = "USE_LARGER_CHUNKS_OR_CHANGE_POLICY";
+                break;
+            case Failure::kMetadataBudget:
+                message.msgCode             = "UPLOAD_METADATA_BUDGET";
+                message.messageKey          = "api.error.uploadMetadataBudget";
+                message.msgText             = "Upload chunk metadata would exceed the safe memory budget";
+                message.details.actualBytes = info.admission.actual;
+                message.details.limitBytes  = info.admission.limit;
+                message.retryable           = false;
+                message.recommendedAction   = "USE_LARGER_CHUNKS";
+                break;
+            case Failure::kPrincipalSessions:
+            case Failure::kGlobalSessions:
+                message.msgCode             = "TRANSFER_BUSY";
+                message.messageKey          = "api.error.transferBusy";
+                message.msgText             = "The configured upload session capacity is busy";
+                message.details.actualCount = info.admission.actual;
+                message.details.limitCount  = info.admission.limit;
+                message.recommendedAction   = "RETRY_LATER";
+                message.retryAfterSeconds   = 5;
+                break;
+            case Failure::kStorageReserve:
+                message.msgCode                = "STORAGE_RESERVE_REACHED";
+                message.messageKey             = "api.error.storageReserveReached";
+                message.msgText                = "Insufficient safe disk space for this upload";
+                message.details.requiredBytes  = info.admission.required_bytes;
+                message.details.availableBytes = info.admission.available_bytes;
+                message.details.reserveBytes   = info.admission.reserve_bytes;
+                message.details.limitBytes     = info.admission.limit;
+                message.recommendedAction      = "FREE_DISK_SPACE";
+                break;
+            case Failure::kNone:
+                message.msgCode           = "UPLOAD_REJECTED";
+                message.messageKey        = "api.error.uploadRejected";
+                message.msgText           = "Upload was rejected";
+                message.recommendedAction = "CHECK_UPLOAD_PARAMETERS";
+                message.retryable         = false;
+                break;
+        }
+        return message;
     }
 
 }  // namespace
@@ -276,6 +346,9 @@ Model::MsgUploadTempSend MessageModelHandler::Handle(Model::MsgUploadTempRecv&& 
         request.client_request_id = data.clientRequestId.empty() ? data.uploadId : data.clientRequestId;
         errc                      = staging.Begin(request, info);
         if (errc) {
+            if (info.admission.failure != service::UploadAdmissionFailure::kNone) {
+                result.resMsg.push_back(MakeUploadAdmissionError(info, purpose));
+            }
             return result;
         }
         upload_id       = info.upload_id;
@@ -328,6 +401,29 @@ Model::MsgCancelUploadSend MessageModelHandler::Handle(Model::MsgCancelUploadRec
     }
     errc = service::ServiceRegistry::Instance().Get<service::IUploadStagingService>().Cancel(
         context.principal, data.uploadId);
+    return result;
+}
+
+Model::MsgUploadCapabilitiesSend MessageModelHandler::Handle(Model::MsgUploadCapabilitiesRecv&& /*data*/,
+                                                             std::error_condition& errc) const {
+    Model::MsgUploadCapabilitiesSend result;
+    const auto capabilities =
+        service::ServiceRegistry::Instance().Get<service::IUploadStagingService>().GetCapabilities();
+    result.resData.maxTotalSize                = std::to_string(capabilities.max_total_size);
+    result.resData.maxChunkSize                = std::to_string(capabilities.max_chunk_size);
+    result.resData.maxChunks                   = std::to_string(capabilities.max_chunks);
+    result.resData.idleTimeoutMs               = std::to_string(capabilities.idle_timeout_ms);
+    result.resData.absoluteTimeoutMs           = std::to_string(capabilities.absolute_timeout_ms);
+    result.resData.availableBytes              = std::to_string(capabilities.available_bytes);
+    result.resData.reserveBytes                = std::to_string(capabilities.reserve_bytes);
+    result.resData.availableForNewUploadsBytes = std::to_string(capabilities.available_for_new_uploads_bytes);
+    result.resData.reservedBySessionsBytes     = std::to_string(capabilities.reserved_by_sessions_bytes);
+    result.resData.activeSessions              = std::to_string(capabilities.active_sessions);
+    result.resData.maxEncodedImageBytes        = std::to_string(detail::MaxEncodedImageInputBytes());
+    result.resData.maxImagePixels              = std::to_string(media::MaxDecodedImagePixels());
+    result.resData.resumable                   = capabilities.resumable;
+    result.resData.persistentAcrossRestart     = capabilities.persistent_across_restart;
+    errc                                       = util::ErrorEnum::Success;
     return result;
 }
 

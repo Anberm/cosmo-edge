@@ -1,7 +1,7 @@
 // channel-manager.js — Create / reuse video channels on the device.
 //
 // Two creation paths:
-//   - local:           Camera/AddVideo  (filePath + fileName + contentLength)
+//   - local:           uploadTemp (purpose=video) → Camera/AddVideo (uploadId)
 //   - rtsp-*:          Camera/Add       (channelCode + channelName + url)
 //
 // IMPORTANT identifier convention (verified in source):
@@ -80,23 +80,10 @@ export class ChannelManager {
     if (mode === 'local') {
       const src = videos.local?.[index] ?? videos.local?.[0];
       if (!src) throw new Error(`scenario.yml channels: not enough local sources for channel ${index + 1}`);
-      // Two ways to source a local video:
-      //   - file:     a path on THIS machine → uploaded to the device temp store first.
-      //   - filePath: a path already staged on the device → used directly (skip upload).
-      let videoPayload;
-      if (src.file) {
-        // AddVideo consumes the upload session, so every channel needs its own
-        // upload even when all channels use the same local source.
-        videoPayload = { uploadId: await this._uploadLocalVideo(src) };
-      } else if (src.filePath) {
-        // Compatibility path for a caller-managed device-side fixture.
-        videoPayload = {
-          filePath: src.filePath,
-          contentLength: String(Number(src.contentLength ?? 0)),
-        };
-      } else {
-        throw new Error(`scenario.yml channels: local source must define 'file' or 'filePath'`);
-      }
+      if (!src.file) throw new Error(`scenario.yml channels: local source must define 'file'`);
+      // AddVideo consumes the upload session, so every channel needs its own
+      // upload even when all channels use the same local source.
+      const videoPayload = { uploadId: await this._uploadLocalVideo(src) };
       const res = await this.client.cameraAddVideo({
         channelName: this._channelNameForSource(name, src),
         channelCode: code,
@@ -123,15 +110,15 @@ export class ChannelManager {
 
   _channelNameForSource(baseName, src) {
     const sourceLabel = src?.name
-      ?? (src?.file ? path.parse(src.file).name : null)
-      ?? (src?.filePath ? path.parse(src.filePath).name : null);
+      ?? (src?.file ? path.parse(src.file).name : null);
     return sourceLabel ? `${baseName}-${sourceLabel}` : baseName;
   }
 
   /**
    * Upload a local video file to the device temp store in chunks, returning the
    * canonical upload ID to pass to AddVideo. Mirrors the frontend
-   * uploadFileInChunks (CHUNK_SIZE = 8 MiB). Chunk zero creates a server-side
+   * uploadFileInChunks. The preferred chunk is 8 MB, but the device's live
+   * capability response is authoritative. Chunk zero creates a server-side
    * session; later chunks use the returned opaque upload ID. The completed
    * session is consumed by Camera/AddVideo.
    */
@@ -140,17 +127,51 @@ export class ChannelManager {
     if (!localPath) throw new Error(`scenario.yml channels: local source missing 'file' path`);
     const stat = fs.statSync(localPath);
     const totalSize = stat.size;
-    const totalChunks = Math.max(1, Math.ceil(totalSize / UPLOAD_CHUNK_SIZE));
+    if (!stat.isFile() || !Number.isSafeInteger(totalSize) || totalSize <= 0) {
+      throw new Error(`local video must be a non-empty regular file: ${localPath}`);
+    }
+    const capabilities = await this.client.uploadCapabilities();
+    const asBigInt = (key) => {
+      const raw = capabilities?.[key];
+      if (raw == null || raw === '') return null;
+      try {
+        const value = BigInt(raw);
+        return value >= 0n ? value : null;
+      } catch {
+        return null;
+      }
+    };
+    const maxTotalSize = asBigInt('maxTotalSize');
+    const available = asBigInt('availableForNewUploadsBytes');
+    if (maxTotalSize && maxTotalSize > 0n && BigInt(totalSize) > maxTotalSize) {
+      throw new Error(`local video exceeds deployment upload policy (${totalSize} > ${maxTotalSize})`);
+    }
+    if (available != null && BigInt(totalSize) > available) {
+      throw new Error(`insufficient safe device storage (${totalSize} required, ${available} available)`);
+    }
+    const advertisedChunkSize = asBigInt('maxChunkSize');
+    const chunkSize = advertisedChunkSize && advertisedChunkSize > 0n
+      ? Math.min(UPLOAD_CHUNK_SIZE, Number(advertisedChunkSize))
+      : UPLOAD_CHUNK_SIZE;
+    if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0) {
+      throw new Error('device returned an invalid maxChunkSize');
+    }
+    const totalChunks = Math.ceil(totalSize / chunkSize);
+    const maxChunks = asBigInt('maxChunks');
+    if (maxChunks && maxChunks > 0n && BigInt(totalChunks) > maxChunks) {
+      throw new Error(`upload needs ${totalChunks} chunks but device policy allows ${maxChunks}`);
+    }
     const clientRequestId = `bench_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const fileName = path.basename(localPath);
     const fd = fs.openSync(localPath, 'r');
     let uploadId = '';
     try {
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const start = chunkIndex * UPLOAD_CHUNK_SIZE;
-        const chunkSize = Math.min(UPLOAD_CHUNK_SIZE, totalSize - start);
-        const chunkBuf = Buffer.alloc(chunkSize);
-        fs.readSync(fd, chunkBuf, 0, chunkSize, start);
+      let chunkIndex = 0;
+      while (chunkIndex < totalChunks) {
+        const start = chunkIndex * chunkSize;
+        const currentChunkSize = Math.min(chunkSize, totalSize - start);
+        const chunkBuf = Buffer.alloc(currentChunkSize);
+        fs.readSync(fd, chunkBuf, 0, currentChunkSize, start);
         const res = await this.client.uploadTempChunk(chunkBuf, fileName, {
           uploadId,
           clientRequestId,
@@ -158,7 +179,7 @@ export class ChannelManager {
           chunkIndex,
           totalChunks,
           totalSize,
-          chunkSize,
+          chunkSize: currentChunkSize,
         });
         const responseUploadId = res?.resData?.uploadId ?? '';
         if (!responseUploadId) {
@@ -169,12 +190,16 @@ export class ChannelManager {
         }
         uploadId = responseUploadId;
         const nextChunkIndex = Number(res?.resData?.nextChunkIndex);
-        if (!Number.isInteger(nextChunkIndex) || nextChunkIndex !== chunkIndex + 1) {
+        if (!Number.isInteger(nextChunkIndex)
+          || nextChunkIndex <= chunkIndex
+          || nextChunkIndex > totalChunks) {
           throw new Error(`uploadTemp returned invalid nextChunkIndex for ${fileName}`);
         }
-        if (chunkIndex === totalChunks - 1 && res?.resData?.complete !== true) {
-          throw new Error(`uploadTemp did not complete ${fileName}`);
+        const complete = nextChunkIndex === totalChunks;
+        if (res?.resData?.complete !== complete) {
+          throw new Error(`uploadTemp returned an invalid completion state for ${fileName}`);
         }
+        chunkIndex = nextChunkIndex;
       }
     } catch (error) {
       if (uploadId) {

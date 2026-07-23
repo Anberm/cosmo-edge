@@ -12,6 +12,8 @@ class IVideoFrameCodec;
 
 namespace cosmo {
 
+struct RequestDispatchContext;
+
 class MessageBodyLibHandler {
 public:
     MessageBodyLibHandler(service::IPersonRecogDaoService& dao_svc, service::IBodyLibService& body_lib_svc,
@@ -33,6 +35,9 @@ public:
     [[nodiscard]] BodyLib::MsgDeleteLibPersonSend Handle(BodyLib::MsgDeleteLibPersonRecv&& data,
                                                          std::error_condition& errc);
     [[nodiscard]] BodyLib::MsgDetectPersonSend Handle(BodyLib::MsgDetectPersonRecv&& data,
+                                                      std::error_condition& errc);
+    [[nodiscard]] BodyLib::MsgDetectPersonSend Handle(BodyLib::MsgDetectPersonRecv&& data,
+                                                      const RequestDispatchContext& context,
                                                       std::error_condition& errc);
     [[nodiscard]] BodyLib::MsgGetPersonPictureSend Handle(BodyLib::MsgGetPersonPictureRecv&& data,
                                                           std::error_condition& errc);

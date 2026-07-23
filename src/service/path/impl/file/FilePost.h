@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
 #include "network/http/HttpRequest.h"
 
@@ -31,17 +30,9 @@ public:
     // Get underlying HTTP request object
     HttpRequest& GetHttpRequest();
 
-    const std::string& GetBoundary() const {
-        return boundary_;
-    }
-
 private:
-    void BoundaryGen();
-
     HttpStringHandler str_hnd_;
     HttpRequest http_post_;
-    std::string data_;
-    std::string boundary_;
 };
 
 }  // namespace cosmo::network::http

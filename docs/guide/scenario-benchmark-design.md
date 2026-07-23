@@ -167,9 +167,9 @@ channels:
   repeatCount: 0
   sources:
     # local 模式：设备本地视频文件（Camera/AddVideo）。
-    # file: 指向本机文件时，工具会先分片上传到设备临时目录（/atomic/model/uploadTemp）
-    #       得到设备侧 filePath，再调用 Camera/AddVideo 建渠道。
-    # filePath: 可直接指向设备上已存在的文件路径，跳过上传。
+    # file: 指向运行压测工具的控制机文件。工具先查询上传能力，再分片上传，
+    #       最后用服务端签发的 uploadId 调用 Camera/AddVideo 建渠道。
+    # 安全边界不接受调用方指定的设备侧 filePath。
     - name: play-phone-01
       file: play-phone.mp4
 ```
@@ -248,32 +248,38 @@ POST /gtw/cwai/algorithm/layout/import
 POST /gtw/cwai/Camera/Add
 ```
 
-本地视频通道：建渠道分**两步**（真机验证）。
+本地视频通道：建渠道分**两步**（真机验证）。所有请求都需要携带当前登录会话的 `mtk`。
 
-第一步，分片上传视频到设备临时目录（`uploadTemp`，单分片 32MB，multipart/form-data）：
+第一步，先查询 `uploadCapabilities`，再按服务端返回的 `maxChunkSize` 分片上传。当前默认分片为 8 MB（8 × 1024 × 1024 bytes），这只是单次请求边界，不是视频总量上限：
 
 ```text
+POST /gtw/cwai/atomic/model/uploadCapabilities
 POST /gtw/cwai/atomic/model/uploadTemp
-# 字段: file(blob), uploadId, chunkIndex, totalChunks, totalSize, chunkSize
-# 最后一片的响应 resData.filePath 即设备侧文件路径
-# 例如 /data/cwaiuserdata/tmp/model_upload/chunk_<uploadId>_<fileName>
+# 首片字段: file(blob), purpose=video, chunkIndex=0, totalChunks,
+#           totalSize, chunkSize, clientRequestId
+# 后续分片额外携带服务端返回的 uploadId
+# 响应字段: resData.uploadId, nextChunkIndex, complete
 ```
 
-第二步，用得到的 `filePath` 建本地视频渠道：
+`clientRequestId` 在同一文件的重试和重启恢复期间必须稳定；服务端返回的 `uploadId` 是不透明标识，客户端不得推导或访问设备临时路径。
+
+第二步，用最终的 `uploadId` 建本地视频渠道：
 
 ```text
 POST /gtw/cwai/Camera/AddVideo
 ```
 
-后端（`MessageCameraHandler.cc`）**只消费 3 个字段**，其余字段（`channelCode`/`fileName` 等）被忽略：
+当前 HTTP 合同：
 
 ```json
 {
   "channelName": "压测通道01",
-  "filePath": "/data/cwaiuserdata/tmp/model_upload/chunk_<id>_video.mp4",
-  "contentLength": "20049063"
+  "channelCode": "benchmark-01",
+  "uploadId": "<server-issued-upload-id>"
 }
 ```
+
+后端会校验该会话属于当前用户、用途为 `video` 且内容未被替换，再从受管文件中获取路径和大小。`filePath`/`contentLength` 仅保留旧版兼容入口，新工具不得发送或记录服务端文件系统路径。
 
 响应 `resData.id` 即视频通道 ID（`videoChannelId`）。
 

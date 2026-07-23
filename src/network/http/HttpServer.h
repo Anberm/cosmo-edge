@@ -77,7 +77,7 @@ protected:
     // Add response headers
     bool AddHttpHeader(struct evhttp_request* ev_request, const std::string& req_id);
     bool AddHttpOctetHeader(struct evhttp_request* ev_request, const std::string& req_id,
-                            const std::string& file_name, long fsize);
+                            const std::string& file_name, std::uint64_t content_length);
 
     // Common headers: Server, RequestId, AppKey, Nonce, CurTime, CheckSum
     bool AddCommonHeaders(struct evkeyvalq* ev_header, const std::string& req_id);

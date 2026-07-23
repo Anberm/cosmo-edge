@@ -21,9 +21,55 @@ next:
 | `resMsg` | object[] | 错误或提示信息列表 |
 | `resMsg[].msgCode` | string | 消息码 |
 | `resMsg[].msgText` | string | 消息文本 |
+| `resMsg[].messageKey` | string | 稳定的本地化键；前端应优先用于翻译 |
+| `resMsg[].details` | object | 实际值、限制值、所需资源和当前可用资源等机器可读上下文 |
+| `resMsg[].retryable` | boolean | 外部条件变化后原操作是否值得重试 |
+| `resMsg[].retryAfterSeconds` | number | 建议等待秒数；仅在适用时返回 |
+| `resMsg[].recommendedAction` | string | 建议下一步，例如释放空间、改用分片或缩放图片 |
 | `resultCode` | string | ChinaMobile 兼容响应码 |
 | `resultMsg` | string | ChinaMobile 兼容响应文本 |
 | `resData` | object | 业务响应数据 |
+
+`messageKey`、`details`、`recommendedAction` 和 `retryAfterSeconds` 仅在适用时返回；`retryable` 为 `false` 时也可能省略。客户端必须把缺失字段按“未提供额外提示”处理，不能把它解释成新的失败。
+
+## 分片上传字段
+
+上传能力、分片和取消接口见 [API 概览：资源感知传输](api.md#资源感知传输)。`uploadTemp` 使用 `multipart/form-data`：
+
+| 字段 | 类型 | 首片 | 后续分片 | 说明 |
+| --- | --- | --- | --- | --- |
+| `file` | blob | 必填 | 必填 | 当前分片；文件名必须保持一致 |
+| `purpose` | string | 必填 | 必填 | `model-component`、`model-archive`、`video`、`face-import`、`audio`、`algorithm`、`upgrade` 或 `image` |
+| `chunkIndex` | decimal string | `0` | 必填 | 从 0 开始的分片序号 |
+| `totalChunks` | decimal string | 必填 | 必填 | 完整文件的分片数 |
+| `totalSize` | decimal string | 必填 | 必填 | 完整文件字节数 |
+| `chunkSize` | decimal string | 必填 | 必填 | 当前分片字节数，必须与 multipart 文件实际大小一致 |
+| `clientRequestId` | string | 建议必填 | 保持不变 | 当前用户范围内稳定的恢复标识，最长 128 字符 |
+| `uploadId` | string | 不填 | 必填 | 服务端签发的不透明会话标识 |
+| `sha256` | string | 可选 | 保持不变 | 完整文件的 64 位小写或大写十六进制 SHA-256 |
+
+`contentLength`、`fileName` 和 `filePath` 由服务端 multipart 解析器根据当前请求生成，客户端提交同名字段不会成为可信来源。
+
+`uploadTemp` 的 `resData`：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `uploadId` | string | 后续分片和业务消费必须使用的服务端会话标识 |
+| `nextChunkIndex` | decimal string | 服务端下一块所需序号；可能因幂等重放或重启恢复而跳过已确认分片 |
+| `complete` | boolean | 完整文件是否已接收并校验 |
+| `filePath` | string | R1 兼容的 `upload://` 不透明别名；不是服务器文件路径，新客户端不要使用 |
+
+完成上传后，业务接口只引用会话标识：
+
+| 业务接口 | 字段 |
+| --- | --- |
+| `/gtw/cwai/Camera/AddVideo` | `uploadId` |
+| `/gtw/cwai/aihost/PTaskDetectPic` | `uploadId`，与 `imageBase64`/`imageUrl` 互斥 |
+| `/gtw/cwai/Library/ModifyFacePicLib` | `pictureUploadIds[]` |
+| `/gtw/cwai/BodyLibrary/DetectPerson` | `uploadId` |
+| `/gtw/cwai/ThingsLibrary/AddLibThings` | `thingsList[].pictureUploadId` |
+
+模型组件、模型归档、算法包、升级包、音频和人脸导入包也使用各自 DTO 中的 `uploadId` 字段。旧版 Base64 和兼容字段仍可读取，但大文件和高清图片客户端应使用分片会话，不能依赖服务器路径。
 
 ## 分页和时间范围
 
@@ -95,12 +141,12 @@ HTTP webhook 和部分内部事件消息使用 `CMsgOnEventsReq` 语义：
 | `algorithmName` | string | 算法名称 |
 | `areaId` | string | 区域 ID |
 | `areaName` | string | 区域名称 |
-| `orignalPicture` | string | 原始图片 URL，字段名沿用当前实现 |
-| `fullPicture` | string | 全景图 URL |
-| `detectedPicture` | string | 检测目标图 URL |
-| `video` | string | 告警视频 URL |
-| `videostructured` | string | 视频结构化文件 URL |
-| `overviewFile` | string | 结构化概览文件 URL |
+| `orignalPicture` | string | 原始图片；HTTP webhook 中为 Base64，内部消息中为 URL。字段名沿用当前实现 |
+| `fullPicture` | string | 全景图；HTTP webhook 中为 Base64，内部消息中为 URL |
+| `detectedPicture` | string | 检测目标图；HTTP webhook 中为 Base64，内部消息中为 URL |
+| `video` | string | 告警视频；独立运行模式的 HTTP webhook 中为设备本地绝对路径，浏览器/查询接口中为 Web URL。文件可能在事件推送后数秒内才完成 |
+| `videostructured` | string | 视频结构化文件路径或 URL，可为空 |
+| `overviewFile` | string | 结构化概览文件路径或 URL，可为空 |
 | `recordId` | string | 告警记录 ID |
 | `files` | string[] | 关联文件列表（DTO 中定义；当前出站 `to_json` 不输出此字段，仅入站反序列化时读取） |
 | `isRetryMessage` | boolean | 是否为重试消息 |

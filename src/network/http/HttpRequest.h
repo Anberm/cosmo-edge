@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@ class HttpRequest {
 public:
     HttpRequest(const std::string& url, HttpRequestHandler& resultHandler);
     explicit HttpRequest(const std::string& url, HttpRequestHandler* result_handler = nullptr);
+    ~HttpRequest();
 
     HttpRequest(const HttpRequest&)            = delete;
     HttpRequest& operator=(const HttpRequest&) = delete;
@@ -35,6 +37,11 @@ public:
     void SetDataEx(std::string&& data);
     // Append key=value pair
     void AppendData(const std::string& key, const std::string& value);
+
+    /// Add multipart fields without buffering file bodies in process memory.
+    bool AddMimeField(const std::string& name, const std::string& value);
+    bool AddMimeFile(const std::string& name, const std::string& path, const std::string& filename,
+                     const std::string& content_type);
     // Submit request, returns HTTP status code
     long Submit(HttpRequestMethod method = HttpRequestMethod::kUnspecified);
 
@@ -48,6 +55,8 @@ public:
     void SetInterface(const std::string& interfaceName);
 
 private:
+    struct MimePart;
+
     std::string url_;
     std::string data_;
     std::string proxy_;
@@ -59,6 +68,7 @@ private:
     std::string ca_bundle_path_;
     HttpRequestHandler* result_handler_;
     std::vector<std::string> header_;
+    std::vector<std::unique_ptr<MimePart>> mime_parts_;
     long status_;
     long timeout_;
     long connect_timeout_;

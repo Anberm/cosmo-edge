@@ -140,24 +140,15 @@ export default {
     },
     // 文件上传之前回调
     beforeUpload(file) {
-      // console.log(file);
-      var testmsg = file.name.substring(file.name.lastIndexOf('.') + 1)
-      const extension2 = testmsg === 'gz'
-      const extension5 = testmsg === 'tar.gz'
-      const isLt2M = file.size / 1024 / 1024 < 300
-      if (!extension2 && !extension5) {
+      const lowerName = String(file.name || '').toLowerCase()
+      const supported = lowerName.endsWith('.tar.gz') || lowerName.endsWith('.tgz')
+      if (!supported) {
         this.$message({
           message: t('validate.formatErrorTarGz'),
           type: 'warning'
         })
       }
-      if (!isLt2M) {
-        this.$message({
-          message: t('validate.fileMaxSize', { n: 300 }),
-          type: 'warning'
-        })
-      }
-      return extension2 || (extension5 && isLt2M)
+      return supported && Number.isSafeInteger(file.size) && file.size > 0
     },
     close() {
       this.algorithmModel = ''

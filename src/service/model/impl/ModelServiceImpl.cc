@@ -17,6 +17,7 @@
 #include <unordered_set>
 
 #include "service/model/impl/ModelConfigParser.h"
+#include "util/ArchiveListingValidator.h"
 #include "util/ErrorCode.h"
 #include "util/Exception.h"
 #include "util/Exec.h"
@@ -25,6 +26,7 @@
 #include "util/LimitedTypeJson.h"
 #include "util/NnBackendConstants.h"
 #include "util/PathUtil.h"
+#include "util/ResourceBudget.h"
 #include "util/StringUtil.h"
 #include "util/TimeUtil.h"
 
@@ -32,85 +34,33 @@ namespace cosmo::service {
 
 namespace {
 
-    constexpr size_t kMaxLegacyModelArchiveEntries         = 10000;
-    constexpr std::uintmax_t kMaxLegacyModelFileBytes      = 500ULL * 1024 * 1024;
-    constexpr std::uintmax_t kMaxLegacyModelExtractedBytes = 1024ULL * 1024 * 1024;
+    constexpr size_t kMaxLegacyModelArchiveEntries = 10000;
 
-    bool IsSafeArchiveMemberPath(std::string member) {
-        if (member.empty() || member.size() > 512 || member.front() == '/' ||
-            member.find('\\') != std::string::npos) {
+    bool InspectZipMemberPaths(const std::string& archive_path, const std::string& extraction_root,
+                               cosmo::util::ArchiveListingInspection& inspection) {
+        if (!cosmo::util::InspectArchiveListingFile(archive_path,
+                                                    cosmo::util::ArchiveListingFormat::kZipVerbose,
+                                                    kMaxLegacyModelArchiveEntries, inspection) ||
+            inspection.total_bytes == 0) {
             return false;
         }
-        while (!member.empty() && member.back() == '/') {
-            member.pop_back();
+        const auto budget = cosmo::util::InspectStorageResourceBudget(extraction_root);
+        if (!budget.valid) {
+            throw cosmo::util::ErrorMessage(cosmo::util::ErrorEnum::SysErr,
+                                            "Cannot inspect legacy model extraction storage");
         }
-        std::stringstream stream(member);
-        std::string component;
-        while (std::getline(stream, component, '/')) {
-            if (!cosmo::path::IsSafePathComponent(component)) {
-                return false;
-            }
+        if (inspection.total_bytes > budget.usable_bytes) {
+            throw cosmo::util::ResourceLimitError(
+                "Insufficient safe disk space to extract the model archive", "archive-extraction",
+                "model-archive", inspection.total_bytes, budget.usable_bytes, budget.reserve_bytes);
         }
-        return !member.empty();
+        return true;
     }
 
-    bool ValidateZipMemberPaths(const std::string& archive_path) {
-        std::string listing;
-        if (cosmo::util::Exec({"unzip", "-Z", "-l", archive_path}, listing) != 0) {
-            return false;
-        }
-        size_t count              = 0;
-        size_t declared_count     = 0;
-        bool has_declared_count   = false;
-        std::uintmax_t total_size = 0;
-        std::istringstream stream(listing);
-        std::string line;
-        while (std::getline(stream, line)) {
-            constexpr std::string_view kEntryCountMarker = "number of entries:";
-            const auto count_pos                         = line.find(kEntryCountMarker);
-            if (line.compare(0, 14, "Zip file size:") == 0 && count_pos != std::string::npos) {
-                std::istringstream count_stream(line.substr(count_pos + kEntryCountMarker.size()));
-                if (!(count_stream >> declared_count) || declared_count > kMaxLegacyModelArchiveEntries) {
-                    return false;
-                }
-                has_declared_count = true;
-                continue;
-            }
-            if (line.size() < 10 || std::string("-dlcbpsh").find(line.front()) == std::string::npos) {
-                continue;
-            }
-            if (line.front() != '-' && line.front() != 'd') {
-                return false;
-            }
-
-            std::istringstream line_stream(line);
-            std::string permissions;
-            std::string version;
-            std::string system;
-            std::string text_mode;
-            std::string compressed_size;
-            std::string method;
-            std::string date;
-            std::string time;
-            std::string member;
-            std::uintmax_t entry_size = 0;
-            if (!(line_stream >> permissions >> version >> system >> entry_size >> text_mode >>
-                  compressed_size >> method >> date >> time)) {
-                return false;
-            }
-            std::getline(line_stream >> std::ws, member);
-            if (++count > kMaxLegacyModelArchiveEntries || entry_size > kMaxLegacyModelFileBytes ||
-                entry_size > kMaxLegacyModelExtractedBytes - total_size || !IsSafeArchiveMemberPath(member)) {
-                return false;
-            }
-            total_size += entry_size;
-        }
-        return count > 0 && has_declared_count && count == declared_count;
-    }
-
-    bool ValidateExtractedModelTree(const std::string& root) {
+    bool ValidateExtractedModelTree(const std::string& root,
+                                    const cosmo::util::ArchiveListingInspection& inspection) {
         return cosmo::path::ValidateDirectoryTreeWithinRoot(
-            root, kMaxLegacyModelArchiveEntries, kMaxLegacyModelFileBytes, kMaxLegacyModelExtractedBytes);
+            root, kMaxLegacyModelArchiveEntries, inspection.largest_file_bytes, inspection.total_bytes);
     }
 
     bool IsZipFile(const std::string& path) {
@@ -240,8 +190,9 @@ std::string ModelServiceImpl::UpzipModelFile(std::string filePath) {
     }
     std::error_code archive_ec;
     const auto archive_size = fs::file_size(managed_archive, archive_ec);
-    if (archive_ec || archive_size == 0 || archive_size > kMaxLegacyModelFileBytes ||
-        !IsZipFile(managed_archive) || !ValidateZipMemberPaths(managed_archive)) {
+    cosmo::util::ArchiveListingInspection inspection;
+    if (archive_ec || archive_size == 0 || !IsZipFile(managed_archive) ||
+        !InspectZipMemberPaths(managed_archive, upload_root, inspection)) {
         LOG_WARN("{}", "Reject invalid legacy model archive");
         return {};
     }
@@ -266,7 +217,7 @@ std::string ModelServiceImpl::UpzipModelFile(std::string filePath) {
         fs::remove_all(upload_path, ec);
         return "";
     }
-    if (!ValidateExtractedModelTree(upload_path)) {
+    if (!ValidateExtractedModelTree(upload_path, inspection)) {
         LOG_WARN("Legacy model archive extracted unsafe entries into {}", upload_path);
         fs::remove_all(upload_path, ec);
         return "";

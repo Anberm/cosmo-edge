@@ -216,6 +216,7 @@ import { t } from '@/i18n'
 import { ElMessage } from 'element-plus'
 import { Upload, VideoPlay, Delete } from '@element-plus/icons-vue'
 import { resolveResourceAlgorithmName } from '@/utils/i18nResource'
+import { uploadFileInChunks, UploadPurpose } from '@/utils/chunkUpload'
 
 const { proxy } = getCurrentInstance()
 const $API = proxy.$API
@@ -299,25 +300,41 @@ const cleanupBackend = async () => {
 }
 
 // 页面离开时，销毁任务释放显存
-onUnmounted(cleanupBackend)
+onUnmounted(async () => {
+  await cleanupBackend()
+  releasePreviews()
+})
 onDeactivated(cleanupBackend)
 
 const handleFileChange = (file) => {
-  // Read file for preview
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    uploadedFiles.value.push({
-      name: file.name,
-      raw: file.raw,
-      preview: e.target.result,
-      base64: e.target.result.split(',')[1],
-      analyzing: false
-    })
+  const raw = file?.raw
+  const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/bmp'])
+  if (!raw || !supportedTypes.has(raw.type)) {
+    ElMessage.error(t('basePic.photoFormatError'))
+    return
   }
-  reader.readAsDataURL(file.raw)
+  if (!Number.isSafeInteger(raw.size) || raw.size <= 0) {
+    ElMessage.error(t('api.error.UpLoadDataEmpty'))
+    return
+  }
+  uploadedFiles.value.push({
+    name: file.name,
+    raw,
+    preview: URL.createObjectURL(raw),
+    analyzing: false
+  })
+}
+
+const releasePreviews = () => {
+  uploadedFiles.value.forEach(file => {
+    if (file.preview?.startsWith('blob:')) {
+      URL.revokeObjectURL(file.preview)
+    }
+  })
 }
 
 const clearAll = () => {
+  releasePreviews()
   uploadedFiles.value = []
   results.value = []
 }
@@ -378,10 +395,17 @@ const startAnalysis = async () => {
   // 2. 逐张分析图片
   for (let i = 0; i < uploadedFiles.value.length; i++) {
     uploadedFiles.value[i].analyzing = true
+    let stagedUpload
     try {
+      stagedUpload = await uploadFileInChunks(uploadedFiles.value[i].raw, {
+        purpose: UploadPurpose.IMAGE,
+        uploadChunk: formData => $API.uploadAtomicModelTemp(formData),
+        cancelUpload: data => $API.cancelAtomicModelUpload(data),
+        getCapabilities: () => $API.getUploadCapabilities()
+      })
       const params = {
         algorithmCode: selectedAlgorithm.value,
-        imageBase64: uploadedFiles.value[i].base64,
+        uploadId: stagedUpload.uploadId,
         needRetImg: true
       }
       const res = await $API.imageAnalysis(params)
@@ -392,6 +416,11 @@ const startAnalysis = async () => {
       await nextTick()
       drawOverlay(i)
     } catch (err) {
+      if (stagedUpload?.uploadId) {
+        await $API.cancelAtomicModelUpload({
+          uploadId: stagedUpload.uploadId
+        }).catch(() => {})
+      }
       console.error('Analysis failed for image:', uploadedFiles.value[i].name, err)
       results.value[i] = { error: true }
       uploadedFiles.value[i].analyzing = false

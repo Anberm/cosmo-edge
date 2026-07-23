@@ -110,6 +110,40 @@ namespace {
         }
     }
 
+    void CleanupTransientUploads() {
+        const fs::path upload_root(UploadPath());
+        std::error_code ec;
+        const auto root_status = fs::symlink_status(upload_root, ec);
+        if (ec || fs::is_symlink(root_status) || !fs::is_directory(root_status)) {
+            ec.clear();
+            fs::remove_all(upload_root, ec);
+            if (ec) {
+                LOG_WARN("Cannot reset upload root {}: {}", upload_root.string(), ec.message());
+                return;
+            }
+        }
+        EnsureDir(upload_root.string());
+
+        fs::directory_iterator iterator(upload_root, ec);
+        const fs::directory_iterator end;
+        while (!ec && iterator != end) {
+            const auto entry_path = iterator->path();
+            ++iterator;
+            if (entry_path.filename() == "sessions") {
+                continue;
+            }
+            std::error_code cleanup_error;
+            fs::remove_all(entry_path, cleanup_error);
+            if (cleanup_error) {
+                LOG_WARN("Cannot clean transient upload path {}: {}", entry_path.string(),
+                         cleanup_error.message());
+            }
+        }
+        if (ec) {
+            LOG_WARN("Cannot enumerate upload root {}: {}", upload_root.string(), ec.message());
+        }
+    }
+
     std::string RelativePath(uint64_t timestamp) {
         time_t t  = static_cast<time_t>(timestamp / 1000);
         auto date = cosmo::util::YMDDate(t);
@@ -143,7 +177,7 @@ namespace {
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 void Init() {
-    cosmo::util::RemovePath(UploadPath());
+    CleanupTransientUploads();
     cosmo::util::RemovePath(RecordPath(kAtWeb, false));
 
     std::string cwaiRuntimePath = (fs::path(g_dataPath) / kCwaiRuntimeDir).string();

@@ -8,10 +8,13 @@
 #include "catch_amalgamated.hpp"
 #include "nlohmann/json.hpp"
 #include "platform/NetCardOp.h"
+#include "service/face/dto/BodyLibDto.h"
+#include "service/face/dto/ThingsLibDto.h"
 #include "util/JsonStructUtil.h"
 #include "util/MsgBaseTypes.h"
 #include "util/MsgDynamicElement.h"
 #include "util/dto/ClientMsgEvent.h"
+#include "util/dto/EventMsgTypes.h"
 #include "util/dto/ServerMsgTypes.h"
 #include "util/dto/TaskCreateTypes.h"
 
@@ -48,6 +51,40 @@ TEST_CASE("legacy JSON O(): optional fields round-trip", "[json][baseline]") {
         REQUIRE(cosmo::util::DecodeJson(json, restored));
         CHECK(restored.msgCode == original.msgCode);
         CHECK(restored.msgText == original.msgText);
+    }
+
+    SECTION("MsgResBase — actionable resource details remain backward compatible") {
+        cosmo::MsgResBase original;
+        original.msgCode               = "STORAGE_RESERVE_REACHED";
+        original.messageKey            = "api.error.storageReserveReached";
+        original.msgText               = "Insufficient safe disk space";
+        original.details.actualBytes   = 6ULL * 1024 * 1024;
+        original.details.requiredBytes = 10ULL * 1024 * 1024;
+        original.details.reserveBytes  = 5ULL * 1024 * 1024;
+        original.details.resource      = "upload-staging";
+        original.details.purpose       = "model-archive";
+        original.retryable             = true;
+        original.recommendedAction     = "FREE_DISK_SPACE";
+        original.retryAfterSeconds     = 30;
+
+        std::string json;
+        REQUIRE(cosmo::util::EncodeJson(original, json));
+        const auto doc = ParseJson(json);
+        REQUIRE(doc["details"].is_object());
+        CHECK(doc["details"]["requiredBytes"] == 10ULL * 1024 * 1024);
+        CHECK(doc["retryable"] == true);
+        CHECK(doc["recommendedAction"] == "FREE_DISK_SPACE");
+        CHECK(doc["retryAfterSeconds"] == 30);
+
+        cosmo::MsgResBase restored;
+        REQUIRE(cosmo::util::DecodeJson(json, restored));
+        REQUIRE(restored.details.actualBytes);
+        CHECK(*restored.details.actualBytes == 6ULL * 1024 * 1024);
+        CHECK(restored.details.purpose == "model-archive");
+        CHECK(restored.retryable);
+        CHECK(restored.recommendedAction == "FREE_DISK_SPACE");
+        REQUIRE(restored.retryAfterSeconds);
+        CHECK(*restored.retryAfterSeconds == 30);
     }
 
     SECTION("MsgAiConfidence — O() with float") {
@@ -120,6 +157,78 @@ TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]
     REQUIRE(restored.targets.size() == 1);
     CHECK(restored.targets[0].label == "category0");
     CHECK(restored.targets[0].box.height == 360);
+}
+
+TEST_CASE("Staged image identifiers round-trip without serializing trusted bytes",
+          "[json][image][upload-staging]") {
+    SECTION("face library") {
+        cosmo::MsgConditionLib original;
+        original.personOperation = 1;
+        original.faceLibId.emplace_back(std::string("face-library"));
+        original.pictureUploadIds = {"image-upload-1", "image-upload-2"};
+        original.pictureData      = {{1, 2, 3}};
+
+        std::string json;
+        REQUIRE(cosmo::util::EncodeJson(original, json));
+        const auto doc = ParseJson(json);
+        CHECK(doc["pictureUploadIds"] == original.pictureUploadIds);
+        CHECK_FALSE(doc.contains("pictureData"));
+
+        cosmo::MsgConditionLib restored;
+        REQUIRE(cosmo::util::DecodeJson(json, restored));
+        CHECK(restored.pictureUploadIds == original.pictureUploadIds);
+        CHECK(restored.pictureData.empty());
+    }
+
+    SECTION("body detection") {
+        cosmo::BodyLib::MsgDetectPersonRecv original;
+        original.uploadId  = "image-upload";
+        original.imageData = {1, 2, 3};
+
+        std::string json;
+        REQUIRE(cosmo::util::EncodeJson(original, json));
+        const auto doc = ParseJson(json);
+        CHECK(doc["uploadId"] == original.uploadId);
+        CHECK_FALSE(doc.contains("imageData"));
+
+        cosmo::BodyLib::MsgDetectPersonRecv restored;
+        REQUIRE(cosmo::util::DecodeJson(json, restored));
+        CHECK(restored.uploadId == original.uploadId);
+        CHECK(restored.imageData.empty());
+    }
+
+    SECTION("things library") {
+        cosmo::ThingsLib::MsgAddLibThingsRecv::ArticlesReid original;
+        original.pictureName     = "photo";
+        original.pictureUploadId = "image-upload";
+        original.pictureData     = {1, 2, 3};
+
+        const nlohmann::json doc = original;
+        CHECK(doc["pictureUploadId"] == original.pictureUploadId);
+        CHECK_FALSE(doc.contains("pictureData"));
+
+        const auto restored = doc.get<cosmo::ThingsLib::MsgAddLibThingsRecv::ArticlesReid>();
+        CHECK(restored.pictureUploadId == original.pictureUploadId);
+        CHECK(restored.pictureData.empty());
+    }
+
+    SECTION("picture task") {
+        cosmo::MsgPTaskDetectPicRecv original;
+        original.algorithmCode = "person";
+        original.uploadId      = "image-upload";
+        original.imageData     = {1, 2, 3};
+
+        std::string json;
+        REQUIRE(cosmo::util::EncodeJson(original, json));
+        const auto doc = ParseJson(json);
+        CHECK(doc["uploadId"] == original.uploadId);
+        CHECK_FALSE(doc.contains("imageData"));
+
+        cosmo::MsgPTaskDetectPicRecv restored;
+        REQUIRE(cosmo::util::DecodeJson(json, restored));
+        CHECK(restored.uploadId == original.uploadId);
+        CHECK(restored.imageData.empty());
+    }
 }
 
 // ===========================================================================

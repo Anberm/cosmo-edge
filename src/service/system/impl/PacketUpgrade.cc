@@ -2,11 +2,13 @@
 
 #include "service/system/impl/PacketUpgrade.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -19,20 +21,25 @@
 #include "cryptopp/hex.h"
 #include "cryptopp/md5.h"
 #include "util/ErrorCode.h"
+#include "util/Exception.h"
 #include "util/Exec.h"
 #include "util/Log.h"
 #include "util/PathUtil.h"
+#include "util/ResourceBudget.h"
 #include "util/StringUtil.h"
 
 namespace cosmo {
 
 namespace {
 
-    constexpr size_t kMaxUpgradeArchiveEntries         = 20000;
-    constexpr std::uintmax_t kMaxUpgradeArchiveBytes   = 500ULL * 1024 * 1024;
-    constexpr std::uintmax_t kMaxUpgradeFileBytes      = 500ULL * 1024 * 1024;
-    constexpr std::uintmax_t kMaxUpgradeExtractedBytes = 2ULL * 1024 * 1024 * 1024;
-    constexpr std::uintmax_t kMaxUpgradeTreeBytes      = kMaxUpgradeArchiveBytes + kMaxUpgradeExtractedBytes;
+    constexpr size_t kMaxUpgradeArchiveEntries = 20000;
+    constexpr size_t kMaxUpgradeListingBytes   = kMaxUpgradeArchiveEntries * 1024 + 16 * 1024;
+
+    struct UpgradeArchiveInspection {
+        size_t entry_count{0};
+        std::uintmax_t largest_file_bytes{0};
+        std::uintmax_t total_bytes{0};
+    };
 
     bool IsGzipFile(const std::string& path) {
         std::ifstream stream(path, std::ios::binary);
@@ -93,9 +100,12 @@ namespace {
         return true;
     }
 
-    bool ValidateUpgradeArchiveListing(const std::string& archive_path) {
+    bool ValidateUpgradeArchiveListing(const std::string& archive_path,
+                                       UpgradeArchiveInspection& inspection) {
+        inspection = {};
         std::string listing;
-        if (util::Exec({"tar", "-tzvf", archive_path, "--quoting-style=escape"}, listing) != 0) {
+        if (util::ExecWithOutputLimit({"tar", "-tzvf", archive_path, "--quoting-style=escape"}, listing,
+                                      kMaxUpgradeListingBytes) != 0) {
             LOG_ERRO("cannot inspect upgrade archive: {}", archive_path);
             return false;
         }
@@ -150,8 +160,8 @@ namespace {
             }
 
             std::string normalized;
-            if (++entry_count > kMaxUpgradeArchiveEntries || entry_size > kMaxUpgradeFileBytes ||
-                entry_size > kMaxUpgradeExtractedBytes - total_size ||
+            if (++entry_count > kMaxUpgradeArchiveEntries ||
+                entry_size > std::numeric_limits<std::uintmax_t>::max() - total_size ||
                 !NormalizeUpgradeArchiveMember(member, is_directory, normalized) ||
                 !members.insert(normalized).second) {
                 LOG_ERRO("upgrade archive contains unsafe entry: {}", member);
@@ -162,8 +172,13 @@ namespace {
                 return false;
             }
             total_size += entry_size;
+            if (!is_directory && !is_symlink) {
+                inspection.largest_file_bytes = std::max(inspection.largest_file_bytes, entry_size);
+            }
         }
-        return entry_count > 0;
+        inspection.entry_count = entry_count;
+        inspection.total_bytes = total_size;
+        return entry_count > 0 && total_size > 0;
     }
 
     std::string Md5SumFile(const std::string& filePath) {
@@ -277,7 +292,7 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     }
 
     const auto archive_size = fs::file_size(resolved_file, ec);
-    if (ec || archive_size == 0 || archive_size > kMaxUpgradeArchiveBytes || !IsGzipFile(resolved_file)) {
+    if (ec || archive_size == 0 || !IsGzipFile(resolved_file)) {
         LOG_ERRO("upgrade package has invalid size or format: {}", resolved_file);
         return util::ErrorEnum::UpgradeFileVerifyFailed;
     }
@@ -287,11 +302,21 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
         LOG_ERRO("upgrade package md5 error, expected={}, actual={}", file_name_md5sum, md5Str);
         return util::ErrorEnum::UpgradeFileNotMatch;
     }
-    if (!ValidateUpgradeArchiveListing(resolved_file)) {
+    UpgradeArchiveInspection inspection;
+    if (!ValidateUpgradeArchiveListing(resolved_file, inspection)) {
         return util::ErrorEnum::UpgradeFileVerifyFailed;
     }
 
     fs::path upgradeFileDir(cosmo::path::GetUpgradePath());
+    const auto budget = util::InspectStorageResourceBudget(upgradeFileDir.string());
+    if (!budget.valid) {
+        throw util::ErrorMessage(util::ErrorEnum::SysErr, "Cannot inspect upgrade extraction storage");
+    }
+    if (inspection.total_bytes > budget.usable_bytes) {
+        throw util::ResourceLimitError("Insufficient safe disk space to extract the upgrade package",
+                                       "archive-extraction", "upgrade", inspection.total_bytes,
+                                       budget.usable_bytes, budget.reserve_bytes);
+    }
     std::string resolved_upgrade_dir;
     if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetBaseDir(), upgradeFileDir.string(),
                                                     cosmo::path::PathEntryType::kDirectory,
@@ -340,8 +365,12 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     }
     LOG_INFO("upgrade package extracted to {}", upgradeFileDir.c_str());
 
+    const auto tree_total = inspection.total_bytes > std::numeric_limits<std::uintmax_t>::max() - archive_size
+                                ? std::numeric_limits<std::uintmax_t>::max()
+                                : inspection.total_bytes + archive_size;
     if (!cosmo::path::ValidateDirectoryTreeWithinRoot(upgradeFileDir.string(), kMaxUpgradeArchiveEntries + 1,
-                                                      kMaxUpgradeFileBytes, kMaxUpgradeTreeBytes)) {
+                                                      std::max(inspection.largest_file_bytes, archive_size),
+                                                      tree_total)) {
         LOG_ERRO("{}", "upgrade package extracted an unsafe directory tree");
         remove_all(upgradeFileDir, ec);
         return util::ErrorEnum::UpgradeFileVerifyFailed;
