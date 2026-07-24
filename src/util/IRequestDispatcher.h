@@ -29,6 +29,13 @@ struct RequestDispatchContext {
     RequestTransport transport{RequestTransport::kHttp};
 };
 
+struct RequestDispatchResponse {
+    std::string body;
+    std::string file_path;
+    std::string file_name;
+    bool delete_file_after_send{false};
+};
+
 /// Abstract request dispatcher for HTTP/MQTT message routing.
 /// Implemented by ApiRouter (api layer), consumed by HttpServer (network layer).
 class IRequestDispatcher {
@@ -51,6 +58,13 @@ public:
     /// @param response  [out] response body
     virtual bool DispatchRequest(const RequestDispatchContext& context, const std::string& body,
                                  std::string& response) = 0;
+
+    /// Dispatch a request that may produce a file response. Implementations
+    /// that only return JSON can rely on this compatibility implementation.
+    virtual bool DispatchRequestResponse(const RequestDispatchContext& context, const std::string& body,
+                                         RequestDispatchResponse& response) {
+        return DispatchRequest(context, body, response.body);
+    }
 };
 
 }  // namespace cosmo

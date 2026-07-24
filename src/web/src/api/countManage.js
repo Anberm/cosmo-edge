@@ -396,6 +396,14 @@ export default {
       silentError: true
     })
   },
+  getUploadCapabilities: () => {
+    return request({
+      url: '/gtw/cwai/atomic/model/uploadCapabilities',
+      method: 'post',
+      data: {},
+      silentError: true
+    })
+  },
   // 添加原子模型接口
   addAtomicModel: (data) => {
     return request({

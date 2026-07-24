@@ -12,6 +12,7 @@
 #include "service/system/impl/SystemOperationServiceImpl.h"
 #include "util/Exec.h"
 #include "util/PathUtil.h"
+#include "util/ResourceBudget.h"
 
 namespace fs = std::filesystem;
 
@@ -204,26 +205,34 @@ TEST_CASE("PacketUpgrade validates archive boundaries before extraction", "[syst
         REQUIRE(fs::is_regular_file(upgrade_root / "lib" / "libfoo.so.1.0.0"));
     }
 
-    SECTION("rejects a sparse member above the declared per-file limit") {
-        const auto source = root / "oversize_source";
-        CreateUpgradeLayout(source);
-        const auto sparse_file = source / "files" / "oversize.bin";
-        {
-            std::ofstream stream(sparse_file, std::ios::binary);
-            REQUIRE(stream.good());
-        }
-        fs::resize_file(sparse_file, 500ULL * 1024 * 1024 + 1, ec);
-        REQUIRE(!ec);
-        const auto unsigned_archive = staging / "oversize.tar.gz";
-        std::string output;
-        REQUIRE(cosmo::util::Exec(
-                    {"tar", "--sparse", "-czf", unsigned_archive.string(), "-C", source.string(), "."},
-                    output) == 0);
-        const auto archive = AddUpgradeChecksumToName(unsigned_archive, staging, "9.9.6");
-        REQUIRE_FALSE(archive.empty());
+    SECTION("accepts a sparse member above the former fixed per-file ceiling when storage permits") {
+        constexpr std::uintmax_t kFormerCeiling = 500ULL * 1024 * 1024;
+        const auto budget = cosmo::util::InspectStorageResourceBudget(cosmo::path::GetUpgradePath());
+        REQUIRE(budget.valid);
+        if (budget.usable_bytes <= kFormerCeiling + 1024 * 1024) {
+            WARN("Insufficient disposable storage budget to exercise the former 500 MiB boundary");
+        } else {
+            const auto source = root / "large_source";
+            CreateUpgradeLayout(source);
+            const auto sparse_file = source / "files" / "large-model.bin";
+            {
+                std::ofstream stream(sparse_file, std::ios::binary);
+                REQUIRE(stream.good());
+            }
+            fs::resize_file(sparse_file, kFormerCeiling + 1, ec);
+            REQUIRE(!ec);
+            const auto unsigned_archive = staging / "large.tar.gz";
+            std::string output;
+            REQUIRE(cosmo::util::Exec(
+                        {"tar", "--sparse", "-czf", unsigned_archive.string(), "-C", source.string(), "."},
+                        output) == 0);
+            const auto archive = AddUpgradeChecksumToName(unsigned_archive, staging, "9.9.6");
+            REQUIRE_FALSE(archive.empty());
 
-        REQUIRE(cosmo::PacketUpgrade(archive) == cosmo::util::ErrorEnum::UpgradeFileVerifyFailed);
-        REQUIRE(fs::is_regular_file(archive));
+            REQUIRE(cosmo::PacketUpgrade(archive) == cosmo::util::ErrorEnum::Success);
+            const auto upgrade_root = fs::path(cosmo::path::GetUpgradePath());
+            REQUIRE(fs::file_size(upgrade_root / "files" / "large-model.bin") == kFormerCeiling + 1);
+        }
     }
 
     SECTION("rejects an archive already placed inside the destructive output directory") {

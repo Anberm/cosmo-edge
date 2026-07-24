@@ -19,6 +19,7 @@
 #include "service/algorithm/impl/AlgorithmServiceImpl.h"
 #include "service/detail/ServiceRegistry.h"
 #include "util/Exec.h"
+#include "util/ResourceBudget.h"
 
 using namespace cosmo::service;
 
@@ -438,24 +439,34 @@ TEST_CASE("AlgorithmPacketLoader validates archives before extraction",
         fs::remove_all(outside, ec);
     }
 
-    SECTION("rejects a sparse member whose declared size exceeds the per-file limit") {
-        const auto source = root / "oversize_source";
-        fs::create_directories(source);
-        const auto sparse_file = source / "oversize.bin";
-        {
-            std::ofstream stream(sparse_file, std::ios::binary);
-            REQUIRE(stream.good());
-        }
-        fs::resize_file(sparse_file, 500ULL * 1024 * 1024 + 1, ec);
-        REQUIRE(!ec);
-        const auto archive = root / "oversize.tar.gz";
-        std::string output;
-        REQUIRE(cosmo::util::Exec(
-                    {"tar", "--sparse", "-czf", archive.string(), "-C", source.string(), "oversize.bin"},
-                    output) == 0);
+    SECTION("accepts a sparse member above the former fixed per-file ceiling when storage permits") {
+        constexpr std::uintmax_t kFormerCeiling = 500ULL * 1024 * 1024;
+        const auto budget                       = cosmo::util::InspectStorageResourceBudget(root.string());
+        REQUIRE(budget.valid);
+        if (budget.usable_bytes <= kFormerCeiling + 4096) {
+            WARN("Insufficient disposable storage budget to exercise the former 500 MiB boundary");
+        } else {
+            const auto source = root / "large_source";
+            fs::create_directories(source);
+            std::ofstream(source / "packet.json") << R"({"algorithmId":"1007"})";
+            const auto sparse_file = source / "large-model.bin";
+            {
+                std::ofstream stream(sparse_file, std::ios::binary);
+                REQUIRE(stream.good());
+            }
+            fs::resize_file(sparse_file, kFormerCeiling + 1, ec);
+            REQUIRE(!ec);
+            const auto archive = root / "large.tar.gz";
+            std::string output;
+            REQUIRE(cosmo::util::Exec({"tar", "--sparse", "-czf", archive.string(), "-C", source.string(),
+                                       "packet.json", "large-model.bin"},
+                                      output) == 0);
 
-        REQUIRE(cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string()).empty());
-        REQUIRE_FALSE(fs::exists(root / "oversize"));
+            const auto extracted =
+                cosmo::service::detail::AlgorithmPacketLoader::UnzipPackageFile(archive.string());
+            REQUIRE(extracted == (root / "large").string());
+            REQUIRE(fs::file_size(fs::path(extracted) / "large-model.bin") == kFormerCeiling + 1);
+        }
     }
 
     fs::remove_all(root, ec);

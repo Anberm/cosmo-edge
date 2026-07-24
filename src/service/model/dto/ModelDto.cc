@@ -151,6 +151,58 @@ void from_json(const nlohmann::json& j, MsgCancelUploadRecv& v) {
     JSON_OPT(j, v, uploadId);
 }
 
+void to_json(nlohmann::json& j, const MsgUploadCapabilitiesRecv& v) {
+    to_json(j, static_cast<const MsgRecvHead&>(v));
+}
+
+void from_json(const nlohmann::json& j, MsgUploadCapabilitiesRecv& v) {
+    from_json(j, static_cast<MsgRecvHead&>(v));
+}
+
+void to_json(nlohmann::json& j, const MsgUploadCapabilitiesSend::ResData& v) {
+    j["maxTotalSize"]                = v.maxTotalSize;
+    j["maxChunkSize"]                = v.maxChunkSize;
+    j["maxChunks"]                   = v.maxChunks;
+    j["idleTimeoutMs"]               = v.idleTimeoutMs;
+    j["absoluteTimeoutMs"]           = v.absoluteTimeoutMs;
+    j["availableBytes"]              = v.availableBytes;
+    j["reserveBytes"]                = v.reserveBytes;
+    j["availableForNewUploadsBytes"] = v.availableForNewUploadsBytes;
+    j["reservedBySessionsBytes"]     = v.reservedBySessionsBytes;
+    j["activeSessions"]              = v.activeSessions;
+    j["maxEncodedImageBytes"]        = v.maxEncodedImageBytes;
+    j["maxImagePixels"]              = v.maxImagePixels;
+    j["resumable"]                   = v.resumable;
+    j["persistentAcrossRestart"]     = v.persistentAcrossRestart;
+}
+
+void from_json(const nlohmann::json& j, MsgUploadCapabilitiesSend::ResData& v) {
+    JSON_OPT(j, v, maxTotalSize);
+    JSON_OPT(j, v, maxChunkSize);
+    JSON_OPT(j, v, maxChunks);
+    JSON_OPT(j, v, idleTimeoutMs);
+    JSON_OPT(j, v, absoluteTimeoutMs);
+    JSON_OPT(j, v, availableBytes);
+    JSON_OPT(j, v, reserveBytes);
+    JSON_OPT(j, v, availableForNewUploadsBytes);
+    JSON_OPT(j, v, reservedBySessionsBytes);
+    JSON_OPT(j, v, activeSessions);
+    JSON_OPT(j, v, maxEncodedImageBytes);
+    JSON_OPT(j, v, maxImagePixels);
+    JSON_OPT(j, v, resumable);
+    JSON_OPT(j, v, persistentAcrossRestart);
+}
+
+void to_json(nlohmann::json& j, const MsgUploadCapabilitiesSend& v) {
+    to_json(j, static_cast<const MsgSendHead&>(v));
+    j["resData"] = v.resData;
+}
+
+void from_json(const nlohmann::json& j, MsgUploadCapabilitiesSend& v) {
+    from_json(j, static_cast<MsgSendHead&>(v));
+    JSON_OPT(j, v, resData);
+}
+
 void to_json(nlohmann::json& j, const MsgGetConfigRecv& v) {
     to_json(j, static_cast<const MsgRecvHead&>(v));
     j["modelCode"] = v.modelCode;

@@ -123,14 +123,17 @@ namespace Model {
     struct MsgAddSend : public MsgSendHead {};
 
     struct MsgUploadTempRecv : public MsgRecvHead {
+        // Populated by the authenticated multipart parser, not trusted from
+        // client-supplied form fields.
         std::string contentLength;
         std::string fileName;
         std::string filePath;
-        // Chunk upload (interface path unchanged: /atomic/model/uploadTemp)
-        // - uploadId: Opaque server-issued ID returned after the first chunk
+        // Resource-aware chunk upload (/atomic/model/uploadTemp):
+        // - uploadId: opaque server-issued ID returned after the first chunk
         // - chunkIndex/totalChunks: Chunk index and total chunks (0-based)
         // - totalSize: Total original file size (bytes)
-        // Note: Compatible with single upload logic if these fields are missing.
+        // - clientRequestId: stable principal-scoped resume identity
+        // Legacy single-upload fields remain accepted during the R1 window.
         std::string uploadId;
         // Multipart form fields are JSON encoded; std::string avoids deserialization mismatch
         std::string chunkIndex;
@@ -147,6 +150,8 @@ namespace Model {
 
     struct MsgUploadTempSend : public MsgSendHead {
         struct ResData {
+            // R1-only opaque upload:// alias. It is never a server path; new
+            // clients use uploadId.
             std::string filePath;
             std::string uploadId;
             std::string nextChunkIndex;
@@ -167,6 +172,34 @@ namespace Model {
     void from_json(const nlohmann::json& j, MsgCancelUploadRecv& v);
 
     struct MsgCancelUploadSend : public MsgSendHead {};
+
+    struct MsgUploadCapabilitiesRecv : public MsgRecvHead {};
+    void to_json(nlohmann::json& j, const MsgUploadCapabilitiesRecv& v);
+    void from_json(const nlohmann::json& j, MsgUploadCapabilitiesRecv& v);
+
+    struct MsgUploadCapabilitiesSend : public MsgSendHead {
+        struct ResData {
+            std::string maxTotalSize;
+            std::string maxChunkSize;
+            std::string maxChunks;
+            std::string idleTimeoutMs;
+            std::string absoluteTimeoutMs;
+            std::string availableBytes;
+            std::string reserveBytes;
+            std::string availableForNewUploadsBytes;
+            std::string reservedBySessionsBytes;
+            std::string activeSessions;
+            std::string maxEncodedImageBytes;
+            std::string maxImagePixels;
+            bool resumable{true};
+            bool persistentAcrossRestart{false};
+            friend void to_json(nlohmann::json& j, const ResData& v);
+            friend void from_json(const nlohmann::json& j, ResData& v);
+        } resData;
+    };
+
+    void to_json(nlohmann::json& j, const MsgUploadCapabilitiesSend& v);
+    void from_json(const nlohmann::json& j, MsgUploadCapabilitiesSend& v);
 
     struct MsgGetConfigRecv : public MsgRecvHead {
         std::string modelCode;

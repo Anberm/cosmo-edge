@@ -61,6 +61,23 @@ TEST_CASE("PathUtil: GetUploadPath returns non-empty", "[path-util]") {
     REQUIRE(!upload.empty());
 }
 
+TEST_CASE("PathUtil: Init preserves resumable sessions and removes transient uploads",
+          "[path-util][upload][restart]") {
+    TestPathFixture fix;
+    const std::filesystem::path upload_root = GetUploadPath();
+    const auto session_marker               = upload_root / "sessions" / "session-id" / ".session.json";
+    const auto transient_file               = upload_root / "request-spool" / "chunk.bin";
+    std::filesystem::create_directories(session_marker.parent_path());
+    std::filesystem::create_directories(transient_file.parent_path());
+    std::ofstream(session_marker) << "{}";
+    std::ofstream(transient_file) << "temporary";
+
+    Init();
+
+    CHECK(std::filesystem::exists(session_marker));
+    CHECK_FALSE(std::filesystem::exists(transient_file.parent_path()));
+}
+
 TEST_CASE("PathUtil: GetUploadTmpPath creates an owner-only directory", "[path-util][security]") {
     TestPathFixture fix;
     const auto upload_tmp = GetUploadTmpPath();

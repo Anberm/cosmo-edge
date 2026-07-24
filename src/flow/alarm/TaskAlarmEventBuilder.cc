@@ -269,6 +269,7 @@ void TaskAlarm::DispatchAlarmEvent(CMsgOnEventsReq& eventData) {
     std::string fullPictureWebPath, fullPictureLocalPath;
     std::string detPictureWebPath, detPictureLocalPath;
     std::string origPictureWebPath, origPictureLocalPath;
+    std::string videoWebPath, videoLocalPath;
 
     if (!eventData.fullPicture.empty()) {
         fullPictureWebPath   = (std::filesystem::path(webFilePath) / eventData.fullPicture).string();
@@ -282,11 +283,16 @@ void TaskAlarm::DispatchAlarmEvent(CMsgOnEventsReq& eventData) {
         origPictureWebPath   = (std::filesystem::path(webFilePath) / eventData.orignalPicture).string();
         origPictureLocalPath = (std::filesystem::path(localFilePath) / eventData.orignalPicture).string();
     }
+    if (!eventData.video.empty()) {
+        videoWebPath   = (std::filesystem::path(webFilePath) / (eventData.messageId + "_video.mp4")).string();
+        videoLocalPath = eventData.video;
+    }
 
     // WebSocket push with web paths
     eventData.orignalPicture  = origPictureWebPath;
     eventData.detectedPicture = detPictureWebPath;
     eventData.fullPicture     = fullPictureWebPath;
+    eventData.video           = videoWebPath;
     if (!((OnEventsPropertyType::CountNumber == m_propertyType) ||
           (OnEventsPropertyType::Car == m_propertyType) ||
           (OnEventsPropertyType::People == m_propertyType))) {
@@ -301,6 +307,7 @@ void TaskAlarm::DispatchAlarmEvent(CMsgOnEventsReq& eventData) {
     eventData.orignalPicture  = origPictureLocalPath;
     eventData.detectedPicture = detPictureLocalPath;
     eventData.fullPicture     = fullPictureLocalPath;
+    eventData.video           = videoLocalPath;
     if (OnEventsPropertyType::Face == m_propertyType) {
         if (!eventData.property.face.image.empty()) {
             eventData.property.face.image = eventData.detectedPicture;

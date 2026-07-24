@@ -154,8 +154,7 @@ import { t, localeColon } from '@/i18n'
 import { resolveResourceAlgorithmRemark, resolveResourceAlgorithmName } from '@/utils/i18nResource'
 import {
   uploadFileInChunks,
-  UploadPurpose,
-  UPLOAD_MAX_TOTAL_SIZE
+  UploadPurpose
 } from '@/utils/chunkUpload'
 
 export default {
@@ -720,11 +719,6 @@ export default {
         this.$message.error(t('api.error.UpLoadDataEmpty'))
         throw new RangeError(t('api.error.UpLoadDataEmpty'))
       }
-      if (params.file.size > UPLOAD_MAX_TOTAL_SIZE) {
-        this.$message.error(t('validate.fileMaxSize', { n: 500 }))
-        throw new RangeError(t('validate.fileMaxSize', { n: 500 }))
-      }
-
       this.uploadAlgorithmicLoading = true
       let stagedUpload
       try {
@@ -733,6 +727,7 @@ export default {
             purpose: UploadPurpose.ALGORITHM,
             uploadChunk: formData => this.$API.uploadAtomicModelTemp(formData),
             cancelUpload: data => this.$API.cancelAtomicModelUpload(data),
+            getCapabilities: () => this.$API.getUploadCapabilities(),
             onProgress: progress => {
               if (typeof params.onProgress === 'function') {
                 params.onProgress({ percent: progress.percent })
@@ -740,7 +735,7 @@ export default {
             }
           })
           if (!stagedUpload.uploadId) {
-            throw new Error(t('validate.cannotGetFilePath'))
+            throw new Error(t('validate.missingUploadId'))
           }
           await this.$API.boxAlgorithmUpload({
             uploadId: stagedUpload.uploadId

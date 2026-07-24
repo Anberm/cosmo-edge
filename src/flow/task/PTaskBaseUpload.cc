@@ -366,8 +366,9 @@ util::ErrorEnum PTaskBase::TaskDetectPic(PTaskElementPtr task, MsgPTaskDetectPic
 
     AlgDataPtr algData                                  = std::make_shared<AlgData>();
     std::pair<util::ErrorEnum, VideoFramePtr> imageData = {util::ErrorEnum::Success, nullptr};
-    if (!inData.imageBase64.empty()) {
-        auto vecPicBin = std::move(util::DecBase64Vec(inData.imageBase64));
+    if (!inData.imageData.empty() || !inData.imageBase64.empty()) {
+        auto vecPicBin = inData.imageData.empty() ? std::move(util::DecBase64Vec(inData.imageBase64))
+                                                  : std::move(inData.imageData);
         if (vecPicBin.empty()) {
             imageData = {util::ErrorEnum::ImageContentDecryptionFailed, nullptr};
         } else {

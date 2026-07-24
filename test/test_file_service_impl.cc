@@ -2,24 +2,112 @@
 /*
  * test_file_service_impl.cc — FileServiceImpl unit tests (DEBT-T01)
  *
- * Strategy: Test pure logic paths only (construction, URL retrieval).
- * Network-dependent operations (upload/download) cannot be tested without
- * a file server, so they are skipped.
+ * Strategy: Keep external platform services mocked, and use a one-shot
+ * loopback HTTP server for deterministic transfer-boundary coverage.
  */
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <future>
+#include <string>
+#include <thread>
 
 #include "mock/MockServiceRegistry.h"
+#include "network/http/HttpRequest.h"
 #include "network/http/HttpRequestHandler.h"
 #include "service/path/impl/FileServiceImpl.h"
 #include "util/FileUtil.h"
 #include "util/PathUtil.h"
 
 using namespace cosmo::service;
+
+namespace {
+
+int OpenLoopbackServer(std::uint16_t& port) {
+    const int server = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (server < 0) {
+        return -1;
+    }
+    int reuse = 1;
+    if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
+        close(server);
+        return -1;
+    }
+    sockaddr_in address{};
+    address.sin_family      = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port        = 0;
+    if (bind(server, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
+        listen(server, 1) != 0) {
+        close(server);
+        return -1;
+    }
+    socklen_t address_size = sizeof(address);
+    if (getsockname(server, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+        close(server);
+        return -1;
+    }
+    port = ntohs(address.sin_port);
+    return server;
+}
+
+bool SendAll(int socket, const char* data, std::size_t size) {
+    std::size_t sent = 0;
+    while (sent < size) {
+        const auto result = send(socket, data + sent, size - sent, MSG_NOSIGNAL);
+        if (result <= 0) {
+            return false;
+        }
+        sent += static_cast<std::size_t>(result);
+    }
+    return true;
+}
+
+bool ServeHttpBodyOnce(int server, std::size_t body_size, char fill) {
+    const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
+    if (client < 0) {
+        close(server);
+        return false;
+    }
+
+    std::string request;
+    std::array<char, 4096> request_buffer{};
+    while (request.find("\r\n\r\n") == std::string::npos && request.size() < 64 * 1024) {
+        const auto received = recv(client, request_buffer.data(), request_buffer.size(), 0);
+        if (received <= 0) {
+            close(client);
+            close(server);
+            return false;
+        }
+        request.append(request_buffer.data(), static_cast<std::size_t>(received));
+    }
+
+    const auto header =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+        "Content-Length: " +
+        std::to_string(body_size) + "\r\nConnection: close\r\n\r\n";
+    bool success = SendAll(client, header.data(), header.size());
+    std::array<char, 64 * 1024> body_buffer{};
+    body_buffer.fill(fill);
+    std::size_t remaining = body_size;
+    while (success && remaining > 0) {
+        const auto bytes = std::min(remaining, body_buffer.size());
+        success          = SendAll(client, body_buffer.data(), bytes);
+        remaining -= bytes;
+    }
+    shutdown(client, SHUT_RDWR);
+    close(client);
+    close(server);
+    return success;
+}
+
+}  // namespace
 
 TEST_CASE("FileServiceImpl: construction and destruction", "[FileService]") {
     REQUIRE_NOTHROW([]() {
@@ -169,4 +257,57 @@ TEST_CASE("FileServiceImpl: download rejects non-HTTP URLs and clears stale outp
     std::vector<uint8_t> data{1, 2, 3};
     REQUIRE_FALSE(sut.DownloadFile("file:///etc/passwd", data));
     REQUIRE(data.empty());
+}
+
+TEST_CASE("FileServiceImpl: resource budget permits HTTP images beyond the legacy 16 MiB cap",
+          "[FileService][http][boundary]") {
+    constexpr std::size_t kBodySize = 17U * 1024 * 1024 + 123;
+    std::uint16_t port              = 0;
+    const int server                = OpenLoopbackServer(port);
+    REQUIRE(server >= 0);
+
+    std::atomic<bool> served{false};
+    std::thread server_thread(
+        [&]() { served.store(ServeHttpBodyOnce(server, kBodySize, 'I'), std::memory_order_release); });
+    FileServiceImpl sut;
+    std::vector<std::uint8_t> data;
+    const bool downloaded =
+        sut.DownloadFile("http://127.0.0.1:" + std::to_string(port) + "/large-image", data);
+    server_thread.join();
+
+    REQUIRE(served.load(std::memory_order_acquire));
+    REQUIRE(downloaded);
+    REQUIRE(data.size() == kBodySize);
+    REQUIRE(data.front() == static_cast<std::uint8_t>('I'));
+    REQUIRE(data.back() == static_cast<std::uint8_t>('I'));
+}
+
+TEST_CASE("HttpFileHandler: HTTP video-sized responses stream to disk beyond 16 MiB",
+          "[FileService][http][streaming]") {
+    constexpr std::size_t kBodySize = 32U * 1024 * 1024 + 321;
+    std::uint16_t port              = 0;
+    const int server                = OpenLoopbackServer(port);
+    REQUIRE(server >= 0);
+
+    const auto output =
+        std::filesystem::path("/tmp") / ("cosmo-http-video-" + std::to_string(getpid()) + ".mp4");
+    std::error_code error;
+    std::filesystem::remove(output, error);
+    std::atomic<bool> served{false};
+    std::thread server_thread(
+        [&]() { served.store(ServeHttpBodyOnce(server, kBodySize, 'V'), std::memory_order_release); });
+
+    cosmo::network::http::HttpFileHandler handler(output.string());
+    cosmo::network::http::HttpRequest request("http://127.0.0.1:" + std::to_string(port) + "/large-video",
+                                              &handler);
+    request.SetTimeout(30);
+    const auto status = request.Submit(cosmo::network::http::HttpRequestMethod::kGet);
+    handler.Flush();
+    server_thread.join();
+
+    REQUIRE(served.load(std::memory_order_acquire));
+    REQUIRE(static_cast<int>(status) == 200);
+    REQUIRE(std::filesystem::file_size(output, error) == kBodySize);
+    REQUIRE_FALSE(error);
+    std::filesystem::remove(output, error);
 }

@@ -62,7 +62,10 @@ struct MsgPTaskDetectPicRecv : public MsgRecvHead {
     std::string algorithmCode;  // Algorithm code
     std::string imageBase64;    // Picture base64
     std::string imageUrl;       // Picture URL
-    bool needRetImg{true};      // Need overlay picture
+    std::string uploadId;       // Authenticated staged image ID (HTTP)
+    // Populated only by authenticated HTTP dispatch; omitted from JSON.
+    std::vector<std::uint8_t> imageData;
+    bool needRetImg{true};  // Need overlay picture
 
     MsgTaskConfig taskConfig;
 };

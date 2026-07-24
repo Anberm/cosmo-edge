@@ -121,6 +121,20 @@ Check the logs:
 /data/cwaiuserdata/log/logs
 ```
 
+## Upgrade Page Keeps Waiting
+
+The device goes offline during an upgrade. The page waits for a new Linux `bootId` and stops the UI wait after 15 minutes. If reboot clears the login session, the page returns to login only after it observed an offline interval and the recovered service answers at the authentication boundary. This UI timeout does not cancel the device-side upgrade; verify the software version after signing in again.
+
+On a Sophon device, inspect:
+
+```bash
+systemctl status cosmo --no-pager -l
+journalctl -u cosmo -b --no-pager -n 200
+stat -c '%F %a %U:%G %n' /data/cwaiuserdata/upload/sessions
+```
+
+Normally `cosmo.service` is `active (running)` and the staging root is a real directory with mode `0700`. A fatal initialization exception exits non-zero so `Restart=on-failure` can retry. Do not bypass the checks by recursively widening permissions on all of `/data/cwaiuserdata`.
+
 ## Documentation Site Build Fails
 
 First install dependencies:

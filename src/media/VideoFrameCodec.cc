@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "bmcv_api_ext.h"
+#include "media/EncodedImageInfo.h"
 #include "media/PixelFormatUtils.h"
 #include "media/VideoFrameProcSophon.h"
 #include "util/Log.h"
@@ -90,6 +91,11 @@ namespace media {
     VideoFramePtr VideoFrameProcSophon::DecodeJpeg(const std::vector<u_int8_t>& data) {
         if (data.empty()) {
             LOG_ERRO("{}", "DecodeJpeg() - empty data");
+            return nullptr;
+        }
+        EncodedImageInfo image_info;
+        if (!InspectEncodedImage(data, image_info) || !IsEncodedImageWithinFrameCapability(image_info)) {
+            LOG_WARN("{}", "DecodeJpeg() - invalid or unsupported encoded dimensions");
             return nullptr;
         }
 

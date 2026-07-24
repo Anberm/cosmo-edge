@@ -57,6 +57,10 @@ struct MsgConditionLib {
     util::String<0, 32> personName;
     std::vector<std::string> retainPictureId;
     std::vector<std::string> pictureBase64;
+    std::vector<std::string> pictureUploadIds;
+    // Populated only by authenticated HTTP dispatch after staged uploads are
+    // claimed. Deliberately omitted from JSON serialization.
+    std::vector<std::vector<std::uint8_t>> pictureData;
     util::String<0, 50> serialNumber;
     int64_t createTime{0};
     int64_t updateTime{0};

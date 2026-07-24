@@ -158,7 +158,7 @@ void LogInit(const std::string& name, const std::string& basedir, const std::str
     cosmo::log::SetPrintLevel(LOG_LEVEL_INFO);
 }
 
-void Application::run(const char* base_dir) {
+int Application::run(const char* base_dir) {
     // DeviceContext must outlive all services — created before SwDeviceInit,
     // destroyed after SwDeviceDestroy. Declared here (not constructed) so the
     // teardown after the catch still sees it; construction moved inside try so a
@@ -166,6 +166,7 @@ void Application::run(const char* base_dir) {
     // std::terminate.
     std::unique_ptr<cosmo::mem::DeviceContext> device_ctx;
     std::unique_ptr<ShutdownSignalMonitor> shutdown_signals;
+    int exit_code = EXIT_SUCCESS;
 
     try {
         // Block process termination signals before any service creates worker
@@ -201,7 +202,11 @@ void Application::run(const char* base_dir) {
         SwDeviceRun();
 
     } catch (const std::exception& ex) {
+        exit_code = EXIT_FAILURE;
         LOG_ERRO("ERROR Exit! [{}]", ex.what());
+    } catch (...) {
+        exit_code = EXIT_FAILURE;
+        LOG_ERRO("{}", "ERROR Exit! [unknown fatal exception]");
     }
 
     if (shutdown_signals) {
@@ -217,6 +222,7 @@ void Application::run(const char* base_dir) {
     LOG_INFO("{} Version:{} Quit", cosmo::util::GetProgramDesc(), cosmo::util::GetAbbrVersion());
 
     cosmo::log::LogShutDown();
+    return exit_code;
 }
 
 }  // namespace cosmo::app

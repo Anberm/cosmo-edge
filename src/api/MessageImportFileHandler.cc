@@ -2,7 +2,6 @@
 
 #include "api/MessageImportFileHandler.h"
 
-#include <charconv>
 #include <exception>
 #include <filesystem>
 #include <utility>
@@ -19,23 +18,7 @@
 namespace cosmo {
 namespace fs = std::filesystem;
 
-static constexpr const char* kTag            = "ImportFileHandler";
-static constexpr int64_t kMaxImportFileBytes = 500LL * 1024 * 1024;  // 500 MB
-
-namespace {
-
-    /// Parse content-length string to int64_t safely.  Returns -1 on failure.
-    int64_t ParseContentLength(const std::string& s) {
-        if (s.empty())
-            return -1;
-        int64_t value  = 0;
-        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);
-        if (ec != std::errc{} || ptr != s.data() + s.size())
-            return -1;
-        return value;
-    }
-
-}  // namespace
+static constexpr const char* kTag = "ImportFileHandler";
 
 service::MsgImportFileSend MessageImportFileHandler::Handle(service::MsgImportFileRecv&& data,
                                                             std::error_condition& errc) {
@@ -44,10 +27,6 @@ service::MsgImportFileSend MessageImportFileHandler::Handle(service::MsgImportFi
     if (data.importType == 1) {
         // Upgrade — not implemented
     } else if (data.importType == 2) {
-        auto content_len = ParseContentLength(data.contentLength);
-        if (content_len > kMaxImportFileBytes) {
-            throw util::ErrorMessage(util::ErrorEnum::ParameterException, "File size cannot exceed 500MB");
-        }
         service::ServiceRegistry::Instance().Get<service::IFaceImport>().ImportFile(data.filePath,
                                                                                     data.faceLibId);
     } else if (data.importType == 3) {
@@ -55,10 +34,6 @@ service::MsgImportFileSend MessageImportFileHandler::Handle(service::MsgImportFi
     } else if (data.importType == 4) {
         // Object import — not implemented
     } else if (data.importType == 5) {
-        auto content_len = ParseContentLength(data.contentLength);
-        if (content_len > kMaxImportFileBytes) {
-            throw util::ErrorMessage(util::ErrorEnum::ParameterException, "File size cannot exceed 500MB");
-        }
         std::error_code err;
         auto& audio_svc = service::ServiceRegistry::Instance().Get<service::IAudioService>();
         if (audio_svc.AudioFileCount() >= audio_svc.AudioFileMaxCount()) {

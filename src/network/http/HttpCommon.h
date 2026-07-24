@@ -89,6 +89,7 @@ struct HttpReqTask : cosmo::MsgTask {
     std::string x_forwarded_for;
     std::string mtk;
     std::string principal;
+    std::string range_request;
     std::string body;
     bool has_tmp_path{false};
     std::string tmp_file_path;
@@ -110,6 +111,8 @@ struct HttpAckTask : cosmo::MsgTask {
     std::string request_id;
     std::string file_path;
     std::string file_name;
+    std::string range_request;
+    bool delete_file_after_send{false};
 
     explicit HttpAckTask(int ack_code, HttpRequestToken token, std::string response_body,
                          std::string response_request_id)
@@ -117,6 +120,8 @@ struct HttpAckTask : cosmo::MsgTask {
           request_token(token),
           response(std::move(response_body)),
           request_id(std::move(response_request_id)) {}
+
+    ~HttpAckTask() override;
 };
 
 // Callback configuration for path resolution (injected from service layer)

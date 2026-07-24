@@ -33,6 +33,33 @@ namespace detail {
         resMsg.msgCode    = std::to_string(errc.value());
         resMsg.messageKey = "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
         resMsg.msgText    = e.what();
+        if (const auto* resource_error = dynamic_cast<const util::ResourceLimitError*>(&e)) {
+            resMsg.msgCode                = "STORAGE_RESERVE_REACHED";
+            resMsg.messageKey             = "api.error.storageReserveReached";
+            resMsg.details.resource       = resource_error->Resource();
+            resMsg.details.purpose        = resource_error->Purpose();
+            resMsg.details.requiredBytes  = resource_error->RequiredBytes();
+            resMsg.details.availableBytes = resource_error->AvailableBytes();
+            resMsg.details.reserveBytes   = resource_error->ReserveBytes();
+            resMsg.retryable              = true;
+            resMsg.recommendedAction      = "FREE_DISK_SPACE";
+        } else if (const auto* image_error = dynamic_cast<const util::ImageInputLimitError*>(&e)) {
+            resMsg.msgCode             = "IMAGE_INPUT_TOO_LARGE";
+            resMsg.messageKey          = "api.error.imageInputTooLarge";
+            resMsg.details.resource    = "encoded-image";
+            resMsg.details.purpose     = "image";
+            resMsg.details.actualBytes = image_error->ActualBytes();
+            resMsg.details.limitBytes  = image_error->LimitBytes();
+            resMsg.recommendedAction   = "RESIZE_OR_RECOMPRESS_IMAGE";
+        } else if (const auto* resolution_error = dynamic_cast<const util::ImageResolutionLimitError*>(&e)) {
+            resMsg.msgCode             = "IMAGE_RESOLUTION_TOO_LARGE";
+            resMsg.messageKey          = "api.error.imageResolutionTooLarge";
+            resMsg.details.resource    = "decoded-image";
+            resMsg.details.purpose     = "image";
+            resMsg.details.actualCount = resolution_error->ActualPixels();
+            resMsg.details.limitCount  = resolution_error->LimitPixels();
+            resMsg.recommendedAction   = "RESIZE_IMAGE";
+        }
         retData.resMsg.push_back(resMsg);
         return nlohmann::json(retData).dump();
     }
@@ -88,12 +115,14 @@ namespace detail {
                 ret.resMsg.push_back(resMsg);
             } else {
                 ret.resCode = kServerRspFailed;
-                MsgResBase resMsg;
-                resMsg.msgCode = std::to_string(errc.value());
-                resMsg.messageKey =
-                    "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
-                resMsg.msgText = errc.message();
-                ret.resMsg.push_back(resMsg);
+                if (ret.resMsg.empty()) {
+                    MsgResBase resMsg;
+                    resMsg.msgCode = std::to_string(errc.value());
+                    resMsg.messageKey =
+                        "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
+                    resMsg.msgText = errc.message();
+                    ret.resMsg.push_back(resMsg);
+                }
             }
             return nlohmann::json(ret).dump(-1, ' ', false, nlohmann::json::error_handler_t::ignore);
         } catch (const nlohmann::json::exception& e) {
@@ -128,12 +157,14 @@ namespace detail {
                 ret.resMsg.push_back(resMsg);
             } else {
                 ret.resCode = kServerRspFailed;
-                MsgResBase resMsg;
-                resMsg.msgCode = std::to_string(errc.value());
-                resMsg.messageKey =
-                    "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
-                resMsg.msgText = errc.message();
-                ret.resMsg.push_back(resMsg);
+                if (ret.resMsg.empty()) {
+                    MsgResBase resMsg;
+                    resMsg.msgCode = std::to_string(errc.value());
+                    resMsg.messageKey =
+                        "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(errc.value()));
+                    resMsg.msgText = errc.message();
+                    ret.resMsg.push_back(resMsg);
+                }
             }
             return nlohmann::json(ret).dump(-1, ' ', false, nlohmann::json::error_handler_t::ignore);
         } catch (const nlohmann::json::exception& e) {
@@ -174,3 +205,13 @@ namespace detail {
                                            return detail::DispatchJson<Msg##X##Send, Msg##X##Recv>(          \
                                                GetMessageFrom(), *handler_, jsonStr, errc);                  \
                                        }}
+
+#define ROUTE_CORE_CONTEXT(url, auth, X)                                                                     \
+    url_map_[util::ToLower(url #X)] = {                                                                      \
+        auth,                                                                                                \
+        {},                                                                                                  \
+        [this](const RequestDispatchContext& context, const std::string& jsonStr,                            \
+               std::error_condition& errc) {                                                                 \
+            return detail::DispatchJsonWithContext<Msg##X##Send, Msg##X##Recv>(GetMessageFrom(), *handler_,  \
+                                                                               context, jsonStr, errc);      \
+        }}

@@ -121,6 +121,20 @@ ${INSTALLPATH}/scripts/run_start.sh
 /data/cwaiuserdata/log/logs
 ```
 
+## 软件升级后页面一直等待
+
+升级期间设备会离线，页面会等待新的 Linux `bootId`，最长显示 15 分钟。如果重启清空登录会话，页面会在“已观察到离线”且新服务返回鉴权响应后进入登录页。这个交互超时不会取消设备端升级；重新登录后仍需核对软件版本。
+
+在 Sophon 设备上检查：
+
+```bash
+systemctl status cosmo --no-pager -l
+journalctl -u cosmo -b --no-pager -n 200
+stat -c '%F %a %U:%G %n' /data/cwaiuserdata/upload/sessions
+```
+
+正常情况下 `cosmo.service` 应为 `active (running)`，暂存根目录应是真实目录并保持 `0700`。如果启动日志出现致命初始化异常，进程会返回非零状态并由 `Restart=on-failure` 重试。不要通过递归放宽整个 `/data/cwaiuserdata` 的权限来规避检查。
+
 ## 文档站构建失败
 
 先安装依赖：

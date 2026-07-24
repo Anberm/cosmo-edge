@@ -88,7 +88,7 @@ void MsgHanderThread::ProcessHttpReqTask(HttpReqTask& task) {
         LOG_INFO("{} Receive uri:{}, body: {}", Name(), uri, task.body);
     }
 
-    std::string response;
+    RequestDispatchResponse dispatch_response;
 
     if (!handler_->SupportsRoute(uri)) {
         LOG_INFO("{} Handle uri:{} BAD REQUEST", Name(), uri);
@@ -108,20 +108,35 @@ void MsgHanderThread::ProcessHttpReqTask(HttpReqTask& task) {
     context.multipart_file_name = task.multipart_file_name;
     context.multipart_file_size = task.multipart_file_size;
     context.transport           = RequestTransport::kHttp;
-    if (!handler_->DispatchRequest(context, task.body, response)) {
+    if (!handler_->DispatchRequestResponse(context, task.body, dispatch_response)) {
         LOG_INFO("{} Handle uri:{} With {} Ms Rsp: MV_HTTP_NEED_AUTHENTICATE", Name(), uri,
                  chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - task.request_time)
                      .count());
-        SendHttpAck(HttpResponseCode::kNeedAuthenticate, task.request_token, std::move(response),
-                    std::move(request_id));
+        SendHttpAck(HttpResponseCode::kNeedAuthenticate, task.request_token,
+                    std::move(dispatch_response.body), std::move(request_id));
+        return;
+    }
+
+    if (!dispatch_response.file_path.empty()) {
+        auto ack_task =
+            std::make_unique<HttpAckTask>(static_cast<int>(HttpResponseCode::kOk), task.request_token,
+                                          std::string{}, std::move(request_id));
+        ack_task->file_path              = std::move(dispatch_response.file_path);
+        ack_task->file_name              = std::move(dispatch_response.file_name);
+        ack_task->range_request          = task.range_request;
+        ack_task->delete_file_after_send = dispatch_response.delete_file_after_send;
+        LOG_INFO("{} Handle {} file:{}", Name(), uri, ack_task->file_name);
+        cosmo::MsgEnvelope msg(static_cast<int>(InnerMsgId::kHttpOctetAck), std::move(ack_task));
+        server_->Put(std::move(msg));
         return;
     }
 
     LOG_INFO(
         "{} Handle uri:{} With {} Ms Rsp: {:.4096}{}", Name(), uri,
         chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - task.request_time).count(),
-        response, response.size() > 4096 ? " ..." : "");
-    SendHttpAck(HttpResponseCode::kOk, task.request_token, std::move(response), std::move(request_id));
+        dispatch_response.body, dispatch_response.body.size() > 4096 ? " ..." : "");
+    SendHttpAck(HttpResponseCode::kOk, task.request_token, std::move(dispatch_response.body),
+                std::move(request_id));
 }
 
 void MsgHanderThread::SendHttpAck(HttpResponseCode code, HttpRequestToken request_token, std::string response,
@@ -176,8 +191,9 @@ void MsgHanderThread::ProcessHttpOctetReqTask(HttpReqTask& task) {
 
     auto ackTask = std::make_unique<HttpAckTask>(static_cast<int>(HttpResponseCode::kOk), task.request_token,
                                                  std::move(response), std::move(request_id));
-    ackTask->file_name = file_name;
-    ackTask->file_path = std::move(resolved_path);
+    ackTask->file_name     = file_name;
+    ackTask->file_path     = std::move(resolved_path);
+    ackTask->range_request = task.range_request;
     LOG_INFO("{} Handle {} interface:{}", Name(), uri, ackTask->file_name);
     cosmo::MsgEnvelope msg(static_cast<int>(InnerMsgId::kHttpOctetAck), std::move(ackTask));
     server_->Put(std::move(msg));

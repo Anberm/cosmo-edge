@@ -44,13 +44,14 @@ void from_json(const nlohmann::json& j, MsgConditionEvent& v) {
 }
 
 void to_json(nlohmann::json& j, const MsgConditionLib& v) {
-    j["personOperation"] = v.personOperation;
-    j["faceLibId"]       = v.faceLibId;
-    j["personId"]        = v.personId;
-    j["personName"]      = v.personName;
-    j["pictureBase64"]   = v.pictureBase64;
-    j["retainPictureId"] = v.retainPictureId;
-    j["serialNumber"]    = v.serialNumber;
+    j["personOperation"]  = v.personOperation;
+    j["faceLibId"]        = v.faceLibId;
+    j["personId"]         = v.personId;
+    j["personName"]       = v.personName;
+    j["pictureBase64"]    = v.pictureBase64;
+    j["pictureUploadIds"] = v.pictureUploadIds;
+    j["retainPictureId"]  = v.retainPictureId;
+    j["serialNumber"]     = v.serialNumber;
 }
 
 void from_json(const nlohmann::json& j, MsgConditionLib& v) {
@@ -59,6 +60,7 @@ void from_json(const nlohmann::json& j, MsgConditionLib& v) {
     JSON_OPT(j, v, personId);
     JSON_OPT(j, v, personName);
     JSON_OPT(j, v, pictureBase64);
+    JSON_OPT(j, v, pictureUploadIds);
     JSON_OPT(j, v, retainPictureId);
     JSON_OPT(j, v, serialNumber);
 }

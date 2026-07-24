@@ -1,11 +1,14 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "catch_amalgamated.hpp"
+#include "media/EncodedImageInfo.h"
 #include "media/PixelFormatUtils.h"
 #include "media/VideoDecoder.h"
 #include "media/VideoFrame.h"
+#include "util/CipherUtil.h"
 #include "util/VideoInfo.h"
 
 #ifdef COSMO_NN_USE_SOPHON_BACKEND
@@ -86,6 +89,40 @@ TEST_CASE("Frame size calculation rejects unsafe dimensions", "[video-frame-safe
     const auto i420_size = PixelFormatUtils::CalculateFrameSize(1920, 1080, PixelFormat::PIXEL_I420);
     REQUIRE(i420_size);
     REQUIRE(*i420_size == 3110400);
+}
+
+TEST_CASE("Encoded image headers are checked before decoded-frame allocation",
+          "[video-frame-safety][image]") {
+    const auto one_pixel_png = util::DecBase64Vec(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+        "x8AAusB9Y9Zl1sAAAAASUVORK5CYII=");
+    EncodedImageInfo info;
+    REQUIRE(InspectEncodedImage(one_pixel_png, info));
+    CHECK(info.width == 1);
+    CHECK(info.height == 1);
+    CHECK(info.pixel_count == 1);
+    CHECK(IsEncodedImageWithinFrameCapability(info));
+
+    std::vector<std::uint8_t> oversized_bmp(54, 0);
+    oversized_bmp[0]  = 'B';
+    oversized_bmp[1]  = 'M';
+    oversized_bmp[2]  = 54;
+    oversized_bmp[10] = 54;
+    oversized_bmp[14] = 40;
+    // BITMAPINFOHEADER width=8000, height=8000, planes=1, bpp=24.
+    oversized_bmp[18] = 0x40;
+    oversized_bmp[19] = 0x1f;
+    oversized_bmp[22] = 0x40;
+    oversized_bmp[23] = 0x1f;
+    oversized_bmp[26] = 1;
+    oversized_bmp[28] = 24;
+
+    REQUIRE(InspectEncodedImage(oversized_bmp, info));
+    CHECK(info.pixel_count == 64'000'000);
+    CHECK_FALSE(IsEncodedImageWithinFrameCapability(info));
+    CHECK(info.pixel_count > MaxDecodedImagePixels());
+
+    CHECK_FALSE(InspectEncodedImage({0, 1, 2, 3}, info));
 }
 
 TEST_CASE("VideoFrame rejects unsafe dimensions before allocation", "[video-frame-safety]") {

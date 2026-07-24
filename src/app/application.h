@@ -8,7 +8,9 @@ public:
     explicit Application(std::string name);
     ~Application() = default;
 
-    void run(const char* base_dir);
+    // Returns EXIT_SUCCESS after an intentional shutdown and EXIT_FAILURE when
+    // initialization or the serving loop terminates with a fatal exception.
+    int run(const char* base_dir);
 
 private:
     std::string app_name_;

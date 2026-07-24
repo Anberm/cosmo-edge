@@ -29,6 +29,16 @@ void from_json(const nlohmann::json& j, MsgQueryHardwareResourceSend& v) {
     JSON_OPT(j, v, resData);
 }
 
+void to_json(nlohmann::json& j, const MsgQueryDeviceStatusSend& v) {
+    to_json(j, static_cast<const MsgSendHead&>(v));
+    j["resData"] = v.resData;
+}
+
+void from_json(const nlohmann::json& j, MsgQueryDeviceStatusSend& v) {
+    from_json(j, static_cast<MsgSendHead&>(v));
+    JSON_OPT(j, v, resData);
+}
+
 void from_json(const nlohmann::json& j, MsgQueryDeviceInfoSend::ResData& v) {
     JSON_OPT(j, v, devInfoList);
 }
@@ -65,6 +75,16 @@ void to_json(nlohmann::json& j, const MsgQueryHardwareResourceSend::ResData& v) 
     j["customScore"] = v.customScore;
     j["itemList"]    = v.itemList;
     j["accelerator"] = v.accelerator;
+}
+
+void from_json(const nlohmann::json& j, MsgQueryDeviceStatusSend::ResData& v) {
+    JSON_OPT(j, v, bootId);
+    JSON_OPT(j, v, softwareVersion);
+}
+
+void to_json(nlohmann::json& j, const MsgQueryDeviceStatusSend::ResData& v) {
+    j["bootId"]          = v.bootId;
+    j["softwareVersion"] = v.softwareVersion;
 }
 
 }  // namespace cosmo::System

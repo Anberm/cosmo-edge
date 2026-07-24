@@ -136,6 +136,12 @@ const system = {
       url: '/gtw/cwai/System/QueryDeviceStatus',
       method: 'post',
       data,
+      // Recovery probes must fail quickly while the device is rebooting.
+      timeout: 5000,
+      // A reboot may invalidate the in-memory login session. Let the upgrade
+      // workflow interpret that response after it has observed the device
+      // offline instead of showing a generic login-expired error.
+      suppressAuthRedirect: true,
     })
   },
   // 重启，恢复出厂设置

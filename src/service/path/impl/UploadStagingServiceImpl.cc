@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "cryptopp/sha.h"
+#include "nlohmann/json.hpp"
 #include "util/Log.h"
 #include "util/PathUtil.h"
 #include "util/UuidUtil.h"
@@ -33,14 +34,32 @@ namespace fs = std::filesystem;
 namespace cosmo::service {
 namespace {
 
-    constexpr mode_t kPrivateFileMode   = 0600;
-    constexpr mode_t kCompletedFileMode = 0400;
+    constexpr mode_t kPrivateFileMode        = 0600;
+    constexpr mode_t kCompletedFileMode      = 0400;
+    constexpr const char* kManifestName      = ".session.json";
+    constexpr const char* kManifestTempName  = ".session.json.tmp";
+    constexpr std::uint32_t kManifestVersion = 1;
 
     bool CloseChecked(int fd) {
         if (fd < 0) {
             return true;
         }
         return close(fd) == 0 || errno == EINTR;
+    }
+
+    bool WriteAll(int fd, const std::string& content) {
+        std::size_t offset = 0;
+        while (offset < content.size()) {
+            const auto count = write(fd, content.data() + offset, content.size() - offset);
+            if (count < 0 && errno == EINTR) {
+                continue;
+            }
+            if (count <= 0) {
+                return false;
+            }
+            offset += static_cast<std::size_t>(count);
+        }
+        return true;
     }
 
     class ScopedFd {
@@ -115,6 +134,25 @@ namespace {
     bool SameIdentity(const struct stat& status, std::uint64_t device, std::uint64_t inode) {
         return static_cast<std::uint64_t>(status.st_dev) == device &&
                static_cast<std::uint64_t>(status.st_ino) == inode;
+    }
+
+    bool HasTrustedStagingRootOwner(const fs::path& root_path, const struct stat& root_status) {
+        if (root_status.st_uid == geteuid()) {
+            return true;
+        }
+
+        // Some appliance images normalize the persistent data tree to the
+        // administrative account on every boot while cosmo-engine runs as
+        // root. Accept that inherited owner only when the immediate deployment
+        // parent has the same owner and cannot be modified by group/other
+        // users. The opened root is still forced to 0700 and pinned by
+        // owner/device/inode; session directories and payloads must continue to
+        // be owned by the running service.
+        const auto parent_path = root_path.parent_path();
+        struct stat parent_status {};
+        return !parent_path.empty() && lstat(parent_path.c_str(), &parent_status) == 0 &&
+               S_ISDIR(parent_status.st_mode) && !S_ISLNK(parent_status.st_mode) &&
+               parent_status.st_uid == root_status.st_uid && (parent_status.st_mode & 0022) == 0;
     }
 
     bool IsAsciiAlphaNumeric(unsigned char c) {
@@ -209,19 +247,41 @@ namespace {
         return success;
     }
 
-    std::uint64_t ReservationLimit(const UploadStagingConfig& config, int root_fd) {
-        struct statvfs status {};
-        if (root_fd < 0 || fstatvfs(root_fd, &status) != 0) {
+    std::uint64_t SaturatingMultiply(std::uint64_t lhs, std::uint64_t rhs) {
+        if (lhs == 0 || rhs == 0) {
             return 0;
         }
+        const auto max_value = std::numeric_limits<std::uint64_t>::max();
+        return lhs > max_value / rhs ? max_value : lhs * rhs;
+    }
+
+    struct StorageAdmission {
+        std::uint64_t limit{0};
+        std::uint64_t available{0};
+        std::uint64_t reserve{0};
+    };
+
+    StorageAdmission InspectStorageAdmission(const UploadStagingConfig& config, int root_fd) {
+        struct statvfs status {};
+        if (root_fd < 0 || fstatvfs(root_fd, &status) != 0) {
+            return {};
+        }
         if (status.f_frsize == 0) {
-            return 0;
+            return {};
         }
         const auto max_value = std::numeric_limits<std::uint64_t>::max();
         const auto available = status.f_bavail > max_value / status.f_frsize
                                    ? max_value
                                    : static_cast<std::uint64_t>(status.f_bavail) * status.f_frsize;
-        return std::min(config.max_reserved_bytes, available / 5);
+        const auto capacity  = status.f_blocks > max_value / status.f_frsize
+                                   ? max_value
+                                   : static_cast<std::uint64_t>(status.f_blocks) * status.f_frsize;
+        const auto percent_reserve =
+            SaturatingMultiply(capacity, std::min<std::uint32_t>(config.reserve_free_percent, 100)) / 100;
+        const auto reserve = std::max(config.reserve_free_bytes, percent_reserve);
+        const auto usable  = available > reserve ? available - reserve : 0;
+        return {config.max_reserved_bytes == 0 ? usable : std::min(config.max_reserved_bytes, usable),
+                available, reserve};
     }
 
 }  // namespace
@@ -242,6 +302,8 @@ std::string_view UploadPurposeName(UploadPurpose purpose) {
             return "algorithm";
         case UploadPurpose::kUpgrade:
             return "upgrade";
+        case UploadPurpose::kImage:
+            return "image";
     }
     return {};
 }
@@ -249,7 +311,7 @@ std::string_view UploadPurposeName(UploadPurpose purpose) {
 bool ParseUploadPurpose(std::string_view value, UploadPurpose& purpose) {
     for (auto candidate : {UploadPurpose::kModelComponent, UploadPurpose::kModelArchive,
                            UploadPurpose::kVideo, UploadPurpose::kFaceImport, UploadPurpose::kAudio,
-                           UploadPurpose::kAlgorithm, UploadPurpose::kUpgrade}) {
+                           UploadPurpose::kAlgorithm, UploadPurpose::kUpgrade, UploadPurpose::kImage}) {
         if (value == UploadPurposeName(candidate)) {
             purpose = candidate;
             return true;
@@ -469,10 +531,11 @@ UploadStagingServiceImpl::UploadStagingServiceImpl()
 
 UploadStagingServiceImpl::UploadStagingServiceImpl(UploadStagingConfig config, NowFunction now)
     : config_(std::move(config)), now_(std::move(now)) {
-    if (config_.root_path.empty() || config_.root_path == "/" || config_.max_total_size == 0 ||
-        config_.max_chunk_size == 0 || config_.max_chunks == 0 || config_.max_sessions_per_principal == 0 ||
-        config_.max_sessions == 0 || config_.session_ttl <= std::chrono::milliseconds::zero() ||
-        config_.max_session_lifetime < config_.session_ttl ||
+    if (config_.root_path.empty() || config_.root_path == "/" || config_.max_chunk_size == 0 ||
+        config_.max_session_metadata_bytes < sizeof(ChunkRecord) || config_.reserve_free_percent > 100 ||
+        config_.session_ttl <= std::chrono::milliseconds::zero() ||
+        (config_.max_session_lifetime > std::chrono::milliseconds::zero() &&
+         config_.max_session_lifetime < config_.session_ttl) ||
         config_.cleanup_interval < std::chrono::milliseconds::zero() || !now_) {
         throw std::invalid_argument("invalid upload staging configuration");
     }
@@ -494,17 +557,22 @@ UploadStagingServiceImpl::UploadStagingServiceImpl(UploadStagingConfig config, N
     struct stat root_stat {};
     struct stat root_path_stat {};
     if (root_fd_ < 0 || fstat(root_fd_, &root_stat) != 0 || !S_ISDIR(root_stat.st_mode) ||
-        root_stat.st_uid != geteuid() || lstat(config_.root_path.c_str(), &root_path_stat) != 0 ||
-        !S_ISDIR(root_path_stat.st_mode) || S_ISLNK(root_path_stat.st_mode) ||
-        root_path_stat.st_dev != root_stat.st_dev || root_path_stat.st_ino != root_stat.st_ino ||
-        fchmod(root_fd_, 0700) != 0) {
+        !HasTrustedStagingRootOwner(absolute_root, root_stat) ||
+        lstat(config_.root_path.c_str(), &root_path_stat) != 0 || !S_ISDIR(root_path_stat.st_mode) ||
+        S_ISLNK(root_path_stat.st_mode) || root_path_stat.st_dev != root_stat.st_dev ||
+        root_path_stat.st_ino != root_stat.st_ino || fchmod(root_fd_, 0700) != 0) {
         CloseChecked(root_fd_);
         root_fd_ = -1;
         throw std::runtime_error("cannot securely open upload staging root");
     }
-    root_device_ = static_cast<std::uint64_t>(root_stat.st_dev);
-    root_inode_  = static_cast<std::uint64_t>(root_stat.st_ino);
-    CleanupOrphans();
+    root_owner_uid_ = static_cast<std::uint64_t>(root_stat.st_uid);
+    root_device_    = static_cast<std::uint64_t>(root_stat.st_dev);
+    root_inode_     = static_cast<std::uint64_t>(root_stat.st_ino);
+    if (config_.persist_sessions) {
+        RecoverSessions();
+    } else {
+        CleanupOrphans();
+    }
     try {
         StartCleanupThread();
     } catch (...) {
@@ -520,16 +588,18 @@ UploadStagingServiceImpl::~UploadStagingServiceImpl() {
     {
         std::lock_guard<std::mutex> lock(sessions_mutex_);
         sessions.reserve(sessions_.size() + consuming_sessions_.size());
-        const auto retire_sessions = [&sessions](const SessionMap& session_map) {
+        const auto collect_sessions = [this, &sessions](const SessionMap& session_map) {
             for (const auto& [id, session] : session_map) {
                 (void)id;
                 std::lock_guard<std::mutex> session_lock(session->mutex);
-                session->state = SessionState::kRetired;
+                if (!config_.persist_sessions) {
+                    session->state = SessionState::kRetired;
+                }
                 sessions.push_back(session);
             }
         };
-        retire_sessions(sessions_);
-        retire_sessions(consuming_sessions_);
+        collect_sessions(sessions_);
+        collect_sessions(consuming_sessions_);
         sessions_.clear();
         consuming_sessions_.clear();
         client_request_aliases_.clear();
@@ -537,7 +607,9 @@ UploadStagingServiceImpl::~UploadStagingServiceImpl() {
         active_session_count_ = 0;
         reserved_bytes_       = 0;
     }
-    RemoveSessions(sessions);
+    if (!config_.persist_sessions) {
+        RemoveSessions(sessions);
+    }
     CloseChecked(root_fd_);
     root_fd_ = -1;
 }
@@ -547,13 +619,29 @@ util::ErrorEnum UploadStagingServiceImpl::Begin(const UploadBeginRequest& reques
     CleanupExpired();
 
     std::string original_name;
+    const bool exceeds_file_policy =
+        config_.max_total_size != 0 && request.total_size > config_.max_total_size;
+    const bool exceeds_chunk_policy = config_.max_chunks != 0 && request.total_chunks > config_.max_chunks;
+    const auto metadata_bytes =
+        SaturatingMultiply(request.total_chunks, static_cast<std::uint64_t>(sizeof(ChunkRecord)));
     if (request.principal.empty() || request.principal.size() > 256 || !IsPurposeValid(request.purpose) ||
         !NormalizeOriginalName(request.original_name, original_name) || request.total_size == 0 ||
-        request.total_size > config_.max_total_size || request.total_chunks == 0 ||
-        request.total_chunks > config_.max_chunks || request.total_chunks > request.total_size ||
+        request.total_chunks == 0 || request.total_chunks > request.total_size ||
         !IsSha256Valid(request.sha256) || !IsClientRequestIdValid(request.client_request_id)) {
-        return request.total_size > config_.max_total_size ? util::ErrorEnum::FileSizeBig
-                                                           : util::ErrorEnum::InvalidParam;
+        return util::ErrorEnum::InvalidParam;
+    }
+    if (exceeds_file_policy) {
+        info.admission = {UploadAdmissionFailure::kFilePolicy, request.total_size, config_.max_total_size};
+        return util::ErrorEnum::FileSizeBig;
+    }
+    if (exceeds_chunk_policy) {
+        info.admission = {UploadAdmissionFailure::kChunkPolicy, request.total_chunks, config_.max_chunks};
+        return util::ErrorEnum::ResourceLimit;
+    }
+    if (metadata_bytes > config_.max_session_metadata_bytes) {
+        info.admission = {UploadAdmissionFailure::kMetadataBudget, metadata_bytes,
+                          config_.max_session_metadata_bytes};
+        return util::ErrorEnum::ResourceLimit;
     }
     if (!ValidateRootPath()) {
         return util::ErrorEnum::FileOpenFailed;
@@ -586,16 +674,27 @@ util::ErrorEnum UploadStagingServiceImpl::Begin(const UploadBeginRequest& reques
     }
     const auto count_it        = principal_session_counts_.find(request.principal);
     const auto principal_count = count_it == principal_session_counts_.end() ? 0 : count_it->second;
-    if (active_session_count_ >= config_.max_sessions ||
-        principal_count >= config_.max_sessions_per_principal) {
+    if (config_.max_sessions != 0 && active_session_count_ >= config_.max_sessions) {
+        info.admission = {UploadAdmissionFailure::kGlobalSessions, active_session_count_,
+                          config_.max_sessions};
+        return util::ErrorEnum::ResourceLimit;
+    }
+    if (config_.max_sessions_per_principal != 0 && principal_count >= config_.max_sessions_per_principal) {
+        info.admission = {UploadAdmissionFailure::kPrincipalSessions, principal_count,
+                          config_.max_sessions_per_principal};
         return util::ErrorEnum::ResourceLimit;
     }
     const auto minimum_chunks = (request.total_size - 1) / config_.max_chunk_size + 1;
     if (request.total_chunks < minimum_chunks) {
         return util::ErrorEnum::InvalidParam;
     }
-    const auto reservation_limit = ReservationLimit(config_, root_fd_);
-    if (request.total_size > reservation_limit || reserved_bytes_ > reservation_limit - request.total_size) {
+    const auto storage = InspectStorageAdmission(config_, root_fd_);
+    if (request.total_size > storage.limit || reserved_bytes_ > storage.limit - request.total_size) {
+        info.admission.failure         = UploadAdmissionFailure::kStorageReserve;
+        info.admission.required_bytes  = request.total_size;
+        info.admission.available_bytes = storage.available;
+        info.admission.reserve_bytes   = storage.reserve;
+        info.admission.limit = storage.limit > reserved_bytes_ ? storage.limit - reserved_bytes_ : 0;
         return util::ErrorEnum::ResourceLimit;
     }
 
@@ -669,16 +768,24 @@ util::ErrorEnum UploadStagingServiceImpl::Begin(const UploadBeginRequest& reques
     session->chunks.resize(request.total_chunks);
     const auto created_at        = now_();
     session->expires_at          = created_at + config_.session_ttl;
-    session->absolute_expires_at = created_at + config_.max_session_lifetime;
+    session->absolute_expires_at = config_.max_session_lifetime == std::chrono::milliseconds::zero()
+                                       ? Clock::time_point::max()
+                                       : created_at + config_.max_session_lifetime;
     const auto system_created_at = std::chrono::system_clock::now();
     session->expires_at_unix_ms  = std::chrono::duration_cast<std::chrono::milliseconds>(
                                       (system_created_at + config_.session_ttl).time_since_epoch())
                                       .count();
     session->absolute_expires_at_unix_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            (system_created_at + config_.max_session_lifetime).time_since_epoch())
-            .count();
+        config_.max_session_lifetime == std::chrono::milliseconds::zero()
+            ? 0
+            : std::chrono::duration_cast<std::chrono::milliseconds>(
+                  (system_created_at + config_.max_session_lifetime).time_since_epoch())
+                  .count();
 
+    if (!PersistSession(*session)) {
+        RemoveSessionAt(root_fd_, upload_id, session->session_device, session->session_inode);
+        return util::ErrorEnum::FileOpenFailed;
+    }
     sessions_.emplace(upload_id, session);
     if (!request.client_request_id.empty()) {
         client_request_aliases_.emplace(std::make_pair(request.principal, request.client_request_id),
@@ -740,6 +847,9 @@ util::ErrorEnum UploadStagingServiceImpl::AppendChunk(const std::string& princip
                     return validation_result;
                 }
             }
+            if (!PersistSession(*session)) {
+                return util::ErrorEnum::FileOpenFailed;
+            }
             info = MakeInfo(*session);
             return util::ErrorEnum::Success;
         }
@@ -758,19 +868,44 @@ util::ErrorEnum UploadStagingServiceImpl::AppendChunk(const std::string& princip
     if (!OpenValidatedPayload(*session, O_WRONLY, payload_fd)) {
         return util::ErrorEnum::FileOpenFailed;
     }
+    const auto old_received_size      = session->received_size;
+    const auto old_next_chunk_index   = session->next_chunk_index;
+    const auto old_expires_at         = session->expires_at;
+    const auto old_expires_at_unix_ms = session->expires_at_unix_ms;
     auto result =
         AppendRegularFile(chunk_path, payload_fd, session->received_size, append_limit, copied, chunk_sha256);
-    CloseChecked(payload_fd);
     if (result != util::ErrorEnum::Success) {
+        CloseChecked(payload_fd);
         return result;
     }
     if (copied == 0 || copied > remaining) {
+        const bool rolled_back =
+            ftruncate(payload_fd, static_cast<off_t>(old_received_size)) == 0 && fsync(payload_fd) == 0;
+        CloseChecked(payload_fd);
+        if (!rolled_back) {
+            LOG_ERRO("Failed to roll back invalid upload chunk for session {}", session->upload_id);
+            return util::ErrorEnum::FileOpenFailed;
+        }
         return util::ErrorEnum::FileSizeSmall;
     }
     session->chunks[chunk_index] = ChunkRecord{copied, std::move(chunk_sha256)};
     session->received_size += copied;
     ++session->next_chunk_index;
     RefreshIdleExpiry(*session);
+    if (!PersistSession(*session)) {
+        const bool rolled_back =
+            ftruncate(payload_fd, static_cast<off_t>(old_received_size)) == 0 && fsync(payload_fd) == 0;
+        if (rolled_back) {
+            session->chunks[chunk_index] = {};
+            session->received_size       = old_received_size;
+            session->next_chunk_index    = old_next_chunk_index;
+            session->expires_at          = old_expires_at;
+            session->expires_at_unix_ms  = old_expires_at_unix_ms;
+        }
+        CloseChecked(payload_fd);
+        return util::ErrorEnum::FileOpenFailed;
+    }
+    CloseChecked(payload_fd);
     info = MakeInfo(*session);
     return util::ErrorEnum::Success;
 }
@@ -802,7 +937,10 @@ util::ErrorEnum UploadStagingServiceImpl::Complete(const std::string& principal,
         return validation_result;
     }
     session->state = SessionState::kComplete;
-    info           = MakeInfo(*session);
+    if (!PersistSession(*session)) {
+        return util::ErrorEnum::FileOpenFailed;
+    }
+    info = MakeInfo(*session);
     return util::ErrorEnum::Success;
 }
 
@@ -889,6 +1027,25 @@ util::ErrorEnum UploadStagingServiceImpl::Cancel(const std::string& principal, c
     return util::ErrorEnum::Success;
 }
 
+UploadCapabilities UploadStagingServiceImpl::GetCapabilities() {
+    const auto storage = InspectStorageAdmission(config_, root_fd_);
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    UploadCapabilities capabilities;
+    capabilities.max_total_size      = config_.max_total_size;
+    capabilities.max_chunk_size      = config_.max_chunk_size;
+    capabilities.max_chunks          = config_.max_chunks;
+    capabilities.idle_timeout_ms     = static_cast<std::uint64_t>(config_.session_ttl.count());
+    capabilities.absolute_timeout_ms = static_cast<std::uint64_t>(config_.max_session_lifetime.count());
+    capabilities.available_bytes     = storage.available;
+    capabilities.reserve_bytes       = storage.reserve;
+    capabilities.reserved_by_sessions_bytes = reserved_bytes_;
+    capabilities.available_for_new_uploads_bytes =
+        storage.limit > reserved_bytes_ ? storage.limit - reserved_bytes_ : 0;
+    capabilities.active_sessions           = active_session_count_;
+    capabilities.persistent_across_restart = config_.persist_sessions;
+    return capabilities;
+}
+
 void UploadStagingServiceImpl::CleanupExpired() {
     std::vector<std::shared_ptr<Session>> expired_sessions;
     const auto now = now_();
@@ -928,6 +1085,7 @@ bool UploadStagingServiceImpl::IsPurposeValid(UploadPurpose purpose) {
         case UploadPurpose::kAudio:
         case UploadPurpose::kAlgorithm:
         case UploadPurpose::kUpgrade:
+        case UploadPurpose::kImage:
             return true;
     }
     return false;
@@ -960,6 +1118,9 @@ bool UploadStagingServiceImpl::NormalizeOriginalName(const std::string& input, s
     auto separator = input.find_last_of("/\\");
     output         = input.substr(separator == std::string::npos ? 0 : separator + 1);
     if (output.empty() || output == "." || output == ".." || output.size() > 255) {
+        return false;
+    }
+    if (output == kManifestName || output == kManifestTempName) {
         return false;
     }
     return std::none_of(output.begin(), output.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
@@ -1162,18 +1323,24 @@ bool UploadStagingServiceImpl::ImmutableMetadataMatches(const Session& session,
 }
 
 void UploadStagingServiceImpl::RefreshIdleExpiry(Session& session) const {
-    session.expires_at = std::min(now_() + config_.session_ttl, session.absolute_expires_at);
+    const bool has_absolute_expiry = config_.max_session_lifetime > std::chrono::milliseconds::zero();
+    session.expires_at             = has_absolute_expiry
+                                         ? std::min(now_() + config_.session_ttl, session.absolute_expires_at)
+                                         : now_() + config_.session_ttl;
     const auto refreshed_unix_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             (std::chrono::system_clock::now() + config_.session_ttl).time_since_epoch())
             .count();
-    session.expires_at_unix_ms = std::min(refreshed_unix_ms, session.absolute_expires_at_unix_ms);
+    session.expires_at_unix_ms = has_absolute_expiry
+                                     ? std::min(refreshed_unix_ms, session.absolute_expires_at_unix_ms)
+                                     : refreshed_unix_ms;
 }
 
 bool UploadStagingServiceImpl::ValidateRootPath() const {
     struct stat path_status {};
     return root_fd_ >= 0 && lstat(config_.root_path.c_str(), &path_status) == 0 &&
-           S_ISDIR(path_status.st_mode) && !S_ISLNK(path_status.st_mode) && path_status.st_uid == geteuid() &&
+           S_ISDIR(path_status.st_mode) && !S_ISLNK(path_status.st_mode) &&
+           static_cast<std::uint64_t>(path_status.st_uid) == root_owner_uid_ &&
            (path_status.st_mode & 0077) == 0 && SameIdentity(path_status, root_device_, root_inode_);
 }
 
@@ -1282,6 +1449,9 @@ util::ErrorEnum UploadStagingServiceImpl::ConsumeBatch(const std::string& princi
             if (consuming_it != consuming_sessions_.end()) {
                 sessions_.insert(consuming_sessions_.extract(consuming_it));
             }
+            if (!PersistSession(*session)) {
+                LOG_WARN("Failed to restore upload manifest for {}", session->upload_id);
+            }
         }
         sessions_hidden = false;
     };
@@ -1375,6 +1545,22 @@ util::ErrorEnum UploadStagingServiceImpl::ConsumeBatch(const std::string& princi
             cleanup_root_fds.emplace_back(cleanup_root_fd);
         }
 
+        if (config_.persist_sessions) {
+            std::size_t removed_manifests = 0;
+            for (; removed_manifests < selected_sessions.size(); ++removed_manifests) {
+                if (!RemoveSessionManifest(*selected_sessions[removed_manifests])) {
+                    for (std::size_t i = 0; i <= removed_manifests; ++i) {
+                        if (!PersistSession(*selected_sessions[i])) {
+                            LOG_WARN("Failed to restore upload manifest for {}",
+                                     selected_sessions[i]->upload_id);
+                        }
+                    }
+                    restore_sessions();
+                    return util::ErrorEnum::FileOpenFailed;
+                }
+            }
+        }
+
         sessions_lock.lock();
         for (std::size_t i = 0; i < selected_sessions.size(); ++i) {
             const auto& session = selected_sessions[i];
@@ -1422,6 +1608,421 @@ void UploadStagingServiceImpl::RemoveSessionLocked(const std::shared_ptr<Session
     session->state = SessionState::kRetired;
     sessions_.erase(session->upload_id);
     ReleaseSessionAccountingLocked(session);
+}
+
+bool UploadStagingServiceImpl::PersistSession(const Session& session) const {
+    if (!config_.persist_sessions) {
+        return true;
+    }
+    if (!ValidateRootPath() || !IsUuidLike(session.upload_id)) {
+        return false;
+    }
+
+    const int session_fd =
+        openat(root_fd_, session.upload_id.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (session_fd < 0) {
+        return false;
+    }
+    ScopedFd scoped_session_fd(session_fd);
+    struct stat session_status {};
+    if (fstat(session_fd, &session_status) != 0 || !S_ISDIR(session_status.st_mode) ||
+        session_status.st_uid != geteuid() || (session_status.st_mode & 0077) != 0 ||
+        !SameIdentity(session_status, session.session_device, session.session_inode)) {
+        return false;
+    }
+
+    nlohmann::json chunks = nlohmann::json::array();
+    for (std::uint32_t index = 0; index < session.next_chunk_index; ++index) {
+        const auto& chunk = session.chunks[index];
+        chunks.push_back({{"size", chunk.size}, {"sha256", chunk.sha256}});
+    }
+    const char* state = session.state == SessionState::kOpen ? "open" : "complete";
+    nlohmann::json manifest{
+        {"version", kManifestVersion},
+        {"uploadId", session.upload_id},
+        {"principal", session.principal},
+        {"purpose", std::string(UploadPurposeName(session.purpose))},
+        {"clientRequestId", session.client_request_id},
+        {"originalName", session.original_name},
+        {"sha256", session.sha256},
+        {"verifiedSha256", session.verified_sha256},
+        {"totalSize", session.total_size},
+        {"receivedSize", session.received_size},
+        {"totalChunks", session.total_chunks},
+        {"nextChunkIndex", session.next_chunk_index},
+        {"expiresAtUnixMs", session.expires_at_unix_ms},
+        {"absoluteExpiresAtUnixMs", session.absolute_expires_at_unix_ms},
+        {"state", state},
+        {"chunks", std::move(chunks)},
+    };
+    const auto serialized     = manifest.dump();
+    const auto max_value      = std::numeric_limits<std::uint64_t>::max();
+    const auto manifest_limit = config_.max_session_metadata_bytes > (max_value - 64 * 1024) / 4
+                                    ? max_value
+                                    : config_.max_session_metadata_bytes * 4 + 64 * 1024;
+    if (serialized.empty() || serialized.size() > manifest_limit) {
+        return false;
+    }
+
+    if (unlinkat(session_fd, kManifestTempName, 0) != 0 && errno != ENOENT) {
+        return false;
+    }
+    const int manifest_fd = openat(session_fd, kManifestTempName,
+                                   O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, kPrivateFileMode);
+    if (manifest_fd < 0) {
+        return false;
+    }
+    const bool written = WriteAll(manifest_fd, serialized) && fchmod(manifest_fd, kPrivateFileMode) == 0 &&
+                         fsync(manifest_fd) == 0;
+    const bool closed = CloseChecked(manifest_fd);
+    if (!written || !closed || renameat(session_fd, kManifestTempName, session_fd, kManifestName) != 0 ||
+        fsync(session_fd) != 0) {
+        unlinkat(session_fd, kManifestTempName, 0);
+        return false;
+    }
+    return true;
+}
+
+bool UploadStagingServiceImpl::RemoveSessionManifest(const Session& session) const {
+    if (!config_.persist_sessions) {
+        return true;
+    }
+    if (!ValidateRootPath() || !IsUuidLike(session.upload_id)) {
+        return false;
+    }
+    const int session_fd =
+        openat(root_fd_, session.upload_id.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (session_fd < 0) {
+        return false;
+    }
+    ScopedFd scoped_session_fd(session_fd);
+    struct stat status {};
+    if (fstat(session_fd, &status) != 0 || !S_ISDIR(status.st_mode) ||
+        !SameIdentity(status, session.session_device, session.session_inode)) {
+        return false;
+    }
+    if (unlinkat(session_fd, kManifestName, 0) != 0) {
+        return false;
+    }
+    if (unlinkat(session_fd, kManifestTempName, 0) != 0 && errno != ENOENT) {
+        return false;
+    }
+    return fsync(session_fd) == 0;
+}
+
+std::shared_ptr<UploadStagingServiceImpl::Session> UploadStagingServiceImpl::LoadPersistedSession(
+    const std::string& upload_id, std::uint64_t& session_device, std::uint64_t& session_inode) const {
+    session_device = 0;
+    session_inode  = 0;
+    if (!IsUuidLike(upload_id) || !ValidateRootPath()) {
+        return nullptr;
+    }
+
+    const int session_fd =
+        openat(root_fd_, upload_id.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (session_fd < 0) {
+        return nullptr;
+    }
+    ScopedFd scoped_session_fd(session_fd);
+    struct stat session_status {};
+    if (fstat(session_fd, &session_status) != 0 || !S_ISDIR(session_status.st_mode) ||
+        session_status.st_uid != geteuid() || (session_status.st_mode & 0077) != 0) {
+        return nullptr;
+    }
+    session_device = static_cast<std::uint64_t>(session_status.st_dev);
+    session_inode  = static_cast<std::uint64_t>(session_status.st_ino);
+
+    if (unlinkat(session_fd, kManifestTempName, 0) != 0 && errno != ENOENT) {
+        return nullptr;
+    }
+    const int manifest_fd = openat(session_fd, kManifestName, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (manifest_fd < 0) {
+        return nullptr;
+    }
+    ScopedFd scoped_manifest_fd(manifest_fd);
+    struct stat manifest_status {};
+    const auto max_value      = std::numeric_limits<std::uint64_t>::max();
+    const auto manifest_limit = config_.max_session_metadata_bytes > (max_value - 64 * 1024) / 4
+                                    ? max_value
+                                    : config_.max_session_metadata_bytes * 4 + 64 * 1024;
+    if (fstat(manifest_fd, &manifest_status) != 0 || !S_ISREG(manifest_status.st_mode) ||
+        manifest_status.st_uid != geteuid() || manifest_status.st_nlink != 1 ||
+        (manifest_status.st_mode & 0077) != 0 || manifest_status.st_size <= 0 ||
+        static_cast<std::uint64_t>(manifest_status.st_size) > manifest_limit ||
+        static_cast<std::uint64_t>(manifest_status.st_size) > std::numeric_limits<std::size_t>::max()) {
+        return nullptr;
+    }
+
+    std::string serialized(static_cast<std::size_t>(manifest_status.st_size), '\0');
+    std::size_t offset = 0;
+    while (offset < serialized.size()) {
+        const auto count = pread(manifest_fd, serialized.data() + offset, serialized.size() - offset,
+                                 static_cast<off_t>(offset));
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        if (count <= 0) {
+            return nullptr;
+        }
+        offset += static_cast<std::size_t>(count);
+    }
+
+    const auto manifest = nlohmann::json::parse(serialized, nullptr, false);
+    if (!manifest.is_object()) {
+        return nullptr;
+    }
+    const auto string_field = [&manifest](const char* name, std::string& value) {
+        const auto it = manifest.find(name);
+        if (it == manifest.end() || !it->is_string()) {
+            return false;
+        }
+        value = it->get<std::string>();
+        return true;
+    };
+    const auto unsigned_field = [&manifest](const char* name, std::uint64_t& value) {
+        const auto it = manifest.find(name);
+        if (it == manifest.end() || !it->is_number_unsigned()) {
+            return false;
+        }
+        value = it->get<std::uint64_t>();
+        return true;
+    };
+    const auto signed_field = [&manifest](const char* name, std::int64_t& value) {
+        const auto it = manifest.find(name);
+        if (it == manifest.end() || !it->is_number_integer()) {
+            return false;
+        }
+        value = it->get<std::int64_t>();
+        return true;
+    };
+
+    std::uint64_t version{0};
+    std::uint64_t total_chunks_value{0};
+    std::uint64_t next_chunk_index_value{0};
+    auto session = std::make_shared<Session>();
+    std::string purpose_name;
+    std::string state_name;
+    if (!unsigned_field("version", version) || version != kManifestVersion ||
+        !string_field("uploadId", session->upload_id) || session->upload_id != upload_id ||
+        !string_field("principal", session->principal) || session->principal.empty() ||
+        session->principal.size() > 256 || !string_field("purpose", purpose_name) ||
+        !ParseUploadPurpose(purpose_name, session->purpose) ||
+        !string_field("clientRequestId", session->client_request_id) ||
+        !IsClientRequestIdValid(session->client_request_id) || session->client_request_id == upload_id ||
+        !string_field("originalName", session->original_name) || !string_field("sha256", session->sha256) ||
+        !IsSha256Valid(session->sha256) || !string_field("verifiedSha256", session->verified_sha256) ||
+        !IsSha256Valid(session->verified_sha256) || !unsigned_field("totalSize", session->total_size) ||
+        session->total_size == 0 || !unsigned_field("receivedSize", session->received_size) ||
+        session->received_size > session->total_size || !unsigned_field("totalChunks", total_chunks_value) ||
+        total_chunks_value == 0 || total_chunks_value > std::numeric_limits<std::uint32_t>::max() ||
+        !unsigned_field("nextChunkIndex", next_chunk_index_value) ||
+        next_chunk_index_value > total_chunks_value ||
+        !signed_field("expiresAtUnixMs", session->expires_at_unix_ms) || session->expires_at_unix_ms <= 0 ||
+        !signed_field("absoluteExpiresAtUnixMs", session->absolute_expires_at_unix_ms) ||
+        session->absolute_expires_at_unix_ms < 0 || !string_field("state", state_name)) {
+        return nullptr;
+    }
+    std::string normalized_name;
+    if (!NormalizeOriginalName(session->original_name, normalized_name) ||
+        normalized_name != session->original_name) {
+        return nullptr;
+    }
+    session->total_chunks     = static_cast<std::uint32_t>(total_chunks_value);
+    session->next_chunk_index = static_cast<std::uint32_t>(next_chunk_index_value);
+    const auto metadata_bytes =
+        SaturatingMultiply(session->total_chunks, static_cast<std::uint64_t>(sizeof(ChunkRecord)));
+    if (metadata_bytes > config_.max_session_metadata_bytes ||
+        (config_.max_total_size != 0 && session->total_size > config_.max_total_size) ||
+        (config_.max_chunks != 0 && session->total_chunks > config_.max_chunks)) {
+        return nullptr;
+    }
+    if (state_name == "open") {
+        session->state = SessionState::kOpen;
+    } else if (state_name == "complete") {
+        session->state = SessionState::kComplete;
+    } else {
+        return nullptr;
+    }
+
+    const auto chunks_it = manifest.find("chunks");
+    if (chunks_it == manifest.end() || !chunks_it->is_array() ||
+        chunks_it->size() != session->next_chunk_index) {
+        return nullptr;
+    }
+    session->chunks.resize(session->total_chunks);
+    std::uint64_t chunk_total = 0;
+    for (std::size_t index = 0; index < chunks_it->size(); ++index) {
+        const auto& chunk_doc = (*chunks_it)[index];
+        if (!chunk_doc.is_object()) {
+            return nullptr;
+        }
+        const auto size_it = chunk_doc.find("size");
+        const auto hash_it = chunk_doc.find("sha256");
+        if (size_it == chunk_doc.end() || !size_it->is_number_unsigned() || hash_it == chunk_doc.end() ||
+            !hash_it->is_string()) {
+            return nullptr;
+        }
+        const auto chunk_size = size_it->get<std::uint64_t>();
+        const auto chunk_hash = hash_it->get<std::string>();
+        if (chunk_size == 0 || chunk_size > config_.max_chunk_size || chunk_size > session->total_size ||
+            !IsSha256Valid(chunk_hash) || chunk_hash.empty() ||
+            chunk_total > session->total_size - chunk_size) {
+            return nullptr;
+        }
+        chunk_total += chunk_size;
+        session->chunks[index] = ChunkRecord{chunk_size, chunk_hash};
+    }
+    if (chunk_total != session->received_size ||
+        (session->state == SessionState::kComplete &&
+         (session->next_chunk_index != session->total_chunks ||
+          session->received_size != session->total_size || session->verified_sha256.empty()))) {
+        return nullptr;
+    }
+
+    const auto system_now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::system_clock::now().time_since_epoch())
+                                   .count();
+    if (session->expires_at_unix_ms <= system_now_ms ||
+        (session->absolute_expires_at_unix_ms > 0 &&
+         (session->absolute_expires_at_unix_ms <= system_now_ms ||
+          session->expires_at_unix_ms > session->absolute_expires_at_unix_ms))) {
+        return nullptr;
+    }
+    const auto steady_now = now_();
+    session->expires_at = steady_now + std::chrono::milliseconds(session->expires_at_unix_ms - system_now_ms);
+    session->absolute_expires_at =
+        session->absolute_expires_at_unix_ms == 0
+            ? Clock::time_point::max()
+            : steady_now + std::chrono::milliseconds(session->absolute_expires_at_unix_ms - system_now_ms);
+
+    session->session_dir  = (fs::path(config_.root_path) / upload_id).string();
+    session->payload_path = (fs::path(session->session_dir) / session->original_name).string();
+    const int payload_fd =
+        openat(session_fd, session->original_name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (payload_fd < 0) {
+        return nullptr;
+    }
+    ScopedFd scoped_payload_fd(payload_fd);
+    struct stat payload_status {};
+    if (fstat(payload_fd, &payload_status) != 0 || !S_ISREG(payload_status.st_mode) ||
+        payload_status.st_uid != geteuid() || payload_status.st_nlink != 1 ||
+        (payload_status.st_mode & 0077) != 0 || payload_status.st_size < 0 ||
+        static_cast<std::uint64_t>(payload_status.st_size) != session->received_size) {
+        return nullptr;
+    }
+
+    const int iterator_fd = fcntl(session_fd, F_DUPFD_CLOEXEC, 0);
+    if (iterator_fd < 0) {
+        return nullptr;
+    }
+    DIR* directory = fdopendir(iterator_fd);
+    if (directory == nullptr) {
+        CloseChecked(iterator_fd);
+        return nullptr;
+    }
+    bool contents_valid = true;
+    errno               = 0;
+    while (auto* entry = readdir(directory)) {
+        const std::string name(entry->d_name);
+        if (name == "." || name == ".." || name == kManifestName || name == session->original_name) {
+            continue;
+        }
+        contents_valid = false;
+        break;
+    }
+    if (errno != 0 || closedir(directory) != 0) {
+        contents_valid = false;
+    }
+    if (!contents_valid) {
+        return nullptr;
+    }
+
+    const auto desired_mode =
+        session->state == SessionState::kComplete ? kCompletedFileMode : kPrivateFileMode;
+    if (fchmod(payload_fd, desired_mode) != 0) {
+        return nullptr;
+    }
+    session->session_device = session_device;
+    session->session_inode  = session_inode;
+    session->payload_device = static_cast<std::uint64_t>(payload_status.st_dev);
+    session->payload_inode  = static_cast<std::uint64_t>(payload_status.st_ino);
+    return session;
+}
+
+void UploadStagingServiceImpl::RecoverSessions() {
+    const int iterator_fd = fcntl(root_fd_, F_DUPFD_CLOEXEC, 0);
+    if (iterator_fd < 0) {
+        LOG_WARN("{}", "Failed to inspect persisted upload sessions");
+        return;
+    }
+    DIR* directory = fdopendir(iterator_fd);
+    if (directory == nullptr) {
+        CloseChecked(iterator_fd);
+        LOG_WARN("{}", "Failed to inspect persisted upload sessions");
+        return;
+    }
+
+    std::size_t recovered_count = 0;
+    errno                       = 0;
+    while (auto* entry = readdir(directory)) {
+        const std::string upload_id(entry->d_name);
+        if (!IsUuidLike(upload_id)) {
+            continue;
+        }
+        std::uint64_t session_device{0};
+        std::uint64_t session_inode{0};
+        std::shared_ptr<Session> session;
+        try {
+            session = LoadPersistedSession(upload_id, session_device, session_inode);
+        } catch (const std::exception& error) {
+            LOG_WARN("Cannot recover upload session {}: {}", upload_id, error.what());
+        }
+        if (!session) {
+            if (session_device != 0 && session_inode != 0 &&
+                !RemoveSessionAt(root_fd_, upload_id, session_device, session_inode)) {
+                LOG_WARN("Failed to safely remove invalid persisted upload session {}", upload_id);
+            }
+            errno = 0;
+            continue;
+        }
+
+        bool identifier_collision = sessions_.find(upload_id) != sessions_.end();
+        identifier_collision =
+            identifier_collision ||
+            std::any_of(client_request_aliases_.begin(), client_request_aliases_.end(),
+                        [&upload_id](const auto& alias) { return alias.first.second == upload_id; });
+        if (!session->client_request_id.empty()) {
+            identifier_collision =
+                identifier_collision || sessions_.find(session->client_request_id) != sessions_.end() ||
+                client_request_aliases_.find(std::make_pair(
+                    session->principal, session->client_request_id)) != client_request_aliases_.end();
+        }
+        if (identifier_collision) {
+            RemoveSessionAt(root_fd_, upload_id, session_device, session_inode);
+            errno = 0;
+            continue;
+        }
+
+        sessions_.emplace(upload_id, session);
+        if (!session->client_request_id.empty()) {
+            client_request_aliases_.emplace(std::make_pair(session->principal, session->client_request_id),
+                                            upload_id);
+        }
+        ++principal_session_counts_[session->principal];
+        ++active_session_count_;
+        reserved_bytes_ = session->total_size > std::numeric_limits<std::uint64_t>::max() - reserved_bytes_
+                              ? std::numeric_limits<std::uint64_t>::max()
+                              : reserved_bytes_ + session->total_size;
+        ++recovered_count;
+        errno = 0;
+    }
+    if (errno != 0) {
+        LOG_WARN("{}", "Failed while enumerating persisted upload sessions");
+    }
+    closedir(directory);
+    if (recovered_count > 0) {
+        LOG_INFO("Recovered {} resumable upload sessions", recovered_count);
+    }
 }
 
 void UploadStagingServiceImpl::CleanupOrphans() {

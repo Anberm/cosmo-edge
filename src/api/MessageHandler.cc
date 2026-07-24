@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <iomanip>
 
+#include "api/StagedImageInput.h"
 #include "service/algorithm/IActionService.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/media/ILiveStreamService.h"
@@ -118,6 +119,26 @@ MsgPTaskDetectPicSend MessageHandler::Handle(MsgPTaskDetectPicRecv&& data, std::
     errc = service::ServiceRegistry::Instance().Get<service::IPicTaskService>().DetectPic(data.taskId, data,
                                                                                           retData);
     return retData;
+}
+
+MsgPTaskDetectPicSend MessageHandler::Handle(MsgPTaskDetectPicRecv&& data,
+                                             const RequestDispatchContext& context,
+                                             std::error_condition& errc) {
+    if (data.uploadId.empty()) {
+        return Handle(std::move(data), errc);
+    }
+    if (!data.imageBase64.empty() || !data.imageUrl.empty()) {
+        errc = util::ErrorEnum::InvalidParam;
+        return {};
+    }
+
+    std::vector<std::vector<std::uint8_t>> images;
+    errc = detail::ConsumeStagedImages(context, {data.uploadId}, images);
+    if (errc != util::ErrorEnum::Success) {
+        return {};
+    }
+    data.imageData = std::move(images.front());
+    return Handle(std::move(data), errc);
 }
 
 // China Mobile picture detection interface

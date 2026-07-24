@@ -59,8 +59,7 @@ channels:
   repeatCount: 0
   sources:
     - name: vlm
-      filePath: /device/vlm.mp4
-      contentLength: 100
+      file: /device/vlm.mp4
 tasks:
   - id: vlm
     displayName: VLM
@@ -102,8 +101,7 @@ channels:
   repeatCount: 0
   sources:
     - name: vlm
-      filePath: /device/vlm.mp4
-      contentLength: 100
+      file: /device/vlm.mp4
 tasks:
   - id: vlm
     displayName: VLM
@@ -136,8 +134,7 @@ channels:
   repeatCount: 0
   sources:
     - name: cv
-      filePath: /device/cv.mp4
-      contentLength: 100
+      file: /device/cv.mp4
 tasks:
   - id: cv
     displayName: CV

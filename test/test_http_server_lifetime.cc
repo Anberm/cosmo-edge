@@ -452,6 +452,77 @@ TEST_CASE("HttpServer log download rejects a symlink escape", "[http-server][sec
     fs::remove(outside);
 }
 
+TEST_CASE("HttpServer streams single byte ranges without buffering the whole file",
+          "[http-server][download][range]") {
+    namespace fs = std::filesystem;
+
+    ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+    const auto suffix   = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const fs::path root = fs::path("/tmp") / ("cosmo-http-range-root-" + suffix);
+    fs::create_directories(root);
+    std::ofstream(root / "range.log", std::ios::binary) << "0123456789";
+
+    auto state = std::make_shared<BlockingDispatchState>();
+    HttpServerRunner runner(state);
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+    REQUIRE(runner.Start(port, root.string()));
+
+    SECTION("bounded range returns 206 and only the requested bytes") {
+        auto client = Connect(port);
+        REQUIRE(client.Get() >= 0);
+        REQUIRE(SendAll(client.Get(),
+                        "GET /logs/range.log HTTP/1.1\r\n"
+                        "Host: 127.0.0.1\r\n"
+                        "mtk: test-token\r\n"
+                        "Range: bytes=2-5\r\n"
+                        "Connection: close\r\n\r\n"));
+        const auto response = ReadAll(client.Get());
+        CHECK(response.find("206 Partial Content") != std::string::npos);
+        CHECK(response.find("Accept-Ranges: bytes") != std::string::npos);
+        CHECK(response.find("Content-Range: bytes 2-5/10") != std::string::npos);
+        CHECK(response.find("Content-Length: 4") != std::string::npos);
+        const auto body_position = response.find("\r\n\r\n");
+        REQUIRE(body_position != std::string::npos);
+        CHECK(response.substr(body_position + 4) == "2345");
+    }
+
+    SECTION("suffix range returns the tail") {
+        auto client = Connect(port);
+        REQUIRE(client.Get() >= 0);
+        REQUIRE(SendAll(client.Get(),
+                        "GET /logs/range.log HTTP/1.1\r\n"
+                        "Host: 127.0.0.1\r\n"
+                        "mtk: test-token\r\n"
+                        "Range: bytes=-3\r\n"
+                        "Connection: close\r\n\r\n"));
+        const auto response = ReadAll(client.Get());
+        CHECK(response.find("206 Partial Content") != std::string::npos);
+        CHECK(response.find("Content-Range: bytes 7-9/10") != std::string::npos);
+        const auto body_position = response.find("\r\n\r\n");
+        REQUIRE(body_position != std::string::npos);
+        CHECK(response.substr(body_position + 4) == "789");
+    }
+
+    SECTION("unsatisfied range returns 416 with the current size") {
+        auto client = Connect(port);
+        REQUIRE(client.Get() >= 0);
+        REQUIRE(SendAll(client.Get(),
+                        "GET /logs/range.log HTTP/1.1\r\n"
+                        "Host: 127.0.0.1\r\n"
+                        "mtk: test-token\r\n"
+                        "Range: bytes=99-\r\n"
+                        "Connection: close\r\n\r\n"));
+        const auto response = ReadAll(client.Get());
+        CHECK(response.find("416 Range Not Satisfiable") != std::string::npos);
+        CHECK(response.find("Content-Range: bytes */10") != std::string::npos);
+    }
+
+    runner.Server().UnInitialize();
+    runner.Join();
+    fs::remove_all(root);
+}
+
 TEST_CASE("HttpServer rejects unauthorized multipart before parsing or dispatch", "[http-server][security]") {
     ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
     auto state = std::make_shared<BlockingDispatchState>();
@@ -506,17 +577,43 @@ TEST_CASE("HttpServer reports payload limits as 413 before dispatch", "[http-ser
     REQUIRE(port != 0);
     REQUIRE(runner.Start(port));
 
-    SECTION("libevent transport limit preserves 413 when the URI is cleared") {
+    SECTION("application JSON limit returns an actionable structured error") {
         auto client = Connect(port);
         REQUIRE(client.Get() >= 0);
-        constexpr std::size_t kOversizedBody = 32 * 1024 * 1024 + 1;
+        std::string body(1 * 1024 * 1024 + 1, 'x');
+        const std::string headers =
+            "POST /test/request-lifetime HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            "Content-Type: application/json\r\n"
+            "mtk: test-token\r\n"
+            "Content-Length: " +
+            std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n";
+        REQUIRE(SendAll(client.Get(), headers));
+        REQUIRE(SendAll(client.Get(), body));
+        const auto response = ReadAll(client.Get());
+        CHECK(response.find("413") != std::string::npos);
+        const auto body_position = response.find("\r\n\r\n");
+        REQUIRE(body_position != std::string::npos);
+        const auto response_json = nlohmann::json::parse(response.substr(body_position + 4), nullptr, false);
+        REQUIRE(response_json.is_object());
+        REQUIRE(response_json.at("resMsg").is_array());
+        CHECK(response_json.at("resMsg").at(0).at("messageKey") == "api.error.httpBodyTooLarge");
+        CHECK(response_json.at("resMsg").at(0).at("details").at("limitBytes") == 1 * 1024 * 1024);
+        CHECK(response_json.at("resMsg").at(0).at("recommendedAction") == "REDUCE_REQUEST_BODY");
+        CHECK_FALSE(state->Entered());
+    }
+
+    SECTION("libevent keeps a finite emergency body backstop") {
+        auto client = Connect(port);
+        REQUIRE(client.Get() >= 0);
+        constexpr std::size_t kClearlyAbusiveBody = 128 * 1024 * 1024;
         const std::string request =
             "POST /test/request-lifetime HTTP/1.1\r\n"
             "Host: 127.0.0.1\r\n"
             "Content-Type: application/json\r\n"
             "mtk: test-token\r\n"
             "Content-Length: " +
-            std::to_string(kOversizedBody) + "\r\nConnection: close\r\n\r\n";
+            std::to_string(kClearlyAbusiveBody) + "\r\nConnection: close\r\n\r\n";
         REQUIRE(SendAll(client.Get(), request));
         CHECK(ReadAll(client.Get()).find("413") != std::string::npos);
         CHECK_FALSE(state->Entered());

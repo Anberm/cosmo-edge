@@ -92,4 +92,14 @@ TEST_CASE("Archive listing validation is strict and path-aware", "[archive][secu
                                          "-rw-r--r-- user/user 4 2026-07-15 12:00 b\n",
                                          ArchiveListingFormat::kTarVerbose, {2, 8, 8}));
     }
+
+    SECTION("inspects declared resource use without a product file-size ceiling") {
+        cosmo::util::ArchiveListingInspection inspection;
+        const auto large_size = 6ULL * 1024 * 1024 * 1024;
+        REQUIRE(cosmo::util::InspectArchiveListingOutput(ZipListing("models/large-model.bmodel", large_size),
+                                                         ArchiveListingFormat::kZipVerbose, 8, inspection));
+        CHECK(inspection.entry_count == 1);
+        CHECK(inspection.largest_file_bytes == large_size);
+        CHECK(inspection.total_bytes == large_size);
+    }
 }

@@ -334,8 +334,7 @@ import { Search, Plus, Upload } from '@element-plus/icons-vue'
 import { t, localeColon, currentLocale } from '@/i18n'
 import {
   uploadFileInChunks,
-  UploadPurpose,
-  UPLOAD_MAX_TOTAL_SIZE
+  UploadPurpose
 } from '@/utils/chunkUpload'
 
 const SearchIcon = Search
@@ -1012,15 +1011,7 @@ const sureUploadAlgorithmic = () => {
   }
   const uploadResults = uploadAlgorithmicData.value.map(async (file) => {
     const rawFile = file.raw || file
-    const fileSize = rawFile.size
     const fileName = rawFile.name
-    if (fileSize > UPLOAD_MAX_TOTAL_SIZE) {
-      return {
-        fileName,
-        success: false,
-        message: t('validate.fileMaxSize', { n: 500 })
-      }
-    }
     try {
       const resData = await uploadFile({ file: rawFile })
       if (resData?.resCode == 1) {
@@ -1057,10 +1048,11 @@ const uploadFile = async (params) => {
     stagedUpload = await uploadFileInChunks(params.file, {
       purpose: UploadPurpose.MODEL_ARCHIVE,
       uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
-      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+      getCapabilities: () => proxy.$API.getUploadCapabilities()
     })
     if (!stagedUpload.uploadId) {
-      throw new Error(t('validate.cannotGetFilePath'))
+      throw new Error(t('validate.missingUploadId'))
     }
     return await proxy.$API.uploadAtomicModel({
       uploadId: stagedUpload.uploadId
@@ -1099,8 +1091,8 @@ const handleImportFileChange = (file) => {
     proxy.$message.warning(t('validate.selectTarGzOrZip'))
     return
   }
-  if (rawFile.size <= 0 || rawFile.size > UPLOAD_MAX_TOTAL_SIZE) {
-    proxy.$message.warning(t('validate.fileMaxSize', { n: 500 }))
+  if (!Number.isSafeInteger(rawFile.size) || rawFile.size <= 0) {
+    proxy.$message.warning(t('api.error.UpLoadDataEmpty'))
     return
   }
   importModelFileName.value = name
@@ -1276,10 +1268,11 @@ const uploadSingleFile = async (file, purpose = UploadPurpose.MODEL_COMPONENT) =
   const result = await uploadFileInChunks(file, {
     purpose,
     uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
-    cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+    cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+    getCapabilities: () => proxy.$API.getUploadCapabilities()
   })
   if (!result.uploadId) {
-    throw new Error(t('validate.cannotGetFilePath'))
+    throw new Error(t('validate.missingUploadId'))
   }
   return result
 }
@@ -1288,9 +1281,6 @@ const assertModelComponentFileSize = (file) => {
   const size = Number(file?.size)
   if (!Number.isSafeInteger(size) || size <= 0) {
     throw new RangeError(t('api.error.UpLoadDataEmpty'))
-  }
-  if (size > UPLOAD_MAX_TOTAL_SIZE) {
-    throw new RangeError(t('validate.fileMaxSize', { n: 500 }))
   }
 }
 

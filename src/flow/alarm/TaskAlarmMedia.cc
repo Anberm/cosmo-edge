@@ -50,6 +50,13 @@ std::string TaskAlarm::RecordMp4(int targetId, const std::string& messageId, con
             service::FileType::Json);
         overviewUrl = service::ServiceRegistry::Instance().Get<service::IFileService>().GetFileUrl(
             service::FileType::Json);
+    } else {
+        // Standalone mode stores the recording locally.  Keep the absolute path
+        // in the HTTP event payload; DispatchAlarmEvent converts it to the web
+        // path for the browser/WebSocket view.
+        fileUrl =
+            (std::filesystem::path(cosmo::path::GetEventPath(frameTimestamp)) / (messageId + "_video.mp4"))
+                .string();
     }
 
     RecordParam recordParam;
@@ -69,7 +76,10 @@ std::string TaskAlarm::RecordMp4(int targetId, const std::string& messageId, con
 #ifdef DURATION_LOG
     auto timpointRecordMp4 = std::chrono::high_resolution_clock::now();
 #endif
-    m_channelPtr->RecordMp4(recordParam);
+    if (!m_channelPtr->RecordMp4(recordParam)) {
+        LOG_WARN("{}[{}] Failed To Start Recording {}", kTag, task_id, messageId);
+        return "";
+    }
 #ifdef DURATION_LOG
     auto timpointEnd = std::chrono::high_resolution_clock::now();
 

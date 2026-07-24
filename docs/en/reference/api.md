@@ -96,6 +96,87 @@ Most management responses inherit `MsgSendHead`:
 
 `MsgSendHead` itself does not carry business data; each concrete response message (each `*Send` subclass) additionally carries a `resData` business data container on top of `MsgSendHead`, whose structure varies by interface.
 
+## Resource-Aware Transfers
+
+Model components, model archives, local videos, algorithm packages, upgrade packages, audio, face imports, and images use the same authenticated chunk protocol:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /gtw/cwai/atomic/model/uploadCapabilities` | Query current device capabilities and safely usable storage |
+| `POST /gtw/cwai/atomic/model/uploadTemp` | Upload one `multipart/form-data` chunk |
+| `POST /gtw/cwai/atomic/model/cancelUpload` | Cancel a session and release its reservation immediately |
+
+Byte counts in `uploadCapabilities` are returned as decimal strings. Important fields:
+
+| Field | Meaning |
+| --- | --- |
+| `maxTotalSize` | Optional deployment-policy limit for a complete file; `0` means no product quota |
+| `maxChunkSize` | Per-request chunk limit; 8 MB (8 × 1024 × 1024 bytes) by default |
+| `maxChunks` | Optional deployment-policy limit for chunk count; `0` means no product quota |
+| `availableBytes` | Currently available bytes on the staging filesystem before the safety reserve |
+| `reserveBytes` | Effective disk safety reserve |
+| `availableForNewUploadsBytes` | Bytes currently admissible after the safety reserve and in-flight reservations |
+| `reservedBySessionsBytes` | Bytes reserved by in-flight upload sessions |
+| `activeSessions` | Open or completed-but-not-yet-consumed upload sessions |
+| `idleTimeoutMs` | Inactive session expiry; each accepted chunk refreshes it |
+| `absoluteTimeoutMs` | Absolute lifetime; `0` means no absolute timeout |
+| `resumable` | Whether idempotent resume is supported |
+| `persistentAcrossRestart` | Whether sessions survive an engine restart |
+| `maxEncodedImageBytes` | Encoded-image byte capability of the current media pipeline |
+| `maxImagePixels` | Maximum decodable pixel count of the current media pipeline |
+
+The default policy does not impose arbitrary total quotas by model, video, or image type. Admission is based on the target filesystem's live resources while preserving `max(512 MB, 5%)` as a disk safety reserve. Clients must query capabilities before an upload and must not turn a previously observed storage or image value into a product constant.
+
+Current production defaults are centralized instead of defining separate fine-grained limits for each business type:
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| Complete-file total / chunk count | `0` / `0` | No product quota; live resource admission still applies |
+| Per-user / global concurrent sessions | `0` / `0` | No fixed session quota |
+| Global in-flight reservation total | `0` | No fixed reservation quota |
+| Upload chunk | `8 MB` | Bounds per-request memory and parsing work |
+| Per-session metadata budget | `64 MB` | Prevents a malformed session from consuming unbounded memory |
+| Idle / absolute timeout | `30 minutes` / `0` | Progress renews the session; no absolute lifetime |
+| Restart persistence | enabled | Persists manifests and supports idempotent resume |
+| Disk safety reserve | `max(512 MB, 5%)` | Prevents uploads from exhausting the target filesystem |
+
+The first chunk should carry a stable `clientRequestId`. The server returns an opaque `uploadId` and `nextChunkIndex`. After a disconnect or engine restart, resend chunk 0 for the same file with the same `clientRequestId`; the server returns the existing session and its next required chunk. Delete the local resume identity after completion or cancellation.
+
+Control-plane JSON requests are limited to 1 MB by default. A regular single multipart request is limited to 10 MB, and the recommended upload chunk is 8 MB. MB values here use 1024 × 1024 bytes. These are per-request parsing and memory boundaries, not business-file size limits. A request beyond the boundary returns HTTP 413 with `HTTP_BODY_TOO_LARGE` and recommends either `USE_CHUNKED_UPLOAD` or `REDUCE_REQUEST_BODY`.
+
+### Upgrade Recovery Status
+
+`POST /gtw/cwai/System/QueryDeviceStatus` returns these fields on success:
+
+| Field | Meaning |
+| --- | --- |
+| `resData.bootId` | Current Linux boot identity; the software-upgrade page uses it to confirm that a reboot actually completed |
+| `resData.softwareVersion` | Version of the currently running CosmoEdge process |
+
+These are backward-compatible additive fields. Older clients may ignore them; newer clients must not declare an upgrade successful only because the endpoint returns HTTP 200 again.
+
+libevent also has a bounded 12 MB emergency receive backstop. It only protects requests that were not rejected earlier by the application boundary and is not a usable business-upload allowance. A low-level rejection may provide only a generic HTTP 413; the Web console converts that response into the same actionable guidance based on request type (use chunks for multipart, reduce the body for other requests). Third-party clients should still observe the 8 MB chunk, 1 MB JSON, and 10 MB regular multipart boundaries.
+
+Image URL downloads derive their budget from current memory and media-frame capability instead of a fixed 16 MB threshold. HTTP video and other large-file retrieval streams directly to a file. Static media paths return the standard extension-derived MIME type (for example, `image/jpeg` for JPEG and `video/mp4` for MP4). Model and other managed-file exports are also file-streamed and support a single `Range`, `206 Partial Content`, and `416` for an unsatisfiable range.
+
+`/gtw/cwai/atomic/model/exportConfig` returns a direct attachment for user-managed models that are marked exportable. Preset, encrypted, or device-bound models return `DefaultCantBeExport`; this is a model portability and security-policy boundary, not a file-size quota.
+
+## Actionable Errors
+
+In addition to the compatible `msgCode` and `msgText`, an item in `resMsg` can contain:
+
+| Field | Meaning |
+| --- | --- |
+| `messageKey` | Frontend localization key |
+| `details` | Machine-readable context such as `actualBytes`, `limitBytes`, `requiredBytes`, `availableBytes`, and `reserveBytes` |
+| `retryable` | Whether the same operation can succeed after external conditions change |
+| `retryAfterSeconds` | Suggested delay |
+| `recommendedAction` | Next step the frontend should present or perform |
+
+Primary transfer and media errors include `STORAGE_RESERVE_REACHED`, `TRANSFER_BUSY`, `UPLOAD_METADATA_BUDGET`, `HTTP_BODY_TOO_LARGE`, `IMAGE_INPUT_TOO_LARGE`, and `IMAGE_RESOLUTION_TOO_LARGE`. Frontends should display the returned actual value, limit, and recommended action instead of reducing every condition to a generic “upload failed” message.
+
+The current console maps `recommendedAction` to visible guidance. Stable action codes include `FREE_DISK_SPACE`, `USE_CHUNKED_UPLOAD`, `REDUCE_REQUEST_BODY`, `USE_LARGER_CHUNKS`, `RETRY`/`RETRY_LATER`, `RESIZE_IMAGE`, `RESIZE_OR_RECOMPRESS_IMAGE`, `CHECK_UPLOAD_PARAMETERS`, `CHANGE_DEPLOYMENT_POLICY`, and `USE_LARGER_CHUNKS_OR_CHANGE_POLICY`. When `retryAfterSeconds` is also present, the console shows the suggested wait.
+
 ## WebSocket
 
 The default WebSocket port:

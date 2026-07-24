@@ -5,6 +5,7 @@
 #include <unordered_set>
 
 #include "api/MessageFaceLibHandler.h"
+#include "api/StagedImageInput.h"
 #include "db/TransactionGuard.h"
 #include "service/face/IFaceFeature.h"
 #include "service/face/IFaceLibRepo.h"
@@ -47,6 +48,22 @@ namespace {
         return pc;
     }
 }  // namespace
+
+Lib::MsgModifyFacePicLibSend MessageFaceLibHandler::Handle(Lib::MsgModifyFacePicLibRecv&& data,
+                                                           const RequestDispatchContext& context,
+                                                           std::error_condition& errc) {
+    if (data.pictureUploadIds.empty()) {
+        return Handle(std::move(data), errc);
+    }
+
+    std::vector<std::vector<std::uint8_t>> images;
+    errc = detail::ConsumeStagedImages(context, data.pictureUploadIds, images);
+    if (errc != util::ErrorEnum::Success) {
+        return {};
+    }
+    data.pictureData = std::move(images);
+    return Handle(std::move(data), errc);
+}
 
 // Face lib person add/edit
 Lib::MsgModifyFacePicLibSend MessageFaceLibHandler::Handle(Lib::MsgModifyFacePicLibRecv&& data,
@@ -114,7 +131,7 @@ void MessageFaceLibHandler::HandleModifyFacePicUpdate(Lib::MsgModifyFacePicLibRe
     if (!person && !(person = person_repo_.GetPerson(data.personId))) {
         throw util::ErrorMessage(util::ErrorEnum::NoSuchId, "Person ID does not exist");
     }
-    auto picSize = data.pictureBase64.size() + data.retainPictureId.size();
+    auto picSize = data.pictureBase64.size() + data.pictureData.size() + data.retainPictureId.size();
     if (picSize > kMaxPictureCount || picSize == 0) {
         throw util::ErrorMessage(util::ErrorEnum::ParameterException, "Photo count must be 1 to 3");
     }
@@ -146,7 +163,8 @@ void MessageFaceLibHandler::ValidateFaceLibCapacity(const std::vector<FaceLibPtr
     for (const auto& spFaceLib : faceLibs) {
         auto libView   = service::FaceLibView::From(spFaceLib);
         auto faceCount = person_repo_.IsPersonInFaceLibs(person, {libView.id}) ? vFacePicNow.size() : 0;
-        if (libView.faceCount + data.retainPictureId.size() + data.pictureBase64.size() - faceCount >
+        if (libView.faceCount + data.retainPictureId.size() + data.pictureBase64.size() +
+                data.pictureData.size() - faceCount >
             libView.faceMaxCount) {
             throw util::ErrorMessage(util::ErrorEnum::FaceLibCountOverFlow);
         }
@@ -157,24 +175,19 @@ void MessageFaceLibHandler::ProcessNewPictures(
     const Lib::MsgModifyFacePicLibRecv& data, std::error_condition& errc,
     Lib::MsgModifyFacePicLibSend& /*retData*/,
     std::vector<std::pair<std::string, std::vector<float>>>& faceFeature, std::vector<FacePicPtr>& vFacePic) {
-    for (auto& pic : data.pictureBase64) {
-        if (pic.size() < kMinBase64Length) {
-            continue;
-        }
-
-        auto picId  = util::GenerateUUID();
-        auto picBin = util::DecBase64Vec(pic);
+    const auto process_picture = [&](const std::vector<std::uint8_t>& picBin) {
         if (picBin.empty()) {
-            LOG_WARN("[{}] Base64 decode failed, skipping picture", kTag);
+            LOG_WARN("[{}] Empty decoded picture, skipping", kTag);
             errc = util::ErrorEnum::InternalError;
-            return;
+            return false;
         }
 
+        auto picId        = util::GenerateUUID();
         auto decodedImage = codec_.DecodeJpeg(picBin);
         if (!decodedImage) {
             LOG_WARN("[{}] JPEG decode failed, skipping picture", kTag);
             errc = util::ErrorEnum::InternalError;
-            return;
+            return false;
         }
 
         AiFeature feature;
@@ -187,7 +200,7 @@ void MessageFaceLibHandler::ProcessNewPictures(
         }
         if (errc != util::ErrorEnum::Success) {
             LOG_WARN("[{}] Face feature extraction failed", kTag);
-            return;
+            return false;
         }
 
         auto origJpeg = codec_.EncodeJpeg(cutImage);
@@ -200,10 +213,31 @@ void MessageFaceLibHandler::ProcessNewPictures(
         if (!util::WriteFile(photoPath, reinterpret_cast<const std::uint8_t*>(origJpeg.data()),
                              static_cast<int>(origJpeg.size()))) {
             LOG_ERRO("[{}] write file error", kTag);
-            continue;
+            return true;
         }
         faceFeature.emplace_back(picId, feature.feature);
         vFacePic.push_back(person_repo_.CreateFacePic(picId, cosmo::path::GetFaceLibPhotoDir(), feature));
+        return true;
+    };
+
+    for (const auto& pic : data.pictureBase64) {
+        if (pic.size() < kMinBase64Length) {
+            continue;
+        }
+        auto picBin = util::DecBase64Vec(pic);
+        if (picBin.empty()) {
+            LOG_WARN("[{}] Base64 decode failed, skipping picture", kTag);
+            errc = util::ErrorEnum::InternalError;
+            return;
+        }
+        if (!process_picture(picBin)) {
+            return;
+        }
+    }
+    for (const auto& picBin : data.pictureData) {
+        if (!process_picture(picBin)) {
+            return;
+        }
     }
 }
 

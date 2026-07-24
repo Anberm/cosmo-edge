@@ -18,15 +18,26 @@ namespace cosmo::service {
 
 struct UploadStagingConfig {
     std::string root_path;
-    std::uint64_t max_total_size{500ULL * 1024 * 1024};
+    /// Optional deployment policy. Zero uses safe free space instead.
+    std::uint64_t max_total_size{0};
     std::uint64_t max_chunk_size{8ULL * 1024 * 1024};
-    std::uint32_t max_chunks{128};
-    std::size_t max_sessions_per_principal{4};
-    std::size_t max_sessions{16};
-    std::uint64_t max_reserved_bytes{2ULL * 1024 * 1024 * 1024};
+    /// Optional administrator policies. Zero means unlimited.
+    std::uint32_t max_chunks{0};
+    std::size_t max_sessions_per_principal{0};
+    std::size_t max_sessions{0};
+    std::uint64_t max_reserved_bytes{0};
+    /// The effective filesystem reserve is the larger of these two values.
+    std::uint64_t reserve_free_bytes{512ULL * 1024 * 1024};
+    std::uint32_t reserve_free_percent{5};
+    /// Bounds chunk bookkeeping memory without imposing a file-size limit.
+    std::uint64_t max_session_metadata_bytes{64ULL * 1024 * 1024};
     std::chrono::milliseconds session_ttl{std::chrono::minutes(30)};
     std::chrono::milliseconds cleanup_interval{std::chrono::minutes(1)};
-    std::chrono::milliseconds max_session_lifetime{std::chrono::hours(2)};
+    /// Zero disables absolute expiry; idle expiry remains active.
+    std::chrono::milliseconds max_session_lifetime{std::chrono::milliseconds::zero()};
+    /// Persist authenticated session metadata beside each payload so uploads
+    /// can resume after a clean restart or process crash.
+    bool persist_sessions{true};
 };
 
 class UploadStagingServiceImpl final : public IUploadStagingService {
@@ -59,6 +70,7 @@ public:
     util::ErrorEnum GetLegacyPath(const std::string& principal, const std::string& upload_id,
                                   UploadPurpose expected_purpose, std::string& path) override;
     util::ErrorEnum Cancel(const std::string& principal, const std::string& upload_id) override;
+    UploadCapabilities GetCapabilities() override;
     void CleanupExpired() override;
 
 private:
@@ -125,6 +137,11 @@ private:
                                  std::vector<StagedFileLease>& leases);
     void ReleaseSessionAccountingLocked(const std::shared_ptr<Session>& session);
     void RemoveSessionLocked(const std::shared_ptr<Session>& session);
+    bool PersistSession(const Session& session) const;
+    bool RemoveSessionManifest(const Session& session) const;
+    std::shared_ptr<Session> LoadPersistedSession(const std::string& upload_id, std::uint64_t& session_device,
+                                                  std::uint64_t& session_inode) const;
+    void RecoverSessions();
     void CleanupOrphans();
     void RemoveSessions(const std::vector<std::shared_ptr<Session>>& sessions) const;
     void StartCleanupThread();
@@ -133,6 +150,10 @@ private:
     UploadStagingConfig config_;
     NowFunction now_;
     int root_fd_{-1};
+    // The persistent volume may restore the staging root to the owner of its
+    // private deployment parent at boot. Pin that accepted owner for all later
+    // path validations; session directories and payloads remain service-owned.
+    std::uint64_t root_owner_uid_{0};
     std::uint64_t root_device_{0};
     std::uint64_t root_inode_{0};
     std::mutex sessions_mutex_;

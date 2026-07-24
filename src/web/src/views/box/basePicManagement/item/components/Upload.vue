@@ -2,7 +2,7 @@
   <div class="mv-upload">
     <div class="file-list" v-for="(item, index) in propsFileList" :key="index">
       <div class="img-style">
-        <img :src="'data:image/jpeg;base64,'+ item.pictureBase64" />
+        <img :src="item.previewUrl || item.pictureUrl || ('data:image/jpeg;base64,' + (item.pictureBase64 || ''))" />
       </div>
       <div class="delete-style">
         <el-button class="upload-btn btn1" type="primary" size="small" @click="resetUpload(index, item)">{{ t('action.reUpload') }}</el-button>

@@ -61,6 +61,7 @@ View logs:
 | `<INSTALLPATH>/resource` | Runtime resource directory |
 | `<DATADIR>` | User persistent data directory, by default located on a persistent volume |
 | `<DATADIR>/log/logs` | Log directory |
+| `<DATADIR>/upload/sessions` | Resumable chunk-upload sessions; directory mode is fixed to `0700` |
 | `<DATADIR>/upgrade` | Upgrade package directory |
 
 ## Runtime Processes
@@ -126,6 +127,16 @@ Upgrade package filename pattern:
 cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz
 ```
 
+The web console performs a local upgrade as follows:
+
+1. Query device status and record the current Linux `bootId`.
+2. Transfer the package in chunks according to live device capabilities while showing actual upload progress.
+3. Validate the filename, MD5, archive safety, package layout, and live disk budget.
+4. After a Sophon reboot, validate the MD5 again, install the release package, and start the services.
+5. Return to login after observing a new `bootId`. If reboot invalidates the login session, first observe the device offline and then require an authentication response from the recovered service before returning to login.
+
+The 15-minute recovery wait is a UI timeout; it does not cancel an upgrade already running on the device. Keep power connected and inspect device networking and systemd logs if it expires. After signing in again, verify the software version against the release package; UI recovery proves reboot and service recovery, not version acceptance.
+
 ## systemd Service
 
 `scripts/install.sh` creates:
@@ -139,6 +150,16 @@ Service start command:
 ```text
 ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
 ```
+
+The service runs as `root` with `Restart=on-failure`. A fatal initialization exception returns a non-zero status so systemd retries it instead of treating the process as a clean stop.
+
+Some Sophon images restore the persistent data tree to the appliance administrator at boot. The upload staging service therefore allows `sessions` to inherit the owner of an immediate parent that is not writable by group/other, while still requiring:
+
+- a real, non-symlink `sessions` directory with mode `0700`;
+- stable owner, device, and inode identity for the lifetime of the process;
+- service-owned private session directories and payloads.
+
+Do not apply broad recursive `chmod` or `chown` operations to the complete `<DATADIR>`.
 
 ## Interface Documentation Static Links
 

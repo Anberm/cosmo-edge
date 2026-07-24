@@ -92,6 +92,9 @@ namespace ThingsLib {
         struct ArticlesReid {
             util::String<0, 256> pictureUrl;
             std::string pictureBase64;
+            std::string pictureUploadId;
+            // Authenticated staged payload, never accepted from JSON.
+            std::vector<std::uint8_t> pictureData;
             util::String<0, 32> pictureName;
             friend void to_json(nlohmann::json& j, const ArticlesReid& v);
             friend void from_json(const nlohmann::json& j, ArticlesReid& v);

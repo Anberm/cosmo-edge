@@ -19,18 +19,18 @@
 #include "nlohmann/json.hpp"
 #include "util/ArchiveListingValidator.h"
 #include "util/ErrorCode.h"
+#include "util/Exception.h"
 #include "util/Exec.h"
 #include "util/NnBackendConstants.h"
 #include "util/PathUtil.h"
+#include "util/ResourceBudget.h"
 #include "util/UuidUtil.h"
 
 namespace cosmo::service {
 
 namespace {
 
-    constexpr std::uintmax_t kMaxArchiveBytes   = 500ULL * 1024 * 1024;
-    constexpr std::uintmax_t kMaxExtractedBytes = 1024ULL * 1024 * 1024;
-    constexpr size_t kMaxArchiveEntries         = 10000;
+    constexpr size_t kMaxArchiveEntries = 10000;
 
     enum class ArchiveKind {
         kUnknown,
@@ -55,18 +55,29 @@ namespace {
         return ArchiveKind::kUnknown;
     }
 
-    bool ValidateArchiveListing(const std::string& archive_path, bool is_zip) {
-        const util::ArchiveListingLimits limits{kMaxArchiveEntries, kMaxArchiveBytes, kMaxExtractedBytes};
+    bool InspectArchiveListing(const std::string& archive_path, bool is_zip,
+                               const std::string& extraction_root,
+                               util::ArchiveListingInspection& inspection) {
         const auto format =
             is_zip ? util::ArchiveListingFormat::kZipVerbose : util::ArchiveListingFormat::kTarVerbose;
-        if (!util::ValidateArchiveListingFile(archive_path, format, limits)) {
+        if (!util::InspectArchiveListingFile(archive_path, format, kMaxArchiveEntries, inspection) ||
+            inspection.total_bytes == 0) {
             LOG_WARN("[ImportModel] Failed to inspect archive member list: {}", archive_path);
             return false;
+        }
+        const auto budget = util::InspectStorageResourceBudget(extraction_root);
+        if (!budget.valid) {
+            throw util::ErrorMessage(util::ErrorEnum::SysErr, "Cannot inspect model extraction storage");
+        }
+        if (inspection.total_bytes > budget.usable_bytes) {
+            throw util::ResourceLimitError("Insufficient safe disk space to extract the model archive",
+                                           "archive-extraction", "model-archive", inspection.total_bytes,
+                                           budget.usable_bytes, budget.reserve_bytes);
         }
         return true;
     }
 
-    bool ValidateExtractedTree(const std::string& root) {
+    bool ValidateExtractedTree(const std::string& root, const util::ArchiveListingInspection& inspection) {
         namespace fs              = std::filesystem;
         size_t entry_count        = 0;
         std::uintmax_t total_size = 0;
@@ -99,7 +110,8 @@ namespace {
             }
             if (fs::is_regular_file(link_status)) {
                 const auto size = fs::file_size(it->path(), ec);
-                if (ec || size > kMaxArchiveBytes || size > kMaxExtractedBytes - total_size) {
+                if (ec || size > inspection.largest_file_bytes || total_size > inspection.total_bytes ||
+                    size > inspection.total_bytes - total_size) {
                     return false;
                 }
                 total_size += size;
@@ -346,15 +358,23 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
     } catch (const std::exception& e) {
         LOG_WARN("[ImportModel] Failed to get archive size: {}", e.what());
     }
-    if (archive_size == 0 || archive_size > kMaxArchiveBytes) {
+    if (archive_size == 0) {
         LOG_WARN("[ImportModel] Archive size is invalid: {}", archive_size);
         return util::ErrorEnum::InvalidParam;
     }
     LOG_INFO("[ImportModel] Starting managed import, size: {} bytes", archive_size);
 
+    const auto temporary_root = cosmo::path::GetTemporaryDirPath();
+    const auto archive_kind   = DetectArchiveKind(managed_archive_path);
+    const bool is_zip         = archive_kind == ArchiveKind::kZip;
+    util::ArchiveListingInspection inspection;
+    if (archive_kind == ArchiveKind::kUnknown ||
+        !InspectArchiveListing(managed_archive_path, is_zip, temporary_root, inspection)) {
+        return util::ErrorEnum::InvalidParam;
+    }
+
     // 1. Create temp extraction directory
-    std::string temp_dir =
-        (fs::path(cosmo::path::GetTemporaryDirPath()) / ("model_import_" + util::GenerateUUID())).string();
+    std::string temp_dir = (fs::path(temporary_root) / ("model_import_" + util::GenerateUUID())).string();
     std::error_code ec;
     fs::create_directories(temp_dir, ec);
     if (ec) {
@@ -364,13 +384,6 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
 
     // 2. Extract archive (detect format: tar.gz or zip)
     std::string out_str;
-    const auto archive_kind = DetectArchiveKind(managed_archive_path);
-    const bool is_zip       = archive_kind == ArchiveKind::kZip;
-    if (archive_kind == ArchiveKind::kUnknown || !ValidateArchiveListing(managed_archive_path, is_zip)) {
-        fs::remove_all(temp_dir, ec);
-        return util::ErrorEnum::InvalidParam;
-    }
-
     std::vector<std::string> extract_argv;
     if (is_zip) {
         LOG_INFO("{}", "[ImportModel] Extracting managed ZIP archive");
@@ -386,7 +399,7 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
         fs::remove_all(temp_dir, ec);
         return util::ErrorEnum::SysErr;
     }
-    if (!ValidateExtractedTree(temp_dir)) {
+    if (!ValidateExtractedTree(temp_dir, inspection)) {
         LOG_WARN("{}", "[ImportModel] Extracted archive violates path, type, count, or size limits");
         fs::remove_all(temp_dir, ec);
         return util::ErrorEnum::InvalidParam;

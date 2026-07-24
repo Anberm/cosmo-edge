@@ -1,3 +1,4 @@
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <array>
@@ -61,6 +62,8 @@ namespace {
         config.max_sessions_per_principal = 2;
         config.max_sessions               = 4;
         config.max_reserved_bytes         = 64;
+        config.reserve_free_bytes         = 0;
+        config.reserve_free_percent       = 0;
         config.session_ttl                = std::chrono::minutes(30);
         config.cleanup_interval           = std::chrono::milliseconds::zero();
         return config;
@@ -73,6 +76,9 @@ TEST_CASE("Upload staging binds opaque sessions to owner and consumes once", "[u
     REQUIRE(ParseUploadPurpose("model-component", parsed_purpose));
     CHECK(parsed_purpose == UploadPurpose::kModelComponent);
     CHECK(UploadPurposeName(UploadPurpose::kFaceImport) == "face-import");
+    REQUIRE(ParseUploadPurpose("image", parsed_purpose));
+    CHECK(parsed_purpose == UploadPurpose::kImage);
+    CHECK(UploadPurposeName(UploadPurpose::kImage) == "image");
     CHECK_FALSE(ParseUploadPurpose("unknown", parsed_purpose));
 
     TempDirectory temp;
@@ -431,27 +437,75 @@ TEST_CASE("Upload staging rejects aliases that collide with canonical upload IDs
     CHECK(ReadFile(lease.Path()) == "x");
 }
 
-TEST_CASE("Upload staging destroys alias sessions without persisting client identifiers",
-          "[upload-staging]") {
+TEST_CASE("Upload staging resumes authenticated aliases and chunks after restart",
+          "[upload-staging][restart]") {
     TempDirectory temp;
-    const auto root = temp.Path() / "sessions";
-    UploadBeginRequest request{"owner", UploadPurpose::kAudio, "alarm.wav", 1, 1, {}};
+    const auto root         = temp.Path() / "sessions";
+    const auto first_chunk  = temp.Path() / "first-chunk";
+    const auto second_chunk = temp.Path() / "second-chunk";
+    WriteFile(first_chunk, "abc");
+    WriteFile(second_chunk, "def");
+
+    UploadBeginRequest request{"owner", UploadPurpose::kAudio, "alarm.wav", 6, 2, {}};
     request.client_request_id = "legacy_restart_id";
     std::string first_id;
     {
         UploadStagingServiceImpl service(MakeConfig(root));
+        CHECK(service.GetCapabilities().persistent_across_restart);
         UploadSessionInfo info;
         REQUIRE(service.Begin(request, info) == util::ErrorEnum::Success);
         first_id = info.upload_id;
+        REQUIRE(service.AppendChunk("owner", first_id, 0, first_chunk.string(), info) ==
+                util::ErrorEnum::Success);
+        CHECK(info.next_chunk_index == 1);
         REQUIRE(fs::exists(root / first_id));
     }
-    CHECK_FALSE(fs::exists(root / first_id));
+    REQUIRE(fs::exists(root / first_id));
 
     UploadStagingServiceImpl restarted(MakeConfig(root));
-    UploadSessionInfo replacement;
-    REQUIRE(restarted.Begin(request, replacement) == util::ErrorEnum::Success);
-    CHECK(replacement.upload_id != first_id);
-    CHECK(restarted.Cancel("owner", request.client_request_id) == util::ErrorEnum::Success);
+    UploadSessionInfo resumed;
+    REQUIRE(restarted.Begin(request, resumed) == util::ErrorEnum::Success);
+    CHECK_FALSE(resumed.newly_created);
+    CHECK(resumed.upload_id == first_id);
+    CHECK(resumed.next_chunk_index == 1);
+    CHECK(resumed.received_size == 3);
+    REQUIRE(restarted.AppendChunk("owner", request.client_request_id, 1, second_chunk.string(), resumed) ==
+            util::ErrorEnum::Success);
+    REQUIRE(restarted.Complete("owner", first_id, resumed) == util::ErrorEnum::Success);
+
+    StagedFileLease lease;
+    REQUIRE(restarted.Consume("owner", first_id, request.purpose, lease) == util::ErrorEnum::Success);
+    CHECK(ReadFile(lease.Path()) == "abcdef");
+}
+
+TEST_CASE("Upload staging rejects corrupt restart manifests without following links",
+          "[upload-staging][restart][security]") {
+    TempDirectory temp;
+    const auto root     = temp.Path() / "sessions";
+    const auto sentinel = temp.Path() / "sentinel";
+    WriteFile(sentinel, "keep");
+
+    UploadBeginRequest request{"owner", UploadPurpose::kVideo, "video.mp4", 4, 1, {}};
+    std::string upload_id;
+    {
+        UploadStagingServiceImpl service(MakeConfig(root));
+        UploadSessionInfo info;
+        REQUIRE(service.Begin(request, info) == util::ErrorEnum::Success);
+        upload_id = info.upload_id;
+    }
+
+    const auto manifest = root / upload_id / ".session.json";
+    REQUIRE(fs::remove(manifest));
+    fs::create_symlink(sentinel, manifest);
+    {
+        UploadStagingServiceImpl restarted(MakeConfig(root));
+        UploadSessionInfo info;
+        REQUIRE(restarted.Begin(request, info) == util::ErrorEnum::Success);
+        CHECK(info.upload_id != upload_id);
+        REQUIRE(restarted.Cancel("owner", info.upload_id) == util::ErrorEnum::Success);
+    }
+    CHECK(ReadFile(sentinel) == "keep");
+    CHECK_FALSE(fs::exists(root / upload_id));
 }
 
 TEST_CASE("Upload staging emits opaque references and temporarily accepts exact R1 paths",
@@ -623,14 +677,18 @@ TEST_CASE("Upload staging rolls back partially prepared batch consumption", "[up
 }
 
 TEST_CASE("Upload staging enforces limits and expires abandoned sessions", "[upload-staging]") {
-    CHECK(UploadStagingConfig{}.max_total_size == 500ULL * 1024 * 1024);
+    CHECK(UploadStagingConfig{}.max_total_size == 0);
     CHECK(UploadStagingConfig{}.max_chunk_size == 8ULL * 1024 * 1024);
-    CHECK(UploadStagingConfig{}.max_sessions_per_principal == 4);
-    CHECK(UploadStagingConfig{}.max_sessions == 16);
-    CHECK(UploadStagingConfig{}.max_reserved_bytes == 2ULL * 1024 * 1024 * 1024);
+    CHECK(UploadStagingConfig{}.max_chunks == 0);
+    CHECK(UploadStagingConfig{}.max_sessions_per_principal == 0);
+    CHECK(UploadStagingConfig{}.max_sessions == 0);
+    CHECK(UploadStagingConfig{}.max_reserved_bytes == 0);
+    CHECK(UploadStagingConfig{}.reserve_free_bytes == 512ULL * 1024 * 1024);
+    CHECK(UploadStagingConfig{}.reserve_free_percent == 5);
     CHECK(UploadStagingConfig{}.session_ttl == std::chrono::minutes(30));
     CHECK(UploadStagingConfig{}.cleanup_interval == std::chrono::minutes(1));
-    CHECK(UploadStagingConfig{}.max_session_lifetime == std::chrono::hours(2));
+    CHECK(UploadStagingConfig{}.max_session_lifetime == std::chrono::milliseconds::zero());
+    CHECK(UploadStagingConfig{}.persist_sessions);
 
     TempDirectory temp;
     auto config                       = MakeConfig(temp.Path() / "sessions");
@@ -647,11 +705,17 @@ TEST_CASE("Upload staging enforces limits and expires abandoned sessions", "[upl
 
     UploadSessionInfo ignored;
     CHECK(service.Begin(request, ignored) == util::ErrorEnum::ResourceLimit);
+    CHECK(ignored.admission.failure == UploadAdmissionFailure::kPrincipalSessions);
+    CHECK(ignored.admission.actual == 1);
+    CHECK(ignored.admission.limit == 1);
     auto other_request         = request;
     other_request.principal    = "other";
     other_request.total_size   = 5;
     other_request.total_chunks = 2;
     CHECK(service.Begin(other_request, ignored) == util::ErrorEnum::ResourceLimit);
+    CHECK(ignored.admission.failure == UploadAdmissionFailure::kStorageReserve);
+    CHECK(ignored.admission.required_bytes == 5);
+    CHECK(ignored.admission.limit == 4);
 
     now += std::chrono::milliseconds(51);
     service.CleanupExpired();
@@ -666,6 +730,44 @@ TEST_CASE("Upload staging enforces limits and expires abandoned sessions", "[upl
     impossible.total_size   = 9;
     impossible.total_chunks = 2;
     CHECK(service.Begin(impossible, first) == util::ErrorEnum::InvalidParam);
+}
+
+TEST_CASE("Upload staging has no default product file-size or chunk-count cap", "[upload-staging]") {
+    TempDirectory temp;
+    auto config                       = MakeConfig(temp.Path() / "sessions");
+    config.max_total_size             = 0;
+    config.max_chunks                 = 0;
+    config.max_sessions_per_principal = 0;
+    config.max_sessions               = 0;
+    config.max_chunk_size             = 8ULL * 1024 * 1024;
+    config.max_reserved_bytes         = 700ULL * 1024 * 1024;
+    config.max_session_metadata_bytes = 64ULL * 1024 * 1024;
+    UploadStagingServiceImpl service(config);
+
+    UploadBeginRequest request{
+        "owner", UploadPurpose::kModelArchive, "large-model.tar.gz", 600ULL * 1024 * 1024, 75, {}};
+    UploadSessionInfo info;
+    REQUIRE(service.Begin(request, info) == util::ErrorEnum::Success);
+    CHECK(info.total_size == request.total_size);
+    CHECK(info.total_chunks == request.total_chunks);
+    CHECK(service.Cancel("owner", info.upload_id) == util::ErrorEnum::Success);
+}
+
+TEST_CASE("Upload staging reports metadata budget rejection details", "[upload-staging]") {
+    TempDirectory temp;
+    auto config                       = MakeConfig(temp.Path() / "sessions");
+    config.max_total_size             = 0;
+    config.max_chunks                 = 0;
+    config.max_session_metadata_bytes = sizeof(std::uint64_t);
+    CHECK_THROWS_AS(UploadStagingServiceImpl(config), std::invalid_argument);
+
+    config.max_session_metadata_bytes = 128;
+    UploadStagingServiceImpl service(config);
+    UploadBeginRequest request{"owner", UploadPurpose::kVideo, "video.mp4", 100, 100, {}};
+    UploadSessionInfo info;
+    CHECK(service.Begin(request, info) == util::ErrorEnum::ResourceLimit);
+    CHECK(info.admission.failure == UploadAdmissionFailure::kMetadataBudget);
+    CHECK(info.admission.actual > info.admission.limit);
 }
 
 TEST_CASE("Upload staging refreshes idle TTL only for new chunks and enforces absolute lifetime",
@@ -789,6 +891,37 @@ TEST_CASE("Upload staging pins root identity and never follows replacement links
     CHECK(fs::exists(sentinel));
     CHECK(ReadFile(sentinel) == "keep");
     CHECK_FALSE(fs::exists(pinned_root / info.upload_id));
+}
+
+TEST_CASE("Upload staging accepts a private root inherited from its deployment parent",
+          "[upload-staging][root]") {
+    if (geteuid() != 0) {
+        SUCCEED("owner-transition coverage requires a root test process");
+        return;
+    }
+
+    constexpr uid_t kDeploymentOwner = 65534;
+    TempDirectory temp;
+    const auto parent = temp.Path() / "upload";
+    const auto root   = parent / "sessions";
+    fs::create_directories(root);
+    REQUIRE(chown(parent.c_str(), kDeploymentOwner, kDeploymentOwner) == 0);
+    REQUIRE(chown(root.c_str(), kDeploymentOwner, kDeploymentOwner) == 0);
+
+    UploadStagingServiceImpl service(MakeConfig(root));
+    UploadBeginRequest request{"owner", UploadPurpose::kAudio, "alarm.wav", 1, 1, {}};
+    UploadSessionInfo info;
+    REQUIRE(service.Begin(request, info) == util::ErrorEnum::Success);
+    const auto session = root / info.upload_id;
+    struct stat session_status {};
+    REQUIRE(lstat(session.c_str(), &session_status) == 0);
+    CHECK(session_status.st_uid == geteuid());
+
+    const auto unexpected_parent = temp.Path() / "other-upload";
+    const auto unexpected_root   = unexpected_parent / "sessions";
+    fs::create_directories(unexpected_root);
+    REQUIRE(chown(unexpected_root.c_str(), kDeploymentOwner, kDeploymentOwner) == 0);
+    CHECK_THROWS_AS(UploadStagingServiceImpl(MakeConfig(unexpected_root)), std::runtime_error);
 }
 
 TEST_CASE("Upload staging lease cleanup remains inside the pinned root", "[upload-staging]") {

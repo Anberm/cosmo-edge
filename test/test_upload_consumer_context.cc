@@ -15,6 +15,7 @@
 #include "api/MessageImportFileHandler.h"
 #include "api/MessageModelHandler.h"
 #include "api/MessageSystemHandler.h"
+#include "api/StagedImageInput.h"
 #include "mock/MockAlgorithmService.h"
 #include "mock/MockAudioService.h"
 #include "mock/MockCameraService.h"
@@ -31,6 +32,7 @@
 #include "service/detail/ServiceRegistry.h"
 #include "service/path/IUploadStagingService.h"
 #include "service/path/impl/UploadStagingServiceImpl.h"
+#include "util/CipherUtil.h"
 #include "util/UuidUtil.h"
 
 namespace cosmo {
@@ -83,6 +85,8 @@ namespace {
         config.max_sessions_per_principal = 8;
         config.max_sessions               = 8;
         config.max_reserved_bytes         = 16ULL * 1024 * 1024;
+        config.reserve_free_bytes         = 0;
+        config.reserve_free_percent       = 0;
         return config;
     }
 
@@ -366,6 +370,65 @@ TEST_CASE("Upload consumers bind purpose before invoking business services", "[u
     }
 }
 
+TEST_CASE("Staged image input is authenticated purpose-bound and one-shot", "[upload-staging][api][image]") {
+    test::MockServiceRegistry mocks;
+    TempDirectory temp;
+    service::UploadStagingServiceImpl staging(MakeConfig(temp.Path() / "sessions"));
+    ScopedStagingRegistration registration(staging);
+
+    const auto encoded_image_bytes = util::DecBase64Vec(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+        "x8AAusB9Y9Zl1sAAAAASUVORK5CYII=");
+    REQUIRE_FALSE(encoded_image_bytes.empty());
+    const std::string encoded_image(reinterpret_cast<const char*>(encoded_image_bytes.data()),
+                                    encoded_image_bytes.size());
+    const auto image = StageFile(staging, temp.Path(), "owner", service::UploadPurpose::kImage,
+                                 "high-resolution.png", encoded_image);
+
+    std::vector<std::vector<std::uint8_t>> images;
+    CHECK(detail::ConsumeStagedImages(HttpContext("other"), {image.upload_id}, images) ==
+          util::ErrorEnum::AuthFailed);
+    CHECK(images.empty());
+
+    CHECK(detail::ConsumeStagedImages(MqttContext("owner"), {image.upload_id}, images) ==
+          util::ErrorEnum::InvalidParam);
+    CHECK(images.empty());
+
+    REQUIRE(detail::ConsumeStagedImages(HttpContext("owner"), {image.upload_id}, images) ==
+            util::ErrorEnum::Success);
+    REQUIRE(images.size() == 1);
+    CHECK(std::string(images.front().begin(), images.front().end()) == encoded_image);
+
+    CHECK(detail::ConsumeStagedImages(HttpContext("owner"), {image.upload_id}, images) ==
+          util::ErrorEnum::NoSuchId);
+    CHECK(images.empty());
+}
+
+TEST_CASE("Staged image batches are claimed atomically", "[upload-staging][api][image]") {
+    test::MockServiceRegistry mocks;
+    TempDirectory temp;
+    service::UploadStagingServiceImpl staging(MakeConfig(temp.Path() / "sessions"));
+    ScopedStagingRegistration registration(staging);
+
+    const auto first =
+        StageFile(staging, temp.Path(), "owner", service::UploadPurpose::kImage, "first.jpg", "first");
+    const auto second =
+        StageFile(staging, temp.Path(), "other", service::UploadPurpose::kImage, "second.jpg", "second");
+
+    std::vector<std::vector<std::uint8_t>> images;
+    CHECK(detail::ConsumeStagedImages(HttpContext("owner"), {first.upload_id, second.upload_id}, images) ==
+          util::ErrorEnum::AuthFailed);
+    CHECK(images.empty());
+
+    std::string reference;
+    CHECK(staging.GetLegacyPath("owner", first.upload_id, service::UploadPurpose::kImage, reference) ==
+          util::ErrorEnum::Success);
+    CHECK(staging.GetLegacyPath("other", second.upload_id, service::UploadPurpose::kImage, reference) ==
+          util::ErrorEnum::Success);
+    CHECK(staging.Cancel("owner", first.upload_id) == util::ErrorEnum::Success);
+    CHECK(staging.Cancel("other", second.upload_id) == util::ErrorEnum::Success);
+}
+
 TEST_CASE("File-consuming context handlers reject MQTT path requests", "[upload-staging][api][security]") {
     test::MockServiceRegistry mocks;
     const auto context = MqttContext("owner");
@@ -472,6 +535,18 @@ TEST_CASE("Local video accepts the external channel alias and rejects conflicts"
         (void)handler.Handle(std::move(request), HttpContext("owner"), error);
         CHECK(error == util::ErrorEnum::InvalidParam);
     }
+}
+
+TEST_CASE("Local video admission has no fixed one-gigabyte ceiling", "[camera][api][resource-policy]") {
+    test::MockServiceRegistry mocks;
+    REQUIRE_CALL(mocks.cameraSvc, Add(trompeloeil::_, trompeloeil::_)).RETURN(util::ErrorEnum::Success);
+    MessageCameraHandler handler(mocks.cameraSvc, mocks.cameraSvc, mocks.cameraSvc, mocks.taskSvc);
+    camera::MsgAddVideoRecv request;
+    request.filePath      = "/managed/video.mp4";
+    request.contentLength = std::to_string(2ULL * 1024 * 1024 * 1024);
+    std::error_condition error;
+    (void)handler.Handle(std::move(request), error);
+    CHECK(error == util::ErrorEnum::Success);
 }
 
 TEST_CASE("HTTP upload compatibility only claims the current multipart file",

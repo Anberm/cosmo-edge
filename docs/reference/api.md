@@ -96,6 +96,87 @@ QueryLogs
 
 `MsgSendHead` 本身不含业务数据；各具体响应消息（各 `*Send` 子类）会在 `MsgSendHead` 之外额外携带 `resData` 业务数据容器，其结构按接口不同而变化。
 
+## 资源感知传输
+
+上传模型组件、模型归档、本地视频、算法包、升级包、音频、人脸导入包和图片时，客户端应复用同一套鉴权分片协议：
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /gtw/cwai/atomic/model/uploadCapabilities` | 查询设备当前能力和安全可用空间 |
+| `POST /gtw/cwai/atomic/model/uploadTemp` | 上传一个 `multipart/form-data` 分片 |
+| `POST /gtw/cwai/atomic/model/cancelUpload` | 取消会话并立即释放预留空间 |
+
+`uploadCapabilities` 中的数字字节数以十进制字符串返回。主要字段：
+
+| 字段 | 语义 |
+| --- | --- |
+| `maxTotalSize` | 可选部署策略中的单文件总量上限；`0` 表示不设置产品配额 |
+| `maxChunkSize` | 单个传输分片上限；默认 8 MB（8 × 1024 × 1024 bytes） |
+| `maxChunks` | 可选部署策略中的分片数上限；`0` 表示不设置产品配额 |
+| `availableBytes` | 暂存目标文件系统当前可用字节数，尚未扣除安全储备 |
+| `reserveBytes` | 当前生效的磁盘安全储备 |
+| `availableForNewUploadsBytes` | 扣除安全储备和在途会话预留后的当前可接纳字节数 |
+| `reservedBySessionsBytes` | 已被在途上传会话预留的字节数 |
+| `activeSessions` | 当前打开或已完成但尚未消费的上传会话数 |
+| `idleTimeoutMs` | 无进展会话的过期时间；每个有效分片都会刷新 |
+| `absoluteTimeoutMs` | 绝对生命周期；`0` 表示不设置绝对时长 |
+| `resumable` | 是否支持幂等续传 |
+| `persistentAcrossRestart` | 是否可在引擎重启后恢复 |
+| `maxEncodedImageBytes` | 当前媒体管线可接收的编码图片字节数 |
+| `maxImagePixels` | 当前媒体管线可解码的最大像素数 |
+
+默认策略不按模型、视频或图片类型设置任意总量配额。设备按目标文件系统的实时资源决定是否接纳，并保留 `max(512 MB, 5%)` 的磁盘安全空间。客户端必须在开始上传前查询能力，不能把某次查询得到的可用空间或图片能力写死为产品常量。
+
+当前生产默认值集中在一处，而不是按业务类型设置多套细粒度上限：
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| 完整文件总量 / 分片数 | `0` / `0` | 不设置产品配额；仍受实时资源接纳结果约束 |
+| 单用户 / 全局并发会话数 | `0` / `0` | 不设置固定会话配额 |
+| 全局在途预留总量 | `0` | 不设置固定预留配额 |
+| 单个上传分片 | `8 MB` | 控制单次请求的内存和解析开销 |
+| 单会话元数据预算 | `64 MB` | 防止异常会话消耗无界内存 |
+| 空闲超时 / 绝对超时 | `30 分钟` / `0` | 有进展即续期，不设置绝对生命周期 |
+| 跨重启恢复 | 启用 | 清单持久化并支持幂等续传 |
+| 磁盘安全储备 | `max(512 MB, 5%)` | 避免上传耗尽目标文件系统 |
+
+首个分片应携带稳定的 `clientRequestId`；服务端返回不透明的 `uploadId` 和 `nextChunkIndex`。断线或引擎重启后，重新发送相同文件的第 0 块和同一 `clientRequestId`，服务端会返回原会话及下一待上传分片。完成或取消后，客户端应删除本地恢复标识。
+
+控制面 JSON 请求默认限制为 1 MB；普通单次 multipart 请求默认限制为 10 MB；推荐上传分片为 8 MB。这里的 MB 均按 1024 × 1024 bytes 计算。它们是单次 HTTP 请求的内存与解析边界，不是业务文件总量限制。超过边界时服务端返回 HTTP 413 和 `HTTP_BODY_TOO_LARGE`，并建议 `USE_CHUNKED_UPLOAD` 或 `REDUCE_REQUEST_BODY`。
+
+### 升级恢复状态
+
+`POST /gtw/cwai/System/QueryDeviceStatus` 成功时返回：
+
+| 字段 | 语义 |
+| --- | --- |
+| `resData.bootId` | 当前 Linux 启动实例标识；软件升级页面用它确认设备确实完成了一次重启 |
+| `resData.softwareVersion` | 当前运行中的 CosmoEdge 版本 |
+
+这两个字段是向后兼容的增量字段。旧客户端可以忽略；新客户端不应只根据“接口再次返回 200”就宣告升级成功。
+
+libevent 另有 12 MB 的有限紧急接收后备线，只在请求未被应用层边界提前拒绝时兜底，不能视为可用的业务上传额度。底层直接拒绝时可能只能返回通用 HTTP 413；Web 控制台会按请求类型补成同样可执行的提示（multipart 改用分片，其他请求缩小请求体）。第三方客户端仍应遵守 8 MB 分片、1 MB JSON 和 10 MB 普通 multipart 边界。
+
+图片 URL 下载使用“当前可用内存、媒体帧能力”共同计算的预算，不再使用固定 16 MB 阈值；视频和其他大文件的 HTTP 获取直接流式写入文件。媒体静态路径按扩展名返回标准 MIME 类型（例如 JPEG 为 `image/jpeg`、MP4 为 `video/mp4`）。模型和其他受管文件的导出同样按文件流发送，并支持单段 `Range` 请求、`206 Partial Content` 和不可满足范围的 `416`。
+
+`/gtw/cwai/atomic/model/exportConfig` 对用户管理且允许导出的模型直接返回附件。预置、加密或与设备绑定的模型会返回 `DefaultCantBeExport`；这是模型可移植性和安全策略边界，不是文件大小配额。
+
+## 可操作错误
+
+`resMsg` 在兼容 `msgCode`、`msgText` 的基础上可携带：
+
+| 字段 | 说明 |
+| --- | --- |
+| `messageKey` | 前端本地化键 |
+| `details` | `actualBytes`、`limitBytes`、`requiredBytes`、`availableBytes`、`reserveBytes` 等机器可读上下文 |
+| `retryable` | 原请求在外部条件变化后是否可重试 |
+| `retryAfterSeconds` | 建议等待时间 |
+| `recommendedAction` | 前端应展示或执行的下一步 |
+
+上传和媒体链路的主要错误包括 `STORAGE_RESERVE_REACHED`、`TRANSFER_BUSY`、`UPLOAD_METADATA_BUDGET`、`HTTP_BODY_TOO_LARGE`、`IMAGE_INPUT_TOO_LARGE` 和 `IMAGE_RESOLUTION_TOO_LARGE`。前端应展示服务端返回的实际值、限制值和建议动作，不能统一降级为“上传失败”。
+
+当前前端会把 `recommendedAction` 映射为可见操作提示。稳定动作码包括 `FREE_DISK_SPACE`、`USE_CHUNKED_UPLOAD`、`REDUCE_REQUEST_BODY`、`USE_LARGER_CHUNKS`、`RETRY`/`RETRY_LATER`、`RESIZE_IMAGE`、`RESIZE_OR_RECOMPRESS_IMAGE`、`CHECK_UPLOAD_PARAMETERS`、`CHANGE_DEPLOYMENT_POLICY` 和 `USE_LARGER_CHUNKS_OR_CHANGE_POLICY`；若同时返回 `retryAfterSeconds`，界面还会显示建议等待时间。
+
 ## WebSocket
 
 默认 WebSocket 端口：

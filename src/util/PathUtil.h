@@ -18,8 +18,9 @@ namespace cosmo::path {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
-/// One-time startup initialisation: clears upload/web transient directories
-/// and recreates the CWAI runtime data path. Call once from SwDevicePreInit().
+/// One-time startup initialisation: clears per-request upload/web transient
+/// directories while preserving resumable upload sessions, and recreates the
+/// CWAI runtime data path. Call once from SwDevicePreInit().
 void Init();
 
 /// Test-only: override the root data paths to isolate unit tests from the

@@ -29,18 +29,40 @@ test('reuses local AddVideo channels by bench-prefixed channelName', async () =>
 
   const ids = await manager.ensureChannels({
     mode: 'local',
-    local: [{ name: 'clip', filePath: '/device/clip.mp4', contentLength: 100 }],
+    local: [{ name: 'clip', file: '/control/clip.mp4' }],
   }, 2);
 
   assert.deepEqual(ids, ['existing-1', 'existing-2']);
   assert.equal(addCalls, 0);
 });
 
-test('created local AddVideo channel names keep a stable bench prefix', async () => {
+test('created local AddVideo channel names keep a stable bench prefix', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenario-bench-name-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const video = path.join(dir, 'clip.mp4');
+  fs.writeFileSync(video, 'video');
+
   const payloads = [];
   const client = {
     async cameraPage() {
       return { rows: [] };
+    },
+    async uploadCapabilities() {
+      return {
+        maxTotalSize: '0',
+        maxChunkSize: String(8 * 1024 * 1024),
+        maxChunks: '0',
+        availableForNewUploadsBytes: String(1024 * 1024),
+      };
+    },
+    async uploadTempChunk(_buffer, _fileName, meta) {
+      return {
+        resData: {
+          uploadId: 'server-upload-id',
+          nextChunkIndex: String(meta.chunkIndex + 1),
+          complete: true,
+        },
+      };
     },
     async cameraAddVideo(payload) {
       payloads.push(payload);
@@ -54,16 +76,16 @@ test('created local AddVideo channel names keep a stable bench prefix', async ()
 
   const ids = await manager.ensureChannels({
     mode: 'local',
-    local: [{ name: 'clip', filePath: '/device/clip.mp4', contentLength: 100 }],
+    local: [{ name: 'clip', file: video }],
   }, 1);
 
   assert.deepEqual(ids, ['created-1']);
   assert.equal(payloads[0].channelName, 'bench-case-01-clip');
-  assert.equal(payloads[0].filePath, '/device/clip.mp4');
-  assert.equal(payloads[0].contentLength, '100');
+  assert.equal(payloads[0].uploadId, 'server-upload-id');
+  assert.equal(payloads[0].filePath, undefined);
 });
 
-test('uploads local videos with bounded chunks and consumes the server upload ID', async (t) => {
+test('uses the device-advertised chunk boundary and consumes the server upload ID', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenario-bench-upload-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const video = path.join(dir, 'clip.mp4');
@@ -75,6 +97,14 @@ test('uploads local videos with bounded chunks and consumes the server upload ID
   const client = {
     async cameraPage() {
       return { rows: [] };
+    },
+    async uploadCapabilities() {
+      return {
+        maxTotalSize: '0',
+        maxChunkSize: String(4 * 1024 * 1024),
+        maxChunks: '0',
+        availableForNewUploadsBytes: String(64 * 1024 * 1024),
+      };
     },
     async uploadTempChunk(buffer, fileName, meta) {
       chunks.push({ size: buffer.length, fileName, meta });
@@ -102,7 +132,7 @@ test('uploads local videos with bounded chunks and consumes the server upload ID
   }, 1);
 
   assert.deepEqual(ids, ['created-1']);
-  assert.deepEqual(chunks.map((chunk) => chunk.size), [8 * 1024 * 1024, 1]);
+  assert.deepEqual(chunks.map((chunk) => chunk.size), [4 * 1024 * 1024, 4 * 1024 * 1024, 1]);
   assert.equal(chunks[0].meta.uploadId, '');
   assert.equal(chunks[1].meta.uploadId, 'server-upload-id');
   assert.equal(chunks[0].meta.purpose, 'video');

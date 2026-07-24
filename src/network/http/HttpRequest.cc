@@ -2,6 +2,14 @@
 
 #include "network/http/HttpRequest.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -9,6 +17,22 @@
 #include "util/Log.h"
 
 namespace cosmo::network::http {
+
+struct HttpRequest::MimePart {
+    std::string name;
+    std::string value;
+    std::string filename;
+    std::string content_type;
+    int fd{-1};
+    std::uint64_t size{0};
+    std::uint64_t position{0};
+
+    ~MimePart() {
+        if (fd >= 0) {
+            close(fd);
+        }
+    }
+};
 
 const char* GetMethodString(HttpRequestMethod method) {
     switch (method) {
@@ -45,6 +69,8 @@ HttpRequest::HttpRequest(const std::string& url, HttpRequestHandler* result_hand
       connect_timeout_(10L),
       follow_location_(1L) {}
 
+HttpRequest::~HttpRequest() = default;
+
 void HttpRequest::SetPostUrl(const std::string& url) {
     url_ = url;
 }
@@ -70,6 +96,45 @@ void HttpRequest::AppendData(const std::string& key, const std::string& value) {
     data_ += key;
     data_ += "=";
     data_ += value;
+}
+
+bool HttpRequest::AddMimeField(const std::string& name, const std::string& value) {
+    if (name.empty() || name.find_first_of("\r\n\"") != std::string::npos) {
+        return false;
+    }
+    auto part   = std::make_unique<MimePart>();
+    part->name  = name;
+    part->value = value;
+    mime_parts_.push_back(std::move(part));
+    return true;
+}
+
+bool HttpRequest::AddMimeFile(const std::string& name, const std::string& path, const std::string& filename,
+                              const std::string& content_type) {
+    if (name.empty() || filename.empty() || path.empty() ||
+        name.find_first_of("\r\n\"") != std::string::npos ||
+        filename.find_first_of("\r\n\"") != std::string::npos ||
+        content_type.find_first_of("\r\n") != std::string::npos) {
+        return false;
+    }
+
+    const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    struct stat status {};
+    if (fd < 0 || fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size <= 0) {
+        if (fd >= 0) {
+            close(fd);
+        }
+        return false;
+    }
+
+    auto part          = std::make_unique<MimePart>();
+    part->name         = name;
+    part->filename     = filename;
+    part->content_type = content_type;
+    part->fd           = fd;
+    part->size         = static_cast<std::uint64_t>(status.st_size);
+    mime_parts_.push_back(std::move(part));
+    return true;
 }
 
 const std::string& HttpRequest::GetContentType() const {
@@ -100,6 +165,10 @@ long HttpRequest::Submit(HttpRequestMethod method) {
         curl, curl_easy_cleanup);
     if (!curl) {
         LOG_ERRO("{}", "curl easy init fail");
+        return -1;
+    }
+    if (!mime_parts_.empty() && !data_.empty()) {
+        LOG_ERRO("{}", "HTTP request cannot combine buffered and MIME bodies");
         return -1;
     }
 
@@ -185,7 +254,7 @@ long HttpRequest::Submit(HttpRequestMethod method) {
     }
 
     struct curl_slist* headers = nullptr;
-    if (!data_.empty()) {
+    if (!data_.empty() && mime_parts_.empty()) {
         std::string type_header = "Content-Type: " + post_content_type_;
         headers                 = curl_slist_append(headers, type_header.c_str());
         std::string size_header = "Content-Length: " + std::to_string(data_.size());
@@ -206,6 +275,82 @@ long HttpRequest::Submit(HttpRequestMethod method) {
     if (!data_.empty()) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data_.c_str());
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, data_.size());
+    }
+
+    std::unique_ptr<curl_mime, decltype(&curl_mime_free)> mime(nullptr, curl_mime_free);
+    if (!mime_parts_.empty()) {
+        mime.reset(curl_mime_init(curl));
+        if (!mime) {
+            LOG_ERRO("{}", "curl_mime_init failed");
+            return -1;
+        }
+        const auto read_file =
+            +[](char* buffer, size_t item_size, size_t item_count, void* user_data) -> size_t {
+            auto* part = static_cast<MimePart*>(user_data);
+            if (part == nullptr || part->fd < 0 || item_size == 0 || item_count == 0 ||
+                item_count > std::numeric_limits<size_t>::max() / item_size) {
+                return CURL_READFUNC_ABORT;
+            }
+            const auto capacity = item_size * item_count;
+            if (part->position >= part->size) {
+                return 0;
+            }
+            const auto remaining = part->size - part->position;
+            const auto requested =
+                static_cast<size_t>(std::min<std::uint64_t>(remaining, static_cast<std::uint64_t>(capacity)));
+            ssize_t read_count = 0;
+            do {
+                read_count = pread(part->fd, buffer, requested, static_cast<off_t>(part->position));
+            } while (read_count < 0 && errno == EINTR);
+            if (read_count < 0) {
+                return CURL_READFUNC_ABORT;
+            }
+            part->position += static_cast<std::uint64_t>(read_count);
+            return static_cast<size_t>(read_count);
+        };
+        const auto seek_file = +[](void* user_data, curl_off_t offset, int origin) -> int {
+            auto* part = static_cast<MimePart*>(user_data);
+            if (part == nullptr || offset < 0) {
+                return CURL_SEEKFUNC_FAIL;
+            }
+            std::uint64_t base = 0;
+            if (origin == SEEK_CUR) {
+                base = part->position;
+            } else if (origin == SEEK_END) {
+                base = part->size;
+            } else if (origin != SEEK_SET) {
+                return CURL_SEEKFUNC_FAIL;
+            }
+            const auto delta = static_cast<std::uint64_t>(offset);
+            if (delta > part->size || base > part->size - delta) {
+                return CURL_SEEKFUNC_FAIL;
+            }
+            part->position = base + delta;
+            return CURL_SEEKFUNC_OK;
+        };
+
+        for (const auto& part : mime_parts_) {
+            curl_mimepart* curl_part = curl_mime_addpart(mime.get());
+            if (curl_part == nullptr || curl_mime_name(curl_part, part->name.c_str()) != CURLE_OK) {
+                return -1;
+            }
+            if (part->fd >= 0) {
+                part->position = 0;
+                if (part->size > static_cast<std::uint64_t>(std::numeric_limits<curl_off_t>::max()) ||
+                    curl_mime_filename(curl_part, part->filename.c_str()) != CURLE_OK ||
+                    (!part->content_type.empty() &&
+                     curl_mime_type(curl_part, part->content_type.c_str()) != CURLE_OK) ||
+                    curl_mime_data_cb(curl_part, static_cast<curl_off_t>(part->size), read_file, seek_file,
+                                      nullptr, part.get()) != CURLE_OK) {
+                    return -1;
+                }
+            } else if (curl_mime_data(curl_part, part->value.data(), part->value.size()) != CURLE_OK) {
+                return -1;
+            }
+        }
+        if (curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime.get()) != CURLE_OK) {
+            return -1;
+        }
     }
 
     res = curl_easy_perform(curl);

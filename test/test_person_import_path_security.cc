@@ -42,15 +42,30 @@ void WriteLe32(std::ostream& stream, std::uint32_t value) {
     }
 }
 
-bool WriteEmptyStoredZip(const std::filesystem::path& archive_path, std::string_view member) {
-    if (member.empty() || member.size() > std::numeric_limits<std::uint16_t>::max()) {
+std::uint32_t Crc32(std::string_view value) {
+    std::uint32_t crc = 0xffffffffU;
+    for (const auto character : value) {
+        crc ^= static_cast<unsigned char>(character);
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1U) ^ ((crc & 1U) != 0U ? 0xedb88320U : 0U);
+        }
+    }
+    return crc ^ 0xffffffffU;
+}
+
+bool WriteStoredZip(const std::filesystem::path& archive_path, std::string_view member,
+                    std::string_view payload = {}) {
+    if (member.empty() || member.size() > std::numeric_limits<std::uint16_t>::max() ||
+        payload.size() > std::numeric_limits<std::uint32_t>::max()) {
         return false;
     }
     std::ofstream stream(archive_path, std::ios::binary | std::ios::trunc);
     if (!stream) {
         return false;
     }
-    const auto member_size = static_cast<std::uint16_t>(member.size());
+    const auto member_size  = static_cast<std::uint16_t>(member.size());
+    const auto payload_size = static_cast<std::uint32_t>(payload.size());
+    const auto payload_crc  = Crc32(payload);
 
     WriteLe32(stream, 0x04034b50U);
     WriteLe16(stream, 20);
@@ -58,12 +73,13 @@ bool WriteEmptyStoredZip(const std::filesystem::path& archive_path, std::string_
     WriteLe16(stream, 0);
     WriteLe16(stream, 0);
     WriteLe16(stream, 0x21);
-    WriteLe32(stream, 0);
-    WriteLe32(stream, 0);
-    WriteLe32(stream, 0);
+    WriteLe32(stream, payload_crc);
+    WriteLe32(stream, payload_size);
+    WriteLe32(stream, payload_size);
     WriteLe16(stream, member_size);
     WriteLe16(stream, 0);
     stream.write(member.data(), static_cast<std::streamsize>(member.size()));
+    stream.write(payload.data(), static_cast<std::streamsize>(payload.size()));
 
     const auto central_offset = static_cast<std::uint32_t>(static_cast<std::streamoff>(stream.tellp()));
     WriteLe32(stream, 0x02014b50U);
@@ -73,9 +89,9 @@ bool WriteEmptyStoredZip(const std::filesystem::path& archive_path, std::string_
     WriteLe16(stream, 0);
     WriteLe16(stream, 0);
     WriteLe16(stream, 0x21);
-    WriteLe32(stream, 0);
-    WriteLe32(stream, 0);
-    WriteLe32(stream, 0);
+    WriteLe32(stream, payload_crc);
+    WriteLe32(stream, payload_size);
+    WriteLe32(stream, payload_size);
     WriteLe16(stream, member_size);
     WriteLe16(stream, 0);
     WriteLe16(stream, 0);
@@ -119,7 +135,7 @@ TEST_CASE("PersonImport rejects and preserves unmanaged input paths", "[face][se
 
         const fs::path traversal_archive = fs::path(cosmo::path::GetUploadPath()) / "traversal.zip";
         const fs::path escaped_path = root.parent_path() / ("cosmo_person_import_escape_" + suffix + ".jpg");
-        REQUIRE(WriteEmptyStoredZip(traversal_archive, "../" + escaped_path.filename().string()));
+        REQUIRE(WriteStoredZip(traversal_archive, "../" + escaped_path.filename().string()));
         REQUIRE_THROWS_AS(importer.ImportFile(traversal_archive.string(), "face-lib"),
                           cosmo::util::ErrorMessage);
         REQUIRE_FALSE(fs::exists(traversal_archive));
@@ -143,7 +159,10 @@ TEST_CASE("PersonImport Stop waits for an active import and rejects restart", "[
         cosmo::test::MockServiceRegistry mocks;
         const RootPathOverrideGuard root_override(root.string(), root.string());
         const auto archive = fs::path(cosmo::path::GetUploadPath()) / "faces.zip";
-        REQUIRE(WriteEmptyStoredZip(archive, "ignored.txt"));
+        // Archive validation intentionally rejects zero-byte-only archives.
+        // Keep this lifecycle fixture structurally valid so the worker reaches
+        // the transaction boundary that Stop() is meant to exercise.
+        REQUIRE(WriteStoredZip(archive, "ignored.txt", "fixture"));
 
         auto face_lib = std::make_shared<cosmo::FaceLib>();
         REQUIRE_CALL(mocks.faceLibSvc, GetFaceLib("face-lib")).RETURN(face_lib);

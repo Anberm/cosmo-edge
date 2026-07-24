@@ -133,7 +133,7 @@ void ApiRouter::RegisterCoreRoutes() {
     ROUTE_CORE("/v1/cwai/aihost/", kAuth, TaskCancle);
     ROUTE_CORE("/v1/cwai/aihost/", kAuth, PTaskCreate);
     ROUTE_CORE("/v1/cwai/aihost/", kAuth, PTaskCancle);
-    ROUTE_CORE("/v1/cwai/aihost/", kAuth, PTaskDetectPic);
+    ROUTE_CORE_CONTEXT("/v1/cwai/aihost/", kAuth, PTaskDetectPic);
     ROUTE_CORE("/v1/cwai/aihost/", kAuth, OperateNode);
     ROUTE_CORE("/v1/cwai/aihost/", kAuth, Info);
     ROUTE_CORE("/v1/cwai/aihost/", kNoAuth, Probe);
@@ -160,9 +160,12 @@ void ApiRouter::RegisterCoreRoutes() {
                                                                                 jsonStr, errc);
         }};
     url_map_[util::ToLower("/gtw/cwai/aihost/PTaskDetectPic")] = {
-        kAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
-            return detail::DispatchJson<MsgPTaskDetectPicSend, MsgPTaskDetectPicRecv>(
-                GetMessageFrom(), *handler_, jsonStr, errc);
+        kAuth,
+        {},
+        [this](const RequestDispatchContext& context, const std::string& jsonStr,
+               std::error_condition& errc) {
+            return detail::DispatchJsonWithContext<MsgPTaskDetectPicSend, MsgPTaskDetectPicRecv>(
+                GetMessageFrom(), *handler_, context, jsonStr, errc);
         }};
 
     // ── Login (No Auth) ─────────────────────────────────────────────────
@@ -221,20 +224,19 @@ void ApiRouter::RegisterAlgorithmRoutes() {
         }};
     url_map_[util::ToLower("/gtw/cwai/algorithm/layout/exportSingleAlg")] = {
         kAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
-            std::string jsonResponse = detail::DispatchJson<Algorithm::MsgLayoutExportSingleSend,
-                                                            Algorithm::MsgLayoutExportSingleRecv>(
+            return detail::DispatchJson<Algorithm::MsgLayoutExportSingleSend,
+                                        Algorithm::MsgLayoutExportSingleRecv>(
                 GetMessageFrom(), *algorithm_handler_, jsonStr, errc);
-            return DispatchFileDownload(jsonResponse);
         }};
+    file_download_routes_.insert(util::ToLower("/gtw/cwai/algorithm/layout/exportSingleAlg"));
 
     // Export all orchestration algorithms (Special handling: return tar.gz file content for download)
     url_map_[util::ToLower("/gtw/cwai/algorithm/layout/export")] = {
         kAuth, [this](const std::string& jsonStr, std::error_condition& errc) {
-            std::string jsonResponse =
-                detail::DispatchJson<Algorithm::MsgLayoutExportAllSend, Algorithm::MsgLayoutExportAllRecv>(
-                    GetMessageFrom(), *algorithm_handler_, jsonStr, errc);
-            return DispatchFileDownload(jsonResponse);
+            return detail::DispatchJson<Algorithm::MsgLayoutExportAllSend, Algorithm::MsgLayoutExportAllRecv>(
+                GetMessageFrom(), *algorithm_handler_, jsonStr, errc);
         }};
+    file_download_routes_.insert(util::ToLower("/gtw/cwai/algorithm/layout/export"));
 
     // Note: This route URL does not follow layout/ prefix rule
     url_map_[util::ToLower("/gtw/cwai/atomic/action/list")] = {

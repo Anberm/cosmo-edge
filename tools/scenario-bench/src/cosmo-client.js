@@ -71,7 +71,6 @@ export class CosmoClient {
   /**
    * Upload one chunk of a file via multipart/form-data to the temp store.
    * Mirrors the frontend uploadVideoByChunk (src/web/src/views/gam/taskManager/index.vue).
-   * The final chunk returns resData.filePath on the device.
    * @param {Buffer} chunkBuf  raw chunk bytes
    * @param {string} fileName  original file name (used for extension + naming)
    * @param {object} meta upload session and chunk metadata
@@ -99,6 +98,11 @@ export class CosmoClient {
     // the opaque upload ID returned by that first response.
     if (uploadId) fields.uploadId = uploadId;
     return this._postMultipart('/atomic/model/uploadTemp', fields);
+  }
+
+  /** Query live transfer, storage, and image capabilities. */
+  async uploadCapabilities() {
+    return (await this._post('/atomic/model/uploadCapabilities', {})).resData;
   }
 
   async cancelUpload(uploadId) {

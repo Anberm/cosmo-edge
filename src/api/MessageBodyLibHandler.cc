@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "api/StagedImageInput.h"
 #include "db/TransactionGuard.h"
 #include "service/camera/ICameraTaskConfig.h"
 #include "service/face/IBodyLibService.h"
@@ -331,10 +332,10 @@ BodyLib::MsgDeleteLibPersonSend MessageBodyLibHandler::Handle(BodyLib::MsgDelete
 BodyLib::MsgDetectPersonSend MessageBodyLibHandler::Handle(BodyLib::MsgDetectPersonRecv&& data,
                                                            std::error_condition& /*errc*/) {
     BodyLib::MsgDetectPersonSend ret{};
-    if (data.imageBase64.empty()) {
+    if (data.imageBase64.empty() && data.imageData.empty()) {
         throw util::ErrorMessage(util::ErrorEnum::PersonElementNotEmpty, "Photo to detect is empty");
     }
-    auto picBin = util::DecBase64Vec(data.imageBase64);
+    auto picBin = data.imageData.empty() ? util::DecBase64Vec(data.imageBase64) : std::move(data.imageData);
     auto frame  = video_codec_.DecodeJpeg(picBin);
     if (!frame) {
         throw util::ErrorMessage(util::ErrorEnum::ImageDecodeFailed, "Image decode failed");
@@ -351,6 +352,26 @@ BodyLib::MsgDetectPersonSend MessageBodyLibHandler::Handle(BodyLib::MsgDetectPer
     }
     ret.resData.pictureUrl = cosmo::path::GetWebDir(jpgPath);
     return ret;
+}
+
+BodyLib::MsgDetectPersonSend MessageBodyLibHandler::Handle(BodyLib::MsgDetectPersonRecv&& data,
+                                                           const RequestDispatchContext& context,
+                                                           std::error_condition& errc) {
+    if (data.uploadId.empty()) {
+        return Handle(std::move(data), errc);
+    }
+    if (!data.imageBase64.empty()) {
+        errc = util::ErrorEnum::InvalidParam;
+        return {};
+    }
+
+    std::vector<std::vector<std::uint8_t>> images;
+    errc = detail::ConsumeStagedImages(context, {data.uploadId}, images);
+    if (errc != util::ErrorEnum::Success) {
+        return {};
+    }
+    data.imageData = std::move(images.front());
+    return Handle(std::move(data), errc);
 }
 
 BodyLib::MsgGetPersonPictureSend MessageBodyLibHandler::Handle(BodyLib::MsgGetPersonPictureRecv&& data,

@@ -1,7 +1,9 @@
 #include <cerrno>
 #include <nlohmann/json.hpp>
+#include <vector>
 
 #include "catch_amalgamated.hpp"
+#include "mock/MockNetworkService.h"
 #include "mock/MockServiceRegistry.h"
 #include "service/network/DeviceDiscoveryTypes.h"
 #include "service/network/impl/DeviceDiscoveryReceivePolicy.h"
@@ -105,6 +107,10 @@ TEST_CASE("DeviceDiscoveryService: construction with params", "[device-discovery
 
 TEST_CASE("DeviceDiscoveryService: Start then Stop", "[device-discovery]") {
     cosmo::test::MockServiceRegistry mocks;
+    // Some test hosts cannot join multicast through INADDR_ANY. The service
+    // then asks the network service for a main-interface fallback; keep that
+    // environment-dependent branch inside the mock contract.
+    ALLOW_CALL(mocks.networkSvc, GetCardRealInfos()).RETURN(std::vector<cosmo::platform::NetCardInfo>{});
 
     cosmo::service::DeviceDiscoveryServiceImpl sut("239.255.0.0", 46000);
     REQUIRE_NOTHROW(sut.Start());

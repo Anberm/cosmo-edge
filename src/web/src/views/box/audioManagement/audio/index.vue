@@ -178,7 +178,6 @@ function handleChange(file, fileList) {
   const rawFile = file.raw || file
   const lowerName = (rawFile.name || '').toLowerCase()
   const isMP3orWAV = lowerName.endsWith('.mp3') || lowerName.endsWith('.wav')
-  const isLt3M = rawFile.size <= 3 * 1024 * 1024
   if (!isMP3orWAV) {
     audioFile.value = null
     fileNameString.value = ''
@@ -186,11 +185,11 @@ function handleChange(file, fileList) {
     proxy.$message.error(t('boxOther.audioUploadFormatError'))
     return
   }
-  if (!isLt3M) {
+  if (!Number.isSafeInteger(rawFile.size) || rawFile.size <= 0) {
     audioFile.value = null
     fileNameString.value = ''
     audioRef.value?.clearFiles?.()
-    proxy.$message.error(t('boxOther.audioUploadSizeError'))
+    proxy.$message.error(t('api.error.UpLoadDataEmpty'))
     return
   }
 
@@ -210,9 +209,10 @@ async function saveAudio() {
     stagedUpload = await uploadFileInChunks(audioFile.value, {
       purpose: UploadPurpose.AUDIO,
       uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
-      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data)
+      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+      getCapabilities: () => proxy.$API.getUploadCapabilities()
     })
-    if (!stagedUpload.uploadId) throw new Error(t('validate.cannotGetFilePath'))
+    if (!stagedUpload.uploadId) throw new Error(t('validate.missingUploadId'))
     await proxy.$API.boxImportFile({
       importType: 5,
       uploadId: stagedUpload.uploadId

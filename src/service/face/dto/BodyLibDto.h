@@ -110,6 +110,9 @@ namespace BodyLib {
     void from_json(const nlohmann::json& j, MsgDeleteLibPersonSend& v);
     struct MsgDetectPersonRecv : public MsgRecvHead {
         std::string imageBase64;
+        std::string uploadId;
+        // Authenticated staged payload, never accepted from JSON.
+        std::vector<std::uint8_t> imageData;
     };
 
     void to_json(nlohmann::json& j, const MsgDetectPersonRecv& v);

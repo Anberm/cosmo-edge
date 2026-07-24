@@ -46,6 +46,7 @@ void to_json(nlohmann::json& j, const MsgPTaskDetectPicRecv& r) {
     j["mvDebug"]       = r.mvDebug;
     j["imageBase64"]   = r.imageBase64;
     j["imageUrl"]      = r.imageUrl;
+    j["uploadId"]      = r.uploadId;
     j["taskConfig"]    = r.taskConfig;
 }
 
@@ -56,6 +57,7 @@ void from_json(const nlohmann::json& j, MsgPTaskDetectPicRecv& r) {
     JSON_OPT(j, r, mvDebug);
     JSON_OPT(j, r, imageBase64);
     JSON_OPT(j, r, imageUrl);
+    JSON_OPT(j, r, uploadId);
     JSON_OPT(j, r, taskConfig);
 }
 

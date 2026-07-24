@@ -21,6 +21,7 @@
 import { ref, reactive, watch, getCurrentInstance } from 'vue'
 import Upload from './Upload.vue'
 import { t, currentLocale } from '@/i18n'
+import { uploadFileInChunks, UploadPurpose } from '@/utils/chunkUpload'
 
 // 定义组件名称
 defineOptions({
@@ -57,7 +58,6 @@ const ruleForm = reactive({
 
 const fileList = ref([])
 const personLibList = ref([])
-const ImageBase64 = ref('')
 
 const rules = reactive({
   personName: [
@@ -180,46 +180,40 @@ function initData() {
   fileList.value = newFileList
 }
 
-function onProgress(file, index) {
-  console.log(file, 'file')
-  console.log(index, 'index')
-  const isJPG = file.type === 'image/jpeg'
-  const isPNG = file.type === 'image/png'
-  const isBMP = file.type === 'image/jpg'
-  const isLt2M = file.size / 1024 / 1024 < 3
-
-  if (!isJPG && !isPNG && !isBMP) {
+async function onProgress(file, index) {
+  const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/bmp'])
+  if (!file || !supportedTypes.has(file.type)) {
     return proxy.$message.error(t('basePic.photoFormatError'))
   }
-  if (!isLt2M) {
-    return proxy.$message.error(t('basePic.photoSizeError'))
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+    return proxy.$message.error(t('api.error.UpLoadDataEmpty'))
   }
 
-  const reader = new FileReader()
-  reader.readAsDataURL(file)
-  reader.onload = (e) => {
-    let base64
-    if (e.target.result.indexOf(',') > -1) {
-      base64 = e.target.result.substring(e.target.result.indexOf(',') + 1)
-    } else {
-      base64 = e.target.result
-    }
-
-    proxy.$API.detectPerson({ imageBase64: base64 }).then((res) => {
-      console.log(res, 'res')
-
-      if (index || index == 0) {
-        fileList.value[index] = {
-          pictureUrl: res.resData.pictureUrl,
-          pictureName: ''
-        }
-      } else {
-        fileList.value.push({
-          pictureUrl: res.resData.pictureUrl,
-          pictureName: ''
-        })
-      }
+  let stagedUpload
+  try {
+    stagedUpload = await uploadFileInChunks(file, {
+      purpose: UploadPurpose.IMAGE,
+      uploadChunk: formData => proxy.$API.uploadAtomicModelTemp(formData),
+      cancelUpload: data => proxy.$API.cancelAtomicModelUpload(data),
+      getCapabilities: () => proxy.$API.getUploadCapabilities()
     })
+    const res = await proxy.$API.detectPerson({ uploadId: stagedUpload.uploadId })
+    const item = {
+      pictureUrl: res.resData.pictureUrl,
+      pictureName: ''
+    }
+    if (index || index === 0) {
+      fileList.value[index] = item
+    } else {
+      fileList.value.push(item)
+    }
+  } catch (error) {
+    if (stagedUpload?.uploadId) {
+      await proxy.$API.cancelAtomicModelUpload({
+        uploadId: stagedUpload.uploadId
+      }).catch(() => {})
+    }
+    throw error
   }
 }
 

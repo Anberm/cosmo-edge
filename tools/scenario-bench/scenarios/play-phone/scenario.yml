@@ -7,9 +7,7 @@ channels:
   repeatCount: 0
   sources:
     - name: play-phone-01
-      filePath: /opt/cosmo/video/play-phone.mp4
-      fileName: play-phone.mp4
-      contentLength: "20049063"
+      file: /opt/cosmo/video/play-phone.mp4
 
 tasks:
   - id: play-phone

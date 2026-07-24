@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
 #include <utility>
 
 #include "api/HttpUploadClaim.h"
@@ -25,10 +26,6 @@ namespace cosmo {
 
 namespace {
     static constexpr const char* kTag = "MessageCameraHandler";
-
-    // Video file size constraints for AddVideo validation.
-    constexpr size_t kMinVideoFileSize = 1 * 1024 * 1024;     // 1 MB
-    constexpr size_t kMaxVideoFileSize = 1024 * 1024 * 1024;  // 1 GB
 }  // namespace
 
 MessageCameraHandler::MessageCameraHandler(service::ICameraDeviceCrud& crud,
@@ -74,19 +71,19 @@ camera::MsgAddVideoSend MessageCameraHandler::Handle(camera::MsgAddVideoRecv&& d
     }
 
     // P0-2: Guard against invalid contentLength strings.
-    size_t contentLength = 0;
+    std::uint64_t content_length = 0;
     try {
-        contentLength = std::stoul(data.contentLength);
+        std::size_t parsed = 0;
+        content_length     = std::stoull(data.contentLength, &parsed);
+        if (parsed != data.contentLength.size()) {
+            throw std::invalid_argument("trailing content length data");
+        }
     } catch (const std::exception&) {
         errc = util::ErrorEnum::ParameterException;
         return retData;
     }
-    if (contentLength < kMinVideoFileSize) {
+    if (content_length == 0) {
         errc = util::ErrorEnum::FileSizeSmall;
-        return retData;
-    }
-    if (contentLength > kMaxVideoFileSize) {
-        errc = util::ErrorEnum::FileSizeBig;
         return retData;
     }
 
