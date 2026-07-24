@@ -1,6 +1,7 @@
 // VideoFrameCodec.cc — JPEG encode/decode operations for VideoFrameProcSophon.
 // Split from VideoFrameProcSophon.cc to reduce file size (DEBT-007).
 
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -113,15 +114,42 @@ namespace media {
             stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &w, &h, &channels, 3),
             stbi_image_free);
         if (img_guard) {
-            auto rgb_frame = std::make_shared<VideoFrame>(w, h, PixelFormat::PIXEL_RGB8);
+            // RGB2I420 below produces I420, which requires even-aligned dims.
+            // stb-decoded images (PNG, or JPEG the JPU rejected) frequently have
+            // odd width/height; align the RGB frame down to even and copy only
+            // that subset so the I420 frame is valid (mirrors the alignment done
+            // in DecodeJpegHardware for the JPU path).
+            const int out_w = w & ~1;
+            const int out_h = h & ~1;
+            if (out_w == 0 || out_h == 0) {
+                LOG_ERRO("DecodeJpeg() - software-decoded dims too small {}x{}", w, h);
+                return nullptr;
+            }
+            auto rgb_frame = std::make_shared<VideoFrame>(out_w, out_h, PixelFormat::PIXEL_RGB8);
             if (!VideoFrameValid(rgb_frame, true)) {
                 LOG_ERRO("{}", "DecodeJpeg() - allocate rgb frame failed");
                 return nullptr;
             }
 
             auto dst_mem = reinterpret_cast<bm_device_mem_t*>(rgb_frame->GetData());
-            auto ret     = bm_memcpy_s2d_partial(handle, *dst_mem, img_guard.get(),
-                                                 static_cast<unsigned int>(rgb_frame->GetSize()));
+            int ret      = BM_SUCCESS;
+            if (out_w == w && out_h == h) {
+                // Even dims: bulk-copy the whole stb buffer straight to device.
+                ret = bm_memcpy_s2d_partial(handle, *dst_mem, img_guard.get(),
+                                            static_cast<unsigned int>(rgb_frame->GetSize()));
+            } else {
+                // Odd source: copy even-aligned rows into a host buffer first.
+                const std::size_t row_bytes = static_cast<std::size_t>(out_w) * 3;
+                std::vector<u_int8_t> host(row_bytes * static_cast<std::size_t>(out_h));
+                const unsigned char* src = img_guard.get();
+                for (int y = 0; y < out_h; ++y) {
+                    std::memcpy(host.data() + row_bytes * static_cast<std::size_t>(y),
+                                src + static_cast<std::size_t>(w) * 3 * static_cast<std::size_t>(y),
+                                row_bytes);
+                }
+                ret = bm_memcpy_s2d_partial(handle, *dst_mem, host.data(),
+                                            static_cast<unsigned int>(host.size()));
+            }
 
             if (ret != BM_SUCCESS) {
                 LOG_ERRO("DecodeJpeg() - bm_memcpy_s2d_partial failed {}", ret);
@@ -161,9 +189,24 @@ namespace media {
             return nullptr;
         }
 
+        // I420 (YUV 4:2:0) requires even-aligned width/height. Source JPEGs —
+        // especially ID/portrait photos — frequently have odd dimensions (e.g.
+        // 343x456), which made the I420 VideoFrame invalid and failed the whole
+        // decode ("Image too small or decode failed"). Align the output down to
+        // even; bmcv_image_vpp_convert below scales the native (possibly odd) JPU
+        // output into the even frame.
+        const int out_width  = img_width & ~1;
+        const int out_height = img_height & ~1;
+        if (out_width == 0 || out_height == 0) {
+            LOG_ERRO("DecodeJpegHardware() - dimensions too small after even alignment {}x{}", img_width,
+                     img_height);
+            bm_image_destroy(&decode_img);
+            return nullptr;
+        }
+
         // Create output VideoFrame and bm_image, associate memory via VideoFrameAttach
         auto pixel_fmt = PixelFormat::PIXEL_I420;
-        auto frame     = std::make_shared<VideoFrame>(img_width, img_height, pixel_fmt);
+        auto frame     = std::make_shared<VideoFrame>(out_width, out_height, pixel_fmt);
         if (!VideoFrameValid(frame)) {
             LOG_ERRO("{}", "DecodeJpegHardware() - create VideoFrame failed");
             bm_image_destroy(&decode_img);
@@ -171,7 +214,7 @@ namespace media {
         }
 
         auto yuv_image =
-            CreateBMImage(static_cast<size_t>(img_width), static_cast<size_t>(img_height), pixel_fmt);
+            CreateBMImage(static_cast<size_t>(out_width), static_cast<size_t>(out_height), pixel_fmt);
         if (!yuv_image) {
             LOG_ERRO("{}", "DecodeJpegHardware() - CreateBMImage failed");
             bm_image_destroy(&decode_img);
