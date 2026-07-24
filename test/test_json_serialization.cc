@@ -160,22 +160,32 @@ TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]
     target.box.width  = 240;
     target.box.height = 360;
     event.targets.push_back(target);
+    target.label      = "category1";
+    target.confidence = 0.88F;
+    target.trackId    = "track-2";
+    target.box.x      = 480;
+    event.targets.push_back(target);
 
     std::string json;
     REQUIRE(cosmo::util::EncodeJson(event, json));
     auto doc = ParseJson(json);
     REQUIRE(doc.contains("targets"));
-    REQUIRE(doc["targets"].size() == 1);
+    REQUIRE(doc["targets"].size() == 2);
     CHECK(doc["targets"][0]["label"] == "category0");
     CHECK(doc["targets"][0]["confidence"].get<float>() == Catch::Approx(0.93F));
     CHECK(doc["targets"][0]["trackId"] == "track-1");
     CHECK(doc["targets"][0]["box"]["width"] == 240);
+    CHECK(doc["targets"][1]["label"] == "category1");
+    CHECK(doc["targets"][1]["trackId"] == "track-2");
+    CHECK(doc["targets"][1]["box"]["x"] == 480);
 
     cosmo::CMsgOnEventsReq restored;
     REQUIRE(cosmo::util::DecodeJson(json, restored));
-    REQUIRE(restored.targets.size() == 1);
+    REQUIRE(restored.targets.size() == 2);
     CHECK(restored.targets[0].label == "category0");
     CHECK(restored.targets[0].box.height == 360);
+    CHECK(restored.targets[1].label == "category1");
+    CHECK(restored.targets[1].trackId == "track-2");
 }
 
 TEST_CASE("Staged image identifiers round-trip without serializing trusted bytes",

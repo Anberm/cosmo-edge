@@ -1,13 +1,15 @@
 // TaskAlarmEventBuilder.cc — Alarm event construction and dispatch.
 // Refactored from a single 208-line FillAlarmData() into focused helpers:
-// ShouldFilterAlarm()   — alarm filtering (interval/count/position/LLM)
+// ShouldFilter*Alarm()  — area/batch and per-target filtering
 // BuildBaseEventData()  — base event field population
 // AttachAlarmMedia()    — recording + picture attachment
 // FillEventProperty()   — property type dispatch
 // DispatchAlarmEvent()  — WebSocket/HTTP/linkage push
 
 #include <filesystem>
+#include <unordered_set>
 
+#include "flow/alarm/AlarmBatch.h"
 #include "flow/alarm/TaskAlarm.h"
 #include "flow/alarm/TaskAlarmInternalTypes.h"
 #include "service/detail/ServiceRegistry.h"
@@ -28,12 +30,10 @@ static constexpr const char* kTag = "TaskAlarm ";
 namespace cosmo {
 
 // ---------------------------------------------------------------------------
-// ShouldFilterAlarm — returns true if the alarm should be skipped
+// Area-level filtering is evaluated once for a same-frame alarm batch.
 // ---------------------------------------------------------------------------
-bool TaskAlarm::ShouldFilterAlarm(const AlgDataPtr& algData, const DataAlarmUnit& alarmUnit,
-                                  const chrono::steady_clock::time_point& now, const AreaIdData& areaData,
-                                  AlarmIdData& idData, MsgRecAlarm& recAlarmData) {
-    // Area-level alarm interval
+bool TaskAlarm::ShouldFilterAreaAlarm(const chrono::steady_clock::time_point& now, const AreaIdData& areaData,
+                                      MsgRecAlarm& recAlarmData) {
     if (m_alarmCount > 0) {
         if ((areaData.haveReport) && (m_param.alarmInterval > 0) &&
             (now - areaData.lastAlarmTime < chrono::milliseconds(m_param.alarmInterval * 1000))) {
@@ -42,7 +42,13 @@ bool TaskAlarm::ShouldFilterAlarm(const AlgDataPtr& algData, const DataAlarmUnit
             return true;
         }
     }
+    return false;
+}
 
+// Target-level filtering remains independent inside a batch.
+bool TaskAlarm::ShouldFilterTargetAlarm(const AlgDataPtr& algData, const DataAlarmUnit& alarmUnit,
+                                        const chrono::steady_clock::time_point& now, AlarmIdData& idData,
+                                        MsgRecAlarm& recAlarmData) {
     // Per-target alarm count limit (only for tracked targets)
     if ((alarmUnit.trackId >= 0) && (m_param.targetAlarmCount > 0) &&
         (idData.alarmCount >= m_param.targetAlarmCount)) {
@@ -323,8 +329,10 @@ void TaskAlarm::DispatchAlarmEvent(CMsgOnEventsReq& eventData) {
 // FillAlarmData — orchestrator (was 208 lines, now ~50)
 // ---------------------------------------------------------------------------
 bool TaskAlarm::FillAlarmData(AlgDataPtr algData) {
-    auto alarmData = algData->taskDataAlarm.alarmData;
-    for (auto& alarmUnit : alarmData->alarms) {
+    auto alarmData     = algData->taskDataAlarm.alarmData;
+    const auto batches = alarm::BuildAlarmBatches(alarmData->alarms, m_propertyType, alarmData->multiAlarms);
+
+    const auto makeRecAlarmData = [&](const DataAlarmUnit& alarmUnit) {
         MsgRecAlarm recAlarmData;
         recAlarmData.type        = m_propertyType;
         recAlarmData.targetCount = alarmUnit.boxs.size();
@@ -335,17 +343,53 @@ bool TaskAlarm::FillAlarmData(AlgDataPtr algData) {
         }
         recAlarmData.areaId  = alarmUnit.areaId;
         recAlarmData.trackId = alarmUnit.trackId;
+        return recAlarmData;
+    };
 
-        auto now       = chrono::steady_clock::now();
-        auto& areaData = m_mapAreaIdStatus[alarmUnit.areaId];
-        auto& idData   = m_mapAlarmIdStatus[alarmUnit.trackId];
-
-        if (ShouldFilterAlarm(algData, alarmUnit, now, areaData, idData, recAlarmData))
+    for (const auto& batch : batches) {
+        if (batch.empty()) {
             continue;
+        }
 
-        // Update counters
-        idData.alarmCount += 1;
-        idData.lastAlarmTime   = now;
+        const auto now               = chrono::steady_clock::now();
+        const auto& first            = alarmData->alarms[batch.front()];
+        auto& areaData               = m_mapAreaIdStatus[first.areaId];
+        auto areaRecAlarmData        = makeRecAlarmData(first);
+        areaRecAlarmData.targetCount = 0;
+        for (const auto index : batch) {
+            areaRecAlarmData.targetCount += alarmData->alarms[index].boxs.size();
+        }
+        if (ShouldFilterAreaAlarm(now, areaData, areaRecAlarmData)) {
+            continue;
+        }
+
+        alarm::AlarmBatchIndices acceptedIndices;
+        acceptedIndices.reserve(batch.size());
+        for (const auto index : batch) {
+            const auto& alarmUnit = alarmData->alarms[index];
+            auto recAlarmData     = makeRecAlarmData(alarmUnit);
+            auto& idData          = m_mapAlarmIdStatus[alarmUnit.trackId];
+            if (!ShouldFilterTargetAlarm(algData, alarmUnit, now, idData, recAlarmData)) {
+                acceptedIndices.push_back(index);
+            }
+        }
+        if (acceptedIndices.empty()) {
+            continue;
+        }
+
+        auto alarmUnit = alarm::MergeAlarmBatch(alarmData->alarms, acceptedIndices);
+
+        // Every accepted tracked target keeps its own count/interval state.
+        std::unordered_set<int> updatedTrackIds;
+        for (const auto index : acceptedIndices) {
+            const int trackId = alarmData->alarms[index].trackId;
+            if (!updatedTrackIds.insert(trackId).second) {
+                continue;
+            }
+            auto& memberIdData = m_mapAlarmIdStatus[trackId];
+            memberIdData.alarmCount += 1;
+            memberIdData.lastAlarmTime = now;
+        }
         areaData.lastAlarmTime = now;
         areaData.haveReport    = true;
 
@@ -353,6 +397,7 @@ bool TaskAlarm::FillAlarmData(AlgDataPtr algData) {
         auto eventData    = BuildBaseEventData(algData, alarmUnit);
         eventData.targets = alarmUnit.targets;
         AttachAlarmMedia(eventData, algData, alarmUnit);
+        auto& idData = m_mapAlarmIdStatus[alarmUnit.trackId];
         FillEventProperty(eventData, algData, alarmUnit, idData);
 
         LOG_INFO("{}[{}] Alarm Push {}/{} trackId:{} Area:{} Type:{}", kTag, task_id, eventData.messageId,
@@ -362,6 +407,7 @@ bool TaskAlarm::FillAlarmData(AlgDataPtr algData) {
         m_lastAlarmTime = now;
 
         // Record and update pass-flow totals
+        auto recAlarmData = makeRecAlarmData(alarmUnit);
         if (OnEventsPropertyType::People == m_propertyType) {
             recAlarmData.enterTotalCount = alarmUnit.passFlowData.enterTotalNum;
             recAlarmData.leaveTotalCount = alarmUnit.passFlowData.leaveTotalNum;
