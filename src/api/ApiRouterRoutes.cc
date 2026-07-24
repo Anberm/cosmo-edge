@@ -406,7 +406,7 @@ bool ApiRouter::DispatchRequestResponse(const RequestDispatchContext& context, c
         // Never return that path to the client when it cannot be converted into
         // a managed download.
         std::error_condition errc = util::ErrorEnum::FileOpenFailed;
-        response.body = detail::ErroResult("Export file is unavailable for download", errc);
+        response.body             = detail::ErroResult("Export file is unavailable for download", errc);
     }
     return true;
 }

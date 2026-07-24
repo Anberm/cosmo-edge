@@ -284,8 +284,7 @@ void TaskAlarm::DispatchAlarmEvent(CMsgOnEventsReq& eventData) {
         origPictureLocalPath = (std::filesystem::path(localFilePath) / eventData.orignalPicture).string();
     }
     if (!eventData.video.empty()) {
-        videoWebPath =
-            (std::filesystem::path(webFilePath) / (eventData.messageId + "_video.mp4")).string();
+        videoWebPath   = (std::filesystem::path(webFilePath) / (eventData.messageId + "_video.mp4")).string();
         videoLocalPath = eventData.video;
     }
 

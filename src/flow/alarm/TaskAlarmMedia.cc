@@ -54,9 +54,9 @@ std::string TaskAlarm::RecordMp4(int targetId, const std::string& messageId, con
         // Standalone mode stores the recording locally.  Keep the absolute path
         // in the HTTP event payload; DispatchAlarmEvent converts it to the web
         // path for the browser/WebSocket view.
-        fileUrl = (std::filesystem::path(cosmo::path::GetEventPath(frameTimestamp)) /
-                   (messageId + "_video.mp4"))
-                      .string();
+        fileUrl =
+            (std::filesystem::path(cosmo::path::GetEventPath(frameTimestamp)) / (messageId + "_video.mp4"))
+                .string();
     }
 
     RecordParam recordParam;
