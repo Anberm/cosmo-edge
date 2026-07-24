@@ -383,7 +383,7 @@ bool TaskAlarm::FillAlarmData(AlgDataPtr algData) {
         std::unordered_set<int> updatedTrackIds;
         for (const auto index : acceptedIndices) {
             const int trackId = alarmData->alarms[index].trackId;
-            if (!updatedTrackIds.insert(trackId).second) {
+            if (trackId < 0 || !updatedTrackIds.insert(trackId).second) {
                 continue;
             }
             auto& memberIdData = m_mapAlarmIdStatus[trackId];

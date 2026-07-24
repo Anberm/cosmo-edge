@@ -91,6 +91,16 @@ cosmo::AlgDataPtr MakeTaskAlarmFrame() {
     return data;
 }
 
+cosmo::AlgDataPtr MakeUntrackedTaskAlarmFrame() {
+    auto data                                  = std::make_shared<cosmo::AlgData>();
+    data->taskDataAlarm.alarmData              = std::make_shared<cosmo::DataAlarm>();
+    data->taskDataAlarm.alarmData->multiAlarms = 1;
+    data->taskDataAlarm.alarmData->alarms.push_back(MakeTaskAlarmUnit(-1, "", {100, 60, 80, 180}));
+    data->taskDataAlarm.alarmData->alarms.push_back(MakeTaskAlarmUnit(-1, "", {300, 80, 60, 160}));
+    data->taskDataAlarm.alarmData->alarms.push_back(MakeTaskAlarmUnit(-1, "", {500, 100, 70, 150}));
+    return data;
+}
+
 }  // namespace
 
 TEST_CASE("TaskAlarm emits one event with all same-frame abnormal targets", "[alarm][batch][event]") {
@@ -131,4 +141,32 @@ TEST_CASE("TaskAlarm emits one event with all same-frame abnormal targets", "[al
     CHECK(alarm.GetAlarmRealCnt() == 1);
     CHECK(notifier.httpEvents.size() == 1);
     CHECK(notifier.websocketEvents.size() == 1);
+}
+
+TEST_CASE("TaskAlarm emits one event for any number of untracked same-frame targets",
+          "[alarm][batch][event][untracked]") {
+    cosmo::test::MockServiceRegistry mocks;
+    CapturingEventNotifier notifier;
+    ScopedEventNotifierRegistration notifierRegistration(notifier);
+
+    REQUIRE_CALL(mocks.cameraSvc, GetChannelName("channel")).RETURN("Camera");
+    REQUIRE_CALL(mocks.configReadSvc, IsNetworkModel()).RETURN(true);
+    REQUIRE_CALL(mocks.alarmRecordSvc, Insert(trompeloeil::_)).RETURN(true);
+
+    cosmo::ActionNode action;
+    action.actionId     = "alarm-action";
+    action.actionName   = "Alarm";
+    action.flowActionId = "alarm-flow";
+    cosmo::TaskAlarm alarm("channel", "task", action);
+
+    alarm.HandFrame(MakeUntrackedTaskAlarmFrame());
+
+    REQUIRE(alarm.GetAlarmRealCnt() == 1);
+    REQUIRE(notifier.httpEvents.size() == 1);
+    REQUIRE(notifier.websocketEvents.size() == 1);
+    REQUIRE(notifier.httpEvents[0].targets.size() == 3);
+    CHECK(notifier.httpEvents[0].recordId.empty());
+    CHECK(notifier.httpEvents[0].targets[0].box.x == 100);
+    CHECK(notifier.httpEvents[0].targets[1].box.x == 300);
+    CHECK(notifier.httpEvents[0].targets[2].box.x == 500);
 }

@@ -54,6 +54,25 @@ TEST_CASE("ordinary same-frame target alarms form one deterministic batch", "[al
     CHECK(merged.box == (cosmo::util::Box{100, 60, 260, 180}));
 }
 
+TEST_CASE("untracked same-frame target alarms batch any number of targets", "[alarm][batch][untracked]") {
+    std::deque<cosmo::DataAlarmUnit> alarms;
+    alarms.push_back(MakeAlarm(-1, "", "flow-1", "area-1", {100, 60, 80, 180}));
+    alarms.push_back(MakeAlarm(-1, "", "flow-1", "area-1", {300, 80, 60, 160}));
+    alarms.push_back(MakeAlarm(-1, "", "flow-1", "area-1", {500, 100, 70, 150}));
+
+    const auto batches = cosmo::alarm::BuildAlarmBatches(alarms, cosmo::OnEventsPropertyType::None, 1);
+    REQUIRE(batches.size() == 1);
+    REQUIRE(batches[0].size() == 3);
+    CHECK(batches[0] == cosmo::alarm::AlarmBatchIndices{0, 1, 2});
+
+    const auto merged = cosmo::alarm::MergeAlarmBatch(alarms, batches[0]);
+    REQUIRE(merged.targets.size() == 3);
+    REQUIRE(merged.boxs.size() == 3);
+    CHECK(merged.trackId == -1);
+    CHECK(merged.strTrackId.empty());
+    CHECK(merged.box == (cosmo::util::Box{100, 60, 470, 190}));
+}
+
 TEST_CASE("alarm batching preserves semantic boundaries", "[alarm][batch]") {
     auto first                 = MakeAlarm(1, "track-1", "flow-1", "area-1", {0, 0, 50, 50});
     auto differentArea         = MakeAlarm(2, "track-2", "flow-1", "area-2", {60, 0, 50, 50});

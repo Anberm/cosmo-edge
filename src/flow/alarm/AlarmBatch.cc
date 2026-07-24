@@ -9,7 +9,7 @@ namespace {
 
     bool IsBatchable(const DataAlarmUnit& unit, OnEventsPropertyType propertyType, unsigned int multiAlarms) {
         return propertyType == OnEventsPropertyType::None && multiAlarms == 1 &&
-               unit.reportType == OnEventsReportType::Trigger && unit.trackId >= 0 && !unit.targets.empty();
+               unit.reportType == OnEventsReportType::Trigger && !unit.targets.empty();
     }
 
     bool HasSameBatchKey(const DataAlarmUnit& left, const DataAlarmUnit& right) {
@@ -81,7 +81,10 @@ std::vector<AlarmBatchIndices> BuildAlarmBatches(const std::deque<DataAlarmUnit>
             if (leftUnit.trackId != rightUnit.trackId) {
                 return leftUnit.trackId < rightUnit.trackId;
             }
-            return leftUnit.strTrackId < rightUnit.strTrackId;
+            if (leftUnit.strTrackId != rightUnit.strTrackId) {
+                return leftUnit.strTrackId < rightUnit.strTrackId;
+            }
+            return left < right;
         });
     }
     return batches;
