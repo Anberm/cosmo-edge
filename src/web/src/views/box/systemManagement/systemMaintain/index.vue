@@ -44,6 +44,7 @@ import { ref, watch, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import RunningDetail from './components/RunningDetail.vue'
 import { t } from '@/i18n'
+import { normalizeApiError } from '@/utils/apiError'
 import {
   uploadFileInChunks,
   UploadPurpose
@@ -58,6 +59,43 @@ const fileName = ref('')
 const upload = ref(null)
 const checkTimer = ref(null)
 const upgradePackagePattern = /^cosmo-[Vv]\d+\.\d+\.\d+-[0-9a-fA-F]{32}\.tar\.gz$/
+const upgradeStatusPollIntervalMs = 5000
+const upgradeRecoveryTimeoutMs = 15 * 60 * 1000
+let upgradeLoading = null
+
+const extractDeviceStatus = response =>
+  response?.resData?.resData || response?.resData || {}
+
+const delay = milliseconds =>
+  new Promise(resolve => setTimeout(resolve, milliseconds))
+
+const clearCheckTimer = () => {
+  if (checkTimer.value) {
+    clearTimeout(checkTimer.value)
+    checkTimer.value = null
+  }
+}
+
+const closeUpgradeLoading = () => {
+  if (upgradeLoading) {
+    upgradeLoading.close()
+    upgradeLoading = null
+  }
+}
+
+const finishUpgradeRecovery = async (loading) => {
+  clearCheckTimer()
+  loading.setText(t('systemManage.upgradeComplete'))
+  await delay(1000)
+  closeUpgradeLoading()
+  // Element Plus removes the full-screen mask after its leave transition.
+  // Let that finish before replacing the document so the login page cannot
+  // inherit a stale upgrade mask.
+  await delay(400)
+  localStorage.removeItem('token')
+  localStorage.removeItem('mtk')
+  window.location.replace('/#/boxLogin')
+}
 
 watch(activeTab, (newVal) => {
   if (newVal === 'task') {
@@ -106,31 +144,68 @@ const handleUpgrade = async () => {
     ElMessage.warning(t('systemManage.selectUpgradeFile'))
     return
   }
+
+  try {
+    await ElMessageBox.confirm(
+      t('systemManage.upgradeConfirm', { fileName: fileName.value }),
+      t('common.notice'),
+      {
+        confirmButtonText: t('action.confirm'),
+        cancelButtonText: t('action.cancel'),
+        type: 'warning'
+      }
+    )
+  } catch (_) {
+    return
+  }
+
+  clearCheckTimer()
+  let baselineBootId = ''
+  try {
+    const status = await $API.boxCheckDeviceStatus({})
+    baselineBootId = String(extractDeviceStatus(status).bootId || '')
+  } catch (_) {
+    ElMessage.error(t('systemManage.deviceStatusUnavailable'))
+    return
+  }
+
   const loading = ElLoading.service({
     lock: true,
     text: t('systemManage.fileTransferring'),
     background: 'rgba(0, 0, 0, 0.7)'
   })
+  upgradeLoading = loading
   let stagedUpload
+  let upgradeRequestStarted = false
   try {
     stagedUpload = await uploadFileInChunks(uploadFile.value, {
       purpose: UploadPurpose.UPGRADE,
       uploadChunk: formData => $API.uploadAtomicModelTemp(formData),
       cancelUpload: data => $API.cancelAtomicModelUpload(data),
-      getCapabilities: () => $API.getUploadCapabilities()
+      getCapabilities: () => $API.getUploadCapabilities(),
+      onProgress: ({ percent }) => {
+        loading.setText(t('systemManage.fileTransferringProgress', { percent }))
+      }
     })
     if (!stagedUpload.uploadId) {
       throw new Error(t('validate.missingUploadId'))
     }
+    loading.setText(t('systemManage.upgradePreparing'))
+    upgradeRequestStarted = true
     await $API.boxSystemUpgrade({
       uploadId: stagedUpload.uploadId
     })
-    loading.setText(t('systemManage.fileTransferComplete'))
-    setTimeout(() => {
-      loading.setText(t('systemManage.upgradeInProgress'))
-      checkDeviceStatus(loading)
-    }, 1000)
+    loading.setText(t('systemManage.upgradeInProgress'))
+    checkDeviceStatus(loading, baselineBootId)
   } catch (error) {
+    const structuredResponse =
+      error?.resCode !== undefined ||
+      error?.response?.data?.resCode !== undefined
+    if (upgradeRequestStarted && !structuredResponse) {
+      loading.setText(t('systemManage.upgradeOutcomeUncertain'))
+      checkDeviceStatus(loading, baselineBootId)
+      return
+    }
     if (stagedUpload?.uploadId) {
       try {
         await $API.cancelAtomicModelUpload({ uploadId: stagedUpload.uploadId })
@@ -138,27 +213,69 @@ const handleUpgrade = async () => {
         // The staging service also expires abandoned sessions by TTL.
       }
     }
-    loading.close()
-    const msg = error?.resMsg?.[0]?.msgText || t('systemManage.fileTransferFailed')
+    closeUpgradeLoading()
+    const fallbackMessage = upgradeRequestStarted
+      ? t('systemManage.upgradeFailed')
+      : t('systemManage.fileTransferFailed')
+    const msg = error?.resMsg?.[0]?.msgText || fallbackMessage
     ElMessage.error(msg)
   }
 }
 
-const checkDeviceStatus = (loading) => {
-  checkTimer.value = setInterval(() => {
-    $API
-      .boxCheckDeviceStatus({})
-      .then(() => {
-        loading.close()
-        clearInterval(checkTimer.value)
-        localStorage.removeItem('token')
-        localStorage.removeItem('mtk')
-        window.location.href = '/box/#/boxLogin'
-      })
-      .catch(() => {
-        console.log('测试主机状态中。。。')
-      })
-  }, 30000)
+const checkDeviceStatus = (loading, baselineBootId) => {
+  const startedAt = Date.now()
+  let observedUnavailable = false
+
+  const poll = async () => {
+    if (Date.now() - startedAt >= upgradeRecoveryTimeoutMs) {
+      clearCheckTimer()
+      closeUpgradeLoading()
+      ElMessage.warning(t('systemManage.upgradeRecoveryTimeout'))
+      return
+    }
+
+    try {
+      const response = await $API.boxCheckDeviceStatus({})
+      const currentBootId = String(extractDeviceStatus(response).bootId || '')
+      const rebootConfirmed =
+        (currentBootId && currentBootId !== baselineBootId) ||
+        (!currentBootId && observedUnavailable)
+      if (rebootConfirmed) {
+        await finishUpgradeRecovery(loading)
+        return
+      }
+      loading.setText(t('systemManage.waitingForDeviceRestart'))
+    } catch (error) {
+      const normalized = normalizeApiError(error)
+      const authenticationBoundary =
+        Number(normalized.status) === 401 ||
+        String(normalized.code) === '10005'
+      const recoveredAtLoginBoundary =
+        observedUnavailable && authenticationBoundary
+      if (recoveredAtLoginBoundary) {
+        await finishUpgradeRecovery(loading)
+        return
+      }
+      const status = Number(normalized.status)
+      const serviceUnavailable =
+        (!normalized.status && !normalized.code) ||
+        status === 502 ||
+        status === 503 ||
+        status === 504
+      if (serviceUnavailable) {
+        observedUnavailable = true
+        loading.setText(t('systemManage.deviceRestarting'))
+      } else {
+        // In particular, do not treat an authentication response by itself as
+        // proof of reboot. It is recovery evidence only after an actual
+        // network/service outage has been observed.
+        loading.setText(t('systemManage.waitingForDeviceRestart'))
+      }
+    }
+    checkTimer.value = setTimeout(poll, upgradeStatusPollIntervalMs)
+  }
+
+  checkTimer.value = setTimeout(poll, 1000)
 }
 
 const handleClickInput = () => {
@@ -216,10 +333,8 @@ const downloadFile = async (resData) => {
 }
 
 onBeforeUnmount(() => {
-  if (checkTimer.value) {
-    clearInterval(checkTimer.value)
-    checkTimer.value = null
-  }
+  clearCheckTimer()
+  closeUpgradeLoading()
 })
 </script>
 

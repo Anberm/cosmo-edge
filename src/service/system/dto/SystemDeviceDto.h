@@ -50,6 +50,18 @@ void from_json(const nlohmann::json& j, MsgQueryHardwareResourceSend& v);
 struct MsgQueryDeviceStatusRecv : MsgRecvHead {};
 
 // Query device info status response
-struct MsgQueryDeviceStatusSend : public MsgSendHead {};
+struct MsgQueryDeviceStatusSend : public MsgSendHead {
+    struct ResData {
+        // Linux boot identity lets upgrade clients distinguish the old process
+        // from a service that returned after the requested reboot.
+        std::string bootId;
+        std::string softwareVersion;
+        friend void to_json(nlohmann::json& j, const ResData& v);
+        friend void from_json(const nlohmann::json& j, ResData& v);
+    } resData;
+};
+
+void to_json(nlohmann::json& j, const MsgQueryDeviceStatusSend& v);
+void from_json(const nlohmann::json& j, MsgQueryDeviceStatusSend& v);
 
 }  // namespace cosmo::System

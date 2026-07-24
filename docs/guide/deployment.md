@@ -61,6 +61,7 @@ next:
 | `<INSTALLPATH>/resource` | 运行资源目录 |
 | `<DATADIR>` | 用户持久化数据目录，默认位于持久化卷上 |
 | `<DATADIR>/log/logs` | 日志目录 |
+| `<DATADIR>/upload/sessions` | 可恢复分片上传会话；目录权限固定为 `0700` |
 | `<DATADIR>/upgrade` | 升级包目录 |
 
 ## 运行进程
@@ -126,6 +127,16 @@ COSMO_STREAM_HTTP_PORT=18088
 cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz
 ```
 
+Web 控制台的本地升级流程如下：
+
+1. 查询设备状态并记录当前 Linux `bootId`。
+2. 按设备返回的上传能力分片传输安装包，界面显示实际上传百分比。
+3. 后端校验文件名、MD5、归档安全、目录结构和实时磁盘预算。
+4. Sophon 设备重启后，启动脚本再次校验 MD5、安装发布包并启动服务。
+5. 页面在看到新的 `bootId` 后返回登录页。如果重启使登录会话失效，则必须先观察到设备离线，再收到新服务的鉴权响应，才能判定服务已恢复并返回登录页。
+
+页面等待恢复的 15 分钟是交互超时，不会中止设备端已经开始的升级。超时后应保持供电，并通过设备网络和 systemd 日志确认状态。重新登录后还应核对软件版本与本次发布包；页面恢复只证明重启与服务恢复，不替代版本验收。
+
 ## systemd 服务
 
 `scripts/install.sh` 会创建：
@@ -139,6 +150,16 @@ cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz
 ```text
 ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
 ```
+
+服务以 `root` 运行并使用 `Restart=on-failure`。致命初始化异常会返回非零状态，使 systemd 能够重试，而不会把异常退出误判为正常停止。
+
+部分 Sophon 系统会在启动时把持久化数据树的属主恢复为设备管理账户。上传暂存服务允许 `sessions` 目录继承一个不可被 group/other 写入的直接父目录属主，同时继续要求：
+
+- `sessions` 是真实目录而不是符号链接，且权限为 `0700`；
+- 运行期间属主、设备号和 inode 不变；
+- 每个会话目录和载荷仍由当前服务账户创建并保持私有权限。
+
+不要对整个 `<DATADIR>` 做宽泛的递归 `chmod` 或 `chown`。
 
 ## 接口文档静态链接
 

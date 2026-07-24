@@ -144,9 +144,20 @@ QueryLogs
 
 控制面 JSON 请求默认限制为 1 MB；普通单次 multipart 请求默认限制为 10 MB；推荐上传分片为 8 MB。这里的 MB 均按 1024 × 1024 bytes 计算。它们是单次 HTTP 请求的内存与解析边界，不是业务文件总量限制。超过边界时服务端返回 HTTP 413 和 `HTTP_BODY_TOO_LARGE`，并建议 `USE_CHUNKED_UPLOAD` 或 `REDUCE_REQUEST_BODY`。
 
+### 升级恢复状态
+
+`POST /gtw/cwai/System/QueryDeviceStatus` 成功时返回：
+
+| 字段 | 语义 |
+| --- | --- |
+| `resData.bootId` | 当前 Linux 启动实例标识；软件升级页面用它确认设备确实完成了一次重启 |
+| `resData.softwareVersion` | 当前运行中的 CosmoEdge 版本 |
+
+这两个字段是向后兼容的增量字段。旧客户端可以忽略；新客户端不应只根据“接口再次返回 200”就宣告升级成功。
+
 libevent 另有 12 MB 的有限紧急接收后备线，只在请求未被应用层边界提前拒绝时兜底，不能视为可用的业务上传额度。底层直接拒绝时可能只能返回通用 HTTP 413；Web 控制台会按请求类型补成同样可执行的提示（multipart 改用分片，其他请求缩小请求体）。第三方客户端仍应遵守 8 MB 分片、1 MB JSON 和 10 MB 普通 multipart 边界。
 
-图片 URL 下载使用“当前可用内存、媒体帧能力”共同计算的预算，不再使用固定 16 MB 阈值；视频和其他大文件的 HTTP 获取直接流式写入文件。模型和其他受管文件的导出同样按文件流发送，并支持单段 `Range` 请求、`206 Partial Content` 和不可满足范围的 `416`。
+图片 URL 下载使用“当前可用内存、媒体帧能力”共同计算的预算，不再使用固定 16 MB 阈值；视频和其他大文件的 HTTP 获取直接流式写入文件。媒体静态路径按扩展名返回标准 MIME 类型（例如 JPEG 为 `image/jpeg`、MP4 为 `video/mp4`）。模型和其他受管文件的导出同样按文件流发送，并支持单段 `Range` 请求、`206 Partial Content` 和不可满足范围的 `416`。
 
 `/gtw/cwai/atomic/model/exportConfig` 对用户管理且允许导出的模型直接返回附件。预置、加密或与设备绑定的模型会返回 `DefaultCantBeExport`；这是模型可移植性和安全策略边界，不是文件大小配额。
 

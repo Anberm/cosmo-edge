@@ -150,6 +150,10 @@ private:
     UploadStagingConfig config_;
     NowFunction now_;
     int root_fd_{-1};
+    // The persistent volume may restore the staging root to the owner of its
+    // private deployment parent at boot. Pin that accepted owner for all later
+    // path validations; session directories and payloads remain service-owned.
+    std::uint64_t root_owner_uid_{0};
     std::uint64_t root_device_{0};
     std::uint64_t root_inode_{0};
     std::mutex sessions_mutex_;

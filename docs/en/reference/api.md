@@ -144,9 +144,20 @@ The first chunk should carry a stable `clientRequestId`. The server returns an o
 
 Control-plane JSON requests are limited to 1 MB by default. A regular single multipart request is limited to 10 MB, and the recommended upload chunk is 8 MB. MB values here use 1024 × 1024 bytes. These are per-request parsing and memory boundaries, not business-file size limits. A request beyond the boundary returns HTTP 413 with `HTTP_BODY_TOO_LARGE` and recommends either `USE_CHUNKED_UPLOAD` or `REDUCE_REQUEST_BODY`.
 
+### Upgrade Recovery Status
+
+`POST /gtw/cwai/System/QueryDeviceStatus` returns these fields on success:
+
+| Field | Meaning |
+| --- | --- |
+| `resData.bootId` | Current Linux boot identity; the software-upgrade page uses it to confirm that a reboot actually completed |
+| `resData.softwareVersion` | Version of the currently running CosmoEdge process |
+
+These are backward-compatible additive fields. Older clients may ignore them; newer clients must not declare an upgrade successful only because the endpoint returns HTTP 200 again.
+
 libevent also has a bounded 12 MB emergency receive backstop. It only protects requests that were not rejected earlier by the application boundary and is not a usable business-upload allowance. A low-level rejection may provide only a generic HTTP 413; the Web console converts that response into the same actionable guidance based on request type (use chunks for multipart, reduce the body for other requests). Third-party clients should still observe the 8 MB chunk, 1 MB JSON, and 10 MB regular multipart boundaries.
 
-Image URL downloads derive their budget from current memory and media-frame capability instead of a fixed 16 MB threshold. HTTP video and other large-file retrieval streams directly to a file. Model and other managed-file exports are also file-streamed and support a single `Range`, `206 Partial Content`, and `416` for an unsatisfiable range.
+Image URL downloads derive their budget from current memory and media-frame capability instead of a fixed 16 MB threshold. HTTP video and other large-file retrieval streams directly to a file. Static media paths return the standard extension-derived MIME type (for example, `image/jpeg` for JPEG and `video/mp4` for MP4). Model and other managed-file exports are also file-streamed and support a single `Range`, `206 Partial Content`, and `416` for an unsatisfiable range.
 
 `/gtw/cwai/atomic/model/exportConfig` returns a direct attachment for user-managed models that are marked exportable. Preset, encrypted, or device-bound models return `DefaultCantBeExport`; this is a model portability and security-policy boundary, not a file-size quota.
 

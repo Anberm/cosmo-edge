@@ -6,7 +6,6 @@ import { formatActionableApiError, normalizeApiError } from '@/utils/apiError'
 
 const longTimeoutApi = [
   '/gtw/cwai/System/Upgrade',
-  '/gtw/cwai/System/QueryDeviceStatus',
   '/gtw/cwai/File/ImportFile',
   '/gtw/cwai/Camera/AddVideo',
   '/gtw/cwai/atomic/model/uploadTemp',
@@ -68,6 +67,7 @@ const clearLoginInfo = () => {
 export const request = params => {
   return new Promise((resolve, reject) => {
     const isSilent = silentApi.includes(params.url)
+    const suppressAuthRedirect = params.suppressAuthRedirect === true
     if (!isSilent) actions.setGlobalState({ loading: true }) // 开启过渡效果
     service(params)
       .then(res => {
@@ -78,10 +78,10 @@ export const request = params => {
         if (resCode === 1) {
           resolve(data)
         } else {
-          if (msgCode === '10005') {
+          if (msgCode === '10005' && !suppressAuthRedirect) {
             message.error(t('api.loginExpired'))
             clearLoginInfo()
-          } else if (!params.silentError) {
+          } else if (msgCode !== '10005' && !params.silentError) {
             message.error(apiError.displayMessage)
           }
           reject(data)
@@ -92,8 +92,10 @@ export const request = params => {
         const status = normalized.status
         const msgCode = normalized.code
         if (status === 401 || msgCode === '10005') {
-          message.error(t('api.loginExpired'))
-          clearLoginInfo()
+          if (!suppressAuthRedirect) {
+            message.error(t('api.loginExpired'))
+            clearLoginInfo()
+          }
           return reject(err)
         }
         if (err?.response && status >= 400) {

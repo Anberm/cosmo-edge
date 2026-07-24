@@ -10,6 +10,7 @@
 #include "platform/NetCardOp.h"
 #include "service/face/dto/BodyLibDto.h"
 #include "service/face/dto/ThingsLibDto.h"
+#include "service/system/dto/SystemDeviceDto.h"
 #include "util/JsonStructUtil.h"
 #include "util/MsgBaseTypes.h"
 #include "util/MsgDynamicElement.h"
@@ -126,6 +127,24 @@ TEST_CASE("legacy JSON O(): optional fields round-trip", "[json][baseline]") {
         CHECK(restored.label == "cat");
         CHECK(restored.confidence == 0.0f);  // default
     }
+}
+
+TEST_CASE("device status exposes additive reboot identity", "[json][system][upgrade]") {
+    cosmo::System::MsgQueryDeviceStatusSend original;
+    original.resData.bootId          = "01234567-89ab-cdef-0123-456789abcdef";
+    original.resData.softwareVersion = "V1.0.0.0";
+
+    std::string json;
+    REQUIRE(cosmo::util::EncodeJson(original, json));
+    const auto doc = ParseJson(json);
+    REQUIRE(doc["resData"].is_object());
+    CHECK(doc["resData"]["bootId"] == original.resData.bootId);
+    CHECK(doc["resData"]["softwareVersion"] == original.resData.softwareVersion);
+
+    cosmo::System::MsgQueryDeviceStatusSend restored;
+    REQUIRE(cosmo::util::DecodeJson(json, restored));
+    CHECK(restored.resData.bootId == original.resData.bootId);
+    CHECK(restored.resData.softwareVersion == original.resData.softwareVersion);
 }
 
 TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {

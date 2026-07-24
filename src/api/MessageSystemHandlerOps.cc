@@ -4,6 +4,8 @@
 #include <malloc.h>
 
 #include <algorithm>
+#include <fstream>
+#include <string>
 
 #include "api/MessageSystemHandler.h"
 #include "service/system/IConfigNetworkService.h"
@@ -17,11 +19,26 @@
 #include "util/Log.h"
 #include "util/UuidUtil.h"
 #include "util/VehicleDict.h"
+#include "util/Version.h"
 
 namespace cosmo {
 
 namespace {
     constexpr int kMinLogoSize = 100;  // Minimum valid logo image size in bytes
+
+    std::string ReadBootId() {
+        std::ifstream input("/proc/sys/kernel/random/boot_id");
+        std::string boot_id;
+        if (!(input >> boot_id)) {
+            return {};
+        }
+        const bool valid =
+            boot_id.size() == 36 && std::all_of(boot_id.begin(), boot_id.end(), [](unsigned char value) {
+                return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') ||
+                       (value >= 'A' && value <= 'F') || value == '-';
+            });
+        return valid ? boot_id : std::string{};
+    }
 }  // namespace
 
 // System logo query
@@ -60,7 +77,9 @@ System::MsgSetSystemLogoSend MessageSystemHandler::Handle(System::MsgSetSystemLo
 System::MsgQueryDeviceStatusSend MessageSystemHandler::Handle(System::MsgQueryDeviceStatusRecv&& /*data*/,
                                                               std::error_condition& errc) {
     System::MsgQueryDeviceStatusSend retData{};
-    errc = util::ErrorEnum::Success;
+    retData.resData.bootId          = ReadBootId();
+    retData.resData.softwareVersion = util::GetAbbrVersion();
+    errc                            = util::ErrorEnum::Success;
     return retData;
 }
 

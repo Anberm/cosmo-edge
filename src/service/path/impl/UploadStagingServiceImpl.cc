@@ -136,6 +136,25 @@ namespace {
                static_cast<std::uint64_t>(status.st_ino) == inode;
     }
 
+    bool HasTrustedStagingRootOwner(const fs::path& root_path, const struct stat& root_status) {
+        if (root_status.st_uid == geteuid()) {
+            return true;
+        }
+
+        // Some appliance images normalize the persistent data tree to the
+        // administrative account on every boot while cosmo-engine runs as
+        // root. Accept that inherited owner only when the immediate deployment
+        // parent has the same owner and cannot be modified by group/other
+        // users. The opened root is still forced to 0700 and pinned by
+        // owner/device/inode; session directories and payloads must continue to
+        // be owned by the running service.
+        const auto parent_path = root_path.parent_path();
+        struct stat parent_status {};
+        return !parent_path.empty() && lstat(parent_path.c_str(), &parent_status) == 0 &&
+               S_ISDIR(parent_status.st_mode) && !S_ISLNK(parent_status.st_mode) &&
+               parent_status.st_uid == root_status.st_uid && (parent_status.st_mode & 0022) == 0;
+    }
+
     bool IsAsciiAlphaNumeric(unsigned char c) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
     }
@@ -538,16 +557,17 @@ UploadStagingServiceImpl::UploadStagingServiceImpl(UploadStagingConfig config, N
     struct stat root_stat {};
     struct stat root_path_stat {};
     if (root_fd_ < 0 || fstat(root_fd_, &root_stat) != 0 || !S_ISDIR(root_stat.st_mode) ||
-        root_stat.st_uid != geteuid() || lstat(config_.root_path.c_str(), &root_path_stat) != 0 ||
-        !S_ISDIR(root_path_stat.st_mode) || S_ISLNK(root_path_stat.st_mode) ||
-        root_path_stat.st_dev != root_stat.st_dev || root_path_stat.st_ino != root_stat.st_ino ||
-        fchmod(root_fd_, 0700) != 0) {
+        !HasTrustedStagingRootOwner(absolute_root, root_stat) ||
+        lstat(config_.root_path.c_str(), &root_path_stat) != 0 || !S_ISDIR(root_path_stat.st_mode) ||
+        S_ISLNK(root_path_stat.st_mode) || root_path_stat.st_dev != root_stat.st_dev ||
+        root_path_stat.st_ino != root_stat.st_ino || fchmod(root_fd_, 0700) != 0) {
         CloseChecked(root_fd_);
         root_fd_ = -1;
         throw std::runtime_error("cannot securely open upload staging root");
     }
-    root_device_ = static_cast<std::uint64_t>(root_stat.st_dev);
-    root_inode_  = static_cast<std::uint64_t>(root_stat.st_ino);
+    root_owner_uid_ = static_cast<std::uint64_t>(root_stat.st_uid);
+    root_device_    = static_cast<std::uint64_t>(root_stat.st_dev);
+    root_inode_     = static_cast<std::uint64_t>(root_stat.st_ino);
     if (config_.persist_sessions) {
         RecoverSessions();
     } else {
@@ -1319,7 +1339,8 @@ void UploadStagingServiceImpl::RefreshIdleExpiry(Session& session) const {
 bool UploadStagingServiceImpl::ValidateRootPath() const {
     struct stat path_status {};
     return root_fd_ >= 0 && lstat(config_.root_path.c_str(), &path_status) == 0 &&
-           S_ISDIR(path_status.st_mode) && !S_ISLNK(path_status.st_mode) && path_status.st_uid == geteuid() &&
+           S_ISDIR(path_status.st_mode) && !S_ISLNK(path_status.st_mode) &&
+           static_cast<std::uint64_t>(path_status.st_uid) == root_owner_uid_ &&
            (path_status.st_mode & 0077) == 0 && SameIdentity(path_status, root_device_, root_inode_);
 }
 

@@ -1,3 +1,4 @@
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <array>
@@ -890,6 +891,37 @@ TEST_CASE("Upload staging pins root identity and never follows replacement links
     CHECK(fs::exists(sentinel));
     CHECK(ReadFile(sentinel) == "keep");
     CHECK_FALSE(fs::exists(pinned_root / info.upload_id));
+}
+
+TEST_CASE("Upload staging accepts a private root inherited from its deployment parent",
+          "[upload-staging][root]") {
+    if (geteuid() != 0) {
+        SUCCEED("owner-transition coverage requires a root test process");
+        return;
+    }
+
+    constexpr uid_t kDeploymentOwner = 65534;
+    TempDirectory temp;
+    const auto parent = temp.Path() / "upload";
+    const auto root   = parent / "sessions";
+    fs::create_directories(root);
+    REQUIRE(chown(parent.c_str(), kDeploymentOwner, kDeploymentOwner) == 0);
+    REQUIRE(chown(root.c_str(), kDeploymentOwner, kDeploymentOwner) == 0);
+
+    UploadStagingServiceImpl service(MakeConfig(root));
+    UploadBeginRequest request{"owner", UploadPurpose::kAudio, "alarm.wav", 1, 1, {}};
+    UploadSessionInfo info;
+    REQUIRE(service.Begin(request, info) == util::ErrorEnum::Success);
+    const auto session = root / info.upload_id;
+    struct stat session_status {};
+    REQUIRE(lstat(session.c_str(), &session_status) == 0);
+    CHECK(session_status.st_uid == geteuid());
+
+    const auto unexpected_parent = temp.Path() / "other-upload";
+    const auto unexpected_root   = unexpected_parent / "sessions";
+    fs::create_directories(unexpected_root);
+    REQUIRE(chown(unexpected_root.c_str(), kDeploymentOwner, kDeploymentOwner) == 0);
+    CHECK_THROWS_AS(UploadStagingServiceImpl(MakeConfig(unexpected_root)), std::runtime_error);
 }
 
 TEST_CASE("Upload staging lease cleanup remains inside the pinned root", "[upload-staging]") {
