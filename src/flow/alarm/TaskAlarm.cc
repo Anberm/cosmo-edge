@@ -70,6 +70,20 @@ TaskAlarm::~TaskAlarm() {
     LOG_INFO("{}Task:{} Delete", kTag, task_id);
 }
 
+void TaskAlarm::ResetStateOnRestart() {
+    m_mapAlarmIdStatus.clear();
+    m_mapAreaIdStatus.clear();
+    m_alarmCount    = 0;
+    m_lastAlarmTime = chrono::steady_clock::now();
+    m_handleFrames  = 0;
+    m_filterFrames  = 0;
+    ResetSuppressionState();
+    LOG_INFO(
+        "{}Task:{} ResetStateOnRestart: cleared m_mapAlarmIdStatus, m_mapAreaIdStatus, "
+        "m_alarmCount, and suppression state",
+        kTag, task_id);
+}
+
 TaskAlarm::TaskAlarm(const std::string& channelId, const std::string& taskId, ActionNode& action)
     : AlgActionBase(AlgActionType::AlgActionBATaskAlarm, action, channelId, taskId),
       TaskAlarmSuppression(taskId),
