@@ -68,6 +68,8 @@ bool AlgActionBase::Start() {
             }
             LOG_INFO("[{}] Recreate data queue:{} before Start, OldMaxSize:{}", task_id, queueName,
                      oldMaxSize);
+            // Clear per-run internal state that should not persist across stop→start cycles
+            ResetStateOnRestart();
         }
         distributor->ResetDistributor();
         if (!start()) {

@@ -26,9 +26,11 @@ struct UploadStagingConfig {
     std::size_t max_sessions_per_principal{0};
     std::size_t max_sessions{0};
     std::uint64_t max_reserved_bytes{0};
-    /// The effective filesystem reserve is the larger of these two values.
+    /// Upload admission keeps only an emergency reserve. Long-running event
+    /// storage is reclaimed by StorageSpace's business waterline, so a
+    /// percentage reserve here would deadlock small uploads on large disks.
     std::uint64_t reserve_free_bytes{512ULL * 1024 * 1024};
-    std::uint32_t reserve_free_percent{5};
+    std::uint32_t reserve_free_percent{0};
     /// Bounds chunk bookkeeping memory without imposing a file-size limit.
     std::uint64_t max_session_metadata_bytes{64ULL * 1024 * 1024};
     std::chrono::milliseconds session_ttl{std::chrono::minutes(30)};

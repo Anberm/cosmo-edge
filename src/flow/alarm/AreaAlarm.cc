@@ -20,6 +20,22 @@ AreaAlarm::~AreaAlarm() {
     LOG_INFO("{}Task:{} {}/{} Delete", kTag, task_id, action_info_.actionName, action_info_.flowActionId);
 }
 
+void AreaAlarm::ResetStateOnRestart() {
+    track_id_status_map_.clear();
+    pass_flow_areas_map_.clear();
+    area_target_status_map_.clear();
+    has_track_       = false;
+    frame_index_     = 0;
+    is_alarm_needed_ = false;
+    alarm_data_.reset();
+    handle_frame_cnt.store(0, std::memory_order_relaxed);
+    invalid_frame_cnt = 0;
+    LOG_INFO(
+        "{}Task:{} {}/{} ResetStateOnRestart: cleared track_id_status_map, "
+        "pass_flow_areas_map, area_target_status_map, and per-run flags",
+        kTag, task_id, action_info_.actionName, action_info_.flowActionId);
+}
+
 AreaAlarm::AreaAlarm(const std::string& taskId, ActionNode& action)
     : AlgActionBase(AlgActionType::AlgActionBAAreaAlarm, action, "", taskId),
       action_info_(action),

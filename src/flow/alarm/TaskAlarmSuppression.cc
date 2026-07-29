@@ -23,6 +23,15 @@ void TaskAlarmSuppression::ResetLastAlarmInfo() {
     LOG_INFO("[{}] Reset History", m_name);
 }
 
+void TaskAlarmSuppression::ResetSuppressionState() {
+    m_lastAlarmRect         = {0, 0, 0, 0};
+    m_lastAlarmTime         = 0;
+    m_bSuppresion           = false;
+    m_uiRestrainDurationSec = 6 * 3600;
+    m_overlaprate           = 0.2f;
+    LOG_INFO("[{}] ResetSuppressionState: cleared all suppression state", m_name);
+}
+
 bool TaskAlarmSuppression::CheckReportAlarm(util::Box bbox, bool bSuppresion, float fIOUTh,
                                             uint32_t uiRestrainDurationThSec) {
     if (bSuppresion != m_bSuppresion) {

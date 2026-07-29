@@ -213,6 +213,10 @@ private:
     void FillAlarmData(AlgDataPtr algData, DataAlarmUnit& alarmUnit);
     void FillAlarmDataCombine(AlgDataPtr algData, DataAlarmUnit& alarmUnit);
 
+    // Reset per-run tracking state when task is stopped and restarted (switch ON/OFF).
+    // Otherwise stale track history from previous run can block alarm conditions.
+    void ResetStateOnRestart() override;
+
     // Age tracking IDs in m_mapTrackIdStatus
     void TargetOldHistory();
 

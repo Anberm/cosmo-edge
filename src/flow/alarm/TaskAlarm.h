@@ -70,6 +70,11 @@ public:
     MsgOverviewMem GetOverviewInfo(const std::string& channelId, const std::string& taskId,
                                    int64_t streamIndex = -1, int64_t from = -1, int64_t to = -1) override;
 
+    // Clear per-run alarm tracking state on task restart (switch ON/OFF).
+    // Otherwise stale per-target alarm counts from m_mapAlarmIdStatus can
+    // suppress all future alarms when targetAlarmCount is configured.
+    void ResetStateOnRestart() override;
+
     // Number of alarm triggers
     size_t GetAlarmTriggerCnt() {
         return m_handleFrames;

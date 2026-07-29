@@ -160,6 +160,11 @@ protected:
     // Subclasses override this method to process single frame data
     virtual void HandFrame(AlgDataPtr /*algData*/) {}
 
+    // Called when the action transitions from stopped→started (restart, not first start).
+    // Subclasses override this to clear per-run internal state that should not persist
+    // across task switch ON/OFF cycles (e.g. track history, alarm state).
+    virtual void ResetStateOnRestart() {}
+
     // Subclasses override run
     virtual void run() override;
 

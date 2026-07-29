@@ -158,7 +158,7 @@ void StreamViewerOverview::LiveDataHandTarget(int64_t streamIndex, uint64_t inde
     }
 
     // ── update EMA smooth state (record only, does not change stored coordinates) ──
-    if (target.trackId > 0) {
+    if (target.trackId >= 0) {
         float bx = static_cast<float>(target.aiBox.x);
         float by = static_cast<float>(target.aiBox.y);
         float bw = static_cast<float>(target.aiBox.width);
@@ -182,7 +182,7 @@ void StreamViewerOverview::LiveDataHandTarget(int64_t streamIndex, uint64_t inde
     int drawW = target.aiBox.width;
     int drawH = target.aiBox.height;
 
-    if (target.trackId > 0) {
+    if (target.trackId >= 0) {
         auto sit = smoothed_boxes_.find(target.trackId);
         if (sit != smoothed_boxes_.end()) {
             drawX = static_cast<int>(sit->second.x + 0.5f);
@@ -258,7 +258,7 @@ void StreamViewerOverview::LiveDataHandTarget(int64_t streamIndex, uint64_t inde
             text.color = {138, 148, 184};  // slate #8A94B8 — low confidence
         }
 
-        if (!trackIdShown && target.trackId > 0) {
+        if (!trackIdShown && target.trackId >= 0) {
             text.text =
                 COSMO_FORMAT("{}:{:.2f} #{}", confidence.label, confidence.confidence, target.trackId);
             trackIdShown = true;
@@ -305,7 +305,7 @@ void StreamViewerOverview::LiveDataToLocal() {
                     // Same frame from a different action: merge targets by trackId
                     for (auto& newTarget : aiFrame.targets) {
                         bool merged = false;
-                        if (newTarget.trackId > 0) {
+                        if (newTarget.trackId >= 0) {
                             auto targetIt = std::find_if(it->second.targets.begin(), it->second.targets.end(),
                                                          [&](const auto& existTarget) {
                                                              return existTarget.trackId == newTarget.trackId;
@@ -342,8 +342,8 @@ void StreamViewerOverview::LiveDataToLocal() {
         std::vector<MsgAiDetFrame> deduped;
         deduped.reserve(mergedFrames.size());
         for (auto& [k, frame] : mergedFrames) {
-            // Remove untracked targets (trackId<=0, from Detect action) that overlap
-            // with tracked targets (trackId>0, from Track/Classify). The tracked version
+            // Remove untracked targets (trackId<0, from Detect action) that overlap
+            // with tracked targets (trackId>=0, from Track/Classify). The tracked version
             // is always more informative and already includes the detection bbox.
             auto& tgts = frame.targets;
             tgts.erase(
@@ -358,12 +358,12 @@ void StreamViewerOverview::LiveDataToLocal() {
 
 bool StreamViewerOverview::IsOverlappingTracked(const MsgTarget& target,
                                                 const std::vector<MsgTarget>& targets) {
-    if (target.trackId > 0) {
+    if (target.trackId >= 0) {
         return false;  // keep tracked
     }
     // check if any tracked target has a similar bbox
     for (const auto& tracked : targets) {
-        if (tracked.trackId <= 0) {
+        if (tracked.trackId < 0) {
             continue;
         }
         int dx   = std::abs(target.aiBox.x - tracked.aiBox.x);

@@ -684,7 +684,7 @@ TEST_CASE("Upload staging enforces limits and expires abandoned sessions", "[upl
     CHECK(UploadStagingConfig{}.max_sessions == 0);
     CHECK(UploadStagingConfig{}.max_reserved_bytes == 0);
     CHECK(UploadStagingConfig{}.reserve_free_bytes == 512ULL * 1024 * 1024);
-    CHECK(UploadStagingConfig{}.reserve_free_percent == 5);
+    CHECK(UploadStagingConfig{}.reserve_free_percent == 0);
     CHECK(UploadStagingConfig{}.session_ttl == std::chrono::minutes(30));
     CHECK(UploadStagingConfig{}.cleanup_interval == std::chrono::minutes(1));
     CHECK(UploadStagingConfig{}.max_session_lifetime == std::chrono::milliseconds::zero());

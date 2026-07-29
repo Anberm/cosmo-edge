@@ -18,6 +18,10 @@ public:
     // bbox: detection box, fIOUTh: IOU threshold, uiRestrainDurationThSec: suppression duration (seconds)
     bool CheckReportAlarm(util::Box bbox, bool bSuppresion, float fIOUTh, uint32_t uiRestrainDurationThSec);
 
+public:
+    // Clear suppression state so task stop→start yields fresh alarm judgement
+    void ResetSuppressionState();
+
 private:
     void ResetLastAlarmInfo();
     bool Intersect(util::Box alarmRect, util::Box other);        // Check intersection
