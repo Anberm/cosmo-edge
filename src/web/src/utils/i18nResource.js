@@ -50,7 +50,7 @@ const zhFallbackTerms = [
   ['静止目标去重时间', 'Stationary Target Deduplication Duration'],
   ['静止目标去重', 'Stationary Target Deduplication'],
   ['静止目标重叠率', 'Stationary Target Overlap Rate'],
-  ['区域中的目标数（建议改名）', 'Target Count in Region (Suggest Rename)'],
+  ['目标数量阈值', 'Target Count Threshold'],
   ['区域中的目标数', 'Target Count in Region'],
   ['追踪历史帧数', 'Tracking History Frames'],
   ['追踪半径', 'Tracking Radius'],
