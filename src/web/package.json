@@ -15,7 +15,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "resource-i18n:check": "node scripts/resource_i18n_sync.mjs --check",
-    "resource-i18n:sync": "node scripts/resource_i18n_sync.mjs --sync"
+    "resource-i18n:sync": "node scripts/resource_i18n_sync.mjs --sync",
+    "area-rule:check": "node scripts/area_rule_compatibility_check.mjs"
   },
   "dependencies": {
     "@vue-flow/background": "^1.3.2",

@@ -1,12 +1,58 @@
 <template>
   <div class="form-body">
     <el-form label-position="left">
+      <div v-if="isAreaAlarmAction" class="area-rule-overview">
+        <div class="area-rule-overview__title">区域规则配置</div>
+        <el-form-item label="输出目的" class="form-flex">
+          <el-select
+            v-model="areaRulePurpose"
+            class="form-content"
+            size="small"
+            :disabled="areaRuleUiType === AREA_RULE_UI_TYPES.UNKNOWN"
+            @change="handleAreaRulePurposeChange"
+          >
+            <el-option label="异常告警" value="alarm" />
+            <el-option label="统计上报" value="statistics" />
+            <el-option
+              v-if="areaRulePurpose === 'compatibility'"
+              label="兼容配置"
+              value="compatibility"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="区域规则类型" class="form-flex">
+          <el-select
+            v-model="areaRuleUiType"
+            class="form-content"
+            size="small"
+            :disabled="areaRuleUiType === AREA_RULE_UI_TYPES.UNKNOWN"
+            @change="handleAreaRuleTypeChange"
+          >
+            <el-option
+              v-for="option in areaRuleTypeOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <div class="area-rule-summary" :class="{ 'is-warning': areaRuleUiType === AREA_RULE_UI_TYPES.UNKNOWN }">
+          <div class="area-rule-summary__label">规则说明</div>
+          <div>{{ areaRuleSummary }}</div>
+          <div v-if="areaRuleUiType !== AREA_RULE_UI_TYPES.AREA_COUNT && areaRuleUiType !== AREA_RULE_UI_TYPES.PASS_FLOW && areaRuleUiType !== AREA_RULE_UI_TYPES.UNKNOWN" class="area-rule-summary__note">
+            最终是否形成告警记录，仍受下游“事件上报”节点的限频、去重和复核规则影响。
+          </div>
+          <div v-if="areaRuleUiType === AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT" class="area-rule-summary__note">
+            这是旧版多节点配置。编辑后仍按原来的类型6和参数键保存，不会自动迁移。
+          </div>
+        </div>
+      </div>
       <div v-for="(item, index) in paramConfigs" :key="index">
         <el-form-item v-if="!specialTypes.includes(item.type) && showFormItem(item)" class="form-flex" :prop="item.key">
           <template #label>
             <span style="display:inline-block;">
-              {{ resolveI18nText(item, 'name') }}
-              <el-tooltip effect="dark" :content="resolveI18nText(item, 'description')" placement="top">
+              {{ resolveParamText(item, 'name') }}
+              <el-tooltip effect="dark" :content="resolveParamText(item, 'description')" placement="top">
                 <el-icon class="help-icon">
                   <QuestionFilled />
                 </el-icon>
@@ -31,7 +77,7 @@
 
           <div v-else-if="item.type === 'select'">
             <el-select v-model="item.value" class="form-content" :placeholder="t('validate.pleaseSelect', { name: '' })" filterable size="small">
-              <el-option v-for="obj in item.options" :key="obj.value" :label="resolveI18nOptionLabel(obj)" :value="obj.value">
+              <el-option v-for="obj in item.options" :key="obj.value" :label="resolveParamOptionLabel(item, obj)" :value="obj.value">
               </el-option>
             </el-select>
           </div>
@@ -39,7 +85,7 @@
           <!-- 单选框 -->
           <div v-else-if="item.type === 'radio'">
             <el-radio-group v-model="item.value" size="small">
-              <el-radio v-for="obj in item.options" :key="obj.value" :value="obj.value">{{ resolveI18nOptionLabel(obj) }}</el-radio>
+              <el-radio v-for="obj in item.options" :key="obj.value" :value="obj.value">{{ resolveParamOptionLabel(item, obj) }}</el-radio>
             </el-radio-group>
           </div>
 
@@ -246,6 +292,17 @@ import {
 } from '@element-plus/icons-vue'
 import { t, localeColon } from '@/i18n'
 import { resolveI18nText, resolveI18nOptionLabel } from '@/utils/i18nResource'
+import {
+  AREA_RULE_UI_TYPES,
+  applyAreaRuleUiType,
+  buildAreaRuleSummary,
+  getAreaRuleFieldText,
+  getAreaRuleOptionLabel,
+  getAreaRulePurpose,
+  inferAreaRuleUiType,
+  mergeMetaParamsPreservingUnknown,
+  mergeParamsPreservingUnknown
+} from './areaRuleCompatibility.js'
 
 // Props
 const props = defineProps({
@@ -263,6 +320,57 @@ const props = defineProps({
   }
 })
 const emit = defineEmits(['config-change'])
+
+const isAreaAlarmAction = computed(
+  () =>
+    (props.actionDetail?.actionId || props.actionDetail?.id) === 'BA_00005'
+)
+const originalAreaParams = isAreaAlarmAction.value
+  ? _.cloneDeep(props.actionDetail.configObject?.params || [])
+  : []
+const originalAreaWebConfig = isAreaAlarmAction.value
+  ? _.cloneDeep(props.actionDetail.configObject?.webConfig || {})
+  : {}
+const areaRuleUiType = ref(AREA_RULE_UI_TYPES.TARGET_LIMIT)
+const areaRulePurpose = ref('alarm')
+
+const areaAlarmRuleOptions = [
+  { label: '区域目标数量条件', value: AREA_RULE_UI_TYPES.TARGET_LIMIT },
+  { label: '目标越线', value: AREA_RULE_UI_TYPES.TRIPWIRE },
+  { label: '垂直方向异常', value: AREA_RULE_UI_TYPES.DIRECTION },
+  { label: '目标区域停留', value: AREA_RULE_UI_TYPES.DURATION },
+  { label: '区域内存在目标', value: AREA_RULE_UI_TYPES.PRESENCE }
+]
+const areaStatisticsRuleOptions = [
+  { label: '区域目标数量统计', value: AREA_RULE_UI_TYPES.AREA_COUNT },
+  { label: '进出流量统计', value: AREA_RULE_UI_TYPES.PASS_FLOW }
+]
+
+const areaRuleTypeOptions = computed(() => {
+  if (areaRuleUiType.value === AREA_RULE_UI_TYPES.UNKNOWN) {
+    return [{ label: '无法识别的旧版区域规则', value: AREA_RULE_UI_TYPES.UNKNOWN }]
+  }
+  const options =
+    areaRulePurpose.value === 'statistics'
+      ? areaStatisticsRuleOptions
+      : [...areaAlarmRuleOptions]
+  if (areaRuleUiType.value === AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT) {
+    options.unshift({
+      label: '区域目标数量条件（旧版多节点配置）',
+      value: AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT
+    })
+  }
+  return options
+})
+
+const currentAreaParams = computed(() =>
+  paramConfigs.value
+    .filter((item) => item?.key)
+    .map((item) => ({ key: item.key, value: item.value }))
+)
+const areaRuleSummary = computed(() =>
+  buildAreaRuleSummary(currentAreaParams.value, areaRuleUiType.value)
+)
 
 // Get instance
 const { proxy } = getCurrentInstance()
@@ -372,6 +480,11 @@ onMounted(() => {
     item.key === 'data' && getAudioFile(index)
     item.key === 'deviceSN' && getAudioDevice(index)
   })
+
+  if (isAreaAlarmAction.value) {
+    areaRuleUiType.value = inferAreaRuleUiType(currentAreaParams.value)
+    areaRulePurpose.value = getAreaRulePurpose(areaRuleUiType.value)
+  }
 
   console.log(paramConfigs.value, '=============paramConfigs', props.atomicList)
 
@@ -785,6 +898,48 @@ const getModelSelectList = (code, type) => {
 
 // 隐藏的参数 key 列表（保留后端接口，前端不展示）
 const hiddenParamKeys = ['alarmProperty']
+const areaRuleTechnicalKeys = [
+  'areaAlarmType',
+  'countBreakAreaType',
+  'detectBreakAreaType',
+  'param.targetCalcType'
+]
+
+const resolveParamText = (item, field) => {
+  if (isAreaAlarmAction.value) {
+    const text = getAreaRuleFieldText(item?.key)
+    if (text?.[field]) return text[field]
+  }
+  return resolveI18nText(item, field)
+}
+
+const resolveParamOptionLabel = (item, option) => {
+  const fallback = resolveI18nOptionLabel(option)
+  if (!isAreaAlarmAction.value) return fallback
+  return getAreaRuleOptionLabel(item?.key, option?.value, fallback)
+}
+
+const syncAreaRuleParams = (type) => {
+  const patched = applyAreaRuleUiType(currentAreaParams.value, type)
+  patched.forEach((param) => {
+    const target = _.find(paramConfigs.value, { key: param.key })
+    if (target) target.value = param.value
+  })
+}
+
+const handleAreaRulePurposeChange = (purpose) => {
+  const nextType =
+    purpose === 'statistics'
+      ? AREA_RULE_UI_TYPES.AREA_COUNT
+      : AREA_RULE_UI_TYPES.TARGET_LIMIT
+  areaRuleUiType.value = nextType
+  syncAreaRuleParams(nextType)
+}
+
+const handleAreaRuleTypeChange = (type) => {
+  areaRulePurpose.value = getAreaRulePurpose(type)
+  syncAreaRuleParams(type)
+}
 
 const isDependsOnSatisfied = (obj, visited = new Set()) => {
   if (!obj?.dependsOn || obj.dependsOn.key === '') return true
@@ -796,6 +951,16 @@ const isDependsOnSatisfied = (obj, visited = new Set()) => {
 }
 
 const showFormItem = (obj) => {
+  if (isAreaAlarmAction.value && areaRuleTechnicalKeys.includes(obj.key)) {
+    return false
+  }
+  if (
+    isAreaAlarmAction.value &&
+    obj.key === 'targetCountChange' &&
+    areaRuleUiType.value !== AREA_RULE_UI_TYPES.AREA_COUNT
+  ) {
+    return false
+  }
   if (obj.level === '2') return false
   if (hiddenParamKeys.includes(obj.key)) return false
   return isDependsOnSatisfied(obj)
@@ -1348,6 +1513,28 @@ const submitForm = ({ persist = true } = {}) => {
       }
     }
   })
+  if (isAreaAlarmAction.value) {
+    configObject.params = mergeParamsPreservingUnknown(
+      originalAreaParams,
+      configObject.params
+    )
+    configObject.webConfig = {
+      ...originalAreaWebConfig,
+      ...configObject.webConfig,
+      labelList:
+        configObject.webConfig.labelList.length > 0
+          ? configObject.webConfig.labelList
+          : originalAreaWebConfig.labelList || [],
+      labelFilterList:
+        configObject.webConfig.labelFilterList.length > 0
+          ? configObject.webConfig.labelFilterList
+          : originalAreaWebConfig.labelFilterList || [],
+      metaDataParams: mergeMetaParamsPreservingUnknown(
+        originalAreaWebConfig.metaDataParams,
+        configObject.webConfig.metaDataParams
+      )
+    }
+  }
   if (persist) {
     localStorage.setItem('flowConfigObject', JSON.stringify(configObject))
     console.log('========submitForm=========', configObject)
@@ -1371,6 +1558,46 @@ defineExpose({
   padding: 10px 0;
   // height: 450px;
   overflow-y: scroll;
+}
+
+.area-rule-overview {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.area-rule-overview__title {
+  margin-bottom: 12px;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.area-rule-summary {
+  padding: 10px 12px;
+  border-left: 3px solid #409eff;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.area-rule-summary.is-warning {
+  border-left-color: #e6a23c;
+  background: #fdf6ec;
+}
+
+.area-rule-summary__label {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.area-rule-summary__note {
+  margin-top: 6px;
+  color: #6b7280;
 }
 
 .el-form-item {
