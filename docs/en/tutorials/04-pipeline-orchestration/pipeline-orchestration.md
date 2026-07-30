@@ -139,7 +139,7 @@ relationship, so the guide starts from a known minimum business chain.
 | Model | Installed `PedestrianDetection` atomic model |
 | Rules | Track people, keep the pedestrian class, decide whether a target enters the main area |
 | Output | Region-intrusion event with the person target and snapshot |
-| Positive sample | A clearly visible person enters the area and satisfies the duration |
+| Positive sample | A clearly visible person enters the area and satisfies the minimum stay duration |
 | Negative sample | A person passes only outside the area |
 | Acceptance | Positive has a box and event; negative has no intrusion event; the task still works after restart |
 
@@ -181,10 +181,12 @@ Complete these six numbered steps:
    Keep the pedestrian label and start with the current Min Pedestrian Size of `60`.
 
 5. **Region Alarm**
-   Select the main area as input. This node evaluates whether pedestrians enter the area drawn during
-   scenario task assignment.
+   Select **Exception Alarm** for **Output Purpose**, **Target Region Stay** for **Region Rule Type**,
+   **Primary Region** for **Decision Region**, and **Target is inside the region** for
+   **Stay Start Condition**. This node evaluates whether pedestrians enter the area drawn during scenario
+   task assignment and produces a candidate alarm after the minimum stay duration is satisfied.
 
-   ![Using the main area in Region Alarm](images/img_42.webp)
+   ![Selecting Exception Alarm, Target Region Stay, and Primary Region in Region Alarm](images/img_42.png)
 
 6. **Event Report**
    Select a triggered event with target tracking. Video clips increase storage and transfer load, so enable
@@ -211,7 +213,7 @@ Under **Parameter Settings**, start from an explainable baseline:
 | --- | ---: | --- |
 | Pedestrian Detection Method | Bottom | Use the person's foot position for a ground-plane area |
 | Min Pedestrian Size | 60 | Remove very small pedestrian targets |
-| Detection Time | 0 seconds | Prove the chain first; increase later to suppress brief entry |
+| Minimum Stay Duration | 0 seconds | Prove the chain first; increase later to suppress brief entry |
 | Alarm Interval (sec) | 3 | Convenient for a short test; increase for the production response process |
 | Alarm Count | 1 | Verify a single trigger first |
 | Stationary Target Deduplication | Off | Observe raw behavior before deciding whether to enable it |
@@ -271,7 +273,7 @@ Final pass criteria:
 
 1. Confirm that Category Filter does not remove every target.
 2. Confirm that the target enters the area using the selected box position.
-3. Restore detection duration and alarm suppression to a testable baseline.
+3. Restore minimum stay duration and alarm suppression to a testable baseline.
 4. Confirm that Event Report exists after the rules and is configured for a triggered event.
 5. Check Event Center filters and storage space.
 

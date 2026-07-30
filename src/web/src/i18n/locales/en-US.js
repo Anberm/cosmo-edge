@@ -1653,6 +1653,151 @@ export default {
     }
   },
   flow: {
+    areaRule: {
+      title: 'Region Rule Configuration',
+      purposeLabel: 'Output Purpose',
+      purposes: {
+        alarm: 'Exception Alarm',
+        statistics: 'Statistics Report',
+        compatibility: 'Compatibility Configuration'
+      },
+      typeLabel: 'Region Rule Type',
+      summaryLabel: 'Rule Description',
+      downstreamNote: 'Whether an alarm record is ultimately created still depends on rate limits, deduplication, and review rules in the downstream “Event Report” node.',
+      legacyNote: 'This is a legacy multi-node configuration. Editing preserves the original type 6 and parameter keys without automatic migration.',
+      types: {
+        targetLimit: 'Region Target Count Condition',
+        areaCount: 'Region Target Count Statistics',
+        passFlow: 'Entry/Exit Flow Statistics',
+        tripwire: 'Target Line Crossing',
+        direction: 'Vertical Direction Anomaly',
+        duration: 'Target Region Stay',
+        presence: 'Target Present in Region',
+        legacyTargetLimit: 'Region Target Count Condition (Legacy Multi-node)',
+        unknown: 'Unrecognized Legacy Region Rule'
+      },
+      fields: {
+        decisionRegion: {
+          name: 'Decision Region',
+          description: 'Choose the primary or associated region for rule evaluation.'
+        },
+        targetCountThreshold: {
+          name: 'Target Count Threshold',
+          description: 'Compared with the actual valid target count in the region.'
+        },
+        triggerCondition: {
+          name: 'Trigger Condition',
+          description: 'Choose the comparison between the actual target count and the threshold.'
+        },
+        conditionDuration: {
+          name: 'Condition Duration',
+          description: 'How long the count condition must remain true; 0 evaluates the current frame.'
+        },
+        durationUnit: {
+          name: 'Duration Unit',
+          description: 'Time unit used by the condition duration.'
+        },
+        reportingPeriod: {
+          name: 'Statistics Reporting Period',
+          description: 'Periodically produces region count or entry/exit flow statistics.'
+        },
+        reportingPeriodUnit: {
+          name: 'Reporting Period Unit',
+          description: 'Time unit used by the statistics reporting period.'
+        },
+        crossingDirection: {
+          name: 'Crossing Direction',
+          description: 'Matches when a target crosses in the direction marked on the tripwire.'
+        },
+        requiredLineCount: {
+          name: 'Required Tripwire Count',
+          description: 'Number of tripwires the same tracked target must cross.'
+        },
+        stayStartCondition: {
+          name: 'Stay Start Condition',
+          description: 'Choose whether the target only needs to be inside the region or must first be observed entering from outside.'
+        },
+        minimumStayDuration: {
+          name: 'Minimum Stay Duration',
+          description: 'How long the same tracked target must continuously remain in the region.'
+        },
+        stayDurationUnit: {
+          name: 'Stay Duration Unit',
+          description: 'Time unit used by the minimum stay duration.'
+        },
+        prohibitedDirection: {
+          name: 'Prohibited Movement Direction',
+          description: 'The current implementation evaluates vertical movement and requires stable target tracking.'
+        },
+        minimumAbnormalDisplacement: {
+          name: 'Minimum Abnormal Displacement',
+          description: 'A ratio of frame height; 0.05 means 5% of the frame height.'
+        },
+        legacyTargetCountThreshold: {
+          name: 'Target Count Threshold',
+          description: 'Target count threshold used by the legacy multi-node configuration.'
+        },
+        legacyTriggerCondition: {
+          name: 'Trigger Condition',
+          description: 'Count comparison used by the legacy multi-node configuration.'
+        },
+        legacyConditionDuration: {
+          name: 'Condition Duration',
+          description: 'Condition duration used by the legacy multi-node configuration.'
+        },
+        legacyDurationUnit: {
+          name: 'Duration Unit',
+          description: 'Time unit used by the legacy multi-node configuration.'
+        },
+        periodicDataChangeMarker: {
+          name: 'Periodic Data Change Marker',
+          description: 'Marks whether the target count changed in a periodic report; it does not bypass the reporting period.'
+        }
+      },
+      options: {
+        compare: {
+          lessThan: 'Less than',
+          greaterThan: 'Greater than',
+          notGreaterThan: 'Not greater than',
+          notLessThan: 'Not less than',
+          equalTo: 'Equal to'
+        },
+        unit: {
+          milliseconds: 'ms',
+          seconds: 's',
+          minutes: 'min',
+          hours: 'h'
+        },
+        tripwire: {
+          count1: 'Cross 1 tripwire',
+          count2: 'Cross 2 tripwires'
+        },
+        stayStart: {
+          inside: 'Target is inside the region',
+          entered: 'Target enters from outside the region',
+          insideFallback: 'inside the region'
+        },
+        direction: {
+          bottomToTop: 'from bottom to top of the frame',
+          topToBottom: 'from top to bottom of the frame',
+          specified: 'in the specified direction'
+        }
+      },
+      summary: {
+        currentFrame: 'evaluated on the current frame',
+        satisfiedFor: 'satisfied for {value} {unit}',
+        targetExpression: 'Valid target count {symbol} {count}',
+        targetExpressionFallback: 'The valid target count satisfies the selected threshold relation',
+        targetLimit: 'Compares the valid target count in the region with the target count threshold and supports <, >, ≤, ≥, and =. Current configuration: {expression}; a candidate alarm is produced when the condition is {duration}.',
+        areaCount: 'Periodically reports the current valid target count in the region, including zero. This is statistical data, not an exception alarm.',
+        passFlow: 'Periodically reports tripwire entries, exits, and cumulative flow. This rule requires stable target tracking.',
+        tripwire: 'A candidate alarm is produced when the same tracked target crosses the configured number ({count}) of tripwires in the marked direction.',
+        direction: 'A candidate alarm is produced when the same target moves {direction} by more than {distance}% of the frame height.',
+        duration: 'A candidate alarm is produced when the same target satisfies “{condition}” and the stay condition is {duration}.',
+        presence: 'A candidate alarm is produced when any valid upstream target is inside the decision region. Target classes are determined by the upstream model and category filter.',
+        unknown: 'This configuration contains a legacy rule value that the current interface cannot recognize. Use compatibility mode for read-only inspection to avoid overwriting it.'
+      }
+    },
     actionNames: {
       '目标检测算法': 'Target Detection',
       '目标分类算法': 'Target Classification',
