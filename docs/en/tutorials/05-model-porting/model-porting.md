@@ -1,597 +1,404 @@
 ---
-title: "Volume 5: Model Porting"
-description: Convert, upload, and integrate third-party models into CosmoEdge scenario tasks — a complete end-to-end walkthrough.
+title: "Third-Party Model Integration: Convert, Upload, and Validate"
+description: Confirm support conditions for a third-party model, then convert, upload, configure, run, and accept it end to end.
 prev:
-  text: "Volume 4: Pipeline Orchestration"
+  text: Pipeline Orchestration
   link: /en/tutorials/04-pipeline-orchestration/pipeline-orchestration
 next: false
 ---
 
-# Volume 5: Model Porting
+# Third-Party Model Integration: Convert, Upload, and Validate
 
-> **Estimated time**: 30–45 minutes
-> **Goal**: Learn to convert, upload, and integrate a third-party model into the system — completing a full loop from model porting to scenario task integration to result verification
-> **Prerequisites**: Completed CosmoEdge Scenario Task Orchestration; understand basic pipeline orchestration concepts
-> **Extra environment needed**: A computer with Docker installed for model conversion
+| Item | Details |
+| --- | --- |
+| Who this is for | ML engineers and integration developers bringing a custom detector or classifier to CosmoEdge |
+| What you will accomplish | Evaluate runtime compatibility, convert and upload a model, configure parsing, and complete image, video, and sustained-run validation |
+| Prerequisites | Understand Pipelines and know the model input, output, preprocessing, postprocessing, and label order |
+| Estimated time | About 40–60 minutes for x86 ONNX; Sophon conversion commonly adds 30–60 minutes |
+| Device required | x86 requires an ONNX Runtime CosmoEdge build; Sophon requires a BM1688/CV186X device and matching conversion toolchain |
+| Final acceptance result | The model loads, its output is parsed correctly, image and video results pass, and it runs without resource failure on the target device |
 
-**CosmoEdge Scenario Task Orchestration** covers "how to organize existing capabilities." This volume covers "how to bring in new ones." In other words:
+Complete third-party integration in this order:
 
-- **CosmoEdge Scenario Task Orchestration** teaches you to orchestrate pipelines
-- **CosmoEdge Third-Party Model Porting** teaches you to introduce third-party models
+1. Confirm support conditions.
+2. Export or convert the model.
+3. Validate it on the conversion host.
+4. Upload and configure it.
+5. Run image inference first.
+6. Connect it to a video Pipeline.
+7. Validate parsing and sustained operation.
 
-After completing this volume, you'll be able to:
+“Upload succeeded” proves only that the file was accepted. It does not prove that operators, input shape,
+output layout, and postprocessing are compatible with CosmoEdge.
 
-- Convert an ONNX model to a device-runnable `bmodel`
-- Upload the model to CosmoEdge
-- Configure model metadata and verify the model works
-- Integrate the third-party model into a new scenario task
+## 1. Confirm Support Conditions
 
-## Learning Path
+### 1.1 Current Backends and File Formats
 
-```plain
-Prepare the model
-  ↓
-Convert inside Docker
-  ↓
-Upload to the system and fill in metadata
-  ↓
-Validate with images
-  ↓
-Integrate into a scenario task and run end-to-end testing
-```
+| Target backend | File accepted by Add Model | Main file in an imported model package | Current runtime | Device condition |
+| --- | --- | --- | --- | --- |
+| x86 CPU | `.onnx` | `model.onnx` | ONNX Runtime CPU | x86_64 host and matching CosmoEdge build |
+| Sophon | `.bmodel` | `model.nn` | Sophon BMRT | BM1688 or CV186X; the artifact must target the actual chip |
 
-## Chapter 1: Prepare the Third-Party Model
+`model.nn` is the internal file name in a CosmoEdge model package. It wraps the device model. When adding
+an individual Sophon model in the UI, select its `.bmodel`; do not rename an extension to `.nn`.
 
-This volume uses a publicly available **VisDrone detection model** as its example.
+PyTorch `.pt`, TensorFlow SavedModel, and other training-framework artifacts cannot be uploaded directly.
+Export them to ONNX first. Sophon deployments then convert ONNX into a chip-specific `.bmodel`.
 
-::: warning Model Repository Link
-[VisDrone-YOLOv8-Models-Upgrade](https://github.com/superbabiiX/VisDrone-YOLOv8-Models-Upgrade/tree/main/visdrone%20models)
-:::
+### 1.2 Contracts Beyond the File Format
 
-We chose it for three reasons:
+| Contract | Required information |
+| --- | --- |
+| Model type | Detection, classification, keypoint, feature, or another type; the UI subtype selects a parser |
+| Input | Name, type, shape, batch, and whether dynamic dimensions are fixed |
+| Preprocessing | RGB/BGR, resize, padding color, normalization mean, and scale |
+| Output | Tensor names, shapes, dimension order, and whether NMS is built in |
+| Postprocessing | Model family, confidence, NMS/IoU, coordinate format, and maximum results |
+| Labels | Exact class-ID and class-name order |
+| Resources | File size, runtime memory, channel concurrency, and target frame rate |
+| License | Whether model weights, training data, and export tools permit the intended use and distribution |
 
-1. It's public and reusable — perfect for a tutorial example.
-2. It's a standard object detection task, making results easy to verify.
-3. Its categories differ from the built-in scenarios, proving the platform supports more than just bundled models.
+CosmoEdge currently includes parsers such as `YOLOV8_DET`, but “any ONNX file” is not automatically
+compatible. Custom output, built-in NMS, dynamic shape, or unsupported operators may require a new parser
+or runtime code.
 
-### 1.1 Supported Input Formats
+### 1.3 Verified Capability vs Conditional Compatibility
 
-| Format           | Notes                            |
-| ---------------- | -------------------------------- |
-| ONNX             | Recommended — best compatibility |
-| PyTorch `.pt`    | Must be exported to ONNX first   |
-| TensorFlow `.pb` | Must be exported to ONNX first   |
+- **Directly supported by current code**: Add `.onnx` on x86, add `.bmodel` on Sophon, and import packages
+  containing `model.onnx` or `model.nn`.
+- **Reference evidence in this repository**: a YOLOv8 detector has completed x86 ONNX import, live OSD,
+  and event output.
+- **Still required on the target candidate**: validate your exact model, Sophon artifact, performance,
+  resource usage, concurrency, and long-term stability.
+- **Not promised from format alone**: other ONNX model families, other output layouts, and untested
+  chip/quantization combinations.
 
-> **Recommendation**
->
-> For your first porting attempt, go with ONNX.
-> This keeps the focus on "model conversion and integration" rather than framework export quirks.
+## 2. Reproducible Example: YOLOv8n Person Detection on x86
 
-### 1.2 Example Files for This Volume
+This example exports the public YOLOv8n weights with fixed Ultralytics packages and detects COCO class
+`person` in `data/test-video/Safety Helmet.mp4`. It validates single-stage detection, not the separate
+No Safety Helmet classification task.
 
-Prepare an ONNX model file, for example:
+### 2.1 Prepare a Fixed Environment and Model
 
-```plain
-visdrone_yolov8s.onnx
-```
+Reference environment:
 
-Place it in a local directory, such as:
+| Item | Version |
+| --- | --- |
+| Python | `3.13.11` |
+| Ultralytics | `8.2.84` |
+| ONNX | `1.20.1` |
+| ONNX Runtime | `1.26.0` |
+| Export input | `1 × 3 × 640 × 640` |
 
-```plain
-/home/user/models/
-```
-
-> **Note**
->
-> If you substitute your own model later, you'll need to update the filenames, input dimensions, and output names in the commands below accordingly.
-
-## Chapter 2: Docker Environment Setup
-
-Model conversion uses an official Docker image provided by Sophon (SOPHGO).
-
-### 2.1 Install Docker
-
-| Operating System | Installation Method                                                      |
-| ---------------- | ------------------------------------------------------------------------ |
-| Ubuntu / Debian  | `sudo apt-get install docker.io`                                         |
-| CentOS           | `sudo yum install docker`                                                |
-| Windows          | Install[Docker Desktop](https://www.docker.com/products/docker-desktop/) |
-
-<!-- Screenshot of Docker Desktop -->
-
-![](images/img_01.webp)
-
-Verify the installation:
+Create an isolated environment:
 
 ```bash
-docker --version
-## Expected output: Docker version 2x.x.x
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install \
+  "ultralytics==8.2.84" \
+  "onnx==1.20.1" \
+  "onnxruntime==1.26.0"
 ```
 
-<!-- Screenshot of version output -->
+Download the pinned release asset and record the source hash:
 
-![](images/img_02.webp)
-
-Add your user to the docker group:
-
-```plain
-sudo gpasswd -a USER docker
+```bash
+curl -L \
+  -o yolov8n.pt \
+  https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt
+sha256sum yolov8n.pt
 ```
 
-Replace `USER` with your actual username.
+On macOS, use `shasum -a 256 yolov8n.pt`.
 
-Update the group:
+Export:
 
-```plain
-newgrp docker
+```bash
+yolo export \
+  model=yolov8n.pt \
+  format=onnx \
+  imgsz=640 \
+  batch=1 \
+  dynamic=False
+sha256sum yolov8n.onnx
 ```
 
-<!-- Screenshot of group update -->
+Keep the command output, Python and package versions, source-weight hash, and ONNX hash. Two files with the
+same name but different hashes are different model candidates.
 
-![](images/img_03.webp)
+### 2.2 Pre-Conversion Checks
 
-### 2.2 Pull the Image
+Run ONNX checker and one zero-input inference:
 
-Download the image archive:
+```bash
+python - <<'PY'
+import numpy as np
+import onnx
+import onnxruntime as ort
 
-```plain
-wget https://sophon-file.sophon.cn/sophon-prod-s3/drive/24/06/14/12/sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+path = "yolov8n.onnx"
+model = onnx.load(path)
+onnx.checker.check_model(model)
+
+session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+print("inputs:", [(x.name, x.shape, x.type) for x in session.get_inputs()])
+print("outputs:", [(x.name, x.shape, x.type) for x in session.get_outputs()])
+
+input_meta = session.get_inputs()[0]
+sample = np.zeros((1, 3, 640, 640), dtype=np.float32)
+outputs = session.run(None, {input_meta.name: sample})
+print("runtime output shapes:", [x.shape for x in outputs])
+PY
 ```
 
-<!-- Screenshot of download -->
+Pass criteria:
 
-![](images/img_04.webp)
+- `onnx.checker` reports no error;
+- ONNX Runtime creates a session and performs one inference;
+- input is the expected `1 × 3 × 640 × 640` float tensor;
+- output shapes match the export log.
 
-Load the image:
+A zero-input test verifies loading, not detection accuracy.
 
-```plain
+### 2.3 Prepare Model Metadata
+
+This example uses raw YOLOv8 detection output:
+
+| Configuration | Example value |
+| --- | --- |
+| Main type | Detection |
+| Subtype | `YOLOV8_DET` |
+| Input size | `[640, 640]`, following the UI's height/width order |
+| Resize | Keep aspect ratio and center-pad |
+| Padding color | `114, 114, 114` |
+| Color | RGB |
+| Normalization | `0–1`, scale approximately `1/255` |
+| Output | Raw YOLOv8 detection tensor; CosmoEdge applies thresholds and NMS |
+| Labels | Original COCO 80-class order; only ID `0`, `person`, is enabled in the example Pipeline |
+
+Print labels from the source model instead of reordering them manually:
+
+```bash
+python - <<'PY'
+from ultralytics import YOLO
+for class_id, name in YOLO("yolov8n.pt").names.items():
+    print(f"{class_id}\t{name}")
+PY
+```
+
+Stop and correct the export or implement a matching parser if the ONNX output already contains NMS, does
+not use the expected raw YOLOv8 layout, or has a different label count.
+
+## 3. Sophon Path: Convert the Same ONNX to bmodel
+
+Run this section only for a Sophon target. Record the conversion tool version, target chip, and model
+candidate together.
+
+The repository's existing F16 reference toolchain uses:
+
+```bash
+curl -L \
+  -o sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz \
+  https://sophon-file.sophon.cn/sophon-prod-s3/drive/24/06/14/12/sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+sha256sum sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
 docker load -i sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+docker run --rm -it \
+  -v "$PWD:/workspace" \
+  sophgo/tpuc_dev:v3.2 \
+  bash
 ```
 
-<!-- Screenshot of loading -->
-
-![](images/img_05.webp)
-
-<!-- Screenshot of load complete -->
-
-![](images/img_06.webp)
-
-### 2.3 Useful Docker Commands
-
-| Command                                                                     | Purpose                                    |
-| --------------------------------------------------------------------------- | ------------------------------------------ |
-| `docker images`                                                             | List local images                          |
-| `docker run -it -v /local/path:/container/path sophgo/tpuc_dev:latest bash` | Start a container with a mounted directory |
-| `exit`                                                                      | Exit the container                         |
-
-## Chapter 3: Model Conversion
-
-Converting an ONNX model to a device-runnable `bmodel` takes just two core steps:
-
-1. `model_transform`
-2. `model_deploy`
-
-### 3.1 Start the Container
+Inside the container:
 
 ```bash
-docker run -it -v /home/user/models:/workspace sophgo/tpuc_dev:v3.2 bash
-```
-
-This command:
-
-- Starts the official conversion environment
-- Mounts your local model directory to `/workspace` inside the container
-
-<!-- Screenshot of container start -->
-
-![](images/img_07.webp)
-
-### 3.2 Install Conversion Dependencies
-
-```bash
-pip install tpu_mlir -i https://mirrors.ustc.edu.cn/pypi/simple/
-```
-
-<!-- Screenshot of pip install -->
-
-![](images/img_08.webp)
-
-### 3.3 Step 1: Convert to MLIR
-
-```bash
+cd /workspace
 model_transform \
-  --model_name visdrone_yolov8s \
-  --model_def /workspace/visdrone_yolov8s.onnx \
-  --input_shapes [[1,3,640,640]] \
+  --model_name yolov8n \
+  --model_def yolov8n.onnx \
+  --input_shapes '[[1,3,640,640]]' \
   --pixel_format rgb \
-  --output_names output0 \
-  --mlir visdrone.mlir
-```
+  --mlir yolov8n.mlir
 
-<!-- Screenshots of conversion process -->
-
-![](images/img_09.webp)
-
-<!-- Screenshot of conversion complete -->
-
-![](images/img_10.webp)
-
-### 3.4 Step 2: Convert to bmodel
-
-```bash
 model_deploy \
-  --mlir visdrone.mlir \
+  --mlir yolov8n.mlir \
   --quantize F16 \
   --chip bm1688 \
-  --model visdrone_yolov8s_f16.bmodel
+  --model yolov8n_bm1688_f16.bmodel
+
+sha256sum yolov8n_bm1688_f16.bmodel
 ```
 
-<!-- Screenshot of bmodel conversion -->
+CV186X requires a toolchain and chip option that support CV186X. A BM1688 artifact cannot be used on a
+CV186X device. Unsupported operators, output mismatches, or compilation errors mean conversion failed;
+renaming the extension does not fix them.
 
-![](images/img_11.webp)
+Post-conversion evidence must include:
 
-After conversion, the `/workspace` directory will contain:
+- toolchain version, chip option, and full command;
+- `.bmodel` hash;
+- model inspection with the conversion tool;
+- box, class, and score comparison across the source framework, ONNX, and target device on the same image;
+- any F16 or quantization accuracy difference.
 
-```plain
-visdrone_yolov8s_f16.bmodel
-```
+![The Sophon Add Model page requiring a bmodel file](images/img_15.webp)
 
-<!-- Screenshot of output file -->
+## 4. Upload and Configure the Model
 
-![](images/img_12.webp)
+### 4.1 Add the Model
 
-### 3.4 Three Key Points to Watch
+1. Open **Model Repository**.
+2. Select **Add Model**, not **Import Model**, which is for a complete package.
+3. Enter main type, subtype, model name, normalization, and color channel.
+4. Upload `yolov8n.onnx` on x86 or the chip-specific `.bmodel` on Sophon.
+5. Save.
 
-1. `--input_shapes` must match the model's training/export configuration.
-2. `--pixel_format` must match the preprocessing used during training.
-3. `--output_names` must match the actual output tensor names from the model export.
+![The model list and Add Model entry in Model Repository](images/img_13.webp)
 
-## Chapter 4: Upload the Model to CosmoEdge
+![The imported YOLOv8 ONNX model in an x86 environment](../06-ultralytics-yolo-edge/images/model-import.webp)
 
-### 4.1 Open the Model Repository
+Record the model ID assigned by the system. The model is not yet proven runnable.
 
-1. Navigate to **Model Repository**.
+### 4.2 Configure Input, Postprocessing, and Labels
 
-<!-- Screenshot of model repository -->
+Open **Configure** and compare every item with the export record:
 
-![](images/img_13.webp)
+- input size and resize/padding;
+- RGB/BGR and normalization;
+- confidence and NMS thresholds;
+- maximum retained targets;
+- class IDs, names, and order;
+- output or advanced settings shown by the page.
 
-2. Click **Add Model**.
+![Configuring input size, confidence, NMS, and class labels](images/img_17.webp)
 
-<!-- Screenshot of add model button -->
+Save and reopen the page to prove persistence. Do not reuse the VisDrone labels shown in the screenshot for
+this COCO example.
 
-![](images/img_14.webp)
+## 5. Image Validation: Prove Loading and Parsing First
 
-<!-- Screenshot of add model dialog -->
+1. Create a **Detection / Analysis** task with **Image Analysis** as its data source.
+2. Select **Arrange Algorithm** and add only **Object Detection**.
+3. Select the uploaded YOLOv8n and enable only the `person` label.
+4. Save and open **Image Analysis**.
+5. Upload one clear positive image containing a person and one negative image without a person.
 
-![](images/img_15.webp)
+![A third-party Object Detection node in an image-analysis task](images/img_23.webp)
 
-Fill in the model information:
+Pass criteria:
 
-| Field         | Example Value                                                                       | Notes                            |
-| ------------- | ----------------------------------------------------------------------------------- | -------------------------------- |
-| Primary Type  | Detection Algorithm                                                                 |                                  |
-| Sub Type      | yolov8_det                                                                          | Matches the model's YOLO version |
-| Model Name    | VisDrone Drone Detection                                                            | For easy identification          |
-| Upload File   | `visdrone_yolov8s_f16.bmodel`                                                       | The converted model file         |
-| Normalization | 0–1                                                                                 |                                  |
-| Color Channel | RGB                                                                                 |                                  |
-| Class Labels  | pedestrian, people, bicycle, car, van, truck, tricycle, awning-tricycle, bus, motor | For category display and mapping |
+- model initialization reports no error;
+- the positive image has a reasonably placed box labeled `person`, not an incorrect ID;
+- the negative image does not produce many person boxes;
+- confidence values are finite and plausible, not empty, NaN, or a fixed abnormal value.
 
-Click **OK** to save.
+![Boxes, classes, and confidence in an image-analysis result](images/img_28.webp)
 
-### 4.2 Post-Upload Checklist
+Do not proceed to video while image validation fails.
 
-After uploading, verify:
+## 6. Connect the Model to a Video Pipeline
 
-- The model appears in the Model Repository list.
-- Status shows as normal.
-- Name, type, input dimensions, and labels are all correct.
+Create a “YOLOv8n Person Detection Validation” video task with this minimum chain:
 
-<!-- Screenshot of model in repository -->
+1. **Video Decode**
+2. **Object Detection**: select the uploaded YOLOv8n and enable only `person`
+3. **Category Filter**: keep `person`, starting with **Min Pedestrian Size** at `60`
+4. **Region Alarm**: use the main area
+5. **Event Report**: retain at least a snapshot for the first test
 
-![](images/img_16.webp)
+![Selecting the third-party detector and labels in a Pipeline](images/img_32.webp)
 
-Edit configuration — input dimensions, confidence thresholds, and other basic parameters:
+Assign the task to an offline channel using `data/test-video/Safety Helmet.mp4`, draw a region over the
+people's movement area, include the current time in the running strategy, save, and enable the service.
 
-<!-- Screenshot of model config -->
+## 7. End-to-End Acceptance
 
-![](images/img_17.webp)
+### 7.1 Model Loading
 
-Edit class information:
+- The task moves from stopped to running without a repeating initialization error.
+- Logs report that the model loaded.
+- Host or device memory does not grow until the task is terminated.
 
-<!-- Screenshot of class config -->
+### 7.2 Inference Output
 
-![](images/img_18.webp)
+- Live Display plays continuously.
+- People receive boxes at the expected positions.
+- The class is `person`, and scores and coordinates vary with the image.
+- Segments without people do not show many fixed boxes.
 
-> Accurate model metadata is critical. Errors here are difficult to debug later.
+![Third-party model overlays in Live Display](images/img_42.webp)
 
-## Chapter 5: Validate the Model with Image Testing
+### 7.3 Parsing and Events
 
-Before integrating the model into a scenario task pipeline, run a lightweight validation first.
+- A person inside the ROI creates an event after the rule is satisfied.
+- The event snapshot has the correct box, class, channel, and time.
+- Event Center can query by task and channel.
 
-### 5.1 Prepare Test Images
+![Third-party model detection records in Event Center](images/img_45.webp)
 
-Gather several images that match the model's target domain — for example, aerial drone-view photographs.
+### 7.4 Sustained Operation
 
-### 5.2 Create an Image Validation Task
+Run at least one full loop of the offline video and define a longer project-specific soak window. Record:
 
-1. Go to **Scenario Tasks** and create a new drone image detection task.
+- process restart or crash;
+- stable inference time and effective frame rate;
+- host memory, device memory, and disk growth;
+- continued parsing beyond the first frame;
+- recovery after stopping and starting the task.
 
-<!-- Screenshot of scenario tasks list -->
+Production use must repeat capacity and stability acceptance at the target channel count, resolution, and
+duration. A single-channel functional pass does not prove production capacity.
 
-![](images/img_19.webp)
+## 8. Failure Paths
 
-<!-- Screenshot of new task dialog -->
+### Upload Succeeds but the Model Cannot Run
 
-![](images/img_20.webp)
+1. Compare the uploaded-file hash with the export artifact.
+2. Confirm ONNX for x86 and a bmodel for the exact Sophon chip.
+3. Find the first model-initialization error: unsupported operator, shape, corruption, or insufficient memory.
+4. Repeat ONNX Runtime or target-tool validation on the conversion host.
+5. Confirm that the Pipeline selects the new model ID.
 
-<!-- Screenshot of task saved -->
+### The Model Runs but Output Parsing Is Wrong
 
-![](images/img_21.webp)
+Typical symptoms are no targets, out-of-range coordinates, one class for every target, or abnormal
+confidence. Check:
 
-2. Create the pipeline for **Drone Image Detection**.
+1. subtype and parser;
+2. output names, counts, shapes, and dimension order;
+3. whether export built NMS into the graph;
+4. `xywh` versus `xyxy` and normalized versus pixel coordinates;
+5. label count and order;
+6. RGB/BGR, resize, padding, and normalization.
 
-Click **Pipeline Orchestration** to enter the orchestration page.
+If the output contract differs from an existing parser, implement or adapt postprocessing instead of hiding
+the mismatch with arbitrary thresholds.
 
-<!-- Screenshot of pipeline orchestration -->
+### Resources Are Insufficient
 
-![](images/img_22.webp)
+1. Stop other model tasks and test the minimum single-model chain.
+2. Record memory before and after loading.
+3. Lower frame rate only reduces work; it may not reduce resident model memory. Use a smaller model or
+   suitable precision when the model itself cannot load.
+4. Recheck accuracy after Sophon F16 or quantization.
+5. Admit capacity at the target channel count instead of extrapolating linearly from one channel.
 
-Add an **Object Detection** node.
+### Images Work but Video Fails
 
-<!-- Screenshot of detection node added -->
+Check whether video preprocessing matches the image path, whether the ROI covers the target, whether frame
+sampling is reasonable, and whether tracking, filtering, or event rules remove correct detections. Reduce
+the Pipeline temporarily to **Video Decode + Object Detection**, then restore rule nodes one at a time.
 
-![](images/img_23.webp)
+## Acceptance Checklist
 
-Configure the **business logic parameters**:
-
-<!-- Screenshot of config panel -->
-
-![](images/img_24.webp)
-
-- Base Model: VisDrone Drone Detection
-- Select Labels: All selected
-
-Click **Save** to store the pipeline.
-
-### 5.3 Image Analysis
-
-1. Select the **Drone Image Detection** algorithm.
-
-<!-- Screenshot of algorithm selection -->
-
-![](images/img_25.webp)
-
-2. Upload images.
-
-<!-- Screenshot of image upload -->
-
-![](images/img_26.webp)
-
-3. Click **Start Analysis** to begin testing.
-
-<!-- Screenshot of analysis results -->
-
-![](images/img_27.webp)
-
-### 5.3 Results Analysis
-
-<!-- Screenshot of detailed results -->
-
-![](images/img_28.webp)
-
-Results analysis:
-
-- Pedestrians, vehicles, and other targets in the image are successfully detected.
-- Bounding box positions are generally accurate.
-- Class names display correctly — not as numbers or blank labels.
-
-> If image validation doesn't pass, don't rush into pipeline integration.
-> Go back and check:
->
-> - Was the model file uploaded correctly?
-> - Do the input dimensions match?
-> - Are all class labels configured properly?
-
-## Chapter 6: Integrate the Third-Party Model into a Scenario Task
-
-Now let's integrate this model into an actual business workflow.
-
-### Scenario Description
-
-Create a new **Drone Object Detection** scenario task:
-
-- Detect pedestrians and vehicles in the frame
-- Generate events
-- Display bounding boxes and class labels on the live feed
-
-### 6.1 Create a New Algorithm
-
-1. Go to **Scenario Tasks** → **New Task**.
-
-<!-- Screenshot of new task dialog -->
-
-![](images/img_29.webp)
-
-Fill in the basic information:
-
-- Task Name: Drone Object Detection
-- Data Source Type: Video Analysis
-- Task Type: Detection/Analysis
-
-<!-- Screenshot of saved task -->
-
-![](images/img_30.webp)
-
-### 6.2 Build the Minimum Viable Pipeline
-
-Add nodes in this order:
-
-```plain
-Video Decode → Object Detection (third-party model) → Object Tracking → Region Alarm Judgment → Event Reporting
-```
-
-1. Click **Pipeline Orchestration** to enter the orchestration page.
-
-<!-- Screenshot of empty pipeline -->
-
-![](images/img_31.webp)
-
-2. Add the orchestration logic:
-
-**Step 1**: Add **Video Decode**.
-
-**Step 2**: Add **Object Detection**.
-
-<!-- Screenshot of detection node config -->
-
-![](images/img_32.webp)
-
-**Step 3**: Add **Object Tracking**.
-
-<!-- Screenshot of tracking node config -->
-
-![](images/img_33.webp)
-
-**Step 4**: Add **Region Alarm Judgment**.
-
-<!-- Screenshot of region judgment -->
-
-![](images/img_34.webp)
-
-**Step 5**: Add **Event Reporting**.
-
-<!-- Screenshot of event reporting config -->
-
-![](images/img_35.webp)
-
-3. Configure parameters
-
-<!-- Screenshot of parameter config -->
-
-![](images/img_36.webp)
-
-4. Click **Save** to store the pipeline.
-
-## Chapter 7: End-to-End Verification
-
-### 7.1 Create a Video Source
-
-1. Prepare a drone-perspective test video.
-2. Go to **Video Sources** and add a video channel.
-
-<!-- Screenshot of video channel creation -->
-
-![](images/img_37.webp)
-
-Parameters:
-
-- Source Type: Offline Video
-- Channel Name: Drone Camera
-- Upload Video: drone.mp4
-
-3. Configure **Service Assignment**.
-
-Click **Service Assignment** to open the configuration page.
-
-<!-- Screenshot of service assignment -->
-
-![](images/img_38.webp)
-
-Select **Drone Object Detection** as the scenario task.
-
-<!-- Screenshot of task selection -->
-
-![](images/img_39.webp)
-
-Add a detection region.
-
-<!-- Screenshot of region added -->
-
-![](images/img_40.webp)
-
-Configure **Runtime Strategy** — set play count to 0.
-
-<!-- Screenshot of runtime strategy -->
-
-![](images/img_41.webp)
-
-Click **Save** to save and start.
-
-### 7.2 Check the Live Preview
-
-Go to **Live Preview** and select the Drone Camera channel.
-
-<!-- Screenshot of live preview -->
-
-![](images/img_42.webp)
-
-Enable the algorithm overlay: Drone Object Detection.
-
-<!-- Screenshot of overlay enabled -->
-
-![](images/img_43.webp)
-
-Alarm popup:
-
-![](images/img_44.webp)
-
-Verify:
-
-- Bounding boxes appear in the frame.
-- Class labels display correctly.
-- Different targets maintain consistent tracking.
-
-### 7.3 Check Alarm Records
-
-Go to **Event Center** → **Detection/Analysis** to review alarm event records.
-
-<!-- Screenshot of alarm records -->
-
-![](images/img_45.webp)
-
-Results analysis: Alarm events are recorded normally, confirming the pipeline is working correctly.
-
-### 7.4 Success Criteria
-
-If all three of the following are true, your third-party model porting is complete:
-
-1. Image testing produces correct results.
-2. The scenario task starts successfully.
-3. Both live preview and alarm records show expected output.
-
-## Appendix
-
-### A. Common Issues and Troubleshooting
-
-| Problem                                        | Possible Cause                                                   | Solution                                                    |
-| ---------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------- |
-| Model uploaded but no detections               | Input dimensions configured incorrectly                          | Verify model metadata matches conversion parameters         |
-| Classes show as numbers                        | Class labels not configured                                      | Add the label mapping in Model Repository                   |
-| Scenario task starts but no bounding boxes     | Missing OSD overlay node                                         | Add an OSD overlay at the end of the pipeline               |
-| Image testing works but video results are poor | Test video distribution differs significantly from training data | Try a video that better matches the model's training domain |
-| Service fails to start                         | Nodes not properly connected or model type mismatch              | Check pipeline structure and model type settings            |
-
-### What's Next
-
-After completing all five volumes, you now have a complete capability chain:
-
-```plain
-Device setup
-  ↓
-Configure built-in scenarios
-  ↓
-Define large model rules
-  ↓
-Orchestrate business pipelines
-  ↓
-Port third-party models
-```
-
-This means you can:
-
-- Rapidly deploy scenarios using built-in capabilities
-- Fill long-tail gaps with VLM / DINO
-- Organize capabilities into business workflows through orchestration
-- Bring your own models into the system
+- [ ] The candidate has a source, version, input/output record, and SHA-256.
+- [ ] File format, target backend, and device chip match.
+- [ ] Pre-conversion and post-conversion checks pass.
+- [ ] Model configuration matches preprocessing, postprocessing, and label order.
+- [ ] Positive and negative image samples pass.
+- [ ] The video Pipeline outputs correct boxes, classes, and events.
+- [ ] The soak window has no crash, unbounded resource growth, or parsing interruption.
+- [ ] Evidence is bound to the CosmoEdge version, model hash, device, and configuration.

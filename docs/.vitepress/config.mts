@@ -30,12 +30,27 @@ const i18nZh = [
 ]
 
 const tutorialsZh = [
-  { text: '教程总览', link: '/tutorials/' },
-  { text: '卷一：快速上手', link: '/tutorials/01-quickstart/quickstart' },
-  { text: '卷二：场景配置', link: '/tutorials/02-scenario-config/scenario-config' },
-  { text: '卷三：VLM / DINO 指南', link: '/tutorials/03-vlm-guide/vlm-guide' },
-  { text: '卷四：Pipeline 编排', link: '/tutorials/04-pipeline-orchestration/pipeline-orchestration' },
-  { text: '卷五：模型移植', link: '/tutorials/05-model-porting/model-porting' }
+  { text: '系统使用总览', link: '/tutorials/' },
+  {
+    text: '基础使用',
+    items: [
+      { text: '快速开始：部署、登录与首次检测', link: '/tutorials/01-quickstart/quickstart' },
+      { text: '场景任务配置：通道、区域、参数与告警', link: '/tutorials/02-scenario-config/scenario-config' }
+    ]
+  },
+  {
+    text: 'AI 能力配置',
+    items: [
+      { text: 'VLM 与 DINO：提示词驱动的视觉任务', link: '/tutorials/03-vlm-guide/vlm-guide' }
+    ]
+  },
+  {
+    text: '高级扩展',
+    items: [
+      { text: '算法编排：修改与创建 Pipeline', link: '/tutorials/04-pipeline-orchestration/pipeline-orchestration' },
+      { text: '第三方模型接入：转换、上传与验证', link: '/tutorials/05-model-porting/model-porting' }
+    ]
+  }
 ]
 
 const communityZh = [
@@ -69,12 +84,27 @@ const developmentEn = [
 ]
 
 const tutorialsEn = [
-  { text: 'Tutorials Overview', link: '/en/tutorials/' },
-  { text: 'Volume 1: Quick Start', link: '/en/tutorials/01-quickstart/quickstart' },
-  { text: 'Volume 2: Scenario Configuration', link: '/en/tutorials/02-scenario-config/scenario-config' },
-  { text: 'Volume 3: VLM / DINO Guide', link: '/en/tutorials/03-vlm-guide/vlm-guide' },
-  { text: 'Volume 4: Pipeline Orchestration', link: '/en/tutorials/04-pipeline-orchestration/pipeline-orchestration' },
-  { text: 'Volume 5: Model Porting', link: '/en/tutorials/05-model-porting/model-porting' }
+  { text: 'Using CosmoEdge Overview', link: '/en/tutorials/' },
+  {
+    text: 'Basic Use',
+    items: [
+      { text: 'Quick Start: Deployment, Sign-In, and First Detection', link: '/en/tutorials/01-quickstart/quickstart' },
+      { text: 'Scenario Task Configuration: Channels, Regions, Parameters, and Alarms', link: '/en/tutorials/02-scenario-config/scenario-config' }
+    ]
+  },
+  {
+    text: 'AI Capability Configuration',
+    items: [
+      { text: 'VLM and DINO: Prompt-Driven Vision Tasks', link: '/en/tutorials/03-vlm-guide/vlm-guide' }
+    ]
+  },
+  {
+    text: 'Advanced Extensions',
+    items: [
+      { text: 'Pipeline Orchestration: Modify and Create Pipelines', link: '/en/tutorials/04-pipeline-orchestration/pipeline-orchestration' },
+      { text: 'Third-Party Model Integration: Convert, Upload, and Validate', link: '/en/tutorials/05-model-porting/model-porting' }
+    ]
+  }
 ]
 
 const communityEn = [
@@ -103,7 +133,7 @@ export default defineConfig({
       description: 'CosmoEdge 文档与教程',
       themeConfig: {
         nav: [
-          { text: '教程', link: '/tutorials/' },
+          { text: '系统使用', link: '/tutorials/' },
           { text: '指南', link: '/guide/build' },
           { text: '社区', link: '/community/' },
           { text: '参考', link: '/reference/api' },
@@ -115,11 +145,11 @@ export default defineConfig({
           '/reference/': [{ text: '参考', items: referenceZh }],
           '/development/': [{ text: '开发', items: developmentZh }],
           '/i18n/': [{ text: 'I18N', items: i18nZh }],
-          '/tutorials/': [{ text: '教程', items: tutorialsZh }],
+          '/tutorials/': [{ text: 'CosmoEdge 系统使用指南', items: tutorialsZh }],
           '/community/': [{ text: '社区', items: communityZh }],
           '/': [
             { text: '开始', items: [{ text: '文档首页', link: '/' }, ...guideZh] },
-            { text: '五卷教程', items: tutorialsZh },
+            { text: 'CosmoEdge 系统使用指南', items: tutorialsZh },
             { text: '社区', items: communityZh },
             { text: '参考', items: referenceZh },
             { text: '开发', items: developmentZh },
@@ -148,7 +178,7 @@ export default defineConfig({
       description: 'CosmoEdge documentation and tutorials',
       themeConfig: {
         nav: [
-          { text: 'Tutorials', link: '/en/tutorials/' },
+          { text: 'Using CosmoEdge', link: '/en/tutorials/' },
           { text: 'Guide', link: '/en/guide/build' },
           { text: 'Community', link: '/en/community/' },
           { text: 'Reference', link: '/en/reference/api' },
@@ -159,11 +189,11 @@ export default defineConfig({
           '/en/guide/': [{ text: 'Guide', items: guideEn }],
           '/en/reference/': [{ text: 'Reference', items: referenceEn }],
           '/en/development/': [{ text: 'Development', items: developmentEn }],
-          '/en/tutorials/': [{ text: 'Tutorials', items: tutorialsEn }],
+          '/en/tutorials/': [{ text: 'Using CosmoEdge', items: tutorialsEn }],
           '/en/community/': [{ text: 'Community', items: communityEn }],
           '/en/': [
             { text: 'Start', items: [{ text: 'Documentation Home', link: '/en/' }, ...guideEn] },
-            { text: 'Tutorials', items: tutorialsEn },
+            { text: 'Using CosmoEdge', items: tutorialsEn },
             { text: 'Community', items: communityEn },
             { text: 'Reference', items: referenceEn },
             { text: 'Development', items: developmentEn }

@@ -14,7 +14,10 @@
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "docs:check": "node scripts/check-tutorial-docs.mjs",
+    "docs:smoke": "node scripts/smoke-tutorial-pages.mjs",
+    "docs:verify": "npm run docs:check && npm run docs:build && npm run docs:smoke"
   },
   "devDependencies": {
     "vitepress": "^1.6.4"

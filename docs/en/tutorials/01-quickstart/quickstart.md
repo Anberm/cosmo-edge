@@ -1,437 +1,210 @@
 ---
-title: "Volume 1: Quick Start"
-description: Use either a pre-installed edge box or an x86 Docker deployment to complete your first real-time AI detection experience in 10-15 minutes.
+title: "Quick Start: Deployment, Sign-In, and First Detection"
+description: Deploy or connect to CosmoEdge, add a video, configure a scenario task, and verify the first AI detection.
 prev:
-  text: Tutorials
+  text: Using CosmoEdge
   link: /en/tutorials/
 next:
-  text: "Volume 2: Scenario Configuration"
+  text: Scenario Task Configuration
   link: /en/tutorials/02-scenario-config/scenario-config
 ---
-# Volume 1: Quick Start
 
-> **Reading time**: 10-15 minutes
-> **Objective**: Cover the workflow from environment preparation to viewing real-time AI detection results in a web browser.
-> **Environment Types**:
->
-> - Pre-installed CosmoEdge edge box: no deployment required; power on and use it directly.
-> - No hardware box: deploy and run the platform with Docker containers on an x86 server.
->
-> **General note**: Both environments support demo videos, so no camera is required to complete the tutorial.
+# Quick Start: Deployment, Sign-In, and First Detection
 
-## Table of Contents
+| Item | Details |
+| --- | --- |
+| Who this is for | First-time CosmoEdge users, deployment engineers, and developers |
+| What you will accomplish | Sign in, add one offline video, assign an algorithm, and observe a detection result |
+| Prerequisites | An x86 host with Docker, or an edge device with CosmoEdge preinstalled |
+| Estimated time | About 15–30 minutes for a first x86 build; 10–15 minutes for a preinstalled device |
+| Device required | Choose an x86 Docker host or a preinstalled edge device; a camera is not required |
+| Final acceptance result | The channel is running, the live view shows algorithm output, and matching events can be queried |
 
-1. Option 1: Docker Deployment on an x86 Server
-2. Option 2: Quick Start with a CosmoEdge Edge Box
-3. Quick Start Completion and Next Steps
+The goal is not merely to open the console. You will complete one
+**verifiable first detection**:
 
-## Option 1: Docker Deployment on an x86 Server
+1. Deploy or connect to CosmoEdge.
+2. Sign in to the console.
+3. Add a test video.
+4. Assign and save an algorithm.
+5. Verify the live result and event record.
 
-### 1. Operating Environment
+Changing the default password, connecting a real camera, and tuning business parameters are important
+follow-up tasks, but they are not required to prove the first detection.
 
-The following environment has been verified:
+## 1. Deploy or Connect to CosmoEdge
 
-- OS: ubuntu-22.04.2
-- Docker version: 29.1.3
-- Docker Compose version: v5.1.4
-- CPU: 13th Gen Intel(R) Core(TM) i9-13900F
-- Memory: 64 GB
-- Linux compose file: `docker-compose.x86.yml`
-- Windows compose file: `docker-compose.x86.windows.yml`
+### Path A: Docker on an x86 Host
 
-> **Docker Compose version note**: This documentation uses the Docker Compose V2 command format, `docker compose`. If you use an older Docker environment, replace it with `docker-compose`.
-
-### 2. Get the Code and Start the Containers
-
-For a first run, clone the repository and enter the repository root first:
+Use this path on a Linux x86_64 host. Windows users should use
+`docker-compose.x86.windows.yml`; the remaining steps are the same.
 
 ```bash
 git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
-# Or use the Gitee mirror in China:
-# git clone https://gitee.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
+docker compose -f docker-compose.x86.yml up -d --build
+docker compose -f docker-compose.x86.yml ps
 ```
 
-Linux:
-
-```bash
-sudo docker compose -f docker-compose.x86.yml up -d --build
-```
-
-Windows (PowerShell/CMD):
+Windows PowerShell:
 
 ```powershell
+git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
+cd cosmo-edge
 docker compose -f docker-compose.x86.windows.yml up -d --build
+docker compose -f docker-compose.x86.windows.yml ps
 ```
 
-### 3. Running Results
+The initial build downloads dependencies and compiles the application, so its duration depends on the
+network and host.
 
-Image build and startup process:
+![Docker building the CosmoEdge service images](images/build.webp)
 
-![](images/build.webp)
+Expected state:
 
-Docker container running status:
+- `docker compose ... ps` reports the services as `Up` or `running`;
+- `http://127.0.0.1:8080` opens in a browser;
+- for remote access, replace `127.0.0.1` with the host IP and allow TCP port 8080 through the host firewall.
 
-![](images/container.webp)
+![CosmoEdge containers in the running state](images/container.webp)
 
-### 4. Browser Access
+### Path B: A Preinstalled Edge Device
 
-Access URL: `http://<server-ip>:8080`. If you run it on the same machine, you can also use `http://127.0.0.1:8080`.
+1. Connect the device to power and Ethernet.
+2. Connect the operator computer to the same LAN.
+3. Open the management address supplied with the device.
 
-Default Login Credentials:
+Expected state: the sign-in page opens. If the device address is unknown, check the delivery label or
+the router's DHCP leases before considering any reset.
 
-![](images/x86-login.webp)
+## 2. Sign In
+
+The default x86 address is `http://<host-ip>:8080`. Initial credentials are:
 
 - Username: `admin`
 - Password: `admin`
 
-> Important reminder: Change the default password immediately after logging in.
+![CosmoEdge sign-in page with username and password fields](images/x86-login.webp)
 
-### 5. Post-Deployment Operation Guide
+After signing in, **Operation Overview** should open. Change the default password after the first sign-in.
+This is a security requirement, although it does not block this tutorial's first-detection acceptance.
 
-After the containers start, follow the [Scenario Configuration tutorial](/en/tutorials/02-scenario-config/scenario-config) to set up your first AI detection scenario.
+## 3. Add the Test Video
 
-### 6. Algorithm Inference Result Preview
+The repository contains a reproducible test asset:
 
-![](images/res.webp)
+```text
+data/test-video/Safety Helmet.mp4
+```
 
-## Option 2: Quick Start with a CosmoEdge Edge Box
+1. Open **Video Access**.
+2. Select **Add**.
+3. Choose **Offline Video** as the source type.
+4. Enter a channel name such as “First helmet detection”.
+5. Upload `Safety Helmet.mp4`, then save.
 
-### Hardware Overview
+![Adding an offline test video on the Video Access page](images/img_14.webp)
 
-CosmoEdge runs on a Sophon-based AI edge computing device powered by the BM1688 processor, delivering 16.0 TOPS of AI compute for intelligent analysis of IP camera video streams.
+Expected state: the new channel appears in the list without a persistent connection or decoding error.
 
-<!-- This is a product photo showing the device front panel -->
+::: tip A camera is optional
+After the first detection works, replace the offline video with an RTSP/RTSPS network source. Starting
+with the local asset isolates CosmoEdge from network, credentials, and camera codec differences.
+:::
 
-![](images/img_01.webp)
+## 4. Create the First Detection Task
 
-<!-- This is a product photo showing the device rear panel with ports -->
+1. Select **Allocate Task** for the new channel.
+2. Select **No Safety Helmet** from the available services.
+3. Under **Detection Area**, cover the relevant part of the frame. For this first check, use the main
+   work area.
+4. Keep the built-in parameter defaults.
+5. Select **Save**.
 
-![](images/img_02.webp)
+![Selecting a scenario task for the test video](images/img_16.webp)
 
-Key specifications:
+Saving associates the channel with the algorithm and starts analysis. Return to Video Access and verify
+that the running switch is enabled.
 
-| Component  | Specification                                           |
-| ---------- | ------------------------------------------------------- |
-| Processor  | BM1688                                                  |
-| CPU        | Octa-core ARM A53 @ 1.6 GHz                             |
-| Memory     | LPDDR4 8 GB                                             |
-| Storage    | 64 GB                                                   |
-| AI Compute | 16.0 TOPS                                               |
-| Network    | 2 × 10/100/1000 Mbps auto-negotiation Ethernet         |
-| Interfaces | USB 3.0 × 2, Type-C × 1, HDMI × 1, TF × 1, SIM × 1 |
+![The channel in the running state after the task is saved](images/img_25.webp)
 
-> CosmoEdge-ready certified devices are available in mainland China through the [Taobao store](https://item.taobao.com/item.htm?id=1066672051450). The open-source software does not require a device purchase. For availability outside mainland China or project deployment support, contact [hello@cosmowander.ai](mailto:hello@cosmowander.ai).
+Expected state:
 
-### Step 1: Hardware Connection
+- the channel is assigned to **No Safety Helmet**;
+- its running switch is enabled;
+- no persistent start failure is displayed.
 
-Connect the device to your local network and power it on.
+## 5. Verify the Result
 
-1. Use an Ethernet cable to connect the device's **ETH port** to your router or switch.
+### 5.1 Live Display
 
-<!-- Image showing the Ethernet port -->
+Open **Live Display** and select the channel. Allow time for video playback and model initialization.
 
-![](images/img_03.webp)
+![Safety-helmet inference overlays in the live view](images/res.webp)
 
-2. **Plug in the power adapter.**
+Pass criteria:
 
-<!-- Image showing the power port -->
+- the video plays continuously;
+- bounding boxes, labels, or algorithm status overlays appear;
+- the channel can be reopened after refreshing the page.
 
-![](images/img_04.webp)
+### 5.2 Event Center
 
-3. Wait approximately **60 seconds** for the device to finish booting.
+Open **Event Center** and query by channel and time. An event is created only when the image matches the
+detection condition and also satisfies the alarm interval, count, duration, and deduplication rules.
+“Live overlays are present” and “an event was generated” are therefore separate checks.
 
-**Expected status indicators:**
+![Detection records listed in Event Center](images/img_32.webp)
 
-- Power LED (PWR): Solid on (red)
+## 6. First-Detection Acceptance Checklist
 
-<!-- Image showing the power LED -->
+- [ ] The sign-in page and Operation Overview are reachable.
+- [ ] `Safety Helmet.mp4` exists as an offline video channel.
+- [ ] **No Safety Helmet** is assigned and the channel is running.
+- [ ] Live Display plays continuously and displays algorithm output.
+- [ ] A matching segment produces a queryable Event Center record.
+- [ ] The deployment method, access address, and verification time are recorded.
 
-![](images/img_05.webp)
+The first detection is complete only when every item passes.
 
-- Network LED (WAN): Blinking (indicates a healthy network connection)
+## 7. Troubleshooting
 
-<!-- Image showing the network LED -->
+### Containers Do Not Start
 
-![](images/img_06.webp)
+Check in this order:
 
-4. **Configure a static IP on your computer**
+```bash
+docker compose -f docker-compose.x86.yml ps
+docker compose -f docker-compose.x86.yml logs --tail=200
+docker system df
+```
 
-   On your computer, go to **Start** → **Control Panel** → **Network and Internet** → **Network and Sharing Center** → **Change adapter settings** → **Ethernet**. (A direct connection between the device and your computer is recommended for initial setup.)
+Verify that Docker is running, disk space is available, and port 8080 is free. See
+[Troubleshooting](../../guide/troubleshooting.md) for the broader diagnostic path.
 
-<!-- Screenshot of network adapter settings -->
+### The Sign-In Page Does Not Open or Authentication Fails
 
-![](images/img_07.webp)
+1. Use host port `8080`, not a container-internal port.
+2. For remote access, verify the host IP, firewall, and network segment.
+3. Use `admin` / `admin` only for the initial sign-in. If the password has been changed, use the new
+   value instead of rebuilding containers.
 
-5. Double-click the Ethernet adapter and open **Internet Protocol Version 4 (TCP/IPv4)**.
+### The Saved Video Has No Picture
 
-<!-- Screenshot of TCP/IPv4 properties -->
+Check **file readability → channel state → decoder logs → algorithm state**:
 
-![](images/img_08.webp)
+1. Start with the repository MP4 so that RTSP networking is not another variable.
+2. Confirm that upload completed and the channel is enabled.
+3. Inspect logs for file-access, codec, or decoding errors.
+4. If video plays but no overlay appears, confirm that the scenario task was saved and is running.
 
-6. Set the IP address and subnet mask to be on the same subnet as the CosmoEdge device, then click **OK**.
+### Live Detections Appear but No Event Is Created
 
-<!-- Screenshot of IP address configuration -->
+This is usually not a connection failure. Confirm that the clip matches the rule, then inspect the alarm
+interval, alarm count, detection duration, and stationary-target deduplication settings. The next guide
+explains these controls.
 
-![](images/img_09.webp)
+## Next Step
 
-**💡 The default CosmoEdge address is: WAN: 192.168.100.1**
-
-### Step 2: Access the Management Console and Configure System Settings
-
-Open a browser and navigate to the device's IP address.
-
-1. We recommend **Chrome** or **Edge**.
-2. In the address bar, enter: `http://<device IP>` (e.g., `http://192.168.100.1`)
-
-<!-- Screenshot of browser navigation -->
-
-![](images/x86-login.webp)
-
-3. Log in with the default credentials:
-   - Username: `admin`
-   - Password: `admin` (we strongly recommend changing this after first login)
-
-<!-- Screenshot of login page -->
-
-![](images/img_11.webp)
-
-After a successful login, you'll see the **System Dashboard**, which displays the following key metrics:
-
-|   Metric   |                 Description                 |
-| :---------: | :------------------------------------------: |
-|  CPU Usage  |                Processor load                |
-| VRAM Usage |    Video memory consumed by loaded tasks    |
-|  NPU Usage  |         Neural processing unit load         |
-| eMMC Usage |          System storage utilization          |
-| Packet Loss | If above 10%, system performance may degrade |
-
-Go to **System Management** → **System Settings** → **Time Settings** → **Manual Sync** → **Sync with Computer**. (Since the device is directly connected, it can't automatically obtain the correct time.)
-
-<!-- Screenshot of time sync settings -->
-
-![](images/img_12.webp)
-
-Go to **System Management** → **Network Configuration** to change the device's IP address so it's on the same subnet as your LAN. (This lets your computer access the console while still having internet connectivity.)
-
-<!-- Screenshot of network configuration -->
-
-![](images/img_13.webp)
-
-> **⚠️ Can't access the management console?**
->
-> - Make sure the device and your computer are on the **same subnet**.
-> - Try connecting the device directly to your computer with an Ethernet cable (bypassing the router).
-> - Check whether your browser is using a proxy — disable it and try again.
-
-### Step 3: View Live AI Detection Results
-
-The device comes pre-loaded with several demo scenarios using **built-in demo videos** as data sources — no cameras needed to experience the full AI detection workflow. We'll use **Pedestrian Flow Counting** as our example.
-
-1. **Download the pedestrian flow demo video**
-
-   Demo video download link: [github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.0-videos](https://github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.0-videos)
-
----
-
-2. **Upload the pedestrian flow demo video**
-
-   In the Task Configuration menu, click **Video Sources**, then click **Add**.
-
-<!-- Screenshot of video source page -->
-
-![](images/img_14.webp)
-
-In the dialog that appears:
-
-- Source type: Offline Video
-- Channel name: Give it a descriptive name, e.g., **Building 1 East Corridor**
-- Upload video: Upload the demo MP4 file, then click **Save**.
-
-<!-- Screenshot of add channel dialog -->
-
-![](images/img_15.webp)
-
-Click **Scenario Task Assignment**.
-
-<!-- Screenshot of task assignment button -->
-
-![](images/img_16.webp)
-
-3. **Assign an algorithm to the channel**
-
-   Configure the video analytics algorithm for the channel.
-
-<!-- Screenshot of algorithm assignment -->
-
-![](images/img_17.webp)
-
-Page layout overview:
-
-<!-- Screenshot showing the three functional areas -->
-
-![](images/img_18.webp)
-
-The Service Assignment page has three main areas:
-
-- **Area 1**: All available algorithm types — Detection/Analysis, Face/Body, Counting/Statistics.
-- **Area 2**: Controls for starting, stopping, and deleting services on the channel.
-- **Area 3**: Service configuration panel — detection region setup, parameter tuning, runtime strategy, etc.
-
-Under **Counting/Statistics**, find **Pedestrian Flow Counting** and select it.
-
-<!-- Screenshot of selecting pedestrian flow counting -->
-
-![](images/img_19.webp)
-
-The configuration parameters for the selected algorithm will appear. The pedestrian flow counting algorithm works by detecting pedestrians crossing a detection line. Key controls include:
-
-- **Draw**: Draw a detection line.
-- **Direction Toggle**: Switch the crossing direction for one-sided counting.
-- **Delete**: Remove the detection line.
-
-<!-- Screenshot of detection line parameters -->
-
-![](images/img_20.webp)
-
-> **💡 Configuration Parameters**
->
-> Parameters are determined by the algorithm's pipeline orchestration.
-
-**Draw the detection line**
-
-Click **Draw**, then click once in the video to set the starting point, and click again to set the endpoint. (The line counts pedestrians crossing in the direction of the arrow.)
-
-<!-- Screenshot of drawing process -->
-
-![](images/img_21.webp)
-
-<!-- Screenshot of completed line -->
-
-![](images/img_22.webp)
-
-Click **Finish Drawing** to save. The detection line is now configured.
-
-<!-- Screenshot of saved detection line -->
-
-![](images/img_23.webp)
-
-**Set the runtime strategy**
-
-Set the play count to 0 for looping playback.
-
-<!-- Screenshot of runtime strategy -->
-
-![](images/img_24.webp)
-
-Click **Save**. This assigns the pedestrian flow counting algorithm to the channel and simultaneously starts the analysis service.
-
-<!-- Screenshot of save confirmation -->
-
-![](images/img_25.webp)
-
-Return to the **Video Sources** menu. The "Running" toggle being on indicates the service is active.
-
-<!-- Screenshot of running status -->
-
-![](images/img_26.webp)
-
-4. **Algorithm Visualization**
-
-Click **Live Preview** to enter the visualization page.
-
-<!-- Screenshot of live preview entry -->
-
-![](images/img_27.webp)
-
-The visualization page has three areas:
-
-- **Left panel**: All service channels in the system.
-- **Center area**: Visual algorithm display — select a channel to view.
-- **Right panel**: Real-time scrolling alarm feed from all active algorithm tasks.
-
-<!-- Screenshot of visualization page layout -->
-
-![](images/img_28.webp)
-
-> **💡 Layout Options**
-> Use the toggle in the upper-right corner to switch between **single view** and **quad view** layouts.
-
-Select the **Building 1 East Corridor** channel to stream its algorithm-enhanced video.
-
-<!-- Screenshot of channel selection -->
-
-![](images/img_29.webp)
-
-Under algorithm overlay, select **Pedestrian Flow Counting**. Different algorithms have different overlay behaviors.
-
-<!-- Screenshot of overlay selection -->
-
-![](images/img_30.webp)
-
-> **💡 Overlay Logic**
->
-> Each algorithm's pipeline strategy determines its own overlay behavior.
-
-**Overlay results:**
-
-<!-- Screenshot of overlay results -->
-
-![](images/img_31.webp)
-
-The visualization includes:
-
-1. **Pedestrian detection**: Object class and confidence score, e.g., `Pedestrian: 0.91`
-2. **Pedestrian tracking**: Unique track ID for each person, e.g., `#1318`
-3. **Pipeline timing**: Upper-left area shows per-component latency breakdown.
-4. **Counting results**: Upper-right area shows IN/OUT pedestrian flow totals.
-
-**Demo walkthrough**
-
-> Video demo: Coming soon.
-
-### Step 4: View Statistics
-
-All AI-detected alarms and statistical events are automatically recorded and can be reviewed later.
-
-1. In the left navigation, click **Event Center** → **Counting/Statistics**.
-
-<!-- Screenshot of event center navigation -->
-
-![](images/img_32.webp)
-
-2. Select **Query Events** → **Channel Name** → **Algorithm Service** → click **Query**. (Click Query again to refresh with the latest real-time statistics.)
-
-<!-- Screenshot of query results -->
-
-![](images/img_33.webp)
-
-Page note: "Departing visitors" = the OUT count from the visualization; "Net inflow" = the IN count.
-
-## 🎉 Quick Start Complete
-
-You've now successfully:
-
-### x86 Server Docker Environment Completion Checklist
-
-- [X] Cloned the CosmoEdge repository and started containers from the repository root
-- [X] Accessed the web management console in a browser
-- [X] Logged in with the default account and noted that the initial password should be changed
-- [X] Found the next tutorial entry for scenario configuration
-
-### Hardware Box Environment Completion Checklist
-
-- [X] Powered on the device and connected it to the network
-- [X] Accessed the web management console
-- [X] Previewed pre-deployed real-time AI detection demos
-- [X] Reviewed counting/statistics records
-
-**What's next:**
-
-| Goal                                                         | Read                                          |
-| ------------------------------------------------------------ | --------------------------------------------- |
-| Configure your own AI detection scenarios                    | → Scenario Configuration Guide (Volume 2)    |
-| Try the VLM — switch detection rules without model training | → VLM Visual State Judgment Guide (Volume 3) |
-| Look up a specific parameter or troubleshoot an issue        | → Reference Manual                           |
-
----
+Continue to [Scenario Task Configuration](../02-scenario-config/scenario-config.md) to set detection
+areas, parameters, and alarm-related rules intentionally.

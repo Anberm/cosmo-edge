@@ -15,7 +15,7 @@ This page collects the quality-check entry points that already exist in the repo
 
 | Layer | Check | Suggested Trigger |
 | --- | --- | --- |
-| Documentation site | `npm ci`, `npm run docs:build` | Pull request / push |
+| Documentation site | `npm ci`, `npm run docs:verify` | Pull request |
 | Frontend | `npm ci`, `npm run i18n:check`, `npm run build`, `npm run resource-i18n:check` | Pull request / push |
 | C++ formatting | `scripts/format_check.sh --check` | Pull request / push |
 | C++ static analysis | `scripts/static_analysis.sh --cppcheck`, `scripts/static_analysis.sh --clang-tidy` | Periodic / manual / self-hosted |
@@ -29,8 +29,16 @@ The root `package.json` drives the VitePress documentation site:
 
 ```bash
 npm ci
-npm run docs:build
+npm run docs:verify
 ```
+
+`docs:verify` runs:
+
+1. `docs:check`: validates frontmatter, one H1, placeholders, image alt text, internal links, bilingual
+   pairs, and navigation groups for the five bilingual core guides and two indexes.
+2. `docs:build`: builds the complete VitePress site and checks VitePress parsing and internal links.
+3. `docs:smoke`: inspects rendered HTML for the ten core pages, including titles, locale, navigation,
+   groups, and frontmatter leakage.
 
 Local preview:
 
@@ -40,8 +48,12 @@ npm run docs:preview
 
 Notes:
 
-- The documentation build verifies VitePress pages, navigation, and in-site links.
-- The repository does not currently have a dedicated documentation-site workflow; `npm run docs:build` is the local validation command and can be used as the basis for future PR CI or GitHub Pages deployment workflows.
+- The `docs` job in `.github/workflows/pr-checks.yml` runs the same `npm run docs:verify` command on pull
+  requests.
+- Placeholder checks use an explicit core-guide manifest, so intentional editing prompts in community
+  case templates are not rejected.
+- The VitePress build checks the full site, navigation, and internal links. The ten-page semantic smoke
+  adds detection for frontmatter leaking into content even when the build succeeds.
 - Dependency auditing may currently report npm dependency vulnerabilities; these should be evaluated separately before public release and the resolution recorded.
 
 ## Frontend Checks

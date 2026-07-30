@@ -1,40 +1,61 @@
 ---
-title: Five-Volume Tutorials
-description: English tutorial entry points for CosmoEdge users, integrators, and maintainers.
+title: Using CosmoEdge
+description: Task-oriented guides from the first detection through AI configuration, Pipeline orchestration, and third-party model integration.
 prev: false
 next:
-  text: "Volume 1: Quick Start"
+  text: "Quick Start: Deployment, Sign-In, and First Detection"
   link: /en/tutorials/01-quickstart/quickstart
 ---
 
-# Five-Volume Tutorials
+# Using CosmoEdge
 
-These tutorials are designed for users who want to turn CosmoEdge from a running device into a complete edge AI application.
+These guides are organized around real tasks. Each starts from a defined goal and ends with an observable,
+repeatable result. First-time users should follow the sequence; experienced users can enter through one of
+the three groups below.
 
-## Reading Order
+## Basic Use
 
-1. [Volume 1: Quick Start](01-quickstart/quickstart.md) covers device access, basic system configuration, live preview, and statistics.
-2. [Volume 2: Scenario Configuration](02-scenario-config/scenario-config.md) explains how to configure typical video analytics scenarios.
-3. [Volume 3: VLM / DINO Guide](03-vlm-guide/vlm-guide.md) introduces prompt-driven visual judgment and open-vocabulary detection.
-4. [Volume 4: Pipeline Orchestration](04-pipeline-orchestration/pipeline-orchestration.md) explains how scenario tasks are composed from pipeline nodes.
-5. [Volume 5: Model Porting](05-model-porting/model-porting.md) walks through third-party model conversion, upload, validation, and integration.
+| Guide | Use it when | Final result |
+| --- | --- | --- |
+| [Quick Start: Deployment, Sign-In, and First Detection](01-quickstart/quickstart.md) | Deploying or connecting for the first time | A running video channel and a first result verified in Live View and Event Center |
+| [Scenario Task Configuration: Channels, Regions, Parameters, and Alarms](02-scenario-config/scenario-config.md) | Turning a built-in algorithm into a business task | Persisted region, parameters, and schedule with positive and negative alarm evidence |
 
-## Deployment Examples
+## AI Capability Configuration
 
-- [Deploy Ultralytics YOLO with CosmoEdge](06-ultralytics-yolo-edge/ultralytics-yolo-edge.md) shows the shortest path from Ultralytics YOLO export to a CosmoEdge edge video analytics pipeline.
+| Guide | Use it when | Final result |
+| --- | --- | --- |
+| [VLM and DINO: Prompt-Driven Vision Tasks](03-vlm-guide/vlm-guide.md) | Exploring a state decision or open-vocabulary target | Fixed samples show that VLM decisions and DINO boxes match the prompt definition |
+
+## Advanced Extensions
+
+| Guide | Use it when | Final result |
+| --- | --- | --- |
+| [Pipeline Orchestration: Modify and Create Pipelines](04-pipeline-orchestration/pipeline-orchestration.md) | Changing a rule chain or creating new business logic | Nodes persist and the Pipeline passes positive, negative, and restart checks |
+| [Third-Party Model Integration: Convert, Upload, and Validate](05-model-porting/model-porting.md) | Bringing a custom model into CosmoEdge | Evidence covers loading, inference, parsing, events, and sustained operation |
+
+## Recommended Paths
+
+- **First experience**: Quick Start → Scenario Task Configuration.
+- **Long-tail requirement exploration**: Scenario Task Configuration → VLM and DINO.
+- **Custom business logic**: Scenario Task Configuration → Pipeline Orchestration.
+- **Custom model deployment**: Pipeline Orchestration → Third-Party Model Integration.
+
+Do not skip the final acceptance of the preceding guide. An uploaded model, a saved task, or a visible box
+is only an intermediate state; every path includes result and failure-path validation.
+
+## Additional Deployment Example
+
+[Deploy Ultralytics YOLO with CosmoEdge](06-ultralytics-yolo-edge/ultralytics-yolo-edge.md) remains available
+as a separate community-style deployment record. It is not one of the five core guides above, and its own
+status and evidence determine whether it is ready for a specific release.
 
 ## Related Documentation
 
-- [Build Guide](../guide/build.md)
 - [Deployment Guide](../guide/deployment.md)
 - [Runtime Configuration](../guide/configuration.md)
 - [Troubleshooting](../guide/troubleshooting.md)
 - [Architecture Overview](../guide/architecture.md)
-- [API Overview](../reference/api.md)
-- [API Fields](../reference/api-fields.md)
-- [MQTT Reference](../reference/mqtt.md)
-- [HTTP Webhook Reference](../reference/webhook.md)
 - [Models and Resources](../reference/models.md)
-- [Frontend Development](../development/frontend.md)
-- [Backend Development](../development/backend.md)
+- [HTTP Webhook Reference](../reference/webhook.md)
+- [MQTT Reference](../reference/mqtt.md)
 - [CI and Quality Checks](../development/ci.md)

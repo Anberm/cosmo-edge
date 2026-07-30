@@ -15,7 +15,7 @@ next: false
 
 | 层级 | 检查项 | 建议触发方式 |
 | --- | --- | --- |
-| 文档站 | `npm ci`、`npm run docs:build` | Pull request / push |
+| 文档站 | `npm ci`、`npm run docs:verify` | Pull request |
 | 前端 | `npm ci`、`npm run i18n:check`、`npm run build`、`npm run resource-i18n:check` | Pull request / push |
 | C++ 格式 | `scripts/format_check.sh --check` | Pull request / push |
 | C++ 静态分析 | `scripts/static_analysis.sh --cppcheck`、`scripts/static_analysis.sh --clang-tidy` | 定期 / 手动 / self-hosted |
@@ -29,8 +29,16 @@ next: false
 
 ```bash
 npm ci
-npm run docs:build
+npm run docs:verify
 ```
+
+`docs:verify` 依次执行：
+
+1. `docs:check`：检查五篇中英文核心指南和两个索引的 frontmatter、单一 H1、占位内容、
+   图片 alt、内部链接、双语配对和导航分组。
+2. `docs:build`：构建完整 VitePress 文档站并检查 VitePress 可解析性和站内链接。
+3. `docs:smoke`：检查十篇核心页面的渲染 HTML、标题、语言、导航、分组和 frontmatter
+   泄漏。
 
 本地预览：
 
@@ -40,8 +48,11 @@ npm run docs:preview
 
 说明：
 
-- 文档站构建会检查 VitePress 页面、导航和站内链接。
-- 当前仓库还没有单独的文档站 workflow；上表"文档站"层的 `npm run docs:build` 是本地验证命令，也可作为后续 PR CI 或 GitHub Pages 部署 workflow 的基础。
+- `.github/workflows/pr-checks.yml` 中的 `docs` job 会在 pull request 上执行同一条
+  `npm run docs:verify` 命令。
+- 占位内容检查使用明确的核心指南清单，不扫描社区案例模板中的合法编辑提示。
+- VitePress 构建检查全站页面、导航和站内链接；十页语义冒烟进一步捕获构建不会报错的
+  frontmatter 正文泄漏。
 - 当前依赖审计可能报告 npm dependency vulnerabilities，公开发布前应单独评估并记录处理结论。
 
 ## 前端检查
