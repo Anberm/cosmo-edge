@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cosmo-wander-ai/cosmo-edge/test/agent/examples/model-conversion/schema.json",
+  "title": "CosmoEdge measured model-conversion example",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "exampleId",
+    "task",
+    "status",
+    "applicability",
+    "source",
+    "toolchain",
+    "validatedStages",
+    "recordings",
+    "knownLimits"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "exampleId": {
+      "type": "string",
+      "pattern": "^model-conversion/[A-Za-z0-9][A-Za-z0-9._-]+$"
+    },
+    "task": {
+      "const": "model-conversion"
+    },
+    "status": {
+      "enum": [
+        "candidate",
+        "verified"
+      ]
+    },
+    "applicability": {
+      "type": "object",
+      "required": [
+        "modelFamily",
+        "sourceFormat",
+        "targetBackend",
+        "targetChip",
+        "inputLayout",
+        "quantization"
+      ],
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "model",
+        "url",
+        "sha256"
+      ],
+      "additionalProperties": true
+    },
+    "toolchain": {
+      "type": "object",
+      "required": [
+        "image",
+        "imageId"
+      ],
+      "additionalProperties": true
+    },
+    "validatedStages": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "export",
+          "onnx-preflight",
+          "transform",
+          "deploy",
+          "model-info",
+          "tensor-compare"
+        ]
+      }
+    },
+    "recordings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "recordedBy",
+          "recordedAt",
+          "commit",
+          "tree",
+          "manifestSha256",
+          "artifactSha256",
+          "artifactSizeBytes",
+          "tensorTolerance"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "knownLimits": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

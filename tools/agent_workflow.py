@@ -230,12 +230,24 @@ def _git_snapshot() -> dict[str, Any]:
     commit = _run(["git", "rev-parse", "HEAD"])
     tree = _run(["git", "rev-parse", "HEAD^{tree}"])
     branch = _run(["git", "branch", "--show-current"])
-    status = _run(["git", "status", "--porcelain", "--untracked-files=no"])
+    status = _run(["git", "status", "--porcelain", "--untracked-files=normal"])
+    tracked_diff = _run(["git", "diff", "--binary", "HEAD"], timeout=30)
+    tracked_lines = [
+        line for line in status.stdout.splitlines() if line and not line.startswith("??")
+    ]
+    untracked_lines = [line for line in status.stdout.splitlines() if line.startswith("??")]
+    fingerprint_payload = (
+        tracked_diff.stdout.encode("utf-8", errors="replace")
+        + b"\0"
+        + "\n".join(untracked_lines).encode("utf-8", errors="replace")
+    )
     return {
         "commit": _first_line(commit.stdout) or None,
         "tree": _first_line(tree.stdout) or None,
         "branch": _first_line(branch.stdout) or None,
-        "trackedChanges": len([line for line in status.stdout.splitlines() if line.strip()]),
+        "trackedChanges": len(tracked_lines),
+        "untrackedFiles": len(untracked_lines),
+        "worktreeFingerprint": hashlib.sha256(fingerprint_payload).hexdigest(),
     }
 
 
@@ -358,13 +370,56 @@ def _docker_image_identity(image: str) -> tuple[dict[str, Any] | None, str]:
     }, ""
 
 
-def _python_import_check(executable: str, modules: list[str]) -> tuple[bool, str]:
-    imports = "; ".join(f"import {name}" for name in modules)
-    process = _run([executable, "-c", imports])
-    if process.returncode == 0:
-        version = _run([executable, "--version"])
-        return True, _first_line(version.stdout) or _first_line(version.stderr)
-    return False, _first_line(process.stderr) or "required Python modules could not be imported"
+def _version_tuple(value: str) -> tuple[int, ...]:
+    match = re.match(r"^(\d+(?:\.\d+)*)", value)
+    return tuple(int(part) for part in match.group(1).split(".")) if match else ()
+
+
+def _version_satisfies(actual: str, requirement: str | None) -> bool:
+    if requirement in (None, ""):
+        return True
+    expected = str(requirement).strip()
+    if expected.startswith("=="):
+        return actual == expected[2:]
+    if expected.startswith(">="):
+        actual_tuple = _version_tuple(actual)
+        expected_tuple = _version_tuple(expected[2:])
+        return bool(actual_tuple and expected_tuple and actual_tuple >= expected_tuple)
+    return actual == expected
+
+
+def _python_environment_check(
+    executable: str, requirements: dict[str, str | None]
+) -> tuple[bool, str]:
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", name) for name in requirements):
+        raise WorkflowError("parameters.pythonPackages contains an invalid package name")
+    script = (
+        "import importlib, importlib.metadata, json, sys;"
+        "req=json.loads(sys.argv[1]); out={};"
+        "\nfor name in req:"
+        "\n importlib.import_module(name.replace('-', '_'));"
+        "\n try: out[name]=importlib.metadata.version(name)"
+        "\n except importlib.metadata.PackageNotFoundError: out[name]=getattr(importlib.import_module(name.replace('-', '_')), '__version__', 'unknown')"
+        "\nprint(json.dumps(out, sort_keys=True))"
+    )
+    process = _run([executable, "-c", script, json.dumps(requirements)], timeout=20)
+    if process.returncode != 0:
+        return False, _first_line(process.stderr) or "required Python packages could not be imported"
+    try:
+        versions = json.loads(process.stdout)
+    except json.JSONDecodeError:
+        return False, "Python package version output was unreadable"
+    mismatches = [
+        f"{name}={versions.get(name, 'unknown')} (requires {requirement})"
+        for name, requirement in requirements.items()
+        if not _version_satisfies(str(versions.get(name, "unknown")), requirement)
+    ]
+    summary = ", ".join(f"{name}={versions.get(name, 'unknown')}" for name in sorted(versions))
+    if mismatches:
+        return False, "; ".join(mismatches)
+    version = _run([executable, "--version"])
+    python_version = _first_line(version.stdout) or _first_line(version.stderr)
+    return True, f"{python_version}; {summary}"
 
 
 def task_environment_report(
@@ -414,7 +469,8 @@ def task_environment_report(
     if repository["commit"] and os.access(project_root, os.R_OK | os.W_OK):
         detail = (
             f"Repository identity frozen at {repository['commit']}; "
-            f"tracked change count is {repository['trackedChanges']}."
+            f"tracked change count is {repository['trackedChanges']} and "
+            f"untracked file count is {repository['untrackedFiles']}."
         )
         checks.append(_check("C2", "PASS", detail))
     else:
@@ -531,7 +587,16 @@ def task_environment_report(
                 )
             )
         else:
-            imports_ok, detail = _python_import_check(python_path, ["numpy", "onnx", "onnxruntime"])
+            package_requirements = params.get(
+                "pythonPackages",
+                {"numpy": None, "onnx": None, "onnxruntime": None},
+            )
+            if not isinstance(package_requirements, dict) or any(
+                requirement is not None and not isinstance(requirement, str)
+                for requirement in package_requirements.values()
+            ):
+                raise WorkflowError("parameters.pythonPackages must map package names to versions or null")
+            imports_ok, detail = _python_environment_check(python_path, package_requirements)
             if imports_ok:
                 checks.append(_check("C6", "PASS", f"ONNX preflight runtime is available ({detail})."))
             else:
@@ -584,6 +649,7 @@ def task_environment_report(
         "contractSha256": sha256_file(contract_path),
         "authority": redact_data(contract["authority"]),
         "host": inventory["host"],
+        "repository": inventory["repository"],
         "checks": public_checks,
         "toolchain": toolchain,
         "environmentVerdict": verdict,

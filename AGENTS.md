@@ -12,6 +12,8 @@ workflow.
 - `docs/` — VitePress site; Chinese pages are at the root and English mirrors
   are under `docs/en/`. Navigation is in `docs/.vitepress/config.mts`.
 - `scripts/` — build, run, validation, and packaging scripts.
+  `scripts/agent/` contains environment admission, measured evidence, and
+  implemented task-specific executors.
 - `tools/` — Python and Node validation utilities.
 - `test/` — Catch2 tests and the HTTP/MQTT push test service.
 - `data/resource/aiboxresource/` and `data/resource/aiboxresource_x86/` —
@@ -43,6 +45,7 @@ workflow.
 | C++ | `bash scripts/build_cpu_test.sh`, then `./build_cpu/cosmo-tests`; before submission run `scripts/format_check.sh` |
 | Documentation | `npm run docs:verify` |
 | Frontend | `cd src/web && npm ci && npm run build` |
+| Sophon model conversion selected by the task contract | `./scripts/agent/doctor.sh --task model-conversion --contract ...`, then `./scripts/agent/convert_model.sh --contract ...` and `./scripts/agent/verify.sh --contract ...` |
 | Other task | Use its task contract and the closest native test commands; list anything not verified |
 
 ## Engineering boundaries
@@ -53,6 +56,11 @@ workflow.
 - BM1688 and CV186X artifacts are not interchangeable. A chip name, compiler
   argument, runtime identifier, and artifact mapping must come from current
   repository facts or independent measured evidence.
+- ONNX-to-bmodel conversion depends on an external, locally admitted toolchain
+  image; the repository does not contain that compiler. BM1688/F16 is the first
+  preferred measured path. An entry appears in the example index only after two
+  real recordings pass its promotion rules; an empty index is not a success
+  claim and does not make unrelated development unsupported.
 - x86 or mock success is not Sophon-device or production acceptance. Report
   conclusions by the layer actually tested.
 - Preparing an upstream change to `src/nn/`, `src/infer/`, model templates,

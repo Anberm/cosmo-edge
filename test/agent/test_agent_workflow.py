@@ -77,6 +77,13 @@ class AgentWorkflowTest(unittest.TestCase):
             with self.subTest(case=case["name"]):
                 self.assertEqual(agent_workflow.environment_verdict(case["checks"]), case["expected"])
 
+    def test_python_version_requirements_support_exact_and_minimum_without_freezing_all_tasks(self):
+        self.assertTrue(agent_workflow._version_satisfies("1.20.1", "1.20.1"))
+        self.assertTrue(agent_workflow._version_satisfies("1.20.1", "==1.20.1"))
+        self.assertTrue(agent_workflow._version_satisfies("1.26.0", ">=1.20.1"))
+        self.assertFalse(agent_workflow._version_satisfies("1.19.0", ">=1.20.1"))
+        self.assertTrue(agent_workflow._version_satisfies("9.9.9", None))
+
     def test_command_redaction(self):
         cases = json.loads((FIXTURES / "redaction-cases.json").read_text(encoding="utf-8"))
         for case in cases:

@@ -151,6 +151,9 @@ jobs:
       - name: Test agent-assisted workflow safety boundaries
         run: python -m unittest discover -s test/agent -p 'test_agent_workflow.py'
 
+      - name: Test measured model-conversion workflow
+        run: python -m unittest discover -s test/agent -p 'test_model_conversion_workflow.py'
+
   # ── Documentation structure, links, build, and rendered smoke ─────
   docs:
     runs-on: ubuntu-latest

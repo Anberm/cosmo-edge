@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "task": "model-conversion",
+  "selectionOrder": [
+    "same task, model family, chip/backend, and input layout",
+    "same model family with explicit differences",
+    "same task generic template",
+    "new path from current code and toolchain facts"
+  ],
+  "examples": [],
+  "note": "An example is listed only after two measured recordings satisfy schema.json. An empty index is not evidence that conversion is unsupported."
+}
