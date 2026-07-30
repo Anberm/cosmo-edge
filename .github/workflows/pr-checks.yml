@@ -148,6 +148,9 @@ jobs:
       - name: Test offline accuracy comparison
         run: python -m unittest discover -s test -p 'test_offline_accuracy_compare.py'
 
+      - name: Test agent-assisted workflow safety boundaries
+        run: python -m unittest discover -s test/agent -p 'test_agent_workflow.py'
+
   # ── Documentation structure, links, build, and rendered smoke ─────
   docs:
     runs-on: ubuntu-latest
