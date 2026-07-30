@@ -1,44 +1,56 @@
 ---
-title: 五卷教程
-description: CosmoEdge 教程阅读路径。
+title: CosmoEdge 系统使用指南
+description: 从首次检测到 AI 能力配置、Pipeline 编排和第三方模型接入的任务式使用路径。
 prev:
   text: 文档首页
   link: /
 next:
-  text: 卷一：快速上手
+  text: 快速开始：部署、登录与首次检测
   link: /tutorials/01-quickstart/quickstart
 ---
 
-# 五卷教程
+# CosmoEdge 系统使用指南
 
-教程面向实际操作场景，重点是帮助读者完成任务，而不是介绍产品卖点。建议按顺序阅读；已经熟悉基础流程的读者也可以直接跳到对应卷。
+这套指南围绕真实任务组织内容。每篇都从明确目标开始，以可观察、可复测的结果结束。
+第一次使用时建议按顺序完成；已有经验的读者可以按下面三组直接进入所需任务。
 
-## 阅读顺序
+## 基础使用
 
-| 卷 | 主题 | 适合读者 | 目标 | 前置条件 |
-| --- | --- | --- | --- | --- |
-| [卷一：快速上手](./01-quickstart/quickstart.md) | 设备连接、平台访问、实时检测 | 首次体验者 | 从开箱通电到看到 AI 检测结果 | 已收到预装设备 |
-| [卷二：场景配置](./02-scenario-config/scenario-config.md) | 通道、算法、区域、阈值、告警 | 项目实施和集成商 | 配置一个可运行的业务场景 | 完成卷一 |
-| [卷三：VLM / DINO 指南](./03-vlm-guide/vlm-guide.md) | 视觉状态判断与开放目标检测 | 方案工程师、开发者 | 判断什么时候使用 VLM 或 DINO | 完成卷二 |
-| [卷四：Pipeline 编排](./04-pipeline-orchestration/pipeline-orchestration.md) | 节点、数据流、规则链路 | 高级用户 | 修改或创建可视化算法编排 | 完成卷二和卷三 |
-| [卷五：模型移植](./05-model-porting/model-porting.md) | 第三方模型转换、上传、验证、接入 | 算法和 ML 工程师 | 将自有模型接入 CosmoEdge 场景任务 | 完成卷四；需 Docker 环境 |
+| 指南 | 适合场景 | 最终结果 |
+| --- | --- | --- |
+| [快速开始：部署、登录与首次检测](./01-quickstart/quickstart.md) | 第一次部署或连接系统 | 视频通道运行，实时展示与事件中心验证第一条检测 |
+| [场景任务配置：通道、区域、参数与告警](./02-scenario-config/scenario-config.md) | 把内置算法配置成业务任务 | 区域、参数和策略持久化，正负样本证明告警规则生效 |
 
-## 使用建议
+## AI 能力配置
 
-每一卷都以可验证结果为目标。阅读时建议保留系统页面、测试视频或测试图片，完成每个关键步骤后对照文中的预期结果检查。
+| 指南 | 适合场景 | 最终结果 |
+| --- | --- | --- |
+| [VLM 与 DINO：提示词驱动的视觉任务](./03-vlm-guide/vlm-guide.md) | 验证状态判断或开放类别定位 | 固定样本证明 VLM 判断和 DINO 检测框符合提示词定义 |
 
-当前项目的构建、部署、API 和开发入口已经整理到以下页面：
+## 高级扩展
 
-- [构建指南](../guide/build.md)
+| 指南 | 适合场景 | 最终结果 |
+| --- | --- | --- |
+| [算法编排：修改与创建 Pipeline](./04-pipeline-orchestration/pipeline-orchestration.md) | 修改规则链路或创建新业务流程 | Pipeline 节点可持久化，正负样本和重启验证通过 |
+| [第三方模型接入：转换、上传与验证](./05-model-porting/model-porting.md) | 将自有模型带入 CosmoEdge | 模型加载、推理、解析、事件和持续运行均有证据 |
+
+## 推荐路径
+
+- **首次体验**：快速开始 → 场景任务配置。
+- **长尾需求验证**：场景任务配置 → VLM 与 DINO。
+- **自定义业务逻辑**：场景任务配置 → 算法编排。
+- **自有模型部署**：算法编排 → 第三方模型接入。
+
+不要跳过前一篇的最终验收。模型能上传、任务能保存或页面有检测框，都只是中间状态；
+每条路径都应完成相应的结果和失败路径验证。
+
+## 相关文档
+
 - [部署指南](../guide/deployment.md)
 - [运行配置](../guide/configuration.md)
 - [故障排查](../guide/troubleshooting.md)
 - [架构概览](../guide/architecture.md)
-- [API 概览](../reference/api.md)
-- [字段级 API 参考](../reference/api-fields.md)
-- [MQTT 接入参考](../reference/mqtt.md)
-- [HTTP Webhook 参考](../reference/webhook.md)
 - [模型与资源](../reference/models.md)
-- [前端工程](../development/frontend.md)
-- [后端开发](../development/backend.md)
+- [HTTP Webhook 参考](../reference/webhook.md)
+- [MQTT 接入参考](../reference/mqtt.md)
 - [CI 与质量检查](../development/ci.md)

@@ -148,6 +148,24 @@ jobs:
       - name: Test offline accuracy comparison
         run: python -m unittest discover -s test -p 'test_offline_accuracy_compare.py'
 
+  # ── Documentation structure, links, build, and rendered smoke ─────
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install documentation dependencies
+        run: npm ci
+
+      - name: Verify tutorial documentation
+        run: npm run docs:verify
+
   # ── C++ format check via clang-format ──────────────────────────────
   # Only checks files changed in the PR (not the entire codebase)
   format-check:

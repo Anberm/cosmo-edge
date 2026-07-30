@@ -1,454 +1,220 @@
 ---
-title: "Volume 2: Scenario Configuration"
-description: Learn to configure detection scenarios using built-in AI algorithms, with complete walkthroughs of hard hat detection and absence detection.
+title: "Scenario Task Configuration: Channels, Regions, Parameters, and Alarms"
+description: Configure a scenario task by channel, algorithm, detection area, parameters, and schedule, then verify detections and alarms.
 prev:
-  text: "Volume 1: Quick Start"
+  text: Quick Start
   link: /en/tutorials/01-quickstart/quickstart
 next:
-  text: "Volume 3: VLM / DINO Guide"
+  text: VLM and DINO
   link: /en/tutorials/03-vlm-guide/vlm-guide
 ---
 
-# Volume 2: Scenario Configuration
+# Scenario Task Configuration: Channels, Regions, Parameters, and Alarms
 
-> **Estimated time**: 30–45 minutes
-> **Goal**: Learn to configure your own detection scenarios using the system's built-in AI algorithms
-> **Prerequisites**: Completed the Quick Start Guide (Volume 1); the system is up and running
-> **No extra equipment needed**: This entire volume uses built-in demo videos — no camera required
+| Item | Details |
+| --- | --- |
+| Who this is for | Deployment engineers, integrators, and advanced users configuring built-in algorithms for a real task |
+| What you will accomplish | Select an algorithm for a channel, set its region, parameters, and schedule, and prove the alarm rules work |
+| Prerequisites | Complete the [first detection](../01-quickstart/quickstart.md) and have a playable video channel |
+| Estimated time | 25–40 minutes |
+| Device required | A running CosmoEdge instance; the repository video can be used instead of a camera |
+| Final acceptance result | Live Display analyzes only the intended region, settings persist, and Event Center contains an explainable alarm |
 
-## Learning Path
+Configure a scenario task in this order:
 
-We'll walk you through **one complete hands-on scenario** followed by **one independent practice scenario** to build your general-purpose configuration skills.
+1. Select a channel.
+2. Select an algorithm.
+3. Draw a detection area.
+4. Set detection and alarm-related parameters.
+5. Set the running schedule.
+6. Verify live output and event records.
 
-- Chapter 1 → Hard Hat Detection (full walkthrough — learn the basics of multi-model + region rules)
-- Chapter 2 → Absence Detection (self-guided practice — learn multi-model combination + time-based judgment)
-- Chapter 3 → Quick Reference for Other Scenarios (all 18 scenario tasks and their key differences)
+The current page tabs are **Detection Area**, **Parameter Settings**, and **Running Strategy**. There is
+no separate Alarm Configuration tab. Alarm intervals, counts, durations, and deduplication are controlled
+by the parameter settings and running strategy together.
 
-After completing the first two chapters, you'll be able to independently configure **any built-in algorithm** as a detection scenario.
+![The complete channel, algorithm, area, parameter, live-view, and event workflow](images/img_01.webp)
 
-## Chapter 1: Hard Hat Detection
+## 1. What Each Setting Controls
 
-**Background**: Construction sites involve elevated work and falling object risks. Hard hats are the most fundamental piece of personal protective equipment for frontline workers. Real-time AI detection catches violations immediately, preventing injuries and fatalities from falling debris, collisions, and falls.
+| Setting | Controls | Typical effect | Does not control |
+| --- | --- | --- | --- |
+| Detection area | The spatial region in the frame | Whether a target enters the area to be analyzed | Model confidence |
+| Detection parameters | Model thresholds, duration, counts, and deduplication | Which result is accepted and when an event is formed | Which days and hours the task runs |
+| Running strategy | Task schedule | Whether the task runs at the current time | Recognition output |
 
-**Scenario**: Monitor a construction site entrance, detect workers not wearing hard hats, and trigger automatic alarms.
+These layers also define the diagnostic order. A correctly playing video can still produce no alarm
+because the area misses the target, the schedule excludes the current time, or an alarm condition has not
+yet been satisfied.
 
-**Features involved**: Video Source → Algorithm Assignment → Detection Region → Parameter Tuning → Live Preview → Alarm Records
+## 2. Complete Example: No Safety Helmet
 
-<!-- Image showing the workflow steps -->
+### 2.1 Select a Channel
 
-![](images/img_01.webp)
+Prepare a playable channel. This example uses the repository asset:
 
-### 1.1 Prepare a Video Channel
-
-1. Download the demo video
-
-   The project provides demo videos. Download link: [github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.0-videos](https://github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.0-videos)
-
-2. **Upload the demo video**
-
-   Click the **Video Sources** menu → **Video Sources** to open the video source page.
-
-   Click the **Add** button to open the Add Channel dialog.
-
-   - Source type: Offline Video
-   - Channel name: Give it a descriptive name, e.g., _Construction Site North Entrance_
-   - Upload video: Upload the demo MP4 file.
-
-   Click **Save** to create a new video channel.
-
-<!-- Screenshot of creating a video channel -->
-
-![](images/img_02.webp)
-
-### 1.2 Assign an Algorithm to the Channel
-
-Bind the **Hard Hat Detection** algorithm to the video channel so the system begins analyzing the feed.
-
-1. Assign the algorithm to the channel
-
-   Click **Scenario Task Assignment** to open the algorithm configuration page.
-
-<!-- Screenshot of task assignment -->
-
-![](images/img_03.webp)
-
-2. Select the **No Hard Hat** algorithm
-
-   Under **All Services**, find **No Hard Hat** and click to select it.
-
-<!-- Screenshot of algorithm selection -->
-
-![](images/img_04.webp)
-
-:::info
-**Additional note**
-:::
-
-The No Hard Hat algorithm's business logic can be found under **Task Configuration** → **Scenario Tasks**.
-
-<!-- Screenshot of scenario tasks page -->
-
-![](images/img_05.webp)
-
-Click **Pipeline Orchestration** to view the detailed business logic.
-
-<!-- Screenshot of pipeline orchestration -->
-
-![](images/img_06.webp)
-
-The business logic flows roughly as follows:
-
-1. **Video Decode**: Decode the incoming video stream.
-2. **Object Detection**: Use a pedestrian detection model to locate people.
-3. **Tracking**: Track each person across frames to maintain consistent identity.
-4. **Category Filter**: Filter out non-relevant object classes (if the detection model outputs multiple categories).
-5. **Classification**: Run a hard hat classifier on each detected person.
-6. **Sensitivity Calculation**: Apply alarm tolerance — instead of triggering on a single frame, require multiple consecutive detections above a hit-rate threshold.
-7. **Event Reporting**: Report the alarm event.
-
-Different business scenarios have different priorities: some emphasize accuracy (minimizing false positives), while others emphasize responsiveness (triggering alarms as quickly as possible). By tuning the parameters within the pipeline, you can flexibly adjust the logic without modifying any code — one of this project's key strengths.
-
-### 1.3 Configure the Detection Region
-
-By default, the algorithm analyzes the **entire frame**. By setting up a Region of Interest (ROI), you can restrict analysis to **specific areas**, reducing false positives from irrelevant parts of the scene.
-
-1. Add a detection region
-
-   Click **Add Region** to create a monitoring zone.
-
-<!-- Screenshot of add region button -->
-
-![](images/img_07.webp)
-
-Set the region name.
-
-<!-- Screenshot of region name input -->
-
-![](images/img_08.webp)
-
-A six-sided adjustable detection region will appear over the video feed.
-
-<!-- Screenshot of default region shape -->
-
-![](images/img_09.webp)
-
-2. Adjust the region
-
-   Drag the region and its control points to fit the area of interest.
-
-<!-- Screenshot of adjusted region -->
-
-![](images/img_10.webp)
-
----
-
-> **💡 Detection Region Tips**
->
-> - **Up to 4 independent regions** are supported.
-> - **Don't make regions too small** — ensure that target personnel have enough pixel area within the region.
-> - **If there are fixed sources of interference** (like a safety poster featuring a hard hat), use regions to exclude them.
-
-Only people **inside** the region will be checked for hard hat compliance. People outside the region are ignored, which significantly reduces false alarms and saves compute resources.
-
-### 1.4 Tune Key Parameters
-
-Open the algorithm's parameter configuration to adjust detection behavior for your specific scenario.
-
-1. Switch to the **Parameter Configuration** tab.
-
-<!-- Screenshot of parameter tab -->
-
-![](images/img_11.webp)
-
-Here are the most commonly tuned parameters:
-
-| Parameter                     | Description                                                | Purpose                                                    | Default | Tuning Advice                                                                           |
-| ----------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- | :-----: | --------------------------------------------------------------------------------------- |
-| **Alarm Interval**            | Minimum interval between consecutive alarms (seconds)      | Controls re-alarm frequency for the same ongoing violation | 60 sec  | Set low (e.g., 10 sec) for demos; set high (60–120 sec) in production to avoid overload |
-| **Alarm Count**               | Maximum number of alarms per alarm type                    | Precisely controls total alarm output                      |    1    |                                                                                         |
-| **Static Object Dedup**       | Whether to filter long-stationary targets                  | Prevents repeated alarms on fixed objects                  |   Off   | Enable if there are static distractors (e.g., posters showing people)                   |
-| **Pedestrian Detection Mode** | Defines which part of the bounding box triggers zone entry | Allows flexible entry-point selection                      |         |                                                                                         |
-
-2. Configure the runtime strategy.
-
-<!-- Screenshot of runtime strategy -->
-
-![](images/img_12.webp)
-
-3. Save.
-
-<!-- Screenshot of save -->
-
-![](images/img_13.webp)
-
-Parameter settings overview:
-
-1. Alarm count set to 0 = unlimited alarms.
-2. Static object dedup enabled = stationary objects won't trigger repeated alarms.
-3. Sensitivity set to 3 = within a 10-frame window, 3 hits of "no hard hat" are required before triggering an alarm.
-4. Minimum pedestrian size set to 60 = pedestrians smaller than 60×60 pixels are discarded.
-
-> **Verification method:**
->
-> - **Change the alarm interval from 60 seconds to 10 seconds.**
-> - **Go to Live Preview and watch whether the same hatless person triggers an alarm every 10 seconds.**
-> - **Once confirmed, revert to the recommended production value.**
-
-Saving also starts the service.
-
-<!-- Screenshot of service starting -->
-
-![](images/img_14.webp)
-
-### 1.5 Algorithm Visualization
-
-Real-time visualization makes the entire business workflow clearly visible.
-
-1. Click **Live Preview** to enter the visualization page.
-
-<!-- Screenshot of live preview -->
-
-![](images/img_15.webp)
-
-Click **Channel Selection** and choose the configured channel.
-
-<!-- Screenshot of channel list -->
-
-![](images/img_16.webp)
-
-<!-- Screenshot of channel selected -->
-
-![](images/img_17.webp)
-
-By default, no algorithm overlay is active. You can manually enable visualization overlays for different algorithms.
-
-<!-- Screenshot of overlay toggle -->
-
-![](images/img_18.webp)
-
-Select the **No Hard Hat** algorithm.
-
-<!-- Screenshot of no hard hat selected -->
-
-![](images/img_19.webp)
-
-View the algorithm visualization.
-
-<!-- Screenshot of visualization -->
-
-![](images/img_20.webp)
-
-Visualization elements:
-
-1. **Prediction boxes**: Detection model bounding boxes rendered on screen.
-2. **Detection region**: Visual boundary of the configured ROI.
-3. **Pipeline timing** (upper left): Per-component latency breakdown for performance monitoring.
-4. **Alarm info** (upper right): Alarm notifications appear here.
-
-**When a person without a hard hat enters:**
-
-<!-- Screenshot of hatless detection -->
-
-![](images/img_21.webp)
-
-Classification only runs when a person enters the detection region. Each detected pedestrian is classified for hard hat status, with class labels and confidence scores overlaid:
-
-1. `pedHelmet`: Helmet
-2. `pedSafeHelmet`: Safety hard hat
-3. `normalHat`: Regular hat
-4. `hatless`: No hat
-5. `unsure`: Uncertain
-
-Here, `hatless` shows a confidence of 1.0, and an ALARM ID 178 notification appears in the upper right.
-
-**Alarm popup:**
-
-<!-- Screenshot of alarm popup -->
-
-![](images/img_22.webp)
-
-You can toggle this popup on/off via the settings icon in the upper left.
-
-<!-- Screenshot of popup toggle -->
-
-![](images/img_23.webp)
-
-**When a person wearing a hard hat enters:**
-
-<!-- Screenshot of hard hat detection -->
-
-![](images/img_24.webp)
-
-When `pedSafeHelmet` confidence exceeds the threshold, no alarm is triggered.
-
-### 1.6 View and Export Alarms
-
-Alarm data isn't just displayed in real time — more importantly, it's recorded as persistent alarm events.
-
-1. Click **Event Center** → **Detection/Analysis**.
-
-   Open the alarm records page to view all generated alarms.
-
-<!-- Screenshot of alarm records -->
-
-![](images/img_25.webp)
-
-2. Use filters to locate specific alarms:
-   - **Channel name**: Select the channel you just configured.
-   - **Alarm type**: Select "No Hard Hat."
-   - **Time range**: Select today.
-   - **Status**: Not uploaded.
-
-<!-- Screenshot of filtered results -->
-
-![](images/img_26.webp)
-
-3. Click an alarm's **snapshot** to view the full frame captured at the moment the alarm was triggered.
-
-<!-- Screenshot of alarm snapshot -->
-
-![](images/img_27.webp)
-
-4. To export data, click the **Data Export** button in the upper right.
-
-<!-- Screenshot of data export -->
-
-![](images/img_28.webp)
-
-The exported CSV file:
-
-<!-- Screenshot of CSV output -->
-
-![](images/img_29.webp)
-
-**You've now completed a full hard hat detection scenario.** Here's a recap of the workflow:
-
-```plain
-Video Source (prepare video feed)
-    ↓
-Service Assignment (bind "Hard Hat Detection" algorithm)
-    ↓
-Draw Detection Region (define the area of interest)
-    ↓
-Parameter Tuning (alarm interval / sensitivity)
-    ↓
-Live Preview (verify detection results)
-    ↓
-Event Query (review historical alarms)
+```text
+data/test-video/Safety Helmet.mp4
 ```
 
-## Chapter 2: Absence Detection (Self-Guided Practice)
+If necessary, add it as an **Offline Video** under **Video Access**. Verify playback before configuring an
+algorithm so that video and inference failures are not mixed together.
 
-> **Background**: Traditional supervisors can't watch every workstation 24/7 — there are always gaps between patrol rounds. AI-powered absence monitoring continuously tracks whether personnel are at their stations and instantly alerts when a post is unattended.
->
-> **Scenario**: Monitor a duty station. When personnel leave the designated area for longer than a set threshold, trigger an automatic alarm.
-> **Key difference from hard hat detection**: This isn't just "detected = alarm." It's "continuously absent for a period of time = alarm" — introducing **time-based judgment logic**.
+### 2.2 Select the Algorithm
 
-This chapter omits step-by-step screenshots. Follow the same workflow from Chapter 1 on your own:
+1. Select **Allocate Task** for the channel.
+2. Select **No Safety Helmet** from the available services.
+3. Confirm that it appears among the selected services.
 
-### 2.1 Configuration Workflow
+![Opening scenario task assignment from a video channel](images/img_03.webp)
 
-Follow the same path as Chapter 1:
+![Selecting the No Safety Helmet task from the available services](images/img_04.webp)
 
-1. **Prepare a video channel** — Download the demo video.
-2. **Assign an algorithm** — Select the **Absence Detection** algorithm.
-3. **Configure the detection region** — Draw a region around the area that must be staffed (e.g., a front desk or guard post).
+Expected state: the selected algorithm is visible and the Detection Area, Parameter Settings, and Running
+Strategy tabs are available.
 
-> **💡 Key difference from the hard hat scenario** — the region means something different:
->
-> - Hard hat scenario: Region = **only check for hard hats here**
-> - Absence scenario: Region = **someone must be here** — alarm if nobody is present
+### 2.3 Draw the Detection Area
 
-### 2.2 Key Parameter Differences
+1. Open **Detection Area**.
+2. Select **Add Area** and enter a business-specific name such as “North entrance work zone”.
+3. Drag the polygon vertices over the area where helmets are required.
+4. Save the area.
 
-Absence detection has different core parameters than hard hat detection. Focus on these:
+![Adding and naming a detection area](images/img_07.webp)
 
-| Parameter                                                               | Meaning                                         | Recommended Value | Notes                                                          |
-| ----------------------------------------------------------------------- | ----------------------------------------------- | :---------------: | -------------------------------------------------------------- |
-| **Absence Time Threshold** (how long before an alarm triggers, seconds) | Prevents false alarms from brief absences       |    60–180 sec     | Strict posts = shorter; flexible posts = longer                |
-| **Alarm Interval**                                                      | Same as the hard hat scenario                   |      300 sec      | Absence is a continuous state — no need for frequent re-alarms |
-| **Person Count Threshold**                                              | Minimum number of people required in the region |         1         | Set to 2 for dual-staffed positions                            |
+![Adjusting the polygon to cover the actual work zone](images/img_10.webp)
 
-> **⚠️ If parameter names don't exactly match the table above**
-> Some parameters currently use technical names. Match them by value type and position.
-> Display names will be standardized in a future update.
+Cover the full worker movement area, while excluding posters, reflective displays, and public roads where
+possible. During initial debugging, use a slightly larger area; tighten it after the task works.
 
-### 2.3 Verification
+### 2.4 Set Parameters
 
-After configuration, verify the following:
+Open **Parameter Settings**. The following names come from the current **No Safety Helmet** resource
+template. Other algorithms or versions may expose different fields, so use the labels shown by the current
+console.
 
-- [ ] Person present in the station area: **No alarm**
-- [ ] Person leaves the area, **after the configured threshold**: Absence alarm triggers
-- [ ] Person returns to the area: Alarm stops; event record status updates
-- [ ] Open **Event Query** and confirm absence alarm records appear
+| Current parameter name | Default | What it controls | Tuning guidance |
+| --- | ---: | --- | --- |
+| Safety Helmet Confidence | Template configuration | The classification score accepted as a safety-helmet result | Raise gradually for false positives; lower cautiously for missed targets |
+| Alarm Interval (sec) | 60 | Minimum time between consecutive events | Shorten for a demo; avoid alert flooding in production |
+| Alarm Count | 1 | Number of events allowed for the same alarm type; `0` means unlimited | Match the operational response process |
+| Stationary Target Deduplication | Off | Whether repeated events from a stationary target are suppressed | Enable for repeated events caused by fixed images or posters |
+| Stationary Target Overlap Rate | 0.2 | Overlap used to decide whether a stationary target is the same one | Tune only when stationary deduplication is enabled |
+| Stationary Target Dedup Time (hr) | 6 | Period during which the same stationary target is suppressed | Match the on-site response cycle |
+| Pedestrian Detection Method | Bottom | Uses the bottom, center, or top of a box to test region membership | Ground-plane regions usually use Bottom |
+| Min Pedestrian Size | 60 | Targets smaller than this do not enter later stages | Lowering can recover distant people but increases noise and load |
+| Sensitivity | 2 | Required hit strength across consecutive decisions | Keep the default first, then tune with positive and negative samples |
+| Detection Time (sec) | 3 | How long the condition must persist before an event | Increase to suppress transient false positives |
 
-**If all checks pass — congratulations! You've now mastered two distinct scenario configuration patterns.**
+![Parameter Settings for the No Safety Helmet task](images/img_11.webp)
 
-## Chapter 3: Quick Reference for All Scenarios
+Change one parameter per test round and record the input video, old value, new value, and result. Changing
+several values together makes the outcome impossible to attribute.
 
-Below are all 18 built-in AI algorithm scenario tasks. Their configuration workflow is **identical to the first two chapters** (Video Source → Service Assignment → Detection Region → Parameter Tuning). The only differences are in **applicable scenarios and key parameters**.
+### 2.5 Set the Running Strategy
 
-The 18 algorithms fall into six categories: Construction Safety, Smart Office, Fire Safety, Community / Campus Security, Passenger Flow Counting, and Face Recognition.
+Open **Running Strategy** and select the days and time periods when the task should run. During the first
+verification, include the current date and time.
 
-### Construction Safety
+![Setting the active days and time periods for a scenario task](images/img_12.webp)
 
-| Algorithm          | Detection Target    | Alarm Condition                 | Key Parameters              |
-| ------------------ | ------------------- | ------------------------------- | --------------------------- |
-| No Helmet          | Person's head       | No hard hat detected            | Alarm interval, alarm count |
-| No Reflective Vest | Person's upper body | No reflective vest detected     | Same as above               |
-| No Work Clothes    | Person's upper body | No work uniform detected        | Same as above               |
-| Area Intrusion     | People              | Person enters a restricted zone | Region config (required)    |
+Save the task. Return to Video Access and confirm that the channel's running switch is enabled.
 
-### Smart Office
+![Saving the scenario task and starting analysis](images/img_14.webp)
 
-| Algorithm        | Detection Target      | Alarm Condition                           | Key Parameters                       |
-| ---------------- | --------------------- | ----------------------------------------- | ------------------------------------ |
-| Sleeping on Duty | Body posture          | Detected sleeping on desk / head down     | Duration threshold                   |
-| Leave Post       | Personnel presence    | Designated area unattended past threshold | Absence time, person count threshold |
-| Phone Use        | Hand activity         | Detected using a phone                    | Alarm interval                       |
-| Making a Call    | Hand activity         | Detected making a phone call              | Alarm interval                       |
-| Smoking          | Person / smoke & fire | Detected smoking behavior                 | Sensitivity, alarm interval          |
+### 2.6 Verify the Result
 
-### Fire Safety
+Check detection first, then alarms:
 
-| Algorithm | Detection Target | Alarm Condition         | Key Parameters |
-| --------- | ---------------- | ----------------------- | -------------- |
-| Smoke     | Smoke            | Abnormal smoke detected | Sensitivity    |
-| Flame     | Open flame       | Flame detected          | Sensitivity    |
+1. Open **Live Display**, select the channel, and enable the **No Safety Helmet** overlay.
+2. Confirm continuous playback, the correct area position, and classification output after a person enters.
+3. Play a segment containing a person without a helmet and wait longer than **Detection Time (seconds)**.
+4. Open **Event Center → Detection / Analysis**.
+5. Filter by channel, task, and time; inspect the snapshot against the target, area, and timestamp.
 
-### Community / Campus Security
+![No Safety Helmet output and an event indication in Live Display](images/img_21.webp)
 
-| Algorithm       | Detection Target     | Alarm Condition                             | Key Parameters                        |
-| --------------- | -------------------- | ------------------------------------------- | ------------------------------------- |
-| Person Fall     | Body posture         | Fall detected                               | Duration (to distinguish squatting)   |
-| Crowd           | Area person density  | Person count in area exceeds threshold      | Person count threshold, duration      |
-| Illegal Parking | Vehicles             | Vehicle stays in no-parking zone past limit | Region config, dwell time             |
-| Tripwire        | People / vehicles    | Crosses a configured tripwire               | Tripwire config, direction            |
-| Area Headcount  | Person count in area | Area headcount / over-threshold alarm       | Region config, person count threshold |
+![Filtering alarm records by channel and time in Event Center](images/img_25.webp)
 
-### Passenger Flow Counting
+The acceptance record should include:
 
-| Algorithm      | Detection Target | Output                  | Key Parameters           |
-| -------------- | ---------------- | ----------------------- | ------------------------ |
-| Passenger Flow | People           | Entry/exit count totals | Line position, direction |
+- channel and algorithm names;
+- a detection-area screenshot;
+- every non-default parameter used;
+- the running strategy;
+- one positive-sample event and one negative segment that should not alarm.
 
-### Face Recognition
+## 3. Parameter Example: Post Absence Detection
 
-| Algorithm        | Detection Target | Output                    | Key Parameters                       |
-| ---------------- | ---------------- | ------------------------- | ------------------------------------ |
-| Face Recognition | Faces            | Identity matching results | Gallery config, similarity threshold |
+Post Absence Detection is not configured by inventing a generic “people threshold” and “absence time”.
+The current template exposes these exact fields:
 
-> **💡 Choosing the Right Algorithm**
->
-> - You don't need to configure all algorithms at once. **Start with 1–2 scenarios most relevant to your business** and run through the full workflow.
-> - For detailed parameter documentation, see the Reference Manual — Parameter Guide.
-> - If none of the 18 algorithms cover your use case, check out the VLM Visual State Judgment Guide (Volume 3) — VLM lets you define new detection rules by writing a single sentence, no model training required.
+| Current parameter name | Default | Meaning |
+| --- | ---: | --- |
+| Target Count in Region | 1 | Target count used by the comparison rule |
+| Region Target Count Limit Type | Alarm when below target count | Whether below, equal to, or above the count satisfies the rule |
+| Detection Time | 10 | Duration for which the count condition must persist |
+| Detection Time Unit | Seconds | Unit combined with Detection Time |
+| Alarm Interval (sec) | 60 | Minimum interval between consecutive events |
+| Stationary Target Deduplication | Off | Whether repeated stationary-target events are suppressed |
 
----
+To detect “fewer than one person in the post area for 10 seconds”, use
+**Target Count in Region = 1**, **Region Target Count Limit Type = Alarm when below target count**,
+**Detection Time = 10**, and **Detection Time Unit = Seconds**. Then:
 
-### What's Next
+1. Use a staffed segment as a negative sample; it must not create an absence event.
+2. Use a segment where the area is empty for more than 10 seconds as a positive sample.
+3. Verify that the snapshot area and timestamp match the expected interval.
 
-| Goal                                                                  | Read                                         |
-| --------------------------------------------------------------------- | -------------------------------------------- |
-| Use VLM to define entirely new detection rules with a single sentence | → VLM Visual State Judgment Guide (Volume 3) |
-| Look up parameter details or troubleshoot issues                      | → Reference Manual                           |
+Positive and negative samples prove that the configuration is active more reliably than a “Saved”
+notification.
+
+## 4. How to Prove the Configuration Is Active
+
+Verify four layers in order:
+
+1. **Persistence**: leave and reopen the page; the area, parameters, and strategy retain the saved values.
+2. **Runtime**: the channel switch is enabled and the current time is included by the strategy.
+3. **Detection**: Live Display shows the expected target, area, and class output.
+4. **Event**: a positive sample creates an event, a negative sample does not, and the snapshot is explainable.
+
+A successful save does not prove that inference is running. A bounding box alone does not prove that the
+alarm rule is correct.
+
+## 5. Troubleshooting Order
+
+### The Configuration Cannot Be Saved or Does Not Persist
+
+1. Check for required-field, unfinished-area, or parameter-range messages.
+2. Retry with one minimal area and default parameters.
+3. Reopen the page to confirm persistence.
+4. Inspect the browser network request and backend logs for the save API error.
+
+### There Is No Detection or Alarm
+
+Do not lower every threshold first. Check in this order:
+
+1. The video plays.
+2. The channel is associated with the algorithm and its running switch is enabled.
+3. The current time is included by the running strategy.
+4. The target enters the area, using the selected pedestrian box position.
+5. Live Display already has a detection result.
+6. The positive sample lasts long enough to satisfy detection time and sensitivity.
+7. Alarm interval, alarm count, or stationary-target deduplication is not suppressing the event.
+8. Only then tune confidence and minimum target size using known samples.
+
+### There Are Too Many False Positives
+
+1. Use the event snapshot to classify the cause: out-of-area target, wrong class, or transient result.
+2. Tighten the area or change the pedestrian box position first.
+3. Enable stationary-target deduplication for fixed interference.
+4. Then raise the relevant confidence, sensitivity, or detection duration incrementally.
+5. Change one item at a time and replay the same positive and negative sample set.
+
+If area, rule, and threshold tuning still cannot meet the requirement, a better-matched algorithm or model
+may be needed.
+
+## Next Step
+
+Read [VLM and DINO](../03-vlm-guide/vlm-guide.md) to decide which long-tail tasks can be defined in
+natural language and which still need a conventional detector.
