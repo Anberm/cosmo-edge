@@ -49,4 +49,14 @@ StorageResourceBudget InspectStorageResourceBudget(const std::string& path, std:
     return result;
 }
 
+std::uint64_t UsableStorageBytesAfterReclaim(const StorageResourceBudget& budget,
+                                             std::uint64_t reclaimable_bytes) {
+    if (!budget.valid) {
+        return 0;
+    }
+    const auto max_value = std::numeric_limits<std::uint64_t>::max();
+    return reclaimable_bytes > max_value - budget.usable_bytes ? max_value
+                                                               : budget.usable_bytes + reclaimable_bytes;
+}
+
 }  // namespace cosmo::util

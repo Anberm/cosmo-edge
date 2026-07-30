@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <limits>
 
 #include "catch_amalgamated.hpp"
 #include "util/ResourceBudget.h"
@@ -16,4 +17,23 @@ TEST_CASE("Storage resource budget is derived from the target filesystem", "[res
         std::filesystem::temp_directory_path().string(), budget.available_bytes, 0);
     REQUIRE(reserved.valid);
     CHECK(reserved.usable_bytes == 0);
+}
+
+TEST_CASE("Storage resource budget defaults match upload admission policy", "[resource][storage]") {
+    CHECK(cosmo::util::kDefaultStorageReserveBytes == 512ULL * 1024 * 1024);
+    CHECK(cosmo::util::kDefaultStorageReservePercent == 0);
+}
+
+TEST_CASE("Reclaimable storage extends usable budget safely", "[resource][storage]") {
+    cosmo::util::StorageResourceBudget budget;
+    budget.valid        = true;
+    budget.usable_bytes = 100;
+    CHECK(cosmo::util::UsableStorageBytesAfterReclaim(budget, 25) == 125);
+
+    budget.usable_bytes = std::numeric_limits<std::uint64_t>::max() - 5;
+    CHECK(cosmo::util::UsableStorageBytesAfterReclaim(budget, 10) ==
+          std::numeric_limits<std::uint64_t>::max());
+
+    budget.valid = false;
+    CHECK(cosmo::util::UsableStorageBytesAfterReclaim(budget, 25) == 0);
 }
