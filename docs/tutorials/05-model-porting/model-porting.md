@@ -130,28 +130,14 @@ sha256sum yolov8n.onnx
 
 ### 2.2 转换前检查
 
-使用 ONNX checker 和 ONNX Runtime 完成一次零输入加载与推理：
+在仓库根目录使用统一检查脚本，让 ONNX checker 和 ONNX Runtime 完成一次零输入加载与推理：
 
 ```bash
-python - <<'PY'
-import numpy as np
-import onnx
-import onnxruntime as ort
-
-path = "yolov8n.onnx"
-model = onnx.load(path)
-onnx.checker.check_model(model)
-
-session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
-print("inputs:", [(x.name, x.shape, x.type) for x in session.get_inputs()])
-print("outputs:", [(x.name, x.shape, x.type) for x in session.get_outputs()])
-
-input_meta = session.get_inputs()[0]
-sample = np.zeros((1, 3, 640, 640), dtype=np.float32)
-outputs = session.run(None, {input_meta.name: sample})
-print("runtime output shapes:", [x.shape for x in outputs])
-PY
+python tools/check_onnx_model.py yolov8n.onnx
 ```
+
+动态输入可重复传入 `--shape images=1,3,640,640`；需要机器可读记录时使用
+`--json <输出路径>`。脚本会记录实际依赖版本和模型 SHA-256，不保存推理张量。
 
 通过标准：
 
@@ -194,6 +180,11 @@ PY
 ## 3. Sophon 路径：把同一 ONNX 转为 bmodel
 
 仅在目标设备为 Sophon 时执行本节。转换工具版本、目标芯片和模型候选必须一起记录。
+
+如果把任务交给编码智能体，先阅读[智能体辅助二次开发](/development/agent-assisted-development)。
+智能体应先生成本次运行的任务契约并执行 `scripts/agent/doctor.sh`；环境满足后，推荐通过
+`scripts/agent/convert_model.sh` 和 `scripts/agent/verify.sh` 留下工具链、命令、哈希与
+分层证据。不要手工编造任务契约或实例记录。下面的命令仍保留为人工执行和排障参考。
 
 下面是仓库现有参考工具链的 F16 示例：
 
@@ -239,6 +230,10 @@ CV186X 必须使用支持该芯片的工具链和芯片参数，不能把 BM1688
 - 工具提供的模型信息检查；
 - 同一张图片在源框架、ONNX 和目标设备上的框、类别与分数对比；
 - F16 或量化造成的精度差异。
+
+智能体执行路径会把这些结果写入当前运行的 `execution-manifest.json` 和 `evidence.md`。
+只有使用固定工具链完成两次真实录制并通过张量比对，记录才可进入仓库的已验证实例索引；
+普通候选可以按自己的任务目标交付，但不得借用其他实例的固定形状或哈希宣称成功。
 
 ![Sophon 添加模型页面要求选择 bmodel 文件](images/img_15.webp)
 

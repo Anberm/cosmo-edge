@@ -132,28 +132,15 @@ same name but different hashes are different model candidates.
 
 ### 2.2 Pre-Conversion Checks
 
-Run ONNX checker and one zero-input inference:
+From the repository root, run the shared checker for ONNX validation and one zero-input inference:
 
 ```bash
-python - <<'PY'
-import numpy as np
-import onnx
-import onnxruntime as ort
-
-path = "yolov8n.onnx"
-model = onnx.load(path)
-onnx.checker.check_model(model)
-
-session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
-print("inputs:", [(x.name, x.shape, x.type) for x in session.get_inputs()])
-print("outputs:", [(x.name, x.shape, x.type) for x in session.get_outputs()])
-
-input_meta = session.get_inputs()[0]
-sample = np.zeros((1, 3, 640, 640), dtype=np.float32)
-outputs = session.run(None, {input_meta.name: sample})
-print("runtime output shapes:", [x.shape for x in outputs])
-PY
+python tools/check_onnx_model.py yolov8n.onnx
 ```
+
+For dynamic inputs, repeat `--shape images=1,3,640,640`. Add `--json <output-path>` for a
+machine-readable record. The script records dependency versions and the model SHA-256 without saving
+inference tensors.
 
 Pass criteria:
 
@@ -197,6 +184,13 @@ not use the expected raw YOLOv8 layout, or has a different label count.
 
 Run this section only for a Sophon target. Record the conversion tool version, target chip, and model
 candidate together.
+
+When delegating the task to a coding agent, first read
+[Agent-Assisted Development](/en/development/agent-assisted-development). The agent should generate the
+run-local task contract and run `scripts/agent/doctor.sh`. Once admitted, the recommended path is
+`scripts/agent/convert_model.sh` followed by `scripts/agent/verify.sh`, which records the toolchain,
+commands, hashes, and layered evidence. Do not handcraft task contracts or example records. The manual
+commands below remain useful for direct execution and troubleshooting.
 
 The repository's existing F16 reference toolchain uses:
 
@@ -243,6 +237,11 @@ Post-conversion evidence must include:
 - model inspection with the conversion tool;
 - box, class, and score comparison across the source framework, ONNX, and target device on the same image;
 - any F16 or quantization accuracy difference.
+
+The agent path writes these results to the current run's `execution-manifest.json` and `evidence.md`.
+An entry can join the verified-example index only after two real recordings with a fixed toolchain and
+passing tensor comparison. A normal candidate can still be delivered against its own task acceptance,
+but it must not borrow another example's fixed shapes or hashes as proof.
 
 ![The Sophon Add Model page requiring a bmodel file](images/img_15.webp)
 
