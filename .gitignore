@@ -6,6 +6,13 @@
 .claude
 /.codex/
 /.agents/skills/
+
+# Local Codex-generated artifacts
+/.codex-tmp/
+/artifacts/
+/output/
+/tmp/
+
 CLAUDE.md
 AGENTS.md
 build
