@@ -21,7 +21,6 @@ import agent_workflow as core
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-IMAGE_REFERENCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]+$")
 TOLERANCE_PATTERN = re.compile(r"^(?:0(?:\.\d+)?|1(?:\.0+)?),(?:0(?:\.\d+)?|1(?:\.0+)?)$")
 
 
@@ -76,9 +75,12 @@ def conversion_parameters(contract: dict[str, Any], run_dir: Path) -> dict[str, 
     output_shapes = params.get("expectedOutputShapes", [])
     if output_shapes:
         output_shapes = _validate_shapes(output_shapes, "parameters.expectedOutputShapes")
-    image = _require_string(params.get("toolchainImage"), "parameters.toolchainImage")
-    if not IMAGE_REFERENCE_PATTERN.fullmatch(image) or "://" in image:
-        raise core.WorkflowError("parameters.toolchainImage is not a safe Docker image reference")
+    toolchain_spec, toolchain_error = core._toolchain_spec(params)
+    if not toolchain_spec:
+        raise core.WorkflowError(toolchain_error)
+    preflight = params.get("preflight", {})
+    if not isinstance(preflight, dict):
+        raise core.WorkflowError("parameters.preflight must be an object")
     tolerance = params.get("tensorTolerance")
     if tolerance is not None:
         tolerance = _require_string(tolerance, "parameters.tensorTolerance")
@@ -95,9 +97,14 @@ def conversion_parameters(contract: dict[str, Any], run_dir: Path) -> dict[str, 
         "pixelFormat": pixel_format,
         "inputShapes": input_shapes,
         "expectedOutputShapes": output_shapes,
-        "toolchainImage": image,
+        "toolchainSpec": toolchain_spec,
         "tensorTolerance": tolerance,
-        "pythonExecutable": str(params.get("pythonExecutable", "python3")),
+        "pythonExecutable": str(
+            preflight.get(
+                "pythonExecutable",
+                params.get("pythonExecutable", "python3"),
+            )
+        ),
         "modelFamily": str(params.get("modelFamily", "unspecified")),
         "sourceUrl": str(params.get("sourceUrl", "")),
         "recordedBy": str(params.get("recordedBy", "")),
@@ -129,7 +136,7 @@ def _read_environment_report(
             )
     toolchain = report.get("toolchain")
     if not isinstance(toolchain, dict) or not toolchain.get("id"):
-        raise core.WorkflowError("environment report does not freeze a toolchain image identity")
+        raise core.WorkflowError("environment report does not freeze a complete toolchain identity")
     return report
 
 
@@ -224,42 +231,49 @@ def _docker_base(run_dir: Path, image_id: str, entrypoint: str) -> list[str]:
     ]
 
 
-def _detect_container_tool(
-    names: list[str],
+def _runtime_path(path: Path, run_dir: Path, toolchain: dict[str, Any]) -> str:
+    if toolchain.get("kind") == "container-image":
+        return _container_path(path, run_dir)
+    return str(path.resolve())
+
+
+def _tool_command(
+    toolchain: dict[str, Any],
+    tool_key: str,
+    arguments: list[str],
     *,
     run_dir: Path,
-    image_id: str,
-    log_path: Path,
-    commands: list[str],
-) -> str | None:
-    expression = " || ".join(f"command -v {name}" for name in names)
-    command = _docker_base(run_dir, image_id, "sh") + ["-lc", expression]
-    process = _run_logged(
-        command,
-        cwd=PROJECT_ROOT,
-        log_path=log_path,
-        commands=commands,
-        run_dir=run_dir,
-        timeout=60,
-    )
-    if process.returncode != 0:
-        return None
-    candidate = next((line.strip() for line in process.stdout.splitlines() if line.strip()), "")
-    if not re.fullmatch(r"/[A-Za-z0-9_./+-]+", candidate):
-        raise core.WorkflowError(f"container returned an unsafe executable path: {candidate!r}")
-    return candidate
+) -> list[str]:
+    entry = toolchain.get("tools", {}).get(tool_key)
+    if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+        raise core.WorkflowError(f"admitted toolchain has no {tool_key} command")
+    python_executable = str(toolchain.get("pythonExecutable", ""))
+    if not python_executable:
+        raise core.WorkflowError("admitted toolchain has no Python executable")
+    command = [python_executable, entry["path"], *arguments]
+    if toolchain.get("kind") == "python-package":
+        return command
+    if toolchain.get("kind") == "container-image":
+        image_id = toolchain.get("image", {}).get("id")
+        if not isinstance(image_id, str) or not image_id:
+            raise core.WorkflowError("admitted container toolchain has no image identity")
+        return _docker_base(run_dir, image_id, python_executable) + [
+            entry["path"],
+            *arguments,
+        ]
+    raise core.WorkflowError("admitted toolchain kind is unsupported")
 
 
 def _tool_help(
-    tool: str,
+    toolchain: dict[str, Any],
+    tool_key: str,
     *,
     run_dir: Path,
-    image_id: str,
     log_path: Path,
     commands: list[str],
 ) -> str:
     process = _run_logged(
-        _docker_base(run_dir, image_id, tool) + ["--help"],
+        _tool_command(toolchain, tool_key, ["--help"], run_dir=run_dir),
         cwd=PROJECT_ROOT,
         log_path=log_path,
         commands=commands,
@@ -363,16 +377,14 @@ def execute_conversion(
     parameters = conversion_parameters(contract, run_dir)
     environment = _read_environment_report(contract_path, run_dir, contract)
     selection = _read_asset_selection(run_dir)
-    requested_image = parameters["toolchainImage"]
     admitted_toolchain = environment["toolchain"]
-    if admitted_toolchain.get("reference") != requested_image:
-        raise core.WorkflowError("toolchain image differs from the admitted task contract")
-    current_toolchain, image_error = core._docker_image_identity(requested_image)
+    current_toolchain, toolchain_error = core.inspect_toolchain(parameters["toolchainSpec"])
     if not current_toolchain:
-        raise core.WorkflowError(f"admitted toolchain image is no longer available: {image_error}")
+        raise core.WorkflowError(
+            f"admitted compiler toolchain is no longer available: {toolchain_error}"
+        )
     if current_toolchain.get("id") != admitted_toolchain.get("id"):
-        raise core.WorkflowError("toolchain image identity changed after admission; rerun doctor")
-    image_id = str(current_toolchain["id"])
+        raise core.WorkflowError("toolchain identity changed after admission; rerun doctor")
 
     work_dir = run_dir / "work"
     artifacts_dir = run_dir / "artifacts"
@@ -463,40 +475,17 @@ def execute_conversion(
         }
         core.atomic_write_json(manifest_path, manifest)
 
-        transform_tool = _detect_container_tool(
-            ["model_transform", "model_transform.py"],
-            run_dir=run_dir,
-            image_id=image_id,
-            log_path=logs_dir / "tool-model-transform.log",
-            commands=commands,
-        )
-        deploy_tool = _detect_container_tool(
-            ["model_deploy", "model_deploy.py"],
-            run_dir=run_dir,
-            image_id=image_id,
-            log_path=logs_dir / "tool-model-deploy.log",
-            commands=commands,
-        )
-        if not transform_tool or not deploy_tool:
-            raise ExecutionFailure("toolchain image does not expose model_transform and model_deploy")
-        model_tool = _detect_container_tool(
-            ["model_tool"],
-            run_dir=run_dir,
-            image_id=image_id,
-            log_path=logs_dir / "tool-model-info.log",
-            commands=commands,
-        )
         transform_help = _tool_help(
-            transform_tool,
+            current_toolchain,
+            "modelTransform",
             run_dir=run_dir,
-            image_id=image_id,
             log_path=logs_dir / "tool-model-transform-help.log",
             commands=commands,
         )
         deploy_help = _tool_help(
-            deploy_tool,
+            current_toolchain,
+            "modelDeploy",
             run_dir=run_dir,
-            image_id=image_id,
             log_path=logs_dir / "tool-model-deploy-help.log",
             commands=commands,
         )
@@ -506,12 +495,7 @@ def execute_conversion(
             flag in deploy_help
             for flag in ("--test_input", "--test_reference", "--tolerance")
         )
-        manifest["toolchain"]["tools"] = {
-            "modelTransform": transform_tool,
-            "modelDeploy": deploy_tool,
-            "modelTool": model_tool,
-            "tensorFlagsSupported": tensor_flags_supported,
-        }
+        manifest["toolchain"]["tensorFlagsSupported"] = tensor_flags_supported
 
         test_input_raw = test_input_override or parameters["raw"].get("testInput")
         test_input = (
@@ -525,19 +509,32 @@ def execute_conversion(
         tensor_enabled = bool(
             tensor_requested and tensor_flags_supported and parameters["tensorTolerance"]
         )
-        container_test_input = _container_path(test_input, run_dir) if tensor_enabled else None
-        container_reference = _container_path(reference_path, run_dir) if tensor_enabled else None
+        runtime_test_input = (
+            _runtime_path(test_input, run_dir, current_toolchain)
+            if tensor_enabled and test_input
+            else None
+        )
+        runtime_reference = (
+            _runtime_path(reference_path, run_dir, current_toolchain)
+            if tensor_enabled
+            else None
+        )
 
         transform_args = build_transform_arguments(
             parameters,
-            source_model=_container_path(source_model, run_dir),
-            mlir=_container_path(mlir_path, run_dir),
-            test_input=container_test_input,
-            test_result=container_reference,
+            source_model=_runtime_path(source_model, run_dir, current_toolchain),
+            mlir=_runtime_path(mlir_path, run_dir, current_toolchain),
+            test_input=runtime_test_input,
+            test_result=runtime_reference,
         )
         transform = _run_logged(
-            _docker_base(run_dir, image_id, transform_tool) + transform_args,
-            cwd=PROJECT_ROOT,
+            _tool_command(
+                current_toolchain,
+                "modelTransform",
+                transform_args,
+                run_dir=run_dir,
+            ),
+            cwd=work_dir,
             log_path=logs_dir / "S2-transform.log",
             commands=commands,
             run_dir=run_dir,
@@ -553,14 +550,19 @@ def execute_conversion(
 
         deploy_args = build_deploy_arguments(
             parameters,
-            mlir=_container_path(mlir_path, run_dir),
-            model=_container_path(bmodel_path, run_dir),
-            test_input=container_test_input,
-            test_reference=container_reference,
+            mlir=_runtime_path(mlir_path, run_dir, current_toolchain),
+            model=_runtime_path(bmodel_path, run_dir, current_toolchain),
+            test_input=runtime_test_input,
+            test_reference=runtime_reference,
         )
         deploy = _run_logged(
-            _docker_base(run_dir, image_id, deploy_tool) + deploy_args,
-            cwd=PROJECT_ROOT,
+            _tool_command(
+                current_toolchain,
+                "modelDeploy",
+                deploy_args,
+                run_dir=run_dir,
+            ),
+            cwd=work_dir,
             log_path=logs_dir / "S2-deploy.log",
             commands=commands,
             run_dir=run_dir,
@@ -593,11 +595,18 @@ def execute_conversion(
             ),
         }
 
-        if model_tool:
+        if current_toolchain.get("tools", {}).get("modelTool"):
             model_info = _run_logged(
-                _docker_base(run_dir, image_id, model_tool)
-                + ["--info", _container_path(bmodel_path, run_dir)],
-                cwd=PROJECT_ROOT,
+                _tool_command(
+                    current_toolchain,
+                    "modelTool",
+                    [
+                        "--info",
+                        _runtime_path(bmodel_path, run_dir, current_toolchain),
+                    ],
+                    run_dir=run_dir,
+                ),
+                cwd=work_dir,
                 log_path=logs_dir / "S2-model-info.log",
                 commands=commands,
                 run_dir=run_dir,
@@ -624,7 +633,7 @@ def execute_conversion(
             manifest["stages"]["modelInfo"] = {
                 "status": "UNVERIFIED",
                 "contractMatches": False,
-                "detail": "model_tool is unavailable in the admitted image.",
+                "detail": "model_tool is unavailable in the admitted compiler toolchain.",
             }
 
         manifest["status"] = "COMPLETE"
@@ -655,10 +664,28 @@ def _recording_is_promotion_ready(
     record: dict[str, Any], manifest: dict[str, Any], parameters: dict[str, Any]
 ) -> bool:
     recordings = record.get("recordings", [])
+    toolchain = manifest.get("toolchain", {})
+    package = toolchain.get("package", {})
+    tools = toolchain.get("tools", {})
+    frozen_toolchain = bool(
+        toolchain.get("kind") in core.TOOLCHAIN_KINDS
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", str(toolchain.get("id", "")))
+        and package.get("name")
+        and package.get("version")
+        and re.fullmatch(r"[0-9a-f]{64}", str(package.get("recordSha256", "")))
+        and all(
+            re.fullmatch(r"[0-9a-f]{64}", str(tools.get(key, {}).get("sha256", "")))
+            for key in ("modelTransform", "modelDeploy", "modelTool")
+        )
+        and (
+            toolchain.get("kind") != "container-image"
+            or toolchain.get("image", {}).get("id")
+        )
+    )
     return bool(
         parameters["targetChip"] == "bm1688"
         and parameters["quantization"] == "F16"
-        and parameters["toolchainImage"] == "sophgo/tpuc_dev:v3.2"
+        and frozen_toolchain
         and parameters["sourceUrl"]
         and parameters["recordedBy"]
         and manifest["stages"].get("tensorCompare", {}).get("status") == "PASS"
@@ -713,11 +740,24 @@ def record_example(
         "url": parameters["sourceUrl"],
         "sha256": manifest["source"]["sha256"],
     }
+    manifest_toolchain = manifest["toolchain"]
     toolchain = {
-        "image": parameters["toolchainImage"],
-        "imageId": manifest["toolchain"]["id"],
-        "repoDigests": manifest["toolchain"].get("repoDigests", []),
+        "kind": manifest_toolchain["kind"],
+        "id": manifest_toolchain["id"],
+        "package": {
+            key: manifest_toolchain["package"].get(key)
+            for key in ("name", "version", "recordSha256")
+        },
+        "tools": {
+            key: {"sha256": manifest_toolchain["tools"][key].get("sha256")}
+            for key in ("modelTransform", "modelDeploy", "modelTool")
+        },
     }
+    if manifest_toolchain.get("image"):
+        toolchain["image"] = {
+            key: manifest_toolchain["image"].get(key)
+            for key in ("reference", "id", "repoDigests")
+        }
     if path.exists():
         record = core.load_json(path)
         for field, expected in (

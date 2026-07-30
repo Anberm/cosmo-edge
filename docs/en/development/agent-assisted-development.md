@@ -81,6 +81,14 @@ These are script outputs, not words users must put in a prompt. Code, frontend, 
 a dedicated profile still uses the repository's native build and test commands. Missing a specialized
 profile alone never makes a task unsupported.
 
+A missing item does not automatically mean the customer's machine is unsuitable. The agent must first
+cross-check the current repository instruction, its authoritative upstream source, and the actual command
+entry points. This separates a genuinely missing dependency from a repository instruction that mistakes
+a base environment for a complete toolchain. When a check's `owner` is `repository`, fix the documentation,
+generated contract, or script and rerun validation before asking the customer to install anything. For
+example, `sophgo/tpuc_dev` provides a TPU-MLIR base environment; the conversion path is not `READY` until a
+frozen `tpu_mlir` package and callable compiler commands are also present.
+
 ## Selectable Repository Assets
 
 | Area | Current assets | Boundary |
@@ -123,8 +131,9 @@ For “convert this ONNX detector to an F16 `.bmodel` for BM1688 and return evid
 4. Run `scripts/agent/doctor.sh`. Continue only when the environment passes. The script never pulls an
    image or installs a dependency.
 5. Run `scripts/agent/convert_model.sh`. It calls `tools/check_onnx_model.py`, then invokes
-   `model_transform` and `model_deploy` through the immutable container identity admitted for this run.
-   Generated files do not overwrite existing model resources.
+   `model_transform` and `model_deploy` through the admitted TPU-MLIR package, Python, and command identity.
+   Docker participates only when the task selects a complete-toolchain image. Generated files do not
+   overwrite existing model resources.
 6. Run `scripts/agent/verify.sh` to recheck source and artifact hashes and produce machine-readable
    `evidence.json` plus the readable `evidence.md`.
 

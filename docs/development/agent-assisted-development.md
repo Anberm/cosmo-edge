@@ -70,6 +70,12 @@ Claude Code 或 Copilot。推荐在一台用于开发、并与生产环境隔离
 这些词是脚本输出，用户不需要在任务描述中记忆或填写。没有专用检查配置的普通代码、前端或
 对接任务仍可按仓库原生构建和测试命令完成；不能仅因“没有专项脚本”就判定不支持。
 
+报告中的缺失项也不自动等于“客户机器不合格”。智能体应先核对当前仓库说明、上游官方来源和
+实际命令入口，区分“开发环境确实缺少依赖”和“仓库把基础环境误写成完整工具链”。如果检查项的
+`owner` 是 `repository`，应先修正文档、任务契约或脚本并重跑验证，不得让客户按错误说明安装。
+例如 `sophgo/tpuc_dev` 只提供 TPU-MLIR 所需的基础环境，只有镜像而没有已冻结的
+`tpu_mlir` 包和可调用命令时，模型转换仍不是 `READY`。
+
 ## 仓库中可选择的素材
 
 | 方向 | 当前素材 | 覆盖边界 |
@@ -108,7 +114,8 @@ CosmoEdge 仓库在这种形态下提供接口契约、Mock 服务和验收事�
 3. 把源模型放入当前私有运行目录并生成任务记录；用户不需要手写 Schema。
 4. 运行 `scripts/agent/doctor.sh`。只有环境满足才继续；脚本不会自行拉镜像或安装依赖。
 5. 运行 `scripts/agent/convert_model.sh`。它先执行 `tools/check_onnx_model.py`，再用准入时冻结的
-   容器身份调用 `model_transform` 和 `model_deploy`，产物不写入现有模型资源目录。
+   TPU-MLIR 包、Python 和命令身份调用 `model_transform` 与 `model_deploy`；Docker 仅在任务
+   选择完整工具链镜像时参与，产物不写入现有模型资源目录。
 6. 运行 `scripts/agent/verify.sh`，重新核对候选模型和产物哈希，并生成机器可读的
    `evidence.json` 与一眼可读的 `evidence.md`。
 

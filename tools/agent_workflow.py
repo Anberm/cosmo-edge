@@ -33,6 +33,65 @@ REQUIRED_CONTRACT_FIELDS = (
 ENVIRONMENT_VERDICTS = {"READY", "REPAIRABLE", "NEEDS_ENVIRONMENT", "UNSUPPORTED"}
 CHECK_STATUSES = {"PASS", "FAIL", "BLOCKED", "SKIP", "UNVERIFIED"}
 SENSITIVE_NAME = r"(?:password|passwd|pwd|token|api[_-]?key|authorization|credential|secret)"
+IMAGE_REFERENCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]+$")
+TOOLCHAIN_KINDS = {"python-package", "container-image"}
+TOOLCHAIN_PACKAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+TOOLCHAIN_PROBE_SCRIPT = r"""
+import hashlib
+import importlib
+import importlib.metadata
+import json
+import pathlib
+import shutil
+import sys
+
+package = sys.argv[1]
+distribution = importlib.metadata.distribution(package)
+importlib.import_module(package.replace("-", "_"))
+bin_dir = pathlib.Path(sys.executable).absolute().parent
+
+def tool(names):
+    for name in names:
+        candidate = bin_dir / name
+        if candidate.is_file():
+            path = candidate.resolve()
+            return {
+                "path": str(path),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        resolved = shutil.which(name, path=str(bin_dir))
+        if resolved:
+            path = pathlib.Path(resolved).resolve()
+            return {
+                "path": str(path),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+    raise RuntimeError("missing tool: " + " or ".join(names))
+
+record = None
+for entry in distribution.files or []:
+    if str(entry).endswith(".dist-info/RECORD"):
+        record = pathlib.Path(distribution.locate_file(entry)).resolve()
+        break
+if record is None or not record.is_file():
+    raise RuntimeError("installed distribution has no RECORD identity")
+
+print(json.dumps({
+    "pythonExecutable": str(pathlib.Path(sys.executable).absolute()),
+    "pythonVersion": sys.version.split()[0],
+    "requiresPython": distribution.metadata.get("Requires-Python"),
+    "package": {
+        "name": distribution.metadata.get("Name") or package,
+        "version": distribution.version,
+        "recordSha256": hashlib.sha256(record.read_bytes()).hexdigest(),
+    },
+    "tools": {
+        "modelTransform": tool(["model_transform.py", "model_transform"]),
+        "modelDeploy": tool(["model_deploy.py", "model_deploy"]),
+        "modelTool": tool(["model_tool"]),
+    },
+}, sort_keys=True))
+"""
 
 
 class WorkflowError(ValueError):
@@ -212,6 +271,11 @@ def _first_line(value: str, limit: int = 240) -> str:
     return (lines[0] if lines else "")[:limit]
 
 
+def _last_line(value: str, limit: int = 240) -> str:
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    return (lines[-1] if lines else "")[:limit]
+
+
 def _tool_inventory(name: str, version_args: Iterable[str] = ("--version",)) -> dict[str, Any]:
     executable = shutil.which(name)
     if not executable:
@@ -321,12 +385,15 @@ def _check(
     *,
     remediation: str = "",
     outcome: str | None = None,
+    owner: str | None = None,
 ) -> dict[str, Any]:
     if status not in CHECK_STATUSES:
         raise WorkflowError(f"unknown check status: {status}")
     result: dict[str, Any] = {"id": check_id, "status": status, "detail": detail}
     if remediation:
         result["remediation"] = remediation
+    if owner:
+        result["owner"] = owner
     if outcome:
         result["_outcome"] = outcome
     return result
@@ -368,6 +435,167 @@ def _docker_image_identity(image: str) -> tuple[dict[str, Any] | None, str]:
         "architecture": payload.get("Architecture"),
         "os": payload.get("Os"),
     }, ""
+
+
+def _resolve_executable(raw_value: str) -> str | None:
+    candidate = Path(raw_value).expanduser()
+    if candidate.is_absolute():
+        return str(candidate.absolute()) if candidate.is_file() else None
+    return shutil.which(raw_value)
+
+
+def _toolchain_spec(parameters: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    raw = parameters.get("toolchain")
+    if not isinstance(raw, dict):
+        legacy = parameters.get("toolchainImage")
+        detail = (
+            "parameters.toolchainImage identifies only an execution image, not the "
+            "TPU-MLIR compiler package."
+            if legacy
+            else "parameters.toolchain does not identify a complete TPU-MLIR compiler environment."
+        )
+        return None, detail
+    kind = raw.get("kind")
+    if kind not in TOOLCHAIN_KINDS:
+        return None, "parameters.toolchain.kind must be python-package or container-image."
+    package = str(raw.get("package", "tpu_mlir")).strip()
+    if not TOOLCHAIN_PACKAGE_PATTERN.fullmatch(package):
+        return None, "parameters.toolchain.package contains unsupported characters."
+    version = raw.get("version")
+    if version is not None and (not isinstance(version, str) or not version.strip()):
+        return None, "parameters.toolchain.version must be a non-empty version requirement."
+    normalized: dict[str, Any] = {
+        "kind": kind,
+        "package": package,
+        "version": version.strip() if isinstance(version, str) else None,
+    }
+    if kind == "python-package":
+        executable = raw.get("pythonExecutable")
+        if not isinstance(executable, str) or not executable.strip():
+            return None, "python-package toolchains require parameters.toolchain.pythonExecutable."
+        normalized["pythonExecutable"] = executable.strip()
+    else:
+        image = raw.get("image")
+        if (
+            not isinstance(image, str)
+            or not IMAGE_REFERENCE_PATTERN.fullmatch(image)
+            or "://" in image
+        ):
+            return None, "container-image toolchains require a safe parameters.toolchain.image."
+        normalized["image"] = image
+    return normalized, ""
+
+
+def _identity_digest(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _parse_toolchain_probe(
+    process: subprocess.CompletedProcess[str],
+    *,
+    kind: str,
+    image: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str]:
+    if process.returncode != 0:
+        return None, _last_line(process.stderr) or "TPU-MLIR package inspection failed"
+    try:
+        payload = json.loads(process.stdout)
+    except json.JSONDecodeError:
+        return None, "TPU-MLIR package inspection returned unreadable output"
+    if not isinstance(payload, dict):
+        return None, "TPU-MLIR package inspection returned an invalid identity"
+    identity: dict[str, Any] = {"kind": kind, **payload}
+    if image is not None:
+        identity["image"] = image
+    identity["id"] = _identity_digest(identity)
+    return identity, ""
+
+
+def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    package = str(specification["package"])
+    expected_version = specification.get("version")
+    if specification["kind"] == "python-package":
+        executable = _resolve_executable(str(specification["pythonExecutable"]))
+        if not executable:
+            return None, (
+                "declared toolchain Python is unavailable: "
+                f"{specification['pythonExecutable']}"
+            )
+        process = _run(
+            [executable, "-c", TOOLCHAIN_PROBE_SCRIPT, package],
+            timeout=90,
+        )
+        identity, error = _parse_toolchain_probe(process, kind="python-package")
+    else:
+        image, image_error = _docker_image_identity(str(specification["image"]))
+        if not image:
+            return None, (
+                f"declared toolchain image {specification['image']} is unavailable: {image_error}"
+            )
+        process = _run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--entrypoint",
+                "python3",
+                str(image["id"]),
+                "-c",
+                TOOLCHAIN_PROBE_SCRIPT,
+                package,
+            ],
+            timeout=120,
+        )
+        identity, error = _parse_toolchain_probe(
+            process,
+            kind="container-image",
+            image=image,
+        )
+    if not identity:
+        return None, error
+    actual_version = str(identity.get("package", {}).get("version", ""))
+    if not _version_satisfies(actual_version, expected_version):
+        return None, (
+            f"{package}={actual_version or 'unknown'} does not satisfy "
+            f"{expected_version}"
+        )
+    return identity, ""
+
+
+def _toolchain_tools_respond(identity: dict[str, Any]) -> tuple[bool, str]:
+    failures = []
+    for key in ("modelTransform", "modelDeploy"):
+        tool = identity.get("tools", {}).get(key, {})
+        path = tool.get("path")
+        if not isinstance(path, str) or not path:
+            failures.append(f"{key} has no executable path")
+            continue
+        if identity.get("kind") == "python-package":
+            command = [str(identity["pythonExecutable"]), path, "--help"]
+        else:
+            image_id = identity.get("image", {}).get("id")
+            command = [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--entrypoint",
+                str(identity["pythonExecutable"]),
+                str(image_id),
+                path,
+                "--help",
+            ]
+        process = _run(command, timeout=120)
+        output = f"{process.stdout}\n{process.stderr}".strip()
+        if process.returncode not in (0, 1, 2) or not output:
+            failures.append(
+                f"{key} did not answer --help ({_first_line(process.stderr) or process.returncode})"
+            )
+    return not failures, "; ".join(failures)
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -513,34 +741,65 @@ def task_environment_report(
         if source_path.suffix.lower() != ".onnx":
             raise WorkflowError("the first model-conversion profile requires an ONNX source model")
 
-        docker_path = shutil.which("docker")
-        if not docker_path:
-            checks.append(
-                _check(
-                    "C4",
-                    "FAIL",
-                    "Docker is not installed or not on PATH.",
-                    remediation="Provide Docker through the normal IT process, then rerun doctor; doctor never installs it.",
-                    outcome="repairable",
-                )
-            )
-        else:
-            daemon = _run([docker_path, "info", "--format", "{{.ServerVersion}}"], timeout=15)
-            if daemon.returncode == 0:
-                checks.append(_check("C4", "PASS", f"Docker daemon is available ({_first_line(daemon.stdout)})."))
-            else:
+        toolchain_spec, specification_error = _toolchain_spec(params)
+        docker_ready = False
+        if toolchain_spec and toolchain_spec["kind"] == "container-image":
+            docker_path = shutil.which("docker")
+            if not docker_path:
                 checks.append(
                     _check(
                         "C4",
                         "FAIL",
-                        "Docker is installed but the daemon is unavailable to the current user.",
-                        remediation="Have an authorized operator start or grant access to Docker, then rerun doctor.",
+                        "The selected complete-toolchain image requires Docker, but Docker is unavailable.",
+                        remediation=(
+                            "Verify the selected route first, then provide Docker through the normal "
+                            "IT process or select an already installed python-package toolchain."
+                        ),
                         outcome="repairable",
+                        owner="development-environment",
                     )
                 )
+            else:
+                daemon = _run(
+                    [docker_path, "info", "--format", "{{.ServerVersion}}"],
+                    timeout=15,
+                )
+                if daemon.returncode == 0:
+                    docker_ready = True
+                    checks.append(
+                        _check(
+                            "C4",
+                            "PASS",
+                            f"Docker daemon is available ({_first_line(daemon.stdout)}).",
+                        )
+                    )
+                else:
+                    checks.append(
+                        _check(
+                            "C4",
+                            "FAIL",
+                            "Docker is installed but unavailable to the current user.",
+                            remediation=(
+                                "Have an authorized operator start or grant access to Docker, "
+                                "then rerun doctor."
+                            ),
+                            outcome="repairable",
+                            owner="development-environment",
+                        )
+                    )
+        else:
+            checks.append(
+                _check(
+                    "C4",
+                    "SKIP",
+                    (
+                        "Docker is not required by the selected python-package toolchain."
+                        if toolchain_spec
+                        else "Docker cannot be selected until the complete compiler toolchain is specified."
+                    ),
+                )
+            )
 
-        image = str(params.get("toolchainImage", "sophgo/tpuc_dev:v3.2"))
-        image_identity, image_error = _docker_image_identity(image) if docker_path else (None, "")
         mapping_supported = target_chip.lower() == "bm1688"
         if not mapping_supported:
             mapping_supported = bool(params.get("toolchainChip") and params.get("chipMappingEvidence"))
@@ -554,27 +813,100 @@ def task_environment_report(
                     outcome="unsupported",
                 )
             )
-        elif image_identity:
-            toolchain = image_identity
-            checks.append(
-                _check(
-                    "C5",
-                    "PASS",
-                    f"Local toolchain image is frozen as {image_identity.get('id') or image}.",
-                )
-            )
-        else:
+        elif not toolchain_spec:
             checks.append(
                 _check(
                     "C5",
                     "FAIL",
-                    f"Required local toolchain image {image} is unavailable: {image_error}.",
-                    remediation="After explicit approval, load the verified image or pull a fixed identity, then rerun doctor.",
+                    specification_error,
+                    remediation=(
+                        "Correct the repository instructions or generated task contract and validate "
+                        "the complete compiler path before asking the customer to change their machine."
+                    ),
                     outcome="repairable",
+                    owner="repository",
                 )
             )
+        else:
+            can_inspect = (
+                toolchain_spec["kind"] == "python-package"
+                or (toolchain_spec["kind"] == "container-image" and docker_ready)
+            )
+            inspected, toolchain_error = (
+                inspect_toolchain(toolchain_spec)
+                if can_inspect
+                else (None, "the selected execution layer is not available")
+            )
+            if inspected:
+                tools_ready, tools_error = _toolchain_tools_respond(inspected)
+                if tools_ready:
+                    toolchain = inspected
+                    checks.append(
+                        _check(
+                            "C5",
+                            "PASS",
+                            (
+                                f"Complete TPU-MLIR toolchain is frozen as {inspected['id']} "
+                                f"({inspected['package']['name']} "
+                                f"{inspected['package']['version']})."
+                            ),
+                        )
+                    )
+                else:
+                    checks.append(
+                        _check(
+                            "C5",
+                            "FAIL",
+                            f"TPU-MLIR package exists but its compiler commands are unusable: {tools_error}.",
+                            remediation=(
+                                "Repair or replace the isolated compiler environment; do not treat "
+                                "package files alone as READY."
+                            ),
+                            outcome="repairable",
+                            owner="development-environment",
+                        )
+                    )
+            else:
+                official_base_only = (
+                    toolchain_spec["kind"] == "container-image"
+                    and str(toolchain_spec.get("image", "")).startswith("sophgo/tpuc_dev:")
+                )
+                checks.append(
+                    _check(
+                        "C5",
+                        "FAIL",
+                        (
+                            "The declared image is a base development environment, not a complete "
+                            f"TPU-MLIR compiler: {toolchain_error}."
+                            if official_base_only
+                            else f"The declared TPU-MLIR toolchain is unavailable: {toolchain_error}."
+                        ),
+                        remediation=(
+                            "Add and freeze the TPU-MLIR package in that environment or select an "
+                            "existing isolated Python environment. Revalidate the repository "
+                            "instructions before asking the customer to install anything."
+                            if official_base_only
+                            else "Verify the declared reference against upstream documentation, then "
+                            "repair the isolated development environment only with explicit approval."
+                        ),
+                        outcome="repairable",
+                        owner=(
+                            "repository"
+                            if official_base_only
+                            else "development-environment"
+                        ),
+                    )
+                )
 
-        python_name = str(params.get("pythonExecutable", "python3"))
+        preflight = params.get("preflight", {})
+        if not isinstance(preflight, dict):
+            raise WorkflowError("parameters.preflight must be an object")
+        python_name = str(
+            preflight.get(
+                "pythonExecutable",
+                params.get("pythonExecutable", "python3"),
+            )
+        )
         python_path = shutil.which(python_name) if not Path(python_name).is_absolute() else python_name
         if not python_path or not Path(python_path).is_file():
             checks.append(
@@ -584,18 +916,24 @@ def task_environment_report(
                     f"Python executable is unavailable: {python_name}.",
                     remediation="Use an approved virtual environment with Python, onnx, onnxruntime, and numpy.",
                     outcome="repairable",
+                    owner="development-environment",
                 )
             )
         else:
-            package_requirements = params.get(
+            package_requirements = preflight.get(
                 "pythonPackages",
-                {"numpy": None, "onnx": None, "onnxruntime": None},
+                params.get(
+                    "pythonPackages",
+                    {"numpy": None, "onnx": None, "onnxruntime": None},
+                ),
             )
             if not isinstance(package_requirements, dict) or any(
                 requirement is not None and not isinstance(requirement, str)
                 for requirement in package_requirements.values()
             ):
-                raise WorkflowError("parameters.pythonPackages must map package names to versions or null")
+                raise WorkflowError(
+                    "parameters.preflight.pythonPackages must map package names to versions or null"
+                )
             imports_ok, detail = _python_environment_check(python_path, package_requirements)
             if imports_ok:
                 checks.append(_check("C6", "PASS", f"ONNX preflight runtime is available ({detail})."))
@@ -607,6 +945,7 @@ def task_environment_report(
                         f"ONNX preflight dependencies are incomplete: {detail}.",
                         remediation="Approve an isolated venv or provide one with numpy, onnx, and onnxruntime.",
                         outcome="repairable",
+                        owner="development-environment",
                     )
                 )
     else:

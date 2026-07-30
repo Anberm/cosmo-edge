@@ -56,8 +56,10 @@
     "toolchain": {
       "type": "object",
       "required": [
-        "image",
-        "imageId"
+        "kind",
+        "id",
+        "package",
+        "tools"
       ],
       "additionalProperties": true
     },

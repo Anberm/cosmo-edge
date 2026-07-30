@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +16,48 @@ import agent_workflow  # noqa: E402
 
 
 class AgentWorkflowTest(unittest.TestCase):
+    def _model_contract(self, run_id: str) -> dict:
+        return {
+            "schemaVersion": "1.0",
+            "runId": run_id,
+            "task": "model-conversion",
+            "userObjective": "Validate a synthetic BM1688 conversion environment.",
+            "expectedDeliverables": ["environment report"],
+            "allowedChanges": ["current run"],
+            "requiredCapabilities": [],
+            "acceptance": {},
+            "authority": {"workspace": "isolated fixture"},
+            "parameters": {
+                "sourceModel": "model.onnx",
+                "targetChip": "bm1688",
+                "preflight": {
+                    "pythonExecutable": sys.executable,
+                    "pythonPackages": {},
+                },
+            },
+        }
+
+    def _model_inventory(self) -> dict:
+        return {
+            "host": {
+                "os": "Linux",
+                "osRelease": "fixture",
+                "architecture": "x86_64",
+                "cpuCount": 8,
+                "memoryBytes": {"total": 16 * 1024**3, "available": 8 * 1024**3},
+                "diskBytes": {"total": 100 * 1024**3, "free": 50 * 1024**3},
+            },
+            "repository": {
+                "commit": "1" * 40,
+                "tree": "2" * 40,
+                "branch": "fixture",
+                "trackedChanges": 0,
+                "untrackedFiles": 0,
+                "worktreeFingerprint": "3" * 64,
+            },
+            "tools": {},
+        }
+
     def test_contract_schema_and_runtime_validator_share_thin_required_shell(self):
         schema = json.loads((SCHEMAS / "task-contract-v1.schema.json").read_text(encoding="utf-8"))
         self.assertEqual(tuple(schema["required"]), agent_workflow.REQUIRED_CONTRACT_FIELDS)
@@ -84,6 +127,18 @@ class AgentWorkflowTest(unittest.TestCase):
         self.assertFalse(agent_workflow._version_satisfies("1.19.0", ">=1.20.1"))
         self.assertTrue(agent_workflow._version_satisfies("9.9.9", None))
 
+    def test_toolchain_python_keeps_virtual_environment_entry_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            interpreter = root / "python-real"
+            interpreter.write_text("#!/bin/sh\n", encoding="utf-8")
+            link = root / "venv-python"
+            try:
+                link.symlink_to(interpreter)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            self.assertEqual(agent_workflow._resolve_executable(str(link)), str(link))
+
     def test_command_redaction(self):
         cases = json.loads((FIXTURES / "redaction-cases.json").read_text(encoding="utf-8"))
         for case in cases:
@@ -112,6 +167,152 @@ class AgentWorkflowTest(unittest.TestCase):
         self.assertNotIn("environmentVerdict", report)
         self.assertFalse(report["authority"]["environmentChanges"])
         self.assertFalse(report["authority"]["externalSystems"])
+
+    def test_legacy_base_image_is_repository_owned_not_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("legacy-base-image")
+            contract["parameters"]["toolchainImage"] = "sophgo/tpuc_dev:v3.2"
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            with (
+                mock.patch.object(
+                    agent_workflow,
+                    "host_inventory",
+                    return_value=self._model_inventory(),
+                ),
+                mock.patch.object(
+                    agent_workflow,
+                    "_python_environment_check",
+                    return_value=(True, "fixture"),
+                ),
+            ):
+                report = agent_workflow.task_environment_report(
+                    "model-conversion",
+                    contract_path,
+                    run_dir,
+                    contract,
+                    project_root=root,
+                )
+            check = next(item for item in report["checks"] if item["id"] == "C5")
+            self.assertEqual(report["environmentVerdict"], "REPAIRABLE")
+            self.assertEqual(check["owner"], "repository")
+            self.assertIn("only an execution image", check["detail"])
+            self.assertIsNone(report["toolchain"])
+
+    def test_complete_python_package_toolchain_does_not_require_docker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("python-toolchain")
+            contract["parameters"]["toolchain"] = {
+                "kind": "python-package",
+                "pythonExecutable": sys.executable,
+                "package": "tpu_mlir",
+                "version": "1.28.1",
+            }
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            identity = {
+                "kind": "python-package",
+                "id": "sha256:" + "a" * 64,
+                "package": {"name": "tpu_mlir", "version": "1.28.1"},
+            }
+            with (
+                mock.patch.object(
+                    agent_workflow,
+                    "host_inventory",
+                    return_value=self._model_inventory(),
+                ),
+                mock.patch.object(
+                    agent_workflow,
+                    "inspect_toolchain",
+                    return_value=(identity, ""),
+                ),
+                mock.patch.object(
+                    agent_workflow,
+                    "_toolchain_tools_respond",
+                    return_value=(True, ""),
+                ),
+                mock.patch.object(
+                    agent_workflow,
+                    "_python_environment_check",
+                    return_value=(True, "fixture"),
+                ),
+            ):
+                report = agent_workflow.task_environment_report(
+                    "model-conversion",
+                    contract_path,
+                    run_dir,
+                    contract,
+                    project_root=root,
+                )
+            checks = {item["id"]: item for item in report["checks"]}
+            self.assertEqual(report["environmentVerdict"], "READY")
+            self.assertEqual(checks["C4"]["status"], "SKIP")
+            self.assertEqual(checks["C5"]["status"], "PASS")
+            self.assertEqual(report["toolchain"]["id"], identity["id"])
+
+    def test_official_base_container_without_package_is_repository_owned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("base-container")
+            contract["parameters"]["toolchain"] = {
+                "kind": "container-image",
+                "image": "sophgo/tpuc_dev:v3.2",
+                "package": "tpu_mlir",
+                "version": "1.28.1",
+            }
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            docker_info = subprocess.CompletedProcess(
+                ["docker", "info"],
+                0,
+                "29.1.3\n",
+                "",
+            )
+            with (
+                mock.patch.object(
+                    agent_workflow,
+                    "host_inventory",
+                    return_value=self._model_inventory(),
+                ),
+                mock.patch.object(
+                    agent_workflow.shutil,
+                    "which",
+                    side_effect=lambda name: "/usr/bin/docker" if name == "docker" else None,
+                ),
+                mock.patch.object(agent_workflow, "_run", return_value=docker_info),
+                mock.patch.object(
+                    agent_workflow,
+                    "inspect_toolchain",
+                    return_value=(None, "PackageNotFoundError: tpu_mlir"),
+                ),
+                mock.patch.object(
+                    agent_workflow,
+                    "_python_environment_check",
+                    return_value=(True, "fixture"),
+                ),
+            ):
+                report = agent_workflow.task_environment_report(
+                    "model-conversion",
+                    contract_path,
+                    run_dir,
+                    contract,
+                    project_root=root,
+                )
+            check = next(item for item in report["checks"] if item["id"] == "C5")
+            self.assertEqual(report["environmentVerdict"], "REPAIRABLE")
+            self.assertEqual(check["owner"], "repository")
+            self.assertIn("base development environment", check["detail"])
 
 
 if __name__ == "__main__":

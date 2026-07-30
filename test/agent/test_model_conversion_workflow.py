@@ -21,7 +21,7 @@ def make_contract(run_id: str = "conversion-test") -> dict:
         "userObjective": "Convert the supplied ONNX model for a BM1688 development task.",
         "expectedDeliverables": ["F16 bmodel", "evidence"],
         "allowedChanges": ["current run directory"],
-        "requiredCapabilities": ["docker", "python3"],
+        "requiredCapabilities": ["python3"],
         "acceptance": {
             "requireTensorCompare": True,
             "promoteExample": False,
@@ -45,9 +45,50 @@ def make_contract(run_id: str = "conversion-test") -> dict:
             "inputShapes": [[1, 3, 320, 320]],
             "expectedOutputShapes": [[1, 6, 2100]],
             "pixelFormat": "rgb",
-            "toolchainImage": "sophgo/tpuc_dev:v3.2",
+            "toolchain": {
+                "kind": "python-package",
+                "pythonExecutable": sys.executable,
+                "package": "tpu_mlir",
+                "version": "1.28.1",
+            },
+            "preflight": {
+                "pythonExecutable": sys.executable,
+                "pythonPackages": {
+                    "numpy": None,
+                    "onnx": None,
+                    "onnxruntime": None,
+                },
+            },
             "tensorTolerance": "0.99,0.90",
             "outputKind": "bmodel",
+        },
+    }
+
+
+def make_toolchain_identity() -> dict:
+    return {
+        "kind": "python-package",
+        "id": "sha256:" + "a" * 64,
+        "pythonExecutable": "/isolated/venv/bin/python",
+        "pythonVersion": "3.10.12",
+        "package": {
+            "name": "tpu_mlir",
+            "version": "1.28.1",
+            "recordSha256": "b" * 64,
+        },
+        "tools": {
+            "modelTransform": {
+                "path": "/isolated/venv/bin/model_transform.py",
+                "sha256": "c" * 64,
+            },
+            "modelDeploy": {
+                "path": "/isolated/venv/bin/model_deploy.py",
+                "sha256": "d" * 64,
+            },
+            "modelTool": {
+                "path": "/isolated/venv/bin/model_tool",
+                "sha256": "e" * 64,
+            },
         },
     }
 
@@ -88,6 +129,18 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             self.assertEqual(deploy[deploy.index("--chip") + 1], "bm1688")
             self.assertEqual(deploy[deploy.index("--quantize") + 1], "F16")
 
+    def test_python_toolchain_uses_selected_interpreter_not_entry_shebang(self):
+        identity = make_toolchain_identity()
+        command = conversion._tool_command(
+            identity,
+            "modelTransform",
+            ["--help"],
+            run_dir=ROOT / "output" / "agent-runs" / "fixture",
+        )
+        self.assertEqual(command[0], identity["pythonExecutable"])
+        self.assertEqual(command[1], identity["tools"]["modelTransform"]["path"])
+        self.assertEqual(command[2:], ["--help"])
+
     def test_contract_source_cannot_escape_the_run(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -119,10 +172,7 @@ class ModelConversionWorkflowTest(unittest.TestCase):
                 "contractSha256": core.sha256_file(contract_path),
                 "environmentVerdict": "READY",
                 "repository": core._git_snapshot(),
-                "toolchain": {
-                    "reference": "sophgo/tpuc_dev:v3.2",
-                    "id": "sha256:" + "a" * 64,
-                },
+                "toolchain": make_toolchain_identity(),
             }
             (run_dir / "environment-report.json").write_text(json.dumps(report), encoding="utf-8")
             self.assertEqual(
@@ -158,10 +208,7 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             "contractSha256": core.sha256_file(contract_path),
             "environmentVerdict": "READY",
             "repository": core._git_snapshot(),
-            "toolchain": {
-                "reference": "sophgo/tpuc_dev:v3.2",
-                "id": "sha256:" + "a" * 64,
-            },
+            "toolchain": make_toolchain_identity(),
         }
         (run_dir / "environment-report.json").write_text(json.dumps(environment), encoding="utf-8")
         selection = {
@@ -267,10 +314,7 @@ class ModelConversionWorkflowTest(unittest.TestCase):
                     "target": {},
                 }
             )
-            manifest["toolchain"] = {
-                "id": "sha256:" + "a" * 64,
-                "repoDigests": ["sophgo/tpuc_dev@sha256:" + "b" * 64],
-            }
+            manifest["toolchain"] = make_toolchain_identity()
             manifest_path.write_text(json.dumps({"recording": 1}), encoding="utf-8")
             example_path = example_dir / "candidate-bm1688-f16.json"
             first = conversion.record_example(

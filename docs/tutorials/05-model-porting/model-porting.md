@@ -186,39 +186,69 @@ PY
 `scripts/agent/convert_model.sh` 和 `scripts/agent/verify.sh` 留下工具链、命令、哈希与
 分层证据。不要手工编造任务契约或实例记录。下面的命令仍保留为人工执行和排障参考。
 
-下面是仓库现有参考工具链的 F16 示例：
+先把“基础环境”和“编译器包”分开。算能的
+[BM1688 TPU-MLIR 环境说明](https://doc.sophgo.com/bm1688_sdk-docs/v1.7/docs_latest_release/docs/tpu-mlir/quick_start_en/02_env.html)
+要求 Ubuntu 22.04 和 Python 3.10；宿主已满足时可直接使用隔离 Python 环境，不满足时才用
+`sophgo/tpuc_dev:v3.2` 作为基础环境。该镜像本身不包含完整 TPU-MLIR 编译器，只有镜像不能
+证明 `model_transform.py`、`model_deploy.py` 可用。
 
 ```bash
-curl -L \
-  -o sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz \
-  https://sophon-file.sophon.cn/sophon-prod-s3/drive/24/06/14/12/sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
-sha256sum sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
-docker load -i sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+docker pull sophgo/tpuc_dev:v3.2
 docker run --rm -it \
   -v "$PWD:/workspace" \
+  -w /workspace \
   sophgo/tpuc_dev:v3.2 \
   bash
 ```
 
-在容器内：
+上面的 Docker 步骤是条件性的。在宿主或容器内，另行安装并冻结 TPU-MLIR 包。本页在
+2026-07-30 核对的上游发布是
+[TPU-MLIR v1.28.1](https://github.com/sophgo/tpu-mlir/releases/tag/v1.28.1)，其 wheel
+SHA-256 为 `28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8`：
 
 ```bash
-cd /workspace
-model_transform \
+python3 -m venv .venv-tpu-mlir
+source .venv-tpu-mlir/bin/activate
+curl -L \
+  -o tpu_mlir-1.28.1-py3-none-any.whl \
+  https://github.com/sophgo/tpu-mlir/releases/download/v1.28.1/tpu_mlir-1.28.1-py3-none-any.whl
+printf '%s  %s\n' \
+  28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8 \
+  tpu_mlir-1.28.1-py3-none-any.whl | sha256sum -c -
+python -m pip install './tpu_mlir-1.28.1-py3-none-any.whl[onnx]'
+python -c 'from importlib.metadata import version; print(version("tpu_mlir"))'
+python "$VIRTUAL_ENV/bin/model_transform.py" --help >/dev/null
+python "$VIRTUAL_ENV/bin/model_deploy.py" --help >/dev/null
+```
+
+安装、拉取镜像或下载大文件都会改变环境或消耗网络，应先取得对应授权。版本更新时可以选择
+其他已核验版本，但必须重新记录包版本、来源摘要和实际命令；不要把本页日期或版本扩展成所有
+模型的强制要求。
+
+下面是 BM1688/F16 的人工命令参考。显式使用当前环境的 Python 调用入口脚本，也能识别入口
+文件存在但 shebang 已因环境搬迁而失效的情况：
+
+```bash
+python "$VIRTUAL_ENV/bin/model_transform.py" \
   --model_name yolov8n \
   --model_def yolov8n.onnx \
   --input_shapes '[[1,3,640,640]]' \
   --pixel_format rgb \
   --mlir yolov8n.mlir
 
-model_deploy \
+python "$VIRTUAL_ENV/bin/model_deploy.py" \
   --mlir yolov8n.mlir \
   --quantize F16 \
   --chip bm1688 \
   --model yolov8n_bm1688_f16.bmodel
 
+python "$VIRTUAL_ENV/bin/model_tool" --info yolov8n_bm1688_f16.bmodel
 sha256sum yolov8n_bm1688_f16.bmodel
 ```
+
+通过较新 ONNX 环境完成 x86 预检，不代表同一文件一定被所选 TPU-MLIR 版本接受。转换前要用
+本次冻结的工具链检查实际候选的 IR、opset 和算子；不兼容时应从源权重重新导出受支持的 ONNX，
+不得直接篡改模型的 `ir_version` 冒充兼容。
 
 CV186X 必须使用支持该芯片的工具链和芯片参数，不能把 BM1688 产物上传到 CV186X 设备。
 如果工具报告未支持算子、输出不一致或编译失败，转换没有完成；更换文件扩展名不能解决。

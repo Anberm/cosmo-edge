@@ -192,39 +192,72 @@ run-local task contract and run `scripts/agent/doctor.sh`. Once admitted, the re
 commands, hashes, and layered evidence. Do not handcraft task contracts or example records. The manual
 commands below remain useful for direct execution and troubleshooting.
 
-The repository's existing F16 reference toolchain uses:
+Treat the base environment and compiler package as separate layers. The
+[BM1688 TPU-MLIR environment guide](https://doc.sophgo.com/bm1688_sdk-docs/v1.7/docs_latest_release/docs/tpu-mlir/quick_start_en/02_env.html)
+requires Ubuntu 22.04 and Python 3.10. Use an isolated Python environment directly when the host already
+meets those conditions; use `sophgo/tpuc_dev:v3.2` only as a base environment otherwise. The image alone
+is not the complete TPU-MLIR compiler and does not prove that `model_transform.py` or `model_deploy.py`
+is callable.
 
 ```bash
-curl -L \
-  -o sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz \
-  https://sophon-file.sophon.cn/sophon-prod-s3/drive/24/06/14/12/sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
-sha256sum sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
-docker load -i sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+docker pull sophgo/tpuc_dev:v3.2
 docker run --rm -it \
   -v "$PWD:/workspace" \
+  -w /workspace \
   sophgo/tpuc_dev:v3.2 \
   bash
 ```
 
-Inside the container:
+The Docker step above is conditional. Install and freeze the TPU-MLIR package separately on the host or
+inside that container. The upstream release checked for this page on 2026-07-30 is
+[TPU-MLIR v1.28.1](https://github.com/sophgo/tpu-mlir/releases/tag/v1.28.1); its wheel SHA-256 is
+`28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8`:
 
 ```bash
-cd /workspace
-model_transform \
+python3 -m venv .venv-tpu-mlir
+source .venv-tpu-mlir/bin/activate
+curl -L \
+  -o tpu_mlir-1.28.1-py3-none-any.whl \
+  https://github.com/sophgo/tpu-mlir/releases/download/v1.28.1/tpu_mlir-1.28.1-py3-none-any.whl
+printf '%s  %s\n' \
+  28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8 \
+  tpu_mlir-1.28.1-py3-none-any.whl | sha256sum -c -
+python -m pip install './tpu_mlir-1.28.1-py3-none-any.whl[onnx]'
+python -c 'from importlib.metadata import version; print(version("tpu_mlir"))'
+python "$VIRTUAL_ENV/bin/model_transform.py" --help >/dev/null
+python "$VIRTUAL_ENV/bin/model_deploy.py" --help >/dev/null
+```
+
+Installing packages, pulling an image, or downloading a large file changes the environment or consumes
+network and requires the corresponding approval. A different reviewed release may be selected later,
+but record its version, source digest, and actual commands again. The date and version above are not a
+global requirement for every model.
+
+The following is the manual BM1688/F16 command reference. Calling each entry script through the selected
+Python also detects an entry file whose shebang became invalid after an environment was moved:
+
+```bash
+python "$VIRTUAL_ENV/bin/model_transform.py" \
   --model_name yolov8n \
   --model_def yolov8n.onnx \
   --input_shapes '[[1,3,640,640]]' \
   --pixel_format rgb \
   --mlir yolov8n.mlir
 
-model_deploy \
+python "$VIRTUAL_ENV/bin/model_deploy.py" \
   --mlir yolov8n.mlir \
   --quantize F16 \
   --chip bm1688 \
   --model yolov8n_bm1688_f16.bmodel
 
+python "$VIRTUAL_ENV/bin/model_tool" --info yolov8n_bm1688_f16.bmodel
 sha256sum yolov8n_bm1688_f16.bmodel
 ```
+
+Passing x86 preflight in a newer ONNX environment does not prove that the same file is accepted by the
+selected TPU-MLIR release. Check the candidate's IR, opset, and operators with the frozen conversion
+toolchain. If they are incompatible, re-export a supported ONNX file from the source weights; do not edit
+the model's `ir_version` field to pretend it is compatible.
 
 CV186X requires a toolchain and chip option that support CV186X. A BM1688 artifact cannot be used on a
 CV186X device. Unsupported operators, output mismatches, or compilation errors mean conversion failed;

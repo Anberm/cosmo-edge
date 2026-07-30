@@ -56,11 +56,13 @@ workflow.
 - BM1688 and CV186X artifacts are not interchangeable. A chip name, compiler
   argument, runtime identifier, and artifact mapping must come from current
   repository facts or independent measured evidence.
-- ONNX-to-bmodel conversion depends on an external, locally admitted toolchain
-  image; the repository does not contain that compiler. BM1688/F16 is the first
-  preferred measured path. An entry appears in the example index only after two
-  real recordings pass its promotion rules; an empty index is not a success
-  claim and does not make unrelated development unsupported.
+- ONNX-to-bmodel conversion depends on an external, locally admitted TPU-MLIR
+  package; an optional `sophgo/tpuc_dev` image is only the base environment and
+  is not the compiler. Freeze the complete package and command identity.
+  BM1688/F16 is the first preferred measured path. An entry appears in the
+  example index only after two real recordings pass its promotion rules; an
+  empty index is not a success claim and does not make unrelated development
+  unsupported.
 - x86 or mock success is not Sophon-device or production acceptance. Report
   conclusions by the layer actually tested.
 - Preparing an upstream change to `src/nn/`, `src/infer/`, model templates,
@@ -82,6 +84,11 @@ workflow.
   shared or multi-customer machines.
 - Unknown or untested facts remain unverified. Never replace them with guesses
   or promote a local result to a device or production claim.
+- A missing named environment is not automatically a customer-machine defect.
+  Recheck the repository instruction, its upstream source, and whether it names
+  a base environment or a complete tool before requesting an installation. If
+  the instruction is wrong, fix it and rerun the same admission and execution
+  checks first.
 - Normal task evidence only needs the environment summary, deliverables,
   redacted commands, observed results, and unverified boundaries needed for the
   user's acceptance. Official examples and release claims additionally require
