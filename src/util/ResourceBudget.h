@@ -7,7 +7,7 @@
 
 namespace cosmo::util {
 
-constexpr std::uint64_t kDefaultStorageReserveBytes   = 512ULL * 1024 * 1024;
+constexpr std::uint64_t kDefaultStorageReserveBytes = 512ULL * 1024 * 1024;
 // Keep transfer admission and post-upload consumers on the same emergency
 // reserve policy. Event retention has its own business waterline; applying an
 // additional percentage here can reduce the usable budget to zero on devices

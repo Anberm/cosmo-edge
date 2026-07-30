@@ -2,10 +2,11 @@
 
 #include "service/system/impl/PacketUpgrade.h"
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <sys/stat.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -43,21 +44,20 @@ namespace {
     };
 
     std::uint64_t AllocatedTreeBytes(const fs::path& root) {
-        std::uint64_t total = 0;
+        std::uint64_t total  = 0;
         const auto add_entry = [&total](const fs::path& path) {
             struct stat status {};
             if (lstat(path.c_str(), &status) != 0 || status.st_blocks <= 0) {
                 return;
             }
             constexpr std::uint64_t kStatBlockBytes = 512;
-            const auto blocks = static_cast<std::uint64_t>(status.st_blocks);
-            const auto bytes =
-                blocks > std::numeric_limits<std::uint64_t>::max() / kStatBlockBytes
-                    ? std::numeric_limits<std::uint64_t>::max()
-                    : blocks * kStatBlockBytes;
-            total = bytes > std::numeric_limits<std::uint64_t>::max() - total
-                        ? std::numeric_limits<std::uint64_t>::max()
-                        : total + bytes;
+            const auto blocks                       = static_cast<std::uint64_t>(status.st_blocks);
+            const auto bytes = blocks > std::numeric_limits<std::uint64_t>::max() / kStatBlockBytes
+                                   ? std::numeric_limits<std::uint64_t>::max()
+                                   : blocks * kStatBlockBytes;
+            total            = bytes > std::numeric_limits<std::uint64_t>::max() - total
+                                   ? std::numeric_limits<std::uint64_t>::max()
+                                   : total + bytes;
         };
 
         std::error_code ec;
@@ -347,8 +347,8 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
         util::UsableStorageBytesAfterReclaim(budget, AllocatedTreeBytes(upgradeFileDir));
     if (inspection.total_bytes > usable_bytes) {
         throw util::ResourceLimitError("Insufficient safe disk space to extract the upgrade package",
-                                       "archive-extraction", "upgrade", inspection.total_bytes,
-                                       usable_bytes, budget.reserve_bytes);
+                                       "archive-extraction", "upgrade", inspection.total_bytes, usable_bytes,
+                                       budget.reserve_bytes);
     }
     std::string resolved_upgrade_dir;
     if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetBaseDir(), upgradeFileDir.string(),
