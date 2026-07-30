@@ -185,6 +185,7 @@ def _run_logged(
     commands: list[str],
     run_dir: Path,
     timeout: int = 1800,
+    environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     commands.append(_command_text(command, run_dir))
     try:
@@ -195,6 +196,7 @@ def _run_logged(
             capture_output=True,
             check=False,
             timeout=timeout,
+            env=environment,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         process = subprocess.CompletedProcess(command, 127, "", str(error))
@@ -279,6 +281,7 @@ def _tool_help(
         commands=commands,
         run_dir=run_dir,
         timeout=60,
+        environment=core.toolchain_environment(toolchain),
     )
     return f"{process.stdout}\n{process.stderr}" if process.returncode in (0, 1, 2) else ""
 
@@ -538,6 +541,7 @@ def execute_conversion(
             log_path=logs_dir / "S2-transform.log",
             commands=commands,
             run_dir=run_dir,
+            environment=core.toolchain_environment(current_toolchain),
         )
         if transform.returncode != 0 or not mlir_path.is_file():
             manifest["stages"]["transform"] = {"status": "FAIL"}
@@ -566,6 +570,7 @@ def execute_conversion(
             log_path=logs_dir / "S2-deploy.log",
             commands=commands,
             run_dir=run_dir,
+            environment=core.toolchain_environment(current_toolchain),
         )
         if deploy.returncode != 0 or not bmodel_path.is_file():
             manifest["stages"]["deploy"] = {"status": "FAIL"}
@@ -611,6 +616,7 @@ def execute_conversion(
                 commands=commands,
                 run_dir=run_dir,
                 timeout=120,
+                environment=core.toolchain_environment(current_toolchain),
             )
             info_text = f"{model_info.stdout}\n{model_info.stderr}"
             if model_info.returncode == 0:

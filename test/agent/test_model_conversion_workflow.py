@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -140,6 +141,16 @@ class ModelConversionWorkflowTest(unittest.TestCase):
         self.assertEqual(command[0], identity["pythonExecutable"])
         self.assertEqual(command[1], identity["tools"]["modelTransform"]["path"])
         self.assertEqual(command[2:], ["--help"])
+        environment = core.toolchain_environment(identity)
+        self.assertIsNotNone(environment)
+        self.assertEqual(
+            environment["PATH"].split(os.pathsep)[0],
+            str(Path(identity["pythonExecutable"]).parent),
+        )
+        self.assertEqual(
+            environment["VIRTUAL_ENV"],
+            str(Path(identity["pythonExecutable"]).parent.parent),
+        )
 
     def test_contract_source_cannot_escape_the_run(self):
         with tempfile.TemporaryDirectory() as directory:

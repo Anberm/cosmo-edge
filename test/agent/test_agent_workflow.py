@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -138,6 +139,45 @@ class AgentWorkflowTest(unittest.TestCase):
             except OSError:
                 self.skipTest("symlinks are not available")
             self.assertEqual(agent_workflow._resolve_executable(str(link)), str(link))
+
+    def test_toolchain_probe_rejects_broken_runtime_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "fixture_toolchain"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            broken = package / "runtime.so"
+            try:
+                broken.symlink_to(root / "missing-runtime.so")
+            except OSError:
+                self.skipTest("symlinks are not available")
+            metadata = root / "fixture_toolchain-1.0.dist-info"
+            metadata.mkdir()
+            (metadata / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: fixture_toolchain\nVersion: 1.0\n",
+                encoding="utf-8",
+            )
+            (metadata / "RECORD").write_text(
+                "fixture_toolchain/__init__.py,,\n"
+                "fixture_toolchain-1.0.dist-info/RECORD,,\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    agent_workflow.TOOLCHAIN_PROBE_SCRIPT,
+                    "fixture_toolchain",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertNotEqual(process.returncode, 0)
+            self.assertIn("broken links", process.stderr)
 
     def test_command_redaction(self):
         cases = json.loads((FIXTURES / "redaction-cases.json").read_text(encoding="utf-8"))

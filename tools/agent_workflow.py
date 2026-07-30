@@ -41,13 +41,14 @@ import hashlib
 import importlib
 import importlib.metadata
 import json
+import os
 import pathlib
 import shutil
 import sys
 
 package = sys.argv[1]
 distribution = importlib.metadata.distribution(package)
-importlib.import_module(package.replace("-", "_"))
+module = importlib.import_module(package.replace("-", "_"))
 bin_dir = pathlib.Path(sys.executable).absolute().parent
 
 def tool(names):
@@ -76,6 +77,24 @@ for entry in distribution.files or []:
 if record is None or not record.is_file():
     raise RuntimeError("installed distribution has no RECORD identity")
 
+package_root = pathlib.Path(module.__file__).resolve().parent
+runtime_links = {}
+broken_links = []
+for path in package_root.rglob("*"):
+    if not path.is_symlink():
+        continue
+    relative = str(path.relative_to(package_root))
+    if not path.exists():
+        broken_links.append(relative + " -> " + os.readlink(path))
+        continue
+    target = path.resolve()
+    item = {"target": os.readlink(path)}
+    if target.is_file():
+        item["targetSha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
+    runtime_links[relative] = item
+if broken_links:
+    raise RuntimeError("installed distribution has broken links: " + "; ".join(broken_links[:8]))
+
 print(json.dumps({
     "pythonExecutable": str(pathlib.Path(sys.executable).absolute()),
     "pythonVersion": sys.version.split()[0],
@@ -90,6 +109,7 @@ print(json.dumps({
         "modelDeploy": tool(["model_deploy.py", "model_deploy"]),
         "modelTool": tool(["model_tool"]),
     },
+    "runtimeLinks": runtime_links,
 }, sort_keys=True))
 """
 
@@ -252,6 +272,7 @@ def _run(
     *,
     cwd: Path = PROJECT_ROOT,
     timeout: int = 8,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
@@ -261,6 +282,7 @@ def _run(
             capture_output=True,
             check=False,
             timeout=timeout,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         return subprocess.CompletedProcess(command, 127, "", str(error))
@@ -565,6 +587,20 @@ def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | N
     return identity, ""
 
 
+def toolchain_environment(identity: dict[str, Any]) -> dict[str, str] | None:
+    if identity.get("kind") != "python-package":
+        return None
+    python_executable = identity.get("pythonExecutable")
+    if not isinstance(python_executable, str) or not python_executable:
+        return None
+    environment = os.environ.copy()
+    bin_dir = str(Path(python_executable).parent)
+    existing_path = environment.get("PATH", "")
+    environment["PATH"] = bin_dir + (os.pathsep + existing_path if existing_path else "")
+    environment["VIRTUAL_ENV"] = str(Path(bin_dir).parent)
+    return environment
+
+
 def _toolchain_tools_respond(identity: dict[str, Any]) -> tuple[bool, str]:
     failures = []
     for key in ("modelTransform", "modelDeploy"):
@@ -589,7 +625,11 @@ def _toolchain_tools_respond(identity: dict[str, Any]) -> tuple[bool, str]:
                 path,
                 "--help",
             ]
-        process = _run(command, timeout=120)
+        process = _run(
+            command,
+            timeout=120,
+            env=toolchain_environment(identity),
+        )
         output = f"{process.stdout}\n{process.stderr}".strip()
         if process.returncode not in (0, 1, 2) or not output:
             failures.append(
