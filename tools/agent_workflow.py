@@ -79,21 +79,33 @@ if record is None or not record.is_file():
 
 package_root = pathlib.Path(module.__file__).resolve().parent
 runtime_links = {}
-broken_links = []
+broken_links = {}
 for path in package_root.rglob("*"):
     if not path.is_symlink():
         continue
     relative = str(path.relative_to(package_root))
     if not path.exists():
-        broken_links.append(relative + " -> " + os.readlink(path))
+        broken_links[relative] = os.readlink(path)
         continue
     target = path.resolve()
     item = {"target": os.readlink(path)}
     if target.is_file():
         item["targetSha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
     runtime_links[relative] = item
-if broken_links:
-    raise RuntimeError("installed distribution has broken links: " + "; ".join(broken_links[:8]))
+required_runtime_links = {
+    "lib/libcmodel.so",
+    "lib/libbmlib.so",
+    "lib/libbmlib.so.0",
+}
+broken_required = [
+    relative + " -> " + target
+    for relative, target in broken_links.items()
+    if relative in required_runtime_links
+]
+if broken_required:
+    raise RuntimeError(
+        "installed distribution has broken required links: " + "; ".join(broken_required)
+    )
 
 print(json.dumps({
     "pythonExecutable": str(pathlib.Path(sys.executable).absolute()),
@@ -110,6 +122,7 @@ print(json.dumps({
         "modelTool": tool(["model_tool"]),
     },
     "runtimeLinks": runtime_links,
+    "brokenOptionalLinks": broken_links,
 }, sort_keys=True))
 """
 

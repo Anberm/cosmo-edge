@@ -144,9 +144,9 @@ class AgentWorkflowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             package = root / "fixture_toolchain"
-            package.mkdir()
+            (package / "lib").mkdir(parents=True)
             (package / "__init__.py").write_text("", encoding="utf-8")
-            broken = package / "runtime.so"
+            broken = package / "lib" / "libcmodel.so"
             try:
                 broken.symlink_to(root / "missing-runtime.so")
             except OSError:
@@ -177,7 +177,7 @@ class AgentWorkflowTest(unittest.TestCase):
                 env=environment,
             )
             self.assertNotEqual(process.returncode, 0)
-            self.assertIn("broken links", process.stderr)
+            self.assertIn("broken required links", process.stderr)
 
     def test_command_redaction(self):
         cases = json.loads((FIXTURES / "redaction-cases.json").read_text(encoding="utf-8"))
