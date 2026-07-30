@@ -8,7 +8,11 @@
 namespace cosmo::util {
 
 constexpr std::uint64_t kDefaultStorageReserveBytes   = 512ULL * 1024 * 1024;
-constexpr std::uint32_t kDefaultStorageReservePercent = 5;
+// Keep transfer admission and post-upload consumers on the same emergency
+// reserve policy. Event retention has its own business waterline; applying an
+// additional percentage here can reduce the usable budget to zero on devices
+// that still have enough space for a small operation.
+constexpr std::uint32_t kDefaultStorageReservePercent = 0;
 
 struct StorageResourceBudget {
     bool valid{false};
@@ -24,5 +28,10 @@ struct StorageResourceBudget {
 [[nodiscard]] StorageResourceBudget InspectStorageResourceBudget(
     const std::string& path, std::uint64_t reserve_bytes = kDefaultStorageReserveBytes,
     std::uint32_t reserve_percent = kDefaultStorageReservePercent);
+
+/// Return the usable budget after including bytes that the operation will
+/// reclaim before writing. The addition saturates on overflow.
+[[nodiscard]] std::uint64_t UsableStorageBytesAfterReclaim(const StorageResourceBudget& budget,
+                                                           std::uint64_t reclaimable_bytes);
 
 }  // namespace cosmo::util

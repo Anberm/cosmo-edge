@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <sys/stat.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -40,6 +41,33 @@ namespace {
         std::uintmax_t largest_file_bytes{0};
         std::uintmax_t total_bytes{0};
     };
+
+    std::uint64_t AllocatedTreeBytes(const fs::path& root) {
+        std::uint64_t total = 0;
+        const auto add_entry = [&total](const fs::path& path) {
+            struct stat status {};
+            if (lstat(path.c_str(), &status) != 0 || status.st_blocks <= 0) {
+                return;
+            }
+            constexpr std::uint64_t kStatBlockBytes = 512;
+            const auto blocks = static_cast<std::uint64_t>(status.st_blocks);
+            const auto bytes =
+                blocks > std::numeric_limits<std::uint64_t>::max() / kStatBlockBytes
+                    ? std::numeric_limits<std::uint64_t>::max()
+                    : blocks * kStatBlockBytes;
+            total = bytes > std::numeric_limits<std::uint64_t>::max() - total
+                        ? std::numeric_limits<std::uint64_t>::max()
+                        : total + bytes;
+        };
+
+        std::error_code ec;
+        add_entry(root);
+        for (fs::recursive_directory_iterator it(root, fs::directory_options::none, ec), end;
+             !ec && it != end; it.increment(ec)) {
+            add_entry(it->path());
+        }
+        return ec ? 0 : total;
+    }
 
     bool IsGzipFile(const std::string& path) {
         std::ifstream stream(path, std::ios::binary);
@@ -312,10 +340,15 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     if (!budget.valid) {
         throw util::ErrorMessage(util::ErrorEnum::SysErr, "Cannot inspect upgrade extraction storage");
     }
-    if (inspection.total_bytes > budget.usable_bytes) {
+    // A valid package replaces the previous prepared upgrade tree. Include
+    // those allocated blocks in the admission budget, while keeping the tree
+    // intact until all package validation above has succeeded.
+    const auto usable_bytes =
+        util::UsableStorageBytesAfterReclaim(budget, AllocatedTreeBytes(upgradeFileDir));
+    if (inspection.total_bytes > usable_bytes) {
         throw util::ResourceLimitError("Insufficient safe disk space to extract the upgrade package",
                                        "archive-extraction", "upgrade", inspection.total_bytes,
-                                       budget.usable_bytes, budget.reserve_bytes);
+                                       usable_bytes, budget.reserve_bytes);
     }
     std::string resolved_upgrade_dir;
     if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetBaseDir(), upgradeFileDir.string(),
