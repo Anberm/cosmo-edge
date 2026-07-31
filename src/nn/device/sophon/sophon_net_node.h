@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -10,6 +11,12 @@
 #include "nn/node/net_node.h"
 
 namespace cosmo::nn {
+
+struct BmrtDeleter {
+    void operator()(void* runtime) const noexcept;
+};
+
+using OwnedBmrt = std::unique_ptr<void, BmrtDeleter>;
 
 typedef struct _netInfos {
     std::vector<std::vector<int>> inPuts;
@@ -30,11 +37,9 @@ public:
 
     virtual Status LoadWeight(const char* data, size_t size) override;
 
-    /// Attach an externally-created bmrt handle (from model guard .so).
-    /// The bmrt must already have bmodel data loaded via bmrt_load_bmodel_data.
-    /// Skips bmrt_create + bmrt_load_bmodel_data, but performs all subsequent
-    /// setup: network info, input/output tensors, device memory allocation.
-    Status AttachBmrt(void* bmrt_handle);
+    /// Consume an externally-created bmrt handle whose model data is already loaded.
+    /// The handle is destroyed on every failure path or retained by the node on success.
+    Status AttachOwnedBmrt(OwnedBmrt bmrt_handle);
 
     virtual size_t GetBottomCount() override;
 
