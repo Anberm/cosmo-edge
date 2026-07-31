@@ -227,7 +227,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ArrowDown, CircleClose } from '@element-plus/icons-vue'
 import { t } from '@/i18n'
 
-const FIELD_DEFS = {
+const FIELD_DEFS = computed(() => ({
   input_size: { label: t('glossary.modelInputSize'), type: 'array', desc: '[H, W]' },
   gravity: {
     label: t('glossary.scaleMode'),
@@ -341,61 +341,64 @@ const FIELD_DEFS = {
   eos_token_id: { label: 'EOS Token ID', type: 'array' },
   bos_token_id: { label: 'BOS Token ID', type: 'number', numProps: { min: 0, step: 1 } },
   pad_token_id: { label: 'PAD Token ID', type: 'number', numProps: { min: 0, step: 1 } }
-}
+}))
 
-const TYPE_SCHEMA = {
-  yolov5_det: {
-    common: ['input_size', 'gravity', 'confidence_threshold', 'nms_threshold', 'top_k'],
-    advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr', 'use_npu_postprocess', 'anchors', 'stride']
-  },
-  yolov8_det: {
-    common: ['input_size', 'gravity', 'confidence_threshold', 'nms_threshold', 'top_k'],
-    advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
-  },
-  yolo26_det: {
-    common: ['input_size', 'gravity', 'confidence_threshold', 'top_k'],
-    advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
-  },
-  classify: {
-    common: ['input_size', 'gravity', 'crop', 'crop_h_top', 'crop_h_bottom', 'crop_w_left', 'crop_w_right', 'square', 'square_mode'],
-    advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
-  },
-  keypoints: {
-    common: ['input_size', 'gravity', 'crop', 'crop_h_top', 'crop_h_bottom', 'crop_w_left', 'crop_w_right', 'square', 'square_mode'],
-    advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
-  },
-  feature: {
-    common: ['use_affine_crop', 'norm_ratio', 'norm_mode', 'output_hw', 'center_index'],
-    advanced: ['normalize_mean', 'normalize_scale', 'is_bgr']
-  },
-  ocr: {
-    common: ['input_size', 'character_table_file', 'ctc_blank_index', 'ctc_class_count'],
-    advanced: ['normalize_mean', 'normalize_scale', 'is_bgr', 'ctc_prepend_tokens', 'ctc_append_tokens']
-  },
-  dino: {
-    common: ['input_width', 'input_height', 'text_threshold', 'box_threshold'],
-    advanced: ['is_bgr', 'normalize_mean', 'normalize_std']
-  },
-  sam2: {
-    common: ['input_size', 'gravity'],
-    advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'normalize_std', 'is_bgr']
-  },
-  qwen3vl: {
-    common: [
-      'do_sample',
-      'temperature',
-      { key: 'top_k', label: t('glossary.topKSampling'), type: 'number', numProps: { min: 1, max: 200, step: 1 } },
-      'top_p',
-      'repetition_penalty'
-    ],
-    advanced: ['eos_token_id', 'bos_token_id', 'pad_token_id']
+const TYPE_SCHEMA = computed(() => {
+  const schemas = {
+    yolov5_det: {
+      common: ['input_size', 'gravity', 'confidence_threshold', 'nms_threshold', 'top_k'],
+      advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr', 'use_npu_postprocess', 'anchors', 'stride']
+    },
+    yolov8_det: {
+      common: ['input_size', 'gravity', 'confidence_threshold', 'nms_threshold', 'top_k'],
+      advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
+    },
+    yolo26_det: {
+      common: ['input_size', 'gravity', 'confidence_threshold', 'top_k'],
+      advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
+    },
+    classify: {
+      common: ['input_size', 'gravity', 'crop', 'crop_h_top', 'crop_h_bottom', 'crop_w_left', 'crop_w_right', 'square', 'square_mode'],
+      advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
+    },
+    keypoints: {
+      common: ['input_size', 'gravity', 'crop', 'crop_h_top', 'crop_h_bottom', 'crop_w_left', 'crop_w_right', 'square', 'square_mode'],
+      advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'is_bgr']
+    },
+    feature: {
+      common: ['use_affine_crop', 'norm_ratio', 'norm_mode', 'output_hw', 'center_index'],
+      advanced: ['normalize_mean', 'normalize_scale', 'is_bgr']
+    },
+    ocr: {
+      common: ['input_size', 'character_table_file', 'ctc_blank_index', 'ctc_class_count'],
+      advanced: ['normalize_mean', 'normalize_scale', 'is_bgr', 'ctc_prepend_tokens', 'ctc_append_tokens']
+    },
+    dino: {
+      common: ['input_width', 'input_height', 'text_threshold', 'box_threshold'],
+      advanced: ['is_bgr', 'normalize_mean', 'normalize_std']
+    },
+    sam2: {
+      common: ['input_size', 'gravity'],
+      advanced: ['padding_color', 'normalize_mean', 'normalize_scale', 'normalize_std', 'is_bgr']
+    },
+    qwen3vl: {
+      common: [
+        'do_sample',
+        'temperature',
+        { key: 'top_k', label: t('glossary.topKSampling'), type: 'number', numProps: { min: 1, max: 200, step: 1 } },
+        'top_p',
+        'repetition_penalty'
+      ],
+      advanced: ['eos_token_id', 'bos_token_id', 'pad_token_id']
+    }
   }
-}
 
-TYPE_SCHEMA.yolov9_det = TYPE_SCHEMA.yolov8_det
-TYPE_SCHEMA.yolov11_det = TYPE_SCHEMA.yolov8_det
-TYPE_SCHEMA.yolov12_det = TYPE_SCHEMA.yolov8_det
-TYPE_SCHEMA.qwen3_5 = TYPE_SCHEMA.qwen3vl
+  schemas.yolov9_det = schemas.yolov8_det
+  schemas.yolov11_det = schemas.yolov8_det
+  schemas.yolov12_det = schemas.yolov8_det
+  schemas.qwen3_5 = schemas.qwen3vl
+  return schemas
+})
 
 const props = defineProps({
   modelValue: {
@@ -424,13 +427,13 @@ let syncing = false
 let syncingLabels = false
 
 const normalizeType = computed(() => String(props.modelType || '').toLowerCase())
-const schema = computed(() => TYPE_SCHEMA[normalizeType.value] || null)
+const schema = computed(() => TYPE_SCHEMA.value[normalizeType.value] || null)
 
 const resolveField = (entry) => {
   if (typeof entry === 'string') {
-    return { key: entry, ...(FIELD_DEFS[entry] || { label: entry, type: 'array' }) }
+    return { key: entry, ...(FIELD_DEFS.value[entry] || { label: entry, type: 'array' }) }
   }
-  return { ...(FIELD_DEFS[entry.key] || {}), ...entry }
+  return { ...(FIELD_DEFS.value[entry.key] || {}), ...entry }
 }
 
 const commonFields = computed(() => (schema.value?.common || []).map(resolveField))

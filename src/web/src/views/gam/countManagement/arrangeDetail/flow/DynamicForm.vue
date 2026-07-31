@@ -423,25 +423,25 @@ const trackSelectType = ref(false)
 const conditionType = ref(false)
 const treeSelectData = ref([])
 const labelTargetLimitType = ref(false)
-const warnConditions = ref([
+const warnConditions = computed(() => [
   {
-    name: t('glossary.warnLtTarget'),
+    labelI18nKey: 'glossary.warnLtTarget',
     value: '0'
   },
   {
-    name: t('glossary.warnGtTarget'),
+    labelI18nKey: 'glossary.warnGtTarget',
     value: '1'
   },
   {
-    name: t('glossary.warnLeTarget'),
+    labelI18nKey: 'glossary.warnLeTarget',
     value: '2'
   },
   {
-    name: t('glossary.warnGeTarget'),
+    labelI18nKey: 'glossary.warnGeTarget',
     value: '3'
   },
   {
-    name: t('glossary.warnEqTarget'),
+    labelI18nKey: 'glossary.warnEqTarget',
     value: '4'
   }
 ])

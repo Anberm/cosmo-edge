@@ -592,14 +592,14 @@ const FaceSets = ref([])
 const transferList = ref([])
 const transferData = ref([])
 const MachineryWarehouse = ref([])
-const confidenceList = [
+const confidenceList = computed(() => [
   { label: t('glossary.strictThreshold'), value: 0 },
   { label: t('glossary.recommendedThreshold'), value: 1 }
-]
-const marks = {
+])
+const marks = computed(() => ({
   '-100': t('glossary.sensitive'),
   '100': t('glossary.strict')
-}
+}))
 const networkOptions = ref([])
 const itemChangedIndex = ref(0)
 const distanceDialogVisible = ref(false)

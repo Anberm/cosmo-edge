@@ -39,7 +39,7 @@
 </template>
 
 <script setup>
-import { ref, watch, getCurrentInstance } from 'vue'
+import { computed, ref, watch, getCurrentInstance } from 'vue'
 import { t, localeColon } from '@/i18n'
 
 const props = defineProps({
@@ -62,8 +62,12 @@ const options = ref([])
 const formData = ref({
   libId: ''
 })
-const rukuLabel = ref(t('event.selectWorkClothesLib'))
 const currentProperty = ref({})
+const rukuLabel = computed(() =>
+  currentProperty.value?.workClothesRecognition
+    ? t('event.selectWorkClothesLib')
+    : t('event.selectMachineThingsLib')
+)
 
 const handleImageClick = () => {
   // 如果有图片预览方法，可以在这里调用
@@ -143,10 +147,8 @@ watch(() => props.visible, (newVal) => {
     const result = JSON.parse(props.rukuData.property)
     currentProperty.value = result
     if (result?.workClothesRecognition) {
-      rukuLabel.value = t('event.selectWorkClothesLib')
       queryPersonLibInfo()
     } else {
-      rukuLabel.value = t('event.selectMachineThingsLib')
       queryThingsLibInfo()
     }
   }
