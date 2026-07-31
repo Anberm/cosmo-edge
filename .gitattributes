@@ -25,6 +25,7 @@ Makefile       text eol=lf
 *.bmodel binary
 *.onnx   binary
 *.so     binary
+*.so.*   binary
 *.a      binary
 *.png    binary
 *.jpg    binary
