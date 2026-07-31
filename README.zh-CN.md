@@ -187,9 +187,9 @@ docker compose -f docker-compose.x86.windows.yml up -d --build
 
 启动后，参照 [场景配置教程](docs/tutorials/02-scenario-config/scenario-config.md) 设置你的第一个 AI 检测场景。
 
-### 方案 B：Sophon 边缘设备
+### 方案 B：Sophon 目标构建
 
-该路径用于 Sophon NPU 加速部署。
+该路径用于交叉编译和验证 Sophon NPU 加速的 aarch64 运行时。
 
 ```bash
 # 1. Clone
@@ -198,25 +198,18 @@ git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 # git clone https://gitee.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
 
-# 2. 构建 Sophon/aarch64 发布包
+# 2. 使用默认 public-runtime 配置构建
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 
-# 3. 查看导出的发布包
-ls -lh build_output/
-# 输出的包名格式如：cosmo-V<version>-<hash>.tar.gz
-
-# 4. 将安装包拷贝到 Sophon 边缘设备上（将 <device_ip> 替换为设备的实际 IP，默认是 192.168.100.1）
-scp build_output/cosmo-V*.tar.gz root@<device_ip>:/tmp/
-
-# 5. SSH 登录设备，解压并执行 install.sh 安装脚本
-ssh root@<device_ip>
-cd /tmp
-tar -zxvf cosmo-V*.tar.gz
-sudo bash scripts/install.sh
-
-# 6. 重启设备以启动服务
-sudo reboot
+# 3. 查看导出的构建产物
+ls -lh build_output/public-runtime/
+# 文件名包含：-UNSIGNED-<sha256>.tar.gz
 ```
+
+> **不要部署默认产物。** `public-runtime` 输出明确为 UNSIGNED（未签名）、
+> 不可部署。正式发布必须在受控环境中使用 `production-release` 配置构建，
+> 再经过离线发布签名流程；其未签名候选产物隔离在
+> `build_output/production-release/`。仅重命名未签名归档不会使其变成可部署产物。
 
 在 Windows PowerShell 下构建发布包：
 
@@ -224,13 +217,17 @@ sudo reboot
 .\scripts\build_sophon_package.ps1
 ```
 
-安装完成并重启设备后：
+PowerShell 入口使用相同的默认配置，输出到
+`build_output/public-runtime/`。配置边界详见[构建指南](docs/guide/build.md)。
+设备上只能安装受控发布流程提供的已签名发布包，并应遵循该发布包的部署说明。
+
+安装已签名发布包并重启设备后：
 - **默认 IP**：`192.168.100.1`（请确保你的电脑与设备处于同一网段，例如配置静态 IP 为 `192.168.100.x`）
 - **登录地址**：`http://192.168.100.1`
 - **默认用户名**：`admin`
 - **默认密码**：`admin`（首次登录后建议修改）
 
-该路径会构建发布包并安装到 Sophon 设备。需要生产硬件时，认证 CosmoEdge 设备可提供预配置 Sophon 加速、生产模型包和部署支持。参见 [CosmoEdge-ready 设备](#cosmoedge-ready-设备)。
+需要生产硬件时，认证 CosmoEdge 设备可提供预配置 Sophon 加速、生产模型包和部署支持。参见 [CosmoEdge-ready 设备](#cosmoedge-ready-设备)。
 
 初始引导指南
 <div align="center">

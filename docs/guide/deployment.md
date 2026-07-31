@@ -121,37 +121,41 @@ COSMO_STREAM_HTTP_PORT=18088
 - `lib`
 - `resource`
 
-升级包文件名匹配：
+升级包文件名必须匹配以下一种格式：
 
 ```text
 cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz
+cosmo-release-<release-id>.tar.gz
 ```
 
 Web 控制台的本地升级流程如下：
 
 1. 查询设备状态并记录当前 Linux `bootId`。
 2. 按设备返回的上传能力分片传输安装包，界面显示实际上传百分比。
-3. 后端校验文件名、MD5、归档安全、目录结构和实时磁盘预算。
-4. Sophon 设备重启后，启动脚本再次校验 MD5、安装发布包并启动服务。
+3. 对旧 MD5 包，后端校验文件名、MD5、归档安全、目录结构和实时磁盘预算；对签名发布包，后端保持归档字节不变并原样暂存。
+4. Sophon 设备重启后，旧包由启动脚本再次校验 MD5 后安装；签名发布包由受信任更新器校验签名、清单、载荷和回滚状态后安装。
 5. 页面在看到新的 `bootId` 后返回登录页。如果重启使登录会话失效，则必须先观察到设备离线，再收到新服务的鉴权响应，才能判定服务已恢复并返回登录页。
 
 页面等待恢复的 15 分钟是交互超时，不会中止设备端已经开始的升级。超时后应保持供电，并通过设备网络和 systemd 日志确认状态。重新登录后还应核对软件版本与本次发布包；页面恢复只证明重启与服务恢复，不替代版本验收。
 
 ## systemd 服务
 
-`scripts/install.sh` 会创建：
+空机首装时，从正式 `FACTORY-BASE` 安装：
 
 ```text
-/etc/systemd/system/cosmo.service
+share/cosmo-factory/cosmo.service
+    -> /etc/systemd/system/cosmo.service
 ```
 
 服务启动命令：
 
 ```text
-ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
+ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh
 ```
 
-服务以 `root` 运行并使用 `Restart=on-failure`。致命初始化异常会返回非零状态，使 systemd 能够重试，而不会把异常退出误判为正常停止。
+当前 `scripts/install.sh` 只负责已签名发布事务，不创建 systemd unit。应在设备
+绑定证书和首个签名发布包都就位后再启用服务；不存在逐模型 license。服务以
+`root` 运行并使用 `Restart=on-failure`。
 
 部分 Sophon 系统会在启动时把持久化数据树的属主恢复为设备管理账户。上传暂存服务允许 `sessions` 目录继承一个不可被 group/other 写入的直接父目录属主，同时继续要求：
 

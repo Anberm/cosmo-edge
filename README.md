@@ -185,9 +185,9 @@ docker compose -f docker-compose.x86.windows.yml up -d --build
 
 After startup, follow the [Scenario Configuration tutorial](docs/en/tutorials/02-scenario-config/scenario-config.md) to set up your first AI detection scenario.
 
-### Option B: Sophon Edge Device
+### Option B: Sophon Target Build
 
-Use this path for NPU-accelerated deployment.
+Use this path to cross-compile and validate the NPU-accelerated aarch64 runtime.
 
 ```bash
 # 1. Clone
@@ -196,25 +196,24 @@ git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 # git clone https://gitee.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
 
-# 2. Build the Sophon/aarch64 package
+# 2. Build the SOURCE package (internal profile: public-runtime)
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 
-# 3. View exported release packages
-ls -lh build_output/
-# The output package will be named like: cosmo-V<version>-<hash>.tar.gz
-
-# 4. Copy the package to the Sophon edge device (replace <device_ip> with actual IP, default is 192.168.100.1)
-scp build_output/cosmo-V*.tar.gz root@<device_ip>:/tmp/
-
-# 5. SSH to the device, extract the package, and run the installation script
-ssh root@<device_ip>
-cd /tmp
-tar -zxvf cosmo-V*.tar.gz
-sudo bash scripts/install.sh
-
-# 6. Reboot the device to start the services
-sudo reboot
+# 3. View the exported build artifact
+ls -lh build_output/public-runtime/
+# Filename: ...-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>.tar.gz
 ```
+
+> The SOURCE package is installable for source-modified CosmoEdge deployments,
+> but it is not a signed production release and cannot commission a blank
+> device. Protected preset models require one device-bound certificate installed
+> by a separate authorized workflow; there are no per-model licenses. The
+> package excludes production provisioning, release bootstrap, private trust
+> material, and signing transaction entry points.
+> The archive name records the base Edge commit, the packaged build identity,
+> and the outer archive SHA-256. After extraction, `install-device.sh status`
+> reports the Edge commit, build identity, and deterministic payload SHA-256;
+> it does not claim to recover the no-longer-available outer archive digest.
 
 On Windows PowerShell to build the package:
 
@@ -222,14 +221,19 @@ On Windows PowerShell to build the package:
 .\scripts\build_sophon_package.ps1
 ```
 
-After installing the package and rebooting the device:
+The PowerShell entry point uses the same internal profile and writes the SOURCE
+package to `build_output/public-runtime/`. See the
+[Build Guide](docs/en/guide/build.md) for the SOURCE/controlled-release
+boundaries.
+
+After installing a signed release and rebooting the device:
 
 - **Default IP**: `192.168.100.1` (ensure your computer is configured with a static IP in the `192.168.100.x` subnet to connect directly)
 - **Web Console URL**: `http://192.168.100.1`
 - **Default Username**: `admin`
 - **Default Password**: `admin` (it is highly recommended to change this password after your first login)
 
-This path builds a release package and installs it on a Sophon device. For teams that need production hardware, certified CosmoEdge devices include preconfigured Sophon acceleration, production model packages, and deployment support. See [CosmoEdge-ready devices](#cosmoedge-ready-devices).
+For teams that need production hardware, certified CosmoEdge devices include preconfigured Sophon acceleration, production model packages, and deployment support. See [CosmoEdge-ready devices](#cosmoedge-ready-devices).
 
 Initial Onboarding Guide
 <div align="center">

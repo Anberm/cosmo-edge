@@ -121,37 +121,44 @@ Optional or handled by presence:
 - `lib`
 - `resource`
 
-Upgrade package filename pattern:
+The upgrade package filename must match one of these patterns:
 
 ```text
 cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz
+cosmo-release-<release-id>.tar.gz
 ```
 
 The web console performs a local upgrade as follows:
 
 1. Query device status and record the current Linux `bootId`.
 2. Transfer the package in chunks according to live device capabilities while showing actual upload progress.
-3. Validate the filename, MD5, archive safety, package layout, and live disk budget.
-4. After a Sophon reboot, validate the MD5 again, install the release package, and start the services.
+3. For a legacy MD5 package, validate its filename, MD5, archive safety, package layout, and live disk budget. For a signed release, preserve and stage the archive byte-for-byte.
+4. After a Sophon reboot, the startup script revalidates and installs a legacy MD5 package; the trusted updater verifies a signed release's signature, manifest, payload, and rollback state before installation.
 5. Return to login after observing a new `bootId`. If reboot invalidates the login session, first observe the device offline and then require an authentication response from the recovered service before returning to login.
 
 The 15-minute recovery wait is a UI timeout; it does not cancel an upgrade already running on the device. Keep power connected and inspect device networking and systemd logs if it expires. After signing in again, verify the software version against the release package; UI recovery proves reboot and service recovery, not version acceptance.
 
 ## systemd Service
 
-`scripts/install.sh` creates:
+During blank-device setup, install this file from the controlled
+`FACTORY-BASE`:
 
 ```text
-/etc/systemd/system/cosmo.service
+share/cosmo-factory/cosmo.service
+    -> /etc/systemd/system/cosmo.service
 ```
 
 Service start command:
 
 ```text
-ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
+ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh
 ```
 
-The service runs as `root` with `Restart=on-failure`. A fatal initialization exception returns a non-zero status so systemd retries it instead of treating the process as a clean stop.
+The current `scripts/install.sh` handles signed release transactions only; it
+does not create the systemd unit. Enable the service only after the
+device-bound Model Guard certificate and the first signed release archive are
+in place. There are no per-model licenses. The service runs as `root` with
+`Restart=on-failure`.
 
 Some Sophon images restore the persistent data tree to the appliance administrator at boot. The upload staging service therefore allows `sessions` to inherit the owner of an immediate parent that is not writable by group/other, while still requiring:
 

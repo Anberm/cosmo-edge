@@ -146,6 +146,12 @@ QueryLogs
 
 ### 升级恢复状态
 
+升级请求接受 `uploadId`，其原始文件名必须匹配
+`cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz` 或
+`cosmo-release-<release-id>.tar.gz`。后端会在重启前校验并解压旧 MD5
+包；签名发布包则保持字节不变并原样暂存，由受信任更新器在重启后校验签名、
+清单、载荷和回滚状态。
+
 `POST /gtw/cwai/System/QueryDeviceStatus` 成功时返回：
 
 | 字段 | 语义 |

@@ -61,7 +61,7 @@ The x86 Compose file publishes:
 
 If a port is occupied, you can modify the host port in `docker-compose.x86.yml` (or `docker-compose.x86.windows.yml` on Windows), or stop the service that occupies the port.
 
-## No Release Package in `build_output/`
+## No Build Artifact in `build_output/`
 
 Use the full run command:
 
@@ -81,9 +81,22 @@ For the Sophon path, use:
 
 ```bash
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+ls -lh build_output/public-runtime/
 ```
 
-Note: `docker compose build` only builds the image and does not necessarily execute the container command that exports the release package.
+Sophon output is not written directly to `build_output/`. It is isolated by
+`COSMO_MODEL_GUARD_BUILD_PROFILE`:
+
+- SOURCE build (internal profile `public-runtime`): `build_output/public-runtime/`;
+- controlled production build: `build_output/production-release/`.
+
+The default filename contains
+`-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>`. It is an installable
+source build, not a signed production release. Protected models still require
+a device-bound certificate provisioned through the separate authorized
+workflow.
+
+Note: `docker compose build` only builds the image and does not necessarily execute the container command that exports an artifact.
 
 ## Sophon Build Failure
 
@@ -99,6 +112,12 @@ Common causes:
 
 - Network issues preventing apt/npm/cargo mirror downloads — check `SOPHON_APT_MIRROR` and related environment variables.
 - Insufficient disk space — the build requires approximately 3GB.
+- An unsupported `COSMO_MODEL_GUARD_BUILD_PROFILE` value — only
+  `public-runtime` and `production-release` are accepted.
+- Selecting `production-release` outside the controlled release environment —
+  missing production SDK, provisioning, release-public-key, or bootstrap inputs is
+  rejected by design. Use SOURCE for ordinary source-code builds; do not bypass
+  the formal release checks.
 
 ## nginx / SRS / cosmo-engine Not Started
 
@@ -130,10 +149,10 @@ On a Sophon device, inspect:
 ```bash
 systemctl status cosmo --no-pager -l
 journalctl -u cosmo -b --no-pager -n 200
-stat -c '%F %a %U:%G %n' /data/cwaiuserdata/upload/sessions
 ```
 
-Normally `cosmo.service` is `active (running)` and the staging root is a real directory with mode `0700`. A fatal initialization exception exits non-zero so `Restart=on-failure` can retry. Do not bypass the checks by recursively widening permissions on all of `/data/cwaiuserdata`.
+Normally `cosmo.service` is `active (running)`. A fatal initialization
+exception exits non-zero so `Restart=on-failure` can retry.
 
 ## Documentation Site Build Fails
 

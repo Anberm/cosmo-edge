@@ -61,7 +61,7 @@ x86 Compose 会发布：
 
 如果端口被占用，可以修改 `docker-compose.x86.yml` (或 Windows 上的 `docker-compose.x86.windows.yml`) 的主机端口，或停止占用端口的服务。
 
-## `build_output/` 没有发布包
+## `build_output/` 没有构建产物
 
 使用完整运行命令：
 
@@ -81,9 +81,21 @@ Sophon 路径使用：
 
 ```bash
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+ls -lh build_output/public-runtime/
 ```
 
-注意：`docker compose build` 只构建镜像，不一定执行导出发布包的容器命令。
+Sophon 产物不会直接写在 `build_output/` 根目录，而是按
+`COSMO_MODEL_GUARD_BUILD_PROFILE` 隔离：
+
+- SOURCE 构建（内部配置 `public-runtime`）：`build_output/public-runtime/`；
+- 受控正式构建：`build_output/production-release/`。
+
+默认文件名包含
+`-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>`。它是可安装的源码
+构建，但不是正式签名发布；受保护 preset 模型仍要求通过独立的受控授权流程安装
+一张与本机绑定的设备证书，不存在逐模型 license。
+
+注意：`docker compose build` 只构建镜像，不一定执行导出产物的容器命令。
 
 ## Sophon 构建失败
 
@@ -99,6 +111,11 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package 2>&1 |
 
 - 网络问题导致 apt/npm/cargo 镜像下载失败 — 检查 `SOPHON_APT_MIRROR` 等环境变量。
 - 磁盘空间不足 — 构建过程需要约 3GB 空间。
+- `COSMO_MODEL_GUARD_BUILD_PROFILE` 取值不受支持——只接受
+  `public-runtime` 和 `production-release`。
+- 在非受控发布环境选择 `production-release`——缺少正式 SDK、设备初始化、
+  信任身份、签发者或发布引导输入时按设计拒绝构建。普通源码修改应使用
+  SOURCE，不要绕过正式发布检查。
 
 ## nginx / SRS / cosmo-engine 未启动
 
