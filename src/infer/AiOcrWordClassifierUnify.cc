@@ -31,8 +31,11 @@ util::ErrorEnum AiOcrWordClassifierUnify::Init() {
         return util::ErrorEnum::Failed;
     }
     try {
-        classifier_ = std::make_unique<cosmo::nn::DefaultComponent>(json_path_, model_path_, GetDeviceType(),
-                                                                    &profiler_, "", word_dict_path_);
+        cosmo::nn::DefaultComponent::Options options;
+        options.profiler        = &profiler_;
+        options.word_table_path = word_dict_path_;
+        classifier_ =
+            std::make_unique<cosmo::nn::DefaultComponent>(options, json_path_, model_path_, GetDeviceType());
     } catch (const std::exception& e) {
         LOG_ERRO("Init OCR classifier failed. AlgCode:{} Error:{}", atomic_code_, e.what());
         classifier_.reset();

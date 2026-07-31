@@ -5,12 +5,13 @@ set(NN_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ── Sophon SDK path (used only for Sophon backend) ──
 if(COSMO_NN_USE_SOPHON_BACKEND)
-    set(SOPHON_ROOT_DIR ${CMAKE_SOURCE_DIR}/3rd/libsophon-0.4.11)
+    set(SOPHON_ROOT_DIR ${DEVICE_ROOT_DIR})
 endif()
 
 # ── Collect NN source files ──
 file(GLOB_RECURSE NN_ALL_SRC
     "${NN_DIR}/core/*.h"   "${NN_DIR}/core/*.cc"
+    "${NN_DIR}/guard/*.h"  "${NN_DIR}/guard/*.cc"
     "${NN_DIR}/node/*.h"   "${NN_DIR}/node/*.cc"
     "${NN_DIR}/pipeline/*.h" "${NN_DIR}/pipeline/*.cc"
     "${NN_DIR}/utils/*.h"  "${NN_DIR}/utils/*.cc"
@@ -57,6 +58,7 @@ endif()
 
 if(COSMO_MODEL_GUARD)
     target_compile_definitions(cosmo_nn PRIVATE COSMO_HAS_MODEL_GUARD=1)
+    target_link_libraries(cosmo_nn PRIVATE cosmo_model_guard_v2)
 endif()
 
 if(COSMO_NN_USE_CPU_BACKEND)

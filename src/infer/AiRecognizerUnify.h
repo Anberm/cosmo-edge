@@ -15,10 +15,8 @@ public:
     AiRecognizerUnify(const std::string& json_path, const std::string& model_path);
 
     /// 3-arg constructor for InstancePool<T,PTR> template compatibility.
-    /// The atomicCode is unused — pool-level keying is handled by InferPoolServiceImpl.
-    AiRecognizerUnify(const std::string& /*atomic_code*/, const std::string& json_path,
-                      const std::string& model_path)
-        : AiRecognizerUnify(json_path, model_path) {}
+    AiRecognizerUnify(const std::string& atomic_code, const std::string& json_path,
+                      const std::string& model_path);
     ~AiRecognizerUnify();
 
     util::ErrorEnum Init();

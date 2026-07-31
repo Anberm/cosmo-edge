@@ -25,8 +25,10 @@ util::ErrorEnum AiDetectorUnify::Init() {
     }
 
     try {
-        detector_ = std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(),
-                                                                  &profiler_);
+        cosmo::nn::DefaultComponent::Options options;
+        options.profiler = &profiler_;
+        detector_ =
+            std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     } catch (const std::exception& e) {
         LOG_ERRO("Init SDK Detector Failed. CfgPath:{} ModelPath:{}, {}", cfg_path_, model_path_, e.what());
         detector_.reset();

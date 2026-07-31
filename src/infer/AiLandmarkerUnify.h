@@ -17,10 +17,8 @@ public:
     AiLandmarkerUnify(const std::string& jsonPath, const std::string& modelPath);
 
     /// 3-arg constructor for InstancePool<T,PTR> template compatibility.
-    /// The atomicCode is unused — pool-level keying is handled by InferPoolServiceImpl.
-    AiLandmarkerUnify(const std::string& /*atomicCode*/, const std::string& jsonPath,
-                      const std::string& modelPath)
-        : AiLandmarkerUnify(jsonPath, modelPath) {}
+    AiLandmarkerUnify(const std::string& atomicCode, const std::string& jsonPath,
+                      const std::string& modelPath);
     ~AiLandmarkerUnify();
 
     util::ErrorEnum Init();

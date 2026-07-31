@@ -10,12 +10,9 @@
 #include "util/UuidUtil.h"
 
 namespace cosmo {
-Qwen3VLUnify::Qwen3VLUnify(const std::string& atomic_code, const std::string& json_path,
-                           const std::string& model_path, const std::string& tokenizer_path)
-    : atomic_code_(atomic_code),
-      cfg_path_(json_path),
-      model_path_(model_path),
-      tokenizer_path_(tokenizer_path) {}
+Qwen3VLUnify::Qwen3VLUnify(const std::string&, const std::string& json_path, const std::string& model_path,
+                           const std::string& tokenizer_path)
+    : cfg_path_(json_path), model_path_(model_path), tokenizer_path_(tokenizer_path) {}
 
 Qwen3VLUnify::~Qwen3VLUnify() {
     LOG_INFO("{}", "Qwen3VLUnify Delete");
@@ -28,9 +25,11 @@ util::ErrorEnum Qwen3VLUnify::Init() {
     }
 
     try {
-        // Pass tokenizer_path as the tokenizer_path parameter
-        generator_ = std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(),
-                                                                   &profiler_, tokenizer_path_);
+        cosmo::nn::DefaultComponent::Options options;
+        options.profiler       = &profiler_;
+        options.tokenizer_path = tokenizer_path_;
+        generator_ =
+            std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     } catch (const std::exception& e) {
         LOG_ERRO("Init SDK Qwen3VL Failed. CfgPath:{} ModelPath:{} TokenizerPath:{}, {}", cfg_path_,
                  model_path_, tokenizer_path_, e.what());

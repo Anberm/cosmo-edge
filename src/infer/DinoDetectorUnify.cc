@@ -31,9 +31,11 @@ util::ErrorEnum DinoDetectorUnify::Init() {
     }
 
     try {
-        // Pass vocabPath as the tokenizer_path parameter
-        detector_ = std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(),
-                                                                  &profiler_, vocab_path_);
+        cosmo::nn::DefaultComponent::Options options;
+        options.profiler       = &profiler_;
+        options.tokenizer_path = vocab_path_;
+        detector_ =
+            std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     } catch (const std::exception& e) {
         LOG_ERRO("Init SDK Dino Detector Failed. CfgPath:{} ModelPath:{} VocabPath:{}, {}", cfg_path_,
                  model_path_, vocab_path_, e.what());
