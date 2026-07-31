@@ -103,13 +103,11 @@ sudo ./install-device.sh install
 sudo ./install-device.sh status
 ```
 
-设备没有 `/appfs` 时，安装器会自动创建 `/appfs` 以及应用和状态目录。少量事务
-元数据保存在 `/appfs/cosmo_wander/.cosmo-source`。安装过程中，当前应用只作为
-临时事务交换目录存在，以便启动或健康检查失败时恢复。安装成功后立即删除交换
-目录，不保留上一版或官方版本的持久备份，也不提供 `rollback` 或
-`restore-official` 命令。`status` 会显示当前模式、build ID、payload SHA-256、
-Edge 基准 commit、分发 build identity 和未完成事务。外层归档的 SHA-256 应在
-解压前按分发文件名验证；解压后安装器无法重新获得、不会保存或显示该归档摘要。
+设备没有 `/appfs` 时，安装器会自动创建 `/appfs/cosmo_wander`，验证解压后的
+payload，停止 `cosmo.service`，删除现有 `cwai_data`，安装新应用树并启动 SOURCE
+服务。它不创建应用备份，也不提供回滚命令。最终健康检查失败时，命令会报告失败
+并保留新安装的应用树，便于直接诊断或重新安装。`status` 会显示当前模式、build
+ID、Edge 基准 commit、Guard SDK release 和服务状态。
 
 设备已经完成配置时，
 `/data/cwaiuserdata/model-guard/device-certificate.bin` 保持不变。这一张与本机
