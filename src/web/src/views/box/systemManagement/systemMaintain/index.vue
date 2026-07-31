@@ -45,6 +45,7 @@ import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import RunningDetail from './components/RunningDetail.vue'
 import { t } from '@/i18n'
 import { normalizeApiError } from '@/utils/apiError'
+import { isSupportedUpgradePackageName } from '@/utils/upgradePackage'
 import {
   uploadFileInChunks,
   UploadPurpose
@@ -58,7 +59,6 @@ const uploadFile = ref(null)
 const fileName = ref('')
 const upload = ref(null)
 const checkTimer = ref(null)
-const upgradePackagePattern = /^cosmo-[Vv]\d+\.\d+\.\d+-[0-9a-fA-F]{32}\.tar\.gz$/
 const upgradeStatusPollIntervalMs = 5000
 const upgradeRecoveryTimeoutMs = 15 * 60 * 1000
 let upgradeLoading = null
@@ -104,7 +104,7 @@ watch(activeTab, (newVal) => {
 }, { immediate: true })
 
 const beforeUpload = (file) => {
-  if (!upgradePackagePattern.test(file.name)) {
+  if (!isSupportedUpgradePackageName(file.name)) {
     ElMessage.error(t('systemManage.invalidUpgradeFile'))
     return false
   }
@@ -120,7 +120,7 @@ const beforeUpload = (file) => {
 const handleFileChange = (file) => {
   if (file) {
     const rawFile = file.raw || file
-    if (!upgradePackagePattern.test(rawFile.name)) {
+    if (!isSupportedUpgradePackageName(rawFile.name)) {
       ElMessage.error(t('systemManage.invalidUpgradeFile'))
       fileName.value = ''
       uploadFile.value = null

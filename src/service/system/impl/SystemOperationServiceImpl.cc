@@ -2,7 +2,9 @@
 
 #include "service/system/impl/SystemOperationServiceImpl.h"
 
+#include <cstdlib>
 #include <filesystem>
+#include <string_view>
 
 #include "service/detail/ServiceRegistry.h"
 #include "service/system/impl/PacketUpgrade.h"
@@ -16,6 +18,17 @@
 namespace cosmo::service {
 
 namespace fs = std::filesystem;
+
+namespace {
+
+    constexpr std::string_view kSourceRuntimeEnvironment = "COSMO_SOURCE_RUNTIME";
+
+    bool IsSourceRuntime() {
+        const char* value = std::getenv(kSourceRuntimeEnvironment.data());
+        return value != nullptr && std::string_view(value) == "1";
+    }
+
+}  // namespace
 
 void SystemOperationServiceImpl::RebootDevice(const std::string& reason) {
     reboot_mgr_.Reboot(reason);
@@ -69,6 +82,10 @@ cosmo::util::ErrorEnum SystemOperationServiceImpl::ExportLogs(std::string& fileN
 }
 
 cosmo::util::ErrorEnum SystemOperationServiceImpl::Upgrade(const std::string& filePath) {
+    if (IsSourceRuntime()) {
+        LOG_WARN("{}", "Software upgrade is disabled while the SOURCE runtime is active");
+        return cosmo::util::ErrorEnum::OperationNotSupport;
+    }
     auto result = cosmo::PacketUpgrade(filePath);
     if (result == cosmo::util::ErrorEnum::Success) {
         reboot_mgr_.Reboot("upgrade Reboot");
