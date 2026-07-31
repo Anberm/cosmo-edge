@@ -72,6 +72,8 @@ def make_toolchain_identity() -> dict:
         "id": "sha256:" + "a" * 64,
         "pythonExecutable": "/isolated/venv/bin/python",
         "pythonVersion": "3.10.12",
+        "sysPrefix": "/isolated/venv",
+        "basePrefix": "/usr",
         "package": {
             "name": "tpu_mlir",
             "version": "1.28.1",
@@ -130,6 +132,24 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             self.assertEqual(deploy[deploy.index("--chip") + 1], "bm1688")
             self.assertEqual(deploy[deploy.index("--quantize") + 1], "F16")
 
+    def test_tensor_comparison_uses_tool_default_when_contract_has_no_tolerance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = make_contract()
+            contract["parameters"].pop("tensorTolerance")
+            run_dir, _ = prepare_run(Path(directory), contract)
+            parameters = conversion.conversion_parameters(contract, run_dir)
+            deploy = conversion.build_deploy_arguments(
+                parameters,
+                mlir="/workspace/run/work/candidate.mlir",
+                model="/workspace/run/artifacts/candidate.bmodel",
+                test_input="/workspace/run/inputs/sample.npz",
+                test_reference="/workspace/run/work/reference.npz",
+            )
+            self.assertIn("--test_input", deploy)
+            self.assertIn("--test_reference", deploy)
+            self.assertNotIn("--tolerance", deploy)
+            self.assertIsNone(parameters["tensorTolerance"])
+
     def test_python_toolchain_uses_selected_interpreter_not_entry_shebang(self):
         identity = make_toolchain_identity()
         command = conversion._tool_command(
@@ -151,6 +171,32 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             environment["VIRTUAL_ENV"],
             str(Path(identity["pythonExecutable"]).parent.parent),
         )
+
+    def test_direct_tool_entry_does_not_require_python_script_layout(self):
+        identity = make_toolchain_identity()
+        identity["tools"]["modelTransform"]["invocation"] = "direct"
+        command = conversion._tool_command(
+            identity,
+            "modelTransform",
+            ["--help"],
+            run_dir=ROOT / "output" / "agent-runs" / "fixture",
+        )
+        self.assertEqual(command, [identity["tools"]["modelTransform"]["path"], "--help"])
+
+    def test_system_python_identity_does_not_inherit_unrelated_virtualenv(self):
+        identity = make_toolchain_identity()
+        identity["sysPrefix"] = "/usr"
+        identity["basePrefix"] = "/usr"
+        previous = os.environ.get("VIRTUAL_ENV")
+        os.environ["VIRTUAL_ENV"] = "/unrelated/venv"
+        try:
+            environment = core.toolchain_environment(identity)
+        finally:
+            if previous is None:
+                os.environ.pop("VIRTUAL_ENV", None)
+            else:
+                os.environ["VIRTUAL_ENV"] = previous
+        self.assertNotIn("VIRTUAL_ENV", environment)
 
     def test_contract_source_cannot_escape_the_run(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -194,6 +240,52 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
             with self.assertRaisesRegex(core.WorkflowError, "changed after"):
                 conversion._read_environment_report(contract_path, run_dir, contract)
+
+    def test_previous_execution_manifest_is_archived_before_rerun(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            previous = {
+                "schemaVersion": "1.0",
+                "attempt": 1,
+                "status": "FAILED",
+                "startedAt": "2026-01-01T00:00:00Z",
+                "completedAt": "2026-01-01T00:01:00Z",
+                "failure": "tensor comparison failed",
+                "stages": {"tensorCompare": {"status": "FAIL"}},
+                "artifacts": [],
+            }
+            (run_dir / "execution-manifest.json").write_text(
+                json.dumps(previous), encoding="utf-8"
+            )
+            attempt, history = conversion._archive_previous_attempt(run_dir)
+            self.assertEqual(attempt, 2)
+            self.assertEqual(history[0]["stageStatuses"]["tensorCompare"], "FAIL")
+            self.assertEqual(history[0]["archive"], "attempts/attempt-1.json")
+            archived = json.loads(
+                (run_dir / "attempts" / "attempt-1.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(archived["status"], "FAILED")
+            self.assertEqual(
+                history[0]["manifestSha256"],
+                core.sha256_file(run_dir / "attempts" / "attempt-1.json"),
+            )
+
+    def test_data_flow_record_is_coarse_and_redacted(self):
+        contract = make_contract()
+        contract["parameters"]["requiresModelTransfer"] = True
+        contract["parameters"]["dataFlow"] = {
+            "status": "COMPLETED",
+            "sourceZone": "https://user:secret@example.invalid/source",
+            "executionZone": "isolated Linux development environment",
+            "evidenceReference": "transfer-log-sha256:fixture",
+            "password": "must-not-be-copied",
+        }
+        record = conversion._data_flow_record(contract)
+        self.assertEqual(record["mode"], "REMOTE_TRANSFER")
+        self.assertEqual(record["status"], "COMPLETED")
+        self.assertNotIn("secret", json.dumps(record))
+        self.assertNotIn("must-not-be-copied", json.dumps(record))
+        self.assertFalse(record["credentialMaterialStored"])
 
     def _make_verifiable_run(self, root: Path, tensor_status: str) -> tuple[Path, Path, dict]:
         contract = make_contract()
@@ -282,6 +374,8 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             self.assertEqual(evidence["developmentVerdict"], "PARTIAL")
             self.assertEqual(evidence["promotionVerdict"], "NOT_REQUESTED")
             self.assertEqual(evidence["deviceVerdict"], "NOT_RUN")
+            self.assertEqual(len(evidence["attempts"]), 1)
+            self.assertEqual(evidence["dataFlow"]["status"], "UNVERIFIED")
             self.assertTrue((run_dir / "evidence.md").is_file())
 
             manifest_path = run_dir / "execution-manifest.json"
@@ -299,6 +393,32 @@ class ModelConversionWorkflowTest(unittest.TestCase):
                 next(stage for stage in tampered["stages"] if stage["id"] == "S1")["status"],
                 "FAIL",
             )
+
+    def test_failed_tensor_attempt_remains_visible_until_a_pass_supersedes_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_dir, contract_path, contract = self._make_verifiable_run(root, "UNVERIFIED")
+            manifest_path = run_dir / "execution-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["attempt"] = 2
+            manifest["previousAttempts"] = [
+                {
+                    "attempt": 1,
+                    "status": "FAILED",
+                    "stageStatuses": {"tensorCompare": "FAIL"},
+                }
+            ]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            evidence = conversion.verify_conversion(contract_path, run_dir, contract)
+            tensor = next(stage for stage in evidence["stages"] if stage["id"] == "S3")
+            self.assertEqual(tensor["status"], "FAIL")
+            self.assertIn("attempt(s) 1", tensor["detail"])
+
+            manifest["stages"]["tensorCompare"]["status"] = "PASS"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            superseded = conversion.verify_conversion(contract_path, run_dir, contract)
+            tensor = next(stage for stage in superseded["stages"] if stage["id"] == "S3")
+            self.assertEqual(tensor["status"], "PASS")
 
     def test_example_needs_two_distinct_same_candidate_recordings(self):
         with tempfile.TemporaryDirectory() as directory:

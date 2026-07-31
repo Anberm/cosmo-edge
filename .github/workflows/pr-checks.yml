@@ -154,6 +154,26 @@ jobs:
       - name: Test measured model-conversion workflow
         run: python -m unittest discover -s test/agent -p 'test_model_conversion_workflow.py'
 
+  # ── Windows remains an orchestration and assessment entry ─────────
+  agent-windows-routing:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Test read-only assessment and Linux routing
+        run: >-
+          python -m unittest
+          test.agent.test_agent_workflow.AgentWorkflowTest.test_memory_probe_tolerates_windows_missing_sysconf
+          test.agent.test_agent_workflow.AgentWorkflowTest.test_unspecified_toolchain_selects_capability_probe_without_version_pin
+          test.agent.test_agent_workflow.AgentWorkflowTest.test_assessment_asks_only_for_missing_business_input
+          test.agent.test_agent_workflow.AgentWorkflowTest.test_windows_assessment_routes_to_linux_without_calling_windows_unsupported
+          test.agent.test_agent_workflow.AgentWorkflowTest.test_remote_linux_assessment_consolidates_missing_authority
+          test.agent.test_agent_workflow.AgentWorkflowTest.test_windows_doctor_returns_linux_environment_guidance_not_traceback
+
   # ── Documentation structure, links, build, and rendered smoke ─────
   docs:
     runs-on: ubuntu-latest

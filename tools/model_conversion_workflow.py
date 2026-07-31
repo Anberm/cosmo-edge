@@ -252,17 +252,23 @@ def _tool_command(
     python_executable = str(toolchain.get("pythonExecutable", ""))
     if not python_executable:
         raise core.WorkflowError("admitted toolchain has no Python executable")
-    command = [python_executable, entry["path"], *arguments]
+    invocation = entry.get("invocation", "python")
+    command = (
+        [entry["path"], *arguments]
+        if invocation == "direct"
+        else [python_executable, entry["path"], *arguments]
+    )
     if toolchain.get("kind") == "python-package":
         return command
     if toolchain.get("kind") == "container-image":
         image_id = toolchain.get("image", {}).get("id")
         if not isinstance(image_id, str) or not image_id:
             raise core.WorkflowError("admitted container toolchain has no image identity")
-        return _docker_base(run_dir, image_id, python_executable) + [
-            entry["path"],
-            *arguments,
-        ]
+        entrypoint = entry["path"] if invocation == "direct" else python_executable
+        container_command = _docker_base(run_dir, image_id, entrypoint)
+        if invocation != "direct":
+            container_command.append(entry["path"])
+        return [*container_command, *arguments]
     raise core.WorkflowError("admitted toolchain kind is unsupported")
 
 
@@ -330,16 +336,9 @@ def build_deploy_arguments(
         model,
     ]
     if test_input and test_reference:
-        arguments.extend(
-            [
-                "--test_input",
-                test_input,
-                "--test_reference",
-                test_reference,
-                "--tolerance",
-                parameters["tensorTolerance"],
-            ]
-        )
+        arguments.extend(["--test_input", test_input, "--test_reference", test_reference])
+        if parameters.get("tensorTolerance"):
+            arguments.extend(["--tolerance", parameters["tensorTolerance"]])
     return arguments
 
 
@@ -368,6 +367,95 @@ def _failed_manifest(
     manifest["completedAt"] = utc_now()
     manifest["failure"] = core.redact_text(detail)
     core.atomic_write_json(manifest_path, manifest)
+
+
+def _attempt_summary(
+    manifest: dict[str, Any],
+    *,
+    archive_path: Path | None = None,
+    run_dir: Path | None = None,
+) -> dict[str, Any]:
+    stages = manifest.get("stages", {})
+    artifacts = manifest.get("artifacts", [])
+    first_artifact = artifacts[0] if isinstance(artifacts, list) and artifacts else {}
+    summary = {
+        "attempt": int(manifest.get("attempt", 1)),
+        "status": str(manifest.get("status", "UNKNOWN")),
+        "startedAt": manifest.get("startedAt"),
+        "completedAt": manifest.get("completedAt"),
+        "failure": core.redact_text(str(manifest.get("failure", ""))) or None,
+        "stageStatuses": {
+            key: value.get("status", "UNKNOWN")
+            for key, value in stages.items()
+            if isinstance(value, dict)
+        },
+        "artifactSha256": first_artifact.get("sha256") if isinstance(first_artifact, dict) else None,
+    }
+    if archive_path is not None:
+        summary["archive"] = (
+            _run_relative(archive_path, run_dir)
+            if run_dir is not None
+            else str(archive_path)
+        )
+        summary["manifestSha256"] = core.sha256_file(archive_path)
+    return summary
+
+
+def _archive_previous_attempt(run_dir: Path) -> tuple[int, list[dict[str, Any]]]:
+    manifest_path = run_dir / "execution-manifest.json"
+    attempts_dir = run_dir / "attempts"
+    attempts_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    archived: list[dict[str, Any]] = []
+    maximum = 0
+    for path in sorted(attempts_dir.glob("attempt-*.json")):
+        match = re.fullmatch(r"attempt-(\d+)\.json", path.name)
+        if not match:
+            continue
+        maximum = max(maximum, int(match.group(1)))
+        data = core.load_json(path)
+        if isinstance(data, dict):
+            archived.append(_attempt_summary(data, archive_path=path, run_dir=run_dir))
+    if manifest_path.is_file():
+        current = core.load_json(manifest_path)
+        if not isinstance(current, dict):
+            raise core.WorkflowError("existing execution-manifest.json must be an object")
+        attempt = int(current.get("attempt", maximum + 1))
+        if attempt <= maximum or (attempts_dir / f"attempt-{attempt}.json").exists():
+            attempt = maximum + 1
+        current["attempt"] = attempt
+        archive_path = attempts_dir / f"attempt-{attempt}.json"
+        core.atomic_write_json(archive_path, current)
+        archived.append(_attempt_summary(current, archive_path=archive_path, run_dir=run_dir))
+        maximum = max(maximum, attempt)
+    archived.sort(key=lambda item: item["attempt"])
+    return maximum + 1, archived
+
+
+def _data_flow_record(contract: dict[str, Any]) -> dict[str, Any]:
+    parameters = contract.get("parameters", {})
+    declared = parameters.get("dataFlow", {})
+    if declared is None:
+        declared = {}
+    if not isinstance(declared, dict):
+        raise core.WorkflowError("parameters.dataFlow must be an object")
+    transfer_required = bool(parameters.get("requiresModelTransfer"))
+    record = {
+        "mode": "REMOTE_TRANSFER" if transfer_required else "LOCAL_ONLY",
+        "status": "DECLARED" if transfer_required else "NOT_REQUIRED",
+        "sourceZone": "current isolated run",
+        "executionZone": "current isolated run",
+        "evidenceReference": None,
+        "credentialMaterialStored": False,
+    }
+    for key in ("status", "sourceZone", "executionZone", "evidenceReference"):
+        value = declared.get(key)
+        if value is not None:
+            record[key] = core.redact_text(str(value))
+    if record["status"] not in {"NOT_REQUIRED", "DECLARED", "COMPLETED", "FAILED"}:
+        raise core.WorkflowError(
+            "parameters.dataFlow.status must be NOT_REQUIRED, DECLARED, COMPLETED, or FAILED"
+        )
+    return record
 
 
 def execute_conversion(
@@ -406,11 +494,14 @@ def execute_conversion(
     preflight_path = verification_dir / "onnx-check.json"
     model_info_path = verification_dir / "model-info.txt"
     manifest_path = run_dir / "execution-manifest.json"
+    attempt, previous_attempts = _archive_previous_attempt(run_dir)
     commands: list[str] = []
     started = time.monotonic()
     manifest: dict[str, Any] = {
         "schemaVersion": "1.0",
         "status": "RUNNING",
+        "attempt": attempt,
+        "previousAttempts": previous_attempts,
         "runId": contract["runId"],
         "task": contract["task"],
         "commit": environment.get("commit"),
@@ -429,6 +520,7 @@ def execute_conversion(
             "expectedOutputShapes": parameters["expectedOutputShapes"],
         },
         "toolchain": current_toolchain,
+        "dataFlow": _data_flow_record(contract),
         "selectedAssets": core.redact_data(selection["selectedAssets"]),
         "assetDifferences": core.redact_data(selection["differences"]),
         "runtimeOverrides": {},
@@ -492,13 +584,19 @@ def execute_conversion(
             log_path=logs_dir / "tool-model-deploy-help.log",
             commands=commands,
         )
-        tensor_flags_supported = all(
+        tensor_core_flags_supported = all(
             flag in transform_help for flag in ("--test_input", "--test_result")
         ) and all(
             flag in deploy_help
-            for flag in ("--test_input", "--test_reference", "--tolerance")
+            for flag in ("--test_input", "--test_reference")
+        )
+        tolerance_flag_supported = "--tolerance" in deploy_help
+        tensor_flags_supported = bool(
+            tensor_core_flags_supported
+            and (not parameters["tensorTolerance"] or tolerance_flag_supported)
         )
         manifest["toolchain"]["tensorFlagsSupported"] = tensor_flags_supported
+        manifest["toolchain"]["toleranceFlagSupported"] = tolerance_flag_supported
 
         test_input_raw = test_input_override or parameters["raw"].get("testInput")
         test_input = (
@@ -509,9 +607,7 @@ def execute_conversion(
         if test_input_override and test_input:
             manifest["runtimeOverrides"]["testInput"] = _run_relative(test_input, run_dir)
         tensor_requested = test_input is not None
-        tensor_enabled = bool(
-            tensor_requested and tensor_flags_supported and parameters["tensorTolerance"]
-        )
+        tensor_enabled = bool(tensor_requested and tensor_flags_supported)
         runtime_test_input = (
             _runtime_path(test_input, run_dir, current_toolchain)
             if tensor_enabled and test_input
@@ -581,13 +677,14 @@ def execute_conversion(
 
         if tensor_enabled:
             tensor_status = "PASS"
-            tensor_detail = "TPU-MLIR test input/reference comparison completed during deploy."
+            tensor_detail = (
+                "TPU-MLIR test input/reference comparison completed with the contract tolerance."
+                if parameters["tensorTolerance"]
+                else "TPU-MLIR test input/reference comparison completed with the admitted tool's default tolerance policy."
+            )
         elif tensor_requested and not tensor_flags_supported:
             tensor_status = "UNVERIFIED"
             tensor_detail = "The admitted toolchain does not expose all required tensor comparison flags."
-        elif tensor_requested and not parameters["tensorTolerance"]:
-            tensor_status = "UNVERIFIED"
-            tensor_detail = "A test input was supplied but no tensorTolerance was frozen in the contract."
         else:
             tensor_status = "UNVERIFIED"
             tensor_detail = "No test input was supplied for transform/deploy tensor comparison."
@@ -595,6 +692,9 @@ def execute_conversion(
             "status": tensor_status,
             "detail": tensor_detail,
             "tolerance": parameters["tensorTolerance"],
+            "tolerancePolicy": (
+                "contract-override" if parameters["tensorTolerance"] else "tool-default"
+            ),
             "reference": (
                 _run_relative(reference_path, run_dir) if reference_path.is_file() else None
             ),
@@ -730,6 +830,9 @@ def record_example(
         "artifactSha256": bmodel["sha256"],
         "artifactSizeBytes": bmodel["sizeBytes"],
         "tensorTolerance": manifest["stages"]["tensorCompare"].get("tolerance"),
+        "tensorTolerancePolicy": manifest["stages"]["tensorCompare"].get(
+            "tolerancePolicy", "contract-override"
+        ),
     }
     applicability = {
         "modelFamily": parameters["modelFamily"],
@@ -880,6 +983,26 @@ def _example_applicable(example: dict[str, Any], parameters: dict[str, Any]) -> 
     return all(applicability.get(key) == value for key, value in expected.items())
 
 
+def _accepted_waiver(contract: dict[str, Any], stage: str) -> dict[str, Any] | None:
+    waivers = contract.get("acceptance", {}).get("waivers", [])
+    if not isinstance(waivers, list):
+        raise core.WorkflowError("acceptance.waivers must be an array")
+    for waiver in waivers:
+        if not isinstance(waiver, dict) or waiver.get("stage") != stage:
+            continue
+        reason = waiver.get("reason")
+        if not isinstance(reason, str) or not reason.strip() or waiver.get("confirmedByUser") is not True:
+            raise core.WorkflowError(
+                f"waiver for {stage} requires a reason and confirmedByUser=true"
+            )
+        return {
+            "stage": stage,
+            "reason": core.redact_text(reason.strip()),
+            "confirmedByUser": True,
+        }
+    return None
+
+
 def verify_conversion(
     contract_path: Path,
     run_dir: Path,
@@ -981,11 +1104,35 @@ def verify_conversion(
 
     tensor = manifest.get("stages", {}).get("tensorCompare", {})
     tensor_status = tensor.get("status") if tensor.get("status") in {"PASS", "FAIL", "UNVERIFIED"} else "UNVERIFIED"
+    previous_attempts = manifest.get("previousAttempts", [])
+    if not isinstance(previous_attempts, list):
+        raise core.WorkflowError("execution manifest previousAttempts must be an array")
+    failed_tensor_attempts = [
+        item.get("attempt")
+        for item in previous_attempts
+        if isinstance(item, dict)
+        and item.get("stageStatuses", {}).get("tensorCompare") == "FAIL"
+    ]
+    tensor_waiver = _accepted_waiver(contract, "tensor-compare")
+    tensor_detail = str(tensor.get("detail", "Tensor comparison evidence is unavailable."))
+    if tensor_status == "FAIL":
+        if tensor_waiver:
+            tensor_detail += " A waiver does not supersede a measured failure."
+    elif tensor_status != "PASS" and failed_tensor_attempts and not tensor_waiver:
+        tensor_status = "FAIL"
+        tensor_detail = (
+            "A previous tensor comparison failed in attempt(s) "
+            + ", ".join(str(value) for value in failed_tensor_attempts)
+            + "; the current attempt did not supersede it with a pass."
+        )
+    elif tensor_status == "UNVERIFIED" and tensor_waiver:
+        tensor_status = "SKIP"
+        tensor_detail = "User-confirmed waiver: " + tensor_waiver["reason"]
     stages.append(
         {
             "id": "S3",
             "status": tensor_status,
-            "detail": str(tensor.get("detail", "Tensor comparison evidence is unavailable.")),
+            "detail": tensor_detail,
         }
     )
     stages.append(_package_stage(contract, run_dir, parameters))
@@ -997,7 +1144,7 @@ def verify_conversion(
         }
     )
 
-    required_tensor = bool(contract["acceptance"].get("requireTensorCompare", True))
+    required_tensor = bool(contract["acceptance"].get("requireTensorCompare", True)) and not tensor_waiver
     required_package = str(parameters["raw"].get("outputKind", "bmodel")) == "model-package"
     by_id = {stage["id"]: stage for stage in stages}
     if any(by_id[item]["status"] == "FAIL" for item in ("S1", "S2")):
@@ -1050,6 +1197,9 @@ def verify_conversion(
         "selectedAssets": core.redact_data(selection["selectedAssets"]),
         "assetDifferences": core.redact_data(selection["differences"]),
         "selectedExample": selected_example.get("exampleId") if selected_example else None,
+        "attempts": [*previous_attempts, _attempt_summary(manifest)],
+        "dataFlow": core.redact_data(manifest.get("dataFlow", {"status": "UNVERIFIED"})),
+        "waivers": [tensor_waiver] if tensor_waiver else [],
         "stages": stages,
         "deliverables": deliverables,
         "developmentVerdict": development_verdict,
@@ -1077,6 +1227,11 @@ def verify_conversion(
     lines.extend(f"- {stage['id']} {stage['status']}: {stage['detail']}" for stage in stages)
     lines.extend(
         [
+            "",
+            "## Attempt and data-flow record",
+            "",
+            f"- Current attempt: {manifest.get('attempt', 1)}",
+            f"- Data flow: {evidence['dataFlow'].get('mode', 'UNVERIFIED')} / {evidence['dataFlow'].get('status', 'UNVERIFIED')}",
             "",
             "## Deliverables",
             "",

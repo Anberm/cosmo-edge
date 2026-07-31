@@ -186,52 +186,55 @@ Run this section only for a Sophon target. Record the conversion tool version, t
 candidate together.
 
 When delegating the task to a coding agent, first read
-[Agent-Assisted Development](/en/development/agent-assisted-development). The agent should generate the
-run-local task contract and run `scripts/agent/doctor.sh`. Once admitted, the recommended path is
-`scripts/agent/convert_model.sh` followed by `scripts/agent/verify.sh`, which records the toolchain,
-commands, hashes, and layered evidence. Do not handcraft task contracts or example records. The manual
-commands below remain useful for direct execution and troubleshooting.
+[Agent-Assisted Development](/en/development/agent-assisted-development). An ordinary user states the target
+device, model materials, business preference, and expected deliverable. The agent generates the run-local
+contract, uses `scripts/agent/assess.sh` to select a route, and runs `doctor.sh` in the actual Linux execution
+environment. Once admitted, `convert_model.sh` and `verify.sh` record the toolchain, commands, hashes, and
+layered evidence. Users do not hand-pick releases, images, or commands; the content below is an advanced
+manual and troubleshooting reference.
 
-Treat the base environment and compiler package as separate layers. The
-[BM1688 TPU-MLIR environment guide](https://doc.sophgo.com/bm1688_sdk-docs/v1.7/docs_latest_release/docs/tpu-mlir/quick_start_en/02_env.html)
-requires Ubuntu 22.04 and Python 3.10. Use an isolated Python environment directly when the host already
-meets those conditions; use `sophgo/tpuc_dev:v3.2` only as a base environment otherwise. The image alone
-is not the complete TPU-MLIR compiler and does not prove that `model_transform.py` or `model_deploy.py`
-is callable.
+Separate an officially supported installation route, local capability, and this run's resolved identity.
+Use the current [official TPU-MLIR installation instructions](https://github.com/sophgo/tpu-mlir#-installation)
+at execution time. Supported wheel, source, and prebuilt-Docker routes are all candidates; they need not
+match one exact release or directory layout from this page. A route becomes `READY` only when `tpu_mlir`
+imports, compiler entries are callable, runtime libraries are intact, and the actual candidate passes
+preflight. Admission then freezes package release, image ID/digest, Python, command paths, and hashes.
+
+The official Sophon compiler path executes on Linux. Windows remains suitable for agent orchestration and
+material preparation, but route this section's conversion to an isolated Linux x86_64 environment. Use a
+compatibility layer only as an experimental route with explicitly accepted risk.
+
+An official development image represents a base execution environment; capability checks determine whether
+it also contains a complete compiler. Pulling, starting, or changing it requires separate authority, and
+the resolved image identity must be recorded:
 
 ```bash
-docker pull sophgo/tpuc_dev:v3.2
+docker pull sophgo/tpuc_dev:latest
 docker run --rm -it \
   -v "$PWD:/workspace" \
   -w /workspace \
-  sophgo/tpuc_dev:v3.2 \
+  sophgo/tpuc_dev:latest \
   bash
 ```
 
-The Docker step above is conditional. Install and freeze the TPU-MLIR package separately on the host or
-inside that container. The upstream release checked for this page on 2026-07-30 is
-[TPU-MLIR v1.28.1](https://github.com/sophgo/tpu-mlir/releases/tag/v1.28.1); its wheel SHA-256 is
-`28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8`:
+Docker is optional. On the host or in the container, choose an official release compatible with the
+current Python, model, and chip, install it in isolation, and check capabilities. Do not execute the
+following placeholder as-is; the release page supplies the actual version and filename:
 
 ```bash
 python3 -m venv .venv-tpu-mlir
 source .venv-tpu-mlir/bin/activate
-curl -L \
-  -o tpu_mlir-1.28.1-py3-none-any.whl \
-  https://github.com/sophgo/tpu-mlir/releases/download/v1.28.1/tpu_mlir-1.28.1-py3-none-any.whl
-printf '%s  %s\n' \
-  28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8 \
-  tpu_mlir-1.28.1-py3-none-any.whl | sha256sum -c -
-python -m pip install './tpu_mlir-1.28.1-py3-none-any.whl[onnx]'
+# Install the selected wheel or source release per upstream instructions after checking its digest.
 python -c 'from importlib.metadata import version; print(version("tpu_mlir"))'
-python "$VIRTUAL_ENV/bin/model_transform.py" --help >/dev/null
-python "$VIRTUAL_ENV/bin/model_deploy.py" --help >/dev/null
+command -v model_transform.py || command -v model_transform
+command -v model_deploy.py || command -v model_deploy
 ```
 
 Installing packages, pulling an image, or downloading a large file changes the environment or consumes
-network and requires the corresponding approval. A different reviewed release may be selected later,
-but record its version, source digest, and actual commands again. The date and version above are not a
-global requirement for every model.
+network and requires approval. Official coverage makes a route eligible to try, not proof of model
+compatibility; record actual package release, source digest, and commands every time. Automated admission
+also accepts compiler entries in explicit paths or `PATH`, rather than treating one scaffold layout as a
+global standard.
 
 The following is the manual BM1688/F16 command reference. Calling each entry script through the selected
 Python also detects an entry file whose shebang became invalid after an environment was moved:
@@ -255,9 +258,10 @@ sha256sum yolov8n_bm1688_f16.bmodel
 ```
 
 Passing x86 preflight in a newer ONNX environment does not prove that the same file is accepted by the
-selected TPU-MLIR release. Check the candidate's IR, opset, and operators with the frozen conversion
-toolchain. If they are incompatible, re-export a supported ONNX file from the source weights; do not edit
-the model's `ir_version` field to pretend it is compatible.
+selected TPU-MLIR. Combine the [ONNX versioning rules](https://onnx.ai/onnx/repo-docs/Versioning.html) and
+[ONNX Runtime compatibility guidance](https://onnxruntime.ai/docs/reference/compatibility.html) with checks
+of the actual candidate's IR, opset, and operators in the frozen compiler. If incompatible, re-export a
+supported ONNX from the source weights; do not edit `ir_version` to pretend it is compatible.
 
 CV186X requires a toolchain and chip option that support CV186X. A BM1688 artifact cannot be used on a
 CV186X device. Unsupported operators, output mismatches, or compilation errors mean conversion failed;
@@ -268,10 +272,16 @@ Post-conversion evidence must include:
 - toolchain version, chip option, and full command;
 - `.bmodel` hash;
 - model inspection with the conversion tool;
-- box, class, and score comparison across the source framework, ONNX, and target device on the same image;
+- when test input exists, pre/post-conversion tensor comparison using a user override or the current tool's
+  default tolerance policy, with that policy recorded;
+- after device authorization, box, class, and score comparison across the source framework, ONNX, and
+  target device on the same image;
 - any F16 or quantization accuracy difference.
 
 The agent path writes these results to the current run's `execution-manifest.json` and `evidence.md`.
+Each rerun archives the prior manifest in the private run. A new `UNVERIFIED` result cannot erase a prior
+failure; only a new measured `PASS` or an explicitly user-confirmed waiver with a reason explains the later
+conclusion. Remote execution also records sanitized data-flow status without storing transfer credentials.
 An entry can join the verified-example index only after two real recordings with a fixed toolchain and
 passing tensor comparison. A normal candidate can still be delivered against its own task acceptance,
 but it must not borrow another example's fixed shapes or hashes as proof.

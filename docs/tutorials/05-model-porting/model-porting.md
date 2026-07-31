@@ -182,48 +182,47 @@ PY
 仅在目标设备为 Sophon 时执行本节。转换工具版本、目标芯片和模型候选必须一起记录。
 
 如果把任务交给编码智能体，先阅读[智能体辅助二次开发](/development/agent-assisted-development)。
-智能体应先生成本次运行的任务契约并执行 `scripts/agent/doctor.sh`；环境满足后，推荐通过
-`scripts/agent/convert_model.sh` 和 `scripts/agent/verify.sh` 留下工具链、命令、哈希与
-分层证据。不要手工编造任务契约或实例记录。下面的命令仍保留为人工执行和排障参考。
+普通用户只需说明目标设备、模型物料、业务偏好和期望交付。智能体应生成本次运行的任务契约，
+先执行 `scripts/agent/assess.sh` 选择路径，再在实际 Linux 执行环境运行 `doctor.sh`。环境满足后，
+通过 `convert_model.sh` 和 `verify.sh` 留下工具链、命令、哈希与分层证据。用户无需手工选择版本、
+镜像或命令；下面的内容仅是高级人工执行和排障参考。
 
-先把“基础环境”和“编译器包”分开。算能的
-[BM1688 TPU-MLIR 环境说明](https://doc.sophgo.com/bm1688_sdk-docs/v1.7/docs_latest_release/docs/tpu-mlir/quick_start_en/02_env.html)
-要求 Ubuntu 22.04 和 Python 3.10；宿主已满足时可直接使用隔离 Python 环境，不满足时才用
-`sophgo/tpuc_dev:v3.2` 作为基础环境。该镜像本身不包含完整 TPU-MLIR 编译器，只有镜像不能
-证明 `model_transform.py`、`model_deploy.py` 可用。
+先把“官方支持的安装路径”“本机是否具备能力”和“本次实际身份”分开。执行时应以算能
+[TPU-MLIR 官方安装说明](https://github.com/sophgo/tpu-mlir#-installation)为准：其支持的 wheel、
+源码或预构建 Docker 路径都可以进入候选，不要求与本页某个精确版本或目录布局一致。候选路径
+只有在 `tpu_mlir` 可导入、转换入口可调用、运行库完整且实际候选可预检时才是 `READY`；准入后
+再冻结包版本、镜像 ID/摘要、Python、命令路径与哈希。
+
+Sophon 转换工具链按官方路径运行在 Linux 环境。Windows 可以用于智能体编排和物料整理，但应把
+本节转换路由到隔离的 Linux x86_64 开发环境。兼容层只有在用户明确接受风险时才作为实验路径。
+
+官方开发镜像只代表基础执行环境；镜像中是否已经包含完整编译器，要以实际能力检查为准。例如
+选择上游当前推荐镜像时，拉取、启动和安装仍需单独授权，且必须记录解析后的镜像身份：
 
 ```bash
-docker pull sophgo/tpuc_dev:v3.2
+docker pull sophgo/tpuc_dev:latest
 docker run --rm -it \
   -v "$PWD:/workspace" \
   -w /workspace \
-  sophgo/tpuc_dev:v3.2 \
+  sophgo/tpuc_dev:latest \
   bash
 ```
 
-上面的 Docker 步骤是条件性的。在宿主或容器内，另行安装并冻结 TPU-MLIR 包。本页在
-2026-07-30 核对的上游发布是
-[TPU-MLIR v1.28.1](https://github.com/sophgo/tpu-mlir/releases/tag/v1.28.1)，其 wheel
-SHA-256 为 `28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8`：
+Docker 是可选路径。宿主或容器内按上游说明选择与当前 Python、模型和芯片兼容的官方发布，
+安装到隔离环境，再检查能力。不要把下面的占位符原样执行；版本和文件名来自执行时核对的发布页：
 
 ```bash
 python3 -m venv .venv-tpu-mlir
 source .venv-tpu-mlir/bin/activate
-curl -L \
-  -o tpu_mlir-1.28.1-py3-none-any.whl \
-  https://github.com/sophgo/tpu-mlir/releases/download/v1.28.1/tpu_mlir-1.28.1-py3-none-any.whl
-printf '%s  %s\n' \
-  28f45f878b32f3f328a09f06cc5b14a0d1b8c35169aa09f05d7dc363ee06b4c8 \
-  tpu_mlir-1.28.1-py3-none-any.whl | sha256sum -c -
-python -m pip install './tpu_mlir-1.28.1-py3-none-any.whl[onnx]'
+# 按官方安装说明安装所选 wheel 或源码版本，并先校验下载摘要。
 python -c 'from importlib.metadata import version; print(version("tpu_mlir"))'
-python "$VIRTUAL_ENV/bin/model_transform.py" --help >/dev/null
-python "$VIRTUAL_ENV/bin/model_deploy.py" --help >/dev/null
+command -v model_transform.py || command -v model_transform
+command -v model_deploy.py || command -v model_deploy
 ```
 
-安装、拉取镜像或下载大文件都会改变环境或消耗网络，应先取得对应授权。版本更新时可以选择
-其他已核验版本，但必须重新记录包版本、来源摘要和实际命令；不要把本页日期或版本扩展成所有
-模型的强制要求。
+安装、拉取镜像或下载大文件都会改变环境或消耗网络，应先取得对应授权。官方教程覆盖只表示该
+路径允许尝试，不代表模型一定兼容；每次都要重新记录实际包版本、来源摘要和命令。仓库的自动
+检查也会在入口不与 Python 同目录时继续按显式路径或 `PATH` 查找，不把单一脚手架布局当成标准。
 
 下面是 BM1688/F16 的人工命令参考。显式使用当前环境的 Python 调用入口脚本，也能识别入口
 文件存在但 shebang 已因环境搬迁而失效的情况：
@@ -246,9 +245,11 @@ python "$VIRTUAL_ENV/bin/model_tool" --info yolov8n_bm1688_f16.bmodel
 sha256sum yolov8n_bm1688_f16.bmodel
 ```
 
-通过较新 ONNX 环境完成 x86 预检，不代表同一文件一定被所选 TPU-MLIR 版本接受。转换前要用
-本次冻结的工具链检查实际候选的 IR、opset 和算子；不兼容时应从源权重重新导出受支持的 ONNX，
-不得直接篡改模型的 `ir_version` 冒充兼容。
+通过较新 ONNX 环境完成 x86 预检，不代表同一文件一定被所选 TPU-MLIR 接受。应结合
+[ONNX 版本规则](https://onnx.ai/onnx/repo-docs/Versioning.html)和
+[ONNX Runtime 兼容性说明](https://onnxruntime.ai/docs/reference/compatibility.html)，再用本次冻结的
+工具链检查实际候选的 IR、opset 和算子；不兼容时应从源权重重新导出受支持的 ONNX，不得直接
+篡改 `ir_version` 冒充兼容。
 
 CV186X 必须使用支持该芯片的工具链和芯片参数，不能把 BM1688 产物上传到 CV186X 设备。
 如果工具报告未支持算子、输出不一致或编译失败，转换没有完成；更换文件扩展名不能解决。
@@ -258,10 +259,14 @@ CV186X 必须使用支持该芯片的工具链和芯片参数，不能把 BM1688
 - 工具链版本、芯片参数和完整命令；
 - `.bmodel` 哈希；
 - 工具提供的模型信息检查；
-- 同一张图片在源框架、ONNX 和目标设备上的框、类别与分数对比；
+- 有测试输入时，按用户覆盖容差或当前工具默认容差完成转换前后张量比对并记录策略；
+- 获得设备授权后，同一张图片在源框架、ONNX 和目标设备上的框、类别与分数对比；
 - F16 或量化造成的精度差异。
 
 智能体执行路径会把这些结果写入当前运行的 `execution-manifest.json` 和 `evidence.md`。
+每次重跑都会把上次清单归档到私有运行目录；新一轮 `UNVERIFIED` 不会抹掉之前的失败，只有新的
+实测 `PASS` 或用户明确确认并记录理由的豁免可以解释后续结论。远程执行时还要记录脱敏的数据流
+状态，但不能保存传输凭据。
 只有使用固定工具链完成两次真实录制并通过张量比对，记录才可进入仓库的已验证实例索引；
 普通候选可以按自己的任务目标交付，但不得借用其他实例的固定形状或哈希宣称成功。
 

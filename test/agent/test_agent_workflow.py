@@ -66,6 +66,12 @@ class AgentWorkflowTest(unittest.TestCase):
         validated = agent_workflow.validate_contract(contract)
         self.assertTrue(validated["futureField"]["allowed"])
 
+    def test_contract_rejects_unknown_coarse_authority_grant(self):
+        contract = json.loads((FIXTURES / "task-contract.valid.json").read_text(encoding="utf-8"))
+        contract["authority"]["grants"] = ["remote-execution", "install-anything"]
+        with self.assertRaisesRegex(agent_workflow.WorkflowError, "unknown grants"):
+            agent_workflow.validate_contract(contract)
+
     def test_invalid_contract_is_rejected(self):
         contract = json.loads(
             (FIXTURES / "task-contract.invalid-missing-objective.json").read_text(encoding="utf-8")
@@ -178,6 +184,175 @@ class AgentWorkflowTest(unittest.TestCase):
             )
             self.assertNotEqual(process.returncode, 0)
             self.assertIn("broken required links", process.stderr)
+
+    def test_toolchain_probe_accepts_commands_outside_python_bin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "fixture_toolchain"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            metadata = root / "fixture_toolchain-2.0.dist-info"
+            metadata.mkdir()
+            (metadata / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: fixture_toolchain\nVersion: 2.0\n",
+                encoding="utf-8",
+            )
+            (metadata / "RECORD").write_text(
+                "fixture_toolchain/__init__.py,,\n"
+                "fixture_toolchain-2.0.dist-info/RECORD,,\n",
+                encoding="utf-8",
+            )
+            tools = root / "separate-tools"
+            tools.mkdir()
+            transform = tools / "custom-transform"
+            deploy = tools / "custom-deploy"
+            transform.write_text("#!/bin/sh\n", encoding="utf-8")
+            deploy.write_text("#!/bin/sh\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    agent_workflow.TOOLCHAIN_PROBE_SCRIPT,
+                    "fixture_toolchain",
+                    json.dumps(
+                        {
+                            "modelTransform": str(transform),
+                            "modelDeploy": str(deploy),
+                        }
+                    ),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            identity = json.loads(process.stdout)
+            self.assertEqual(identity["tools"]["modelTransform"]["resolution"], "declared")
+            self.assertEqual(identity["tools"]["modelTransform"]["invocation"], "direct")
+            self.assertEqual(identity["tools"]["modelDeploy"]["path"], str(deploy.resolve()))
+
+    def test_unspecified_toolchain_selects_capability_probe_without_version_pin(self):
+        specification, error = agent_workflow._toolchain_spec({})
+        self.assertEqual(error, "")
+        self.assertEqual(specification["kind"], "auto")
+        self.assertIsNone(specification["version"])
+        self.assertIsNone(specification["pythonExecutable"])
+        self.assertEqual(
+            specification["officialReference"],
+            agent_workflow.TPU_MLIR_OFFICIAL_REFERENCE,
+        )
+        invalid, error = agent_workflow._toolchain_spec({"toolchain": "fixed-recipe"})
+        self.assertIsNone(invalid)
+        self.assertIn("must be an object", error)
+
+    def test_target_chip_can_be_inferred_without_limiting_user_to_example_chips(self):
+        contract = self._model_contract("other-chip")
+        contract["parameters"].pop("targetChip")
+        contract["userObjective"] = "Run this model on our BM1684X test target."
+        self.assertEqual(agent_workflow._objective_target_chip(contract), "bm1684x")
+
+    def test_memory_probe_tolerates_windows_missing_sysconf(self):
+        with mock.patch.object(agent_workflow.os, "sysconf", side_effect=AttributeError("missing")):
+            total, available = agent_workflow._memory_bytes()
+        self.assertTrue(total is None or isinstance(total, int))
+        self.assertTrue(available is None or isinstance(available, int))
+
+    def test_assessment_asks_only_for_missing_business_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("business-assessment")
+            contract["parameters"].pop("targetChip")
+            contract["userObjective"] = "让这个检测模型可以在我的测试设备上运行，并交付转换证据。"
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            with mock.patch.object(
+                agent_workflow,
+                "host_inventory",
+                return_value=self._model_inventory(),
+            ):
+                report = agent_workflow.assess_task_report(
+                    contract_path, run_dir, contract, project_root=root
+                )
+            self.assertEqual(report["routeVerdict"], "NEEDS_INPUT")
+            self.assertEqual([item["id"] for item in report["needsInput"]], ["target-device"])
+            questions = " ".join(item["question"] for item in report["needsInput"])
+            self.assertNotRegex(questions.lower(), r"python|toolchain|version|quant")
+            self.assertEqual(report["recommendedRoute"], "local-linux-tpu-mlir")
+
+    def test_windows_assessment_routes_to_linux_without_calling_windows_unsupported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("windows-assessment")
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            inventory = self._model_inventory()
+            inventory["host"].update({"os": "Windows", "architecture": "AMD64"})
+            with mock.patch.object(agent_workflow, "host_inventory", return_value=inventory):
+                report = agent_workflow.assess_task_report(
+                    contract_path, run_dir, contract, project_root=root
+                )
+            self.assertEqual(report["routeVerdict"], "NEEDS_ENVIRONMENT")
+            self.assertEqual(report["recommendedRoute"], "remote-linux-tpu-mlir")
+            details = " ".join(item["detail"] for item in report["routeCandidates"])
+            self.assertIn("不等于 CosmoEdge 不支持 Windows", details)
+
+    def test_remote_linux_assessment_consolidates_missing_authority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("remote-assessment")
+            contract["parameters"]["developmentEnvironment"] = {
+                "os": "linux",
+                "architecture": "x86_64",
+                "reference": "customer-provided isolated development host",
+            }
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            inventory = self._model_inventory()
+            inventory["host"].update({"os": "Windows", "architecture": "AMD64"})
+            with mock.patch.object(agent_workflow, "host_inventory", return_value=inventory):
+                report = agent_workflow.assess_task_report(
+                    contract_path, run_dir, contract, project_root=root
+                )
+            authority_questions = [
+                item for item in report["needsInput"] if item["category"] == "authority"
+            ]
+            self.assertEqual(len(authority_questions), 1)
+            self.assertIn("remote-execution", authority_questions[0]["question"])
+            self.assertIn("model-transfer", authority_questions[0]["question"])
+
+    def test_assessment_does_not_choose_between_multiple_model_materials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("multiple-models")
+            contract["parameters"].pop("sourceModel")
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            inputs = run_dir / "inputs"
+            inputs.mkdir(parents=True)
+            (inputs / "candidate-a.onnx").write_bytes(b"a")
+            (inputs / "candidate-b.onnx").write_bytes(b"b")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            with mock.patch.object(
+                agent_workflow, "host_inventory", return_value=self._model_inventory()
+            ):
+                report = agent_workflow.assess_task_report(
+                    contract_path, run_dir, contract, project_root=root
+                )
+            self.assertIn(
+                "source-model-selection", [item["id"] for item in report["needsInput"]]
+            )
 
     def test_command_redaction(self):
         cases = json.loads((FIXTURES / "redaction-cases.json").read_text(encoding="utf-8"))
@@ -297,6 +472,120 @@ class AgentWorkflowTest(unittest.TestCase):
             self.assertEqual(checks["C4"]["status"], "SKIP")
             self.assertEqual(checks["C5"]["status"], "PASS")
             self.assertEqual(report["toolchain"]["id"], identity["id"])
+
+    def test_doctor_discovers_and_freezes_actual_toolchain_without_exact_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("auto-toolchain")
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            identity = {
+                "kind": "python-package",
+                "id": "sha256:" + "f" * 64,
+                "package": {"name": "tpu_mlir", "version": "1.31.0"},
+            }
+            with (
+                mock.patch.object(
+                    agent_workflow, "host_inventory", return_value=self._model_inventory()
+                ),
+                mock.patch.object(
+                    agent_workflow, "inspect_toolchain", return_value=(identity, "")
+                ) as inspect,
+                mock.patch.object(
+                    agent_workflow, "_toolchain_tools_respond", return_value=(True, "")
+                ),
+                mock.patch.object(
+                    agent_workflow, "_python_environment_check", return_value=(True, "fixture")
+                ),
+            ):
+                report = agent_workflow.task_environment_report(
+                    "model-conversion", contract_path, run_dir, contract, project_root=root
+                )
+            specification = inspect.call_args.args[0]
+            self.assertEqual(specification["kind"], "auto")
+            self.assertIsNone(specification["version"])
+            self.assertEqual(report["environmentVerdict"], "READY")
+            self.assertEqual(report["toolchain"]["package"]["version"], "1.31.0")
+
+    def test_windows_doctor_returns_linux_environment_guidance_not_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("windows-doctor")
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            inventory = self._model_inventory()
+            inventory["host"].update({"os": "Windows", "architecture": "AMD64"})
+            identity = {
+                "kind": "python-package",
+                "id": "sha256:" + "a" * 64,
+                "package": {"name": "tpu_mlir", "version": "1.31.0"},
+            }
+            with (
+                mock.patch.object(agent_workflow, "host_inventory", return_value=inventory),
+                mock.patch.object(
+                    agent_workflow, "inspect_toolchain", return_value=(identity, "")
+                ) as inspect,
+                mock.patch.object(
+                    agent_workflow, "_toolchain_tools_respond", return_value=(True, "")
+                ),
+                mock.patch.object(
+                    agent_workflow, "_python_environment_check", return_value=(True, "fixture")
+                ),
+            ):
+                report = agent_workflow.task_environment_report(
+                    "model-conversion", contract_path, run_dir, contract, project_root=root
+                )
+            platform_check = next(item for item in report["checks"] if item["id"] == "C0")
+            self.assertEqual(report["environmentVerdict"], "NEEDS_ENVIRONMENT")
+            self.assertIn("Windows support elsewhere", platform_check["remediation"])
+            inspect.assert_not_called()
+
+    def test_doctor_consolidates_multiple_missing_route_grants(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("authority-doctor")
+            contract["parameters"].update(
+                {"requiresRemoteExecution": True, "requiresModelTransfer": True}
+            )
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            identity = {
+                "kind": "python-package",
+                "id": "sha256:" + "a" * 64,
+                "package": {"name": "tpu_mlir", "version": "1.31.0"},
+            }
+            with (
+                mock.patch.object(
+                    agent_workflow, "host_inventory", return_value=self._model_inventory()
+                ),
+                mock.patch.object(
+                    agent_workflow, "inspect_toolchain", return_value=(identity, "")
+                ),
+                mock.patch.object(
+                    agent_workflow, "_toolchain_tools_respond", return_value=(True, "")
+                ),
+                mock.patch.object(
+                    agent_workflow, "_python_environment_check", return_value=(True, "fixture")
+                ),
+            ):
+                report = agent_workflow.task_environment_report(
+                    "model-conversion", contract_path, run_dir, contract, project_root=root
+                )
+            authority_questions = [
+                item for item in report["needsInput"] if item["category"] == "authority"
+            ]
+            self.assertEqual(len(authority_questions), 1)
+            self.assertIn("model-transfer", authority_questions[0]["question"])
+            self.assertIn("remote-execution", authority_questions[0]["question"])
 
     def test_official_base_container_without_package_is_repository_owned(self):
         with tempfile.TemporaryDirectory() as directory:

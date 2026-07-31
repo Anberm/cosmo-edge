@@ -32,10 +32,18 @@ REQUIRED_CONTRACT_FIELDS = (
 )
 ENVIRONMENT_VERDICTS = {"READY", "REPAIRABLE", "NEEDS_ENVIRONMENT", "UNSUPPORTED"}
 CHECK_STATUSES = {"PASS", "FAIL", "BLOCKED", "SKIP", "UNVERIFIED"}
+ASSESSMENT_VERDICTS = {"READY", "NEEDS_INPUT", "NEEDS_ENVIRONMENT", "UNSUPPORTED"}
 SENSITIVE_NAME = r"(?:password|passwd|pwd|token|api[_-]?key|authorization|credential|secret)"
 IMAGE_REFERENCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]+$")
-TOOLCHAIN_KINDS = {"python-package", "container-image"}
+TOOLCHAIN_KINDS = {"auto", "python-package", "container-image"}
 TOOLCHAIN_PACKAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+AUTHORITY_GRANTS = {
+    "environment-change",
+    "remote-execution",
+    "model-transfer",
+    "device-deployment",
+}
+TPU_MLIR_OFFICIAL_REFERENCE = "https://github.com/sophgo/tpu-mlir#-installation"
 TOOLCHAIN_PROBE_SCRIPT = r"""
 import hashlib
 import importlib
@@ -47,26 +55,45 @@ import shutil
 import sys
 
 package = sys.argv[1]
+tool_paths = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
 distribution = importlib.metadata.distribution(package)
 module = importlib.import_module(package.replace("-", "_"))
 bin_dir = pathlib.Path(sys.executable).absolute().parent
 
-def tool(names):
+def tool(key, names, required=True):
+    def record(path, resolution):
+        path = path.resolve()
+        head = path.read_bytes()[:256]
+        first_line = head.splitlines()[0].lower() if head else b""
+        invocation = (
+            "python"
+            if path.suffix.lower() == ".py" or b"python" in first_line
+            else "direct"
+        )
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "resolution": resolution,
+            "invocation": invocation,
+        }
+    declared = tool_paths.get(key)
+    if declared:
+        candidate = pathlib.Path(declared)
+        if not candidate.is_absolute():
+            resolved = shutil.which(declared)
+            candidate = pathlib.Path(resolved) if resolved else candidate
+        if candidate.is_file():
+            return record(candidate, "declared")
+        raise RuntimeError("declared tool is unavailable: " + str(declared))
     for name in names:
         candidate = bin_dir / name
         if candidate.is_file():
-            path = candidate.resolve()
-            return {
-                "path": str(path),
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            }
-        resolved = shutil.which(name, path=str(bin_dir))
+            return record(candidate, "python-bin")
+        resolved = shutil.which(name)
         if resolved:
-            path = pathlib.Path(resolved).resolve()
-            return {
-                "path": str(path),
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            }
+            return record(pathlib.Path(resolved), "path")
+    if not required:
+        return None
     raise RuntimeError("missing tool: " + " or ".join(names))
 
 record = None
@@ -110,6 +137,8 @@ if broken_required:
 print(json.dumps({
     "pythonExecutable": str(pathlib.Path(sys.executable).absolute()),
     "pythonVersion": sys.version.split()[0],
+    "sysPrefix": str(pathlib.Path(sys.prefix).absolute()),
+    "basePrefix": str(pathlib.Path(getattr(sys, "base_prefix", sys.prefix)).absolute()),
     "requiresPython": distribution.metadata.get("Requires-Python"),
     "package": {
         "name": distribution.metadata.get("Name") or package,
@@ -117,9 +146,9 @@ print(json.dumps({
         "recordSha256": hashlib.sha256(record.read_bytes()).hexdigest(),
     },
     "tools": {
-        "modelTransform": tool(["model_transform.py", "model_transform"]),
-        "modelDeploy": tool(["model_deploy.py", "model_deploy"]),
-        "modelTool": tool(["model_tool"]),
+        "modelTransform": tool("modelTransform", ["model_transform.py", "model_transform"]),
+        "modelDeploy": tool("modelDeploy", ["model_deploy.py", "model_deploy"]),
+        "modelTool": tool("modelTool", ["model_tool"], required=False),
     },
     "runtimeLinks": runtime_links,
     "brokenOptionalLinks": broken_links,
@@ -175,6 +204,12 @@ def validate_contract(data: Any) -> dict[str, Any]:
     if not isinstance(data["authority"], dict):
         raise WorkflowError("authority must be an object")
     _require_nonempty_string(data["authority"].get("workspace"), "authority.workspace")
+    grants = data["authority"].get("grants", [])
+    if not isinstance(grants, list) or any(not isinstance(item, str) for item in grants):
+        raise WorkflowError("authority.grants must be an array of grant names")
+    unknown_grants = sorted(set(grants) - AUTHORITY_GRANTS)
+    if unknown_grants:
+        raise WorkflowError(f"authority.grants contains unknown grants: {', '.join(unknown_grants)}")
     if "parameters" in data and not isinstance(data["parameters"], dict):
         raise WorkflowError("parameters must be an object when present")
     if "extensions" in data and not isinstance(data["extensions"], dict):
@@ -358,7 +393,7 @@ def _memory_bytes() -> tuple[int | None, int | None]:
         total = int(page_size * os.sysconf("SC_PHYS_PAGES"))
         if "SC_AVPHYS_PAGES" in os.sysconf_names:
             available = int(page_size * os.sysconf("SC_AVPHYS_PAGES"))
-    except (OSError, ValueError):
+    except (AttributeError, OSError, ValueError):
         pass
     meminfo = Path("/proc/meminfo")
     if meminfo.is_file():
@@ -410,6 +445,238 @@ def baseline_report(project_root: Path = PROJECT_ROOT) -> dict[str, Any]:
             "Task-specific requirements are not evaluated until a task contract is supplied.",
             "Device and production environments are not inspected by baseline mode.",
         ],
+    }
+
+
+def _objective_target_chip(contract: dict[str, Any]) -> str | None:
+    parameters = contract.get("parameters", {})
+    target = parameters.get("targetChip")
+    if isinstance(target, str) and target.strip():
+        return target.strip().lower()
+    device = parameters.get("device")
+    if isinstance(device, dict):
+        mapped = device.get("targetChip")
+        if isinstance(mapped, str) and mapped.strip():
+            return mapped.strip().lower()
+    objective = str(contract.get("userObjective", ""))
+    match = re.search(r"(?i)\b((?:bm|cv)\d+[a-z0-9]*)\b", objective)
+    return match.group(1).lower() if match else None
+
+
+def _material_observations(contract: dict[str, Any], run_dir: Path) -> list[dict[str, Any]]:
+    parameters = contract.get("parameters", {})
+    declared = parameters.get("sourceModel")
+    candidates: list[Path] = []
+    if isinstance(declared, str) and declared.strip():
+        try:
+            candidates.append(resolve_run_input(run_dir, declared.strip()))
+        except WorkflowError as error:
+            return [{"kind": "model", "status": "MISSING", "detail": str(error)}]
+    else:
+        inputs = run_dir / "inputs"
+        if inputs.is_dir():
+            candidates.extend(
+                path.resolve()
+                for path in sorted(inputs.iterdir())
+                if path.is_file()
+                and path.suffix.lower() in {".onnx", ".pt", ".pth", ".mlir", ".bmodel"}
+            )
+    observations = []
+    for path in candidates:
+        observations.append(
+            {
+                "kind": "model",
+                "status": "AVAILABLE",
+                "format": path.suffix.lower().lstrip(".") or "unknown",
+                "path": str(path.relative_to(run_dir.resolve())),
+                "sha256": sha256_file(path),
+                "sizeBytes": path.stat().st_size,
+            }
+        )
+    return observations
+
+
+def _authority_grants(contract: dict[str, Any]) -> set[str]:
+    authority = contract.get("authority", {})
+    grants = {
+        str(item)
+        for item in authority.get("grants", [])
+        if isinstance(item, str) and item in AUTHORITY_GRANTS
+    }
+    if authority.get("externalSystems") is True:
+        grants.update({"remote-execution", "model-transfer", "device-deployment"})
+    if authority.get("environmentChanges") is True:
+        grants.add("environment-change")
+    return grants
+
+
+def _needs_input(
+    question_id: str,
+    question: str,
+    reason: str,
+    *,
+    category: str = "business-input",
+    required_before: str = "execution",
+) -> dict[str, Any]:
+    return {
+        "id": question_id,
+        "category": category,
+        "question": question,
+        "reason": reason,
+        "requiredBefore": required_before,
+    }
+
+
+def assess_task_report(
+    contract_path: Path,
+    run_dir: Path,
+    contract: dict[str, Any],
+    project_root: Path = PROJECT_ROOT,
+) -> dict[str, Any]:
+    """Compile user intent and available materials into a route without changing state."""
+    inventory = host_inventory(project_root)
+    materials = _material_observations(contract, run_dir)
+    needs_input: list[dict[str, Any]] = []
+    route_candidates: list[dict[str, Any]] = []
+    recommended_route: str | None = None
+    verdict = "READY"
+
+    if contract["task"] == "model-conversion":
+        available_models = [item for item in materials if item.get("status") == "AVAILABLE"]
+        if not available_models:
+            needs_input.append(
+                _needs_input(
+                    "source-model",
+                    "请提供需要适配的模型文件，并说明它来自哪个训练框架或导出流程。",
+                    "没有模型物料就无法检查格式、输入输出和可行转换路径。",
+                )
+            )
+        source_format = available_models[0].get("format") if available_models else None
+        declared_source = contract.get("parameters", {}).get("sourceModel")
+        if len(available_models) > 1 and not (
+            isinstance(declared_source, str) and declared_source.strip()
+        ):
+            needs_input.append(
+                _needs_input(
+                    "source-model-selection",
+                    "发现多个候选模型文件。请说明哪一个是本次要适配的源模型。",
+                    "不同源模型会产生不同交付物，智能体不能按文件名排序替用户决定。",
+                )
+            )
+        if source_format and source_format != "onnx":
+            needs_input.append(
+                _needs_input(
+                    "onnx-material",
+                    "当前物料不是 ONNX。请提供可用的 ONNX，或授权智能体把“从原训练工程导出 ONNX”作为单独交付阶段评估。",
+                    "本版本只执行 ONNX 到 Sophon 产物的转换，不能把未实现的导出步骤当作已经支持。",
+                    required_before="route",
+                )
+            )
+
+        target_chip = _objective_target_chip(contract)
+        if not target_chip:
+            needs_input.append(
+                _needs_input(
+                    "target-device",
+                    "请说明最终要运行模型的测试设备型号，或提供不含序列号和凭据的设备信息。",
+                    "目标设备会改变产物，智能体不能仅凭示例替用户决定芯片映射。",
+                )
+            )
+
+        host_os = str(inventory["host"]["os"])
+        host_arch = str(inventory["host"]["architecture"]).lower()
+        linux_local = host_os == "Linux" and host_arch in {"x86_64", "amd64"}
+        parameters = contract.get("parameters", {})
+        environment = parameters.get("developmentEnvironment", {})
+        remote_linux = isinstance(environment, dict) and (
+            str(environment.get("os", "")).lower() == "linux"
+            and str(environment.get("architecture", "x86_64")).lower() in {"x86_64", "amd64"}
+        )
+        route_candidates.append(
+            {
+                "id": "local-linux-tpu-mlir",
+                "title": "在隔离的 Linux x86_64 开发环境中使用 TPU-MLIR",
+                "eligibility": "ELIGIBLE" if linux_local else "NEEDS_ENVIRONMENT",
+                "officialReference": TPU_MLIR_OFFICIAL_REFERENCE,
+                "detail": (
+                    "当前宿主满足官方工具链的操作系统与架构方向；后续仍需 doctor 核验实际能力。"
+                    if linux_local
+                    else "当前宿主不是 Linux x86_64；这不等于 CosmoEdge 不支持 Windows，而是该 Sophon 工具链路径需要 Linux。"
+                ),
+            }
+        )
+        if not linux_local:
+            route_candidates.append(
+                {
+                    "id": "remote-linux-tpu-mlir",
+                    "title": "从当前机器编排隔离的 Linux x86_64 开发环境",
+                    "eligibility": "ELIGIBLE" if remote_linux else "NEEDS_ENVIRONMENT",
+                    "officialReference": TPU_MLIR_OFFICIAL_REFERENCE,
+                    "detail": "当前机器可保留为材料整理和任务编排入口，转换在 Linux 开发环境执行。",
+                }
+            )
+        recommended_route = (
+            "local-linux-tpu-mlir" if linux_local else "remote-linux-tpu-mlir"
+        )
+
+        required_grants: set[str] = set()
+        if not linux_local and remote_linux:
+            required_grants.add("remote-execution")
+            if available_models:
+                required_grants.add("model-transfer")
+        missing_grants = sorted(required_grants - _authority_grants(contract))
+        if missing_grants:
+            names = "、".join(missing_grants)
+            needs_input.append(
+                _needs_input(
+                    "route-authority",
+                    f"推荐路径需要新增授权：{names}。请确认仅对本次隔离开发任务授予这些权限。",
+                    "远程执行和模型传输不会从开发工作区权限自动继承。",
+                    category="authority",
+                    required_before="remote-action",
+                )
+            )
+
+        if not linux_local and not remote_linux:
+            verdict = "NEEDS_ENVIRONMENT"
+            needs_input.append(
+                _needs_input(
+                    "linux-development-environment",
+                    "请提供一台隔离的 Linux x86_64 开发环境，或允许智能体先给出可复用的 Docker/远程 Linux 准备方案；不要在生产设备上补环境。",
+                    "Sophon TPU-MLIR 的官方开发路径以 Linux 环境为基础，当前宿主只适合作为编排入口。",
+                    category="environment",
+                    required_before="doctor",
+                )
+            )
+        elif needs_input:
+            verdict = "NEEDS_INPUT"
+    else:
+        route_candidates.append(
+            {
+                "id": "repository-native",
+                "title": "仓库原生开发与验证路径",
+                "eligibility": "ELIGIBLE",
+                "detail": "使用与交付物最接近的现有代码、示例和原生测试命令。",
+            }
+        )
+        recommended_route = "repository-native"
+
+    if verdict not in ASSESSMENT_VERDICTS:
+        raise WorkflowError(f"unknown assessment verdict: {verdict}")
+    return {
+        "schemaVersion": "1.0",
+        "mode": "assessment",
+        "task": contract["task"],
+        "runId": contract["runId"],
+        "contractSha256": sha256_file(contract_path),
+        "userObjective": redact_text(contract["userObjective"]),
+        "host": inventory["host"],
+        "repository": inventory["repository"],
+        "materialObservations": materials,
+        "routeCandidates": route_candidates,
+        "recommendedRoute": recommended_route,
+        "needsInput": needs_input,
+        "routeVerdict": verdict,
     }
 
 
@@ -482,17 +749,18 @@ def _resolve_executable(raw_value: str) -> str | None:
 def _toolchain_spec(parameters: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     raw = parameters.get("toolchain")
     if not isinstance(raw, dict):
+        if "toolchain" in parameters and raw is not None:
+            return None, "parameters.toolchain must be an object when supplied."
         legacy = parameters.get("toolchainImage")
-        detail = (
-            "parameters.toolchainImage identifies only an execution image, not the "
-            "TPU-MLIR compiler package."
-            if legacy
-            else "parameters.toolchain does not identify a complete TPU-MLIR compiler environment."
-        )
-        return None, detail
-    kind = raw.get("kind")
+        if legacy:
+            return None, (
+                "parameters.toolchainImage identifies only an execution image, not the "
+                "TPU-MLIR compiler package."
+            )
+        raw = {"kind": "auto"}
+    kind = raw.get("kind", "auto")
     if kind not in TOOLCHAIN_KINDS:
-        return None, "parameters.toolchain.kind must be python-package or container-image."
+        return None, "parameters.toolchain.kind must be auto, python-package, or container-image."
     package = str(raw.get("package", "tpu_mlir")).strip()
     if not TOOLCHAIN_PACKAGE_PATTERN.fullmatch(package):
         return None, "parameters.toolchain.package contains unsupported characters."
@@ -503,12 +771,22 @@ def _toolchain_spec(parameters: dict[str, Any]) -> tuple[dict[str, Any] | None, 
         "kind": kind,
         "package": package,
         "version": version.strip() if isinstance(version, str) else None,
+        "officialReference": TPU_MLIR_OFFICIAL_REFERENCE,
     }
-    if kind == "python-package":
+    tool_paths = raw.get("toolPaths", {})
+    if not isinstance(tool_paths, dict) or any(
+        key not in {"modelTransform", "modelDeploy", "modelTool"}
+        or not isinstance(value, str)
+        or not value.strip()
+        for key, value in tool_paths.items()
+    ):
+        return None, "parameters.toolchain.toolPaths must contain supported non-empty command paths."
+    normalized["toolPaths"] = {key: value.strip() for key, value in tool_paths.items()}
+    if kind in {"auto", "python-package"}:
         executable = raw.get("pythonExecutable")
-        if not isinstance(executable, str) or not executable.strip():
-            return None, "python-package toolchains require parameters.toolchain.pythonExecutable."
-        normalized["pythonExecutable"] = executable.strip()
+        if executable is not None and (not isinstance(executable, str) or not executable.strip()):
+            return None, "parameters.toolchain.pythonExecutable must be non-empty when supplied."
+        normalized["pythonExecutable"] = executable.strip() if isinstance(executable, str) else None
     else:
         image = raw.get("image")
         if (
@@ -550,18 +828,36 @@ def _parse_toolchain_probe(
 def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     package = str(specification["package"])
     expected_version = specification.get("version")
-    if specification["kind"] == "python-package":
-        executable = _resolve_executable(str(specification["pythonExecutable"]))
-        if not executable:
-            return None, (
-                "declared toolchain Python is unavailable: "
-                f"{specification['pythonExecutable']}"
+    tool_paths = json.dumps(specification.get("toolPaths", {}), sort_keys=True)
+    if specification["kind"] in {"auto", "python-package"}:
+        declared = specification.get("pythonExecutable")
+        candidates = [declared] if declared else [sys.executable, "python3"]
+        errors = []
+        identity = None
+        error = ""
+        seen_executables: set[str] = set()
+        for candidate in dict.fromkeys(str(value) for value in candidates if value):
+            executable = _resolve_executable(candidate)
+            if not executable:
+                errors.append(f"Python is unavailable: {candidate}")
+                continue
+            executable_key = str(Path(executable).resolve())
+            if executable_key in seen_executables:
+                continue
+            seen_executables.add(executable_key)
+            process = _run(
+                [executable, "-c", TOOLCHAIN_PROBE_SCRIPT, package, tool_paths],
+                timeout=90,
             )
-        process = _run(
-            [executable, "-c", TOOLCHAIN_PROBE_SCRIPT, package],
-            timeout=90,
-        )
-        identity, error = _parse_toolchain_probe(process, kind="python-package")
+            identity, error = _parse_toolchain_probe(process, kind="python-package")
+            if identity:
+                identity["selection"] = (
+                    "declared-python" if declared else "discovered-python"
+                )
+                break
+            errors.append(f"{candidate}: {error}")
+        if not identity:
+            return None, "; ".join(errors) or "no Python environment could be inspected"
     else:
         image, image_error = _docker_image_identity(str(specification["image"]))
         if not image:
@@ -581,6 +877,7 @@ def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | N
                 "-c",
                 TOOLCHAIN_PROBE_SCRIPT,
                 package,
+                tool_paths,
             ],
             timeout=120,
         )
@@ -591,12 +888,17 @@ def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | N
         )
     if not identity:
         return None, error
+    identity["officialReference"] = specification.get(
+        "officialReference", TPU_MLIR_OFFICIAL_REFERENCE
+    )
     actual_version = str(identity.get("package", {}).get("version", ""))
     if not _version_satisfies(actual_version, expected_version):
         return None, (
             f"{package}={actual_version or 'unknown'} does not satisfy "
             f"{expected_version}"
         )
+    identity.pop("id", None)
+    identity["id"] = _identity_digest(identity)
     return identity, ""
 
 
@@ -607,10 +909,21 @@ def toolchain_environment(identity: dict[str, Any]) -> dict[str, str] | None:
     if not isinstance(python_executable, str) or not python_executable:
         return None
     environment = os.environ.copy()
-    bin_dir = str(Path(python_executable).parent)
+    path_entries = [str(Path(python_executable).parent)]
+    for tool in identity.get("tools", {}).values():
+        if isinstance(tool, dict) and isinstance(tool.get("path"), str):
+            path_entries.append(str(Path(tool["path"]).parent))
+    path_entries = list(dict.fromkeys(path_entries))
     existing_path = environment.get("PATH", "")
-    environment["PATH"] = bin_dir + (os.pathsep + existing_path if existing_path else "")
-    environment["VIRTUAL_ENV"] = str(Path(bin_dir).parent)
+    environment["PATH"] = os.pathsep.join(
+        path_entries + ([existing_path] if existing_path else [])
+    )
+    sys_prefix = identity.get("sysPrefix")
+    base_prefix = identity.get("basePrefix")
+    if isinstance(sys_prefix, str) and sys_prefix and sys_prefix != base_prefix:
+        environment["VIRTUAL_ENV"] = sys_prefix
+    else:
+        environment.pop("VIRTUAL_ENV", None)
     return environment
 
 
@@ -622,8 +935,13 @@ def _toolchain_tools_respond(identity: dict[str, Any]) -> tuple[bool, str]:
         if not isinstance(path, str) or not path:
             failures.append(f"{key} has no executable path")
             continue
+        invocation = tool.get("invocation", "python")
         if identity.get("kind") == "python-package":
-            command = [str(identity["pythonExecutable"]), path, "--help"]
+            command = (
+                [path, "--help"]
+                if invocation == "direct"
+                else [str(identity["pythonExecutable"]), path, "--help"]
+            )
         else:
             image_id = identity.get("image", {}).get("id")
             command = [
@@ -633,11 +951,12 @@ def _toolchain_tools_respond(identity: dict[str, Any]) -> tuple[bool, str]:
                 "--network",
                 "none",
                 "--entrypoint",
-                str(identity["pythonExecutable"]),
+                path if invocation == "direct" else str(identity["pythonExecutable"]),
                 str(image_id),
-                path,
-                "--help",
             ]
+            if invocation != "direct":
+                command.append(path)
+            command.append("--help")
         process = _run(
             command,
             timeout=120,
@@ -717,6 +1036,7 @@ def task_environment_report(
     checks: list[dict[str, Any]] = []
 
     architecture = inventory["host"]["architecture"].lower()
+    host_os = str(inventory["host"]["os"])
     allowed_architectures = [str(value).lower() for value in params.get("hostArchitectures", [])]
     if task == "model-conversion" and not allowed_architectures:
         allowed_architectures = ["x86_64", "amd64"]
@@ -733,6 +1053,21 @@ def task_environment_report(
         resource_failures.append("available memory is below the task contract requirement")
     if minimum_disk and disk_free < minimum_disk:
         resource_failures.append("free disk is below the task contract requirement")
+    if task == "model-conversion" and host_os != "Linux":
+        checks.append(
+            _check(
+                "C0",
+                "FAIL",
+                f"The current host is {host_os}; the admitted Sophon conversion path executes on Linux x86_64.",
+                remediation=(
+                    "Keep this machine as the orchestration client and run assessment/doctor in an "
+                    "isolated Linux x86_64 development environment. Windows support elsewhere in "
+                    "CosmoEdge is unchanged."
+                ),
+                outcome="needs_environment",
+                owner="development-environment",
+            )
+        )
     if resource_failures:
         checks.append(
             _check(
@@ -846,7 +1181,7 @@ def task_environment_report(
                     "C4",
                     "SKIP",
                     (
-                        "Docker is not required by the selected python-package toolchain."
+                        "Docker is not required by the selected installed-Python toolchain route."
                         if toolchain_spec
                         else "Docker cannot be selected until the complete compiler toolchain is specified."
                     ),
@@ -854,9 +1189,17 @@ def task_environment_report(
             )
 
         mapping_supported = target_chip.lower() == "bm1688"
-        if not mapping_supported:
+        if host_os != "Linux":
+            checks.append(
+                _check(
+                    "C5",
+                    "SKIP",
+                    "TPU-MLIR capability admission is deferred to the selected Linux execution environment.",
+                )
+            )
+        elif not mapping_supported:
             mapping_supported = bool(params.get("toolchainChip") and params.get("chipMappingEvidence"))
-        if not mapping_supported:
+        if host_os == "Linux" and not mapping_supported:
             checks.append(
                 _check(
                     "C5",
@@ -866,7 +1209,7 @@ def task_environment_report(
                     outcome="unsupported",
                 )
             )
-        elif not toolchain_spec:
+        elif host_os == "Linux" and not toolchain_spec:
             checks.append(
                 _check(
                     "C5",
@@ -880,9 +1223,9 @@ def task_environment_report(
                     owner="repository",
                 )
             )
-        else:
+        elif host_os == "Linux":
             can_inspect = (
-                toolchain_spec["kind"] == "python-package"
+                toolchain_spec["kind"] in {"auto", "python-package"}
                 or (toolchain_spec["kind"] == "container-image" and docker_ready)
             )
             inspected, toolchain_error = (
@@ -1010,27 +1353,62 @@ def task_environment_report(
             ]
         )
 
-    requires_external = any(
-        bool(params.get(field))
-        for field in ("requiresNetwork", "requiresDevice", "requiresExternalWrite", "requiresGpu")
-    )
-    external_authority = bool(contract["authority"].get("externalSystems", False))
-    if requires_external and not external_authority:
+    required_grants = {
+        grant
+        for grant, fields in {
+            "environment-change": ("requiresEnvironmentChange",),
+            "remote-execution": ("requiresRemoteExecution", "requiresNetwork"),
+            "model-transfer": ("requiresModelTransfer",),
+            "device-deployment": ("requiresDevice", "requiresDeployment"),
+        }.items()
+        if any(bool(params.get(field)) for field in fields)
+    }
+    missing_grants = sorted(required_grants - _authority_grants(contract))
+    if missing_grants:
         checks.append(
             _check(
                 "C7",
                 "BLOCKED",
-                "The task requires an external capability that is not included in the recorded authority.",
-                remediation="Confirm the exact target, permission, risk, and recovery boundary separately.",
+                "The route requires grants that are not recorded: " + ", ".join(missing_grants) + ".",
+                remediation=(
+                    "Confirm these coarse task-scoped grants together with the target and recovery "
+                    "boundary; do not place credentials in the contract."
+                ),
                 outcome="repairable",
             )
         )
-    elif requires_external:
+    elif required_grants:
         checks.append(_check("C7", "PASS", "Required external capability is explicitly represented in authority."))
     else:
-        checks.append(_check("C7", "SKIP", "No network, device, GPU, or external write is required."))
+        checks.append(_check("C7", "SKIP", "No additional coarse-grained authority is required by this route."))
 
     verdict = environment_verdict(checks)
+    needs_input: list[dict[str, Any]] = []
+    if missing_grants:
+        needs_input.append(
+            _needs_input(
+                "required-authority",
+                "请确认是否仅为本次隔离开发任务授予：" + "、".join(missing_grants) + "。",
+                "这些权限不会从工作区读写权限自动继承。",
+                category="authority",
+                required_before="external-action",
+            )
+        )
+    repair_requires_change = any(
+        item.get("_outcome") == "repairable"
+        and item.get("owner") == "development-environment"
+        for item in checks
+    )
+    if repair_requires_change and "environment-change" not in _authority_grants(contract):
+        needs_input.append(
+            _needs_input(
+                "environment-change-plan",
+                "当前路径需要改变隔离开发环境。请先审阅智能体给出的依赖、影响和回退方案，再决定是否授权环境变更。",
+                "只读环境检查不包含安装依赖、拉取镜像、启动服务或提权。",
+                category="authority",
+                required_before="environment-change",
+            )
+        )
     public_checks = [{key: value for key, value in item.items() if key != "_outcome"} for item in checks]
     return {
         "schemaVersion": "1.0",
@@ -1044,6 +1422,7 @@ def task_environment_report(
         "repository": inventory["repository"],
         "checks": public_checks,
         "toolchain": toolchain,
+        "needsInput": needs_input,
         "environmentVerdict": verdict,
     }
 
@@ -1076,6 +1455,12 @@ def _print_report(report: dict[str, Any], output_format: str) -> None:
             state = "PASS" if item["available"] else "UNVERIFIED"
             print(f"[{state}] {name}: {item.get('version') or 'not found'}")
         print("Task-specific readiness is not evaluated in baseline mode.")
+        return
+    if report.get("mode") == "assessment":
+        print(f"Recommended route: {report.get('recommendedRoute') or 'UNRESOLVED'}")
+        for item in report.get("needsInput", []):
+            print(f"[NEEDS_INPUT] {item['question']}")
+        print(f"Route verdict: {report['routeVerdict']}")
         return
     for item in report["checks"]:
         print(f"[{item['status']}] {item['id']} {item['detail']}")
@@ -1110,13 +1495,30 @@ def doctor_main(arguments: list[str]) -> int:
     return 0 if report["environmentVerdict"] == "READY" else 1
 
 
+def assess_main(arguments: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="assess.sh",
+        description="Read-only intent, material, route, and authority assessment.",
+    )
+    parser.add_argument("--contract", required=True)
+    parser.add_argument("--format", choices=("text", "json"), default="text")
+    options = parser.parse_args(arguments)
+    contract_path, run_dir, contract = resolve_contract_context(options.contract)
+    report = assess_task_report(contract_path, run_dir, contract)
+    atomic_write_json(run_dir / "route-assessment.json", report)
+    _print_report(report, options.format)
+    return 0 if report["routeVerdict"] == "READY" else 1
+
+
 def main(arguments: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if arguments is None else arguments)
     if not args:
-        print("usage: agent_workflow.py doctor ...", file=sys.stderr)
+        print("usage: agent_workflow.py assess|doctor ...", file=sys.stderr)
         return 2
     command = args.pop(0)
     try:
+        if command == "assess":
+            return assess_main(args)
         if command == "doctor":
             return doctor_main(args)
         raise WorkflowError(f"unknown command: {command}")
