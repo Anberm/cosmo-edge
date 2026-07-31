@@ -138,7 +138,43 @@ The web console performs a local upgrade as follows:
 
 The 15-minute recovery wait is a UI timeout; it does not cancel an upgrade already running on the device. Keep power connected and inspect device networking and systemd logs if it expires. After signing in again, verify the software version against the release package; UI recovery proves reboot and service recovery, not version acceptance.
 
+## Direct SOURCE Installation
+
+SOURCE deploys a locally modified and rebuilt CosmoEdge. It is not a signed
+production release and does not contain the device-certificate provisioning
+tool. On a configured device, copy and extract the SOURCE archive, then run:
+
+```bash
+sudo ./install-device.sh install
+sudo ./install-device.sh status
+```
+
+A blank device first needs
+`/data/cwaiuserdata/model-guard/device-certificate.bin`, installed through the
+separate controlled workflow. One device-bound certificate authorizes every
+current and future preset published under the same product model key; there are
+no per-model licenses.
+
+`install` creates `/appfs/cosmo_wander` when needed, stops `cosmo.service`,
+deletes the old `/appfs/cosmo_wander/cwai_data`, installs the new application
+and SOURCE systemd unit, and then checks service and HTTP health. It creates no
+application backup and exposes no rollback or restore command. A failed health
+check leaves the new application tree in place for diagnosis. The SOURCE
+installer never accesses the Guard certificate.
+
+`status` is read-only and prints `mode`, `edge_commit`, `version`,
+`build_identity`, `service_active`, and `service_enabled`.
+
 ## systemd Service
+
+The SOURCE installer uses:
+
+```text
+share/cosmo-source/cosmo.service
+    -> /etc/systemd/system/cosmo.service
+
+ExecStart=/appfs/cosmo_wander/cwai_data/scripts/source_run_start.sh
+```
 
 During blank-device setup, install this file from the controlled
 `FACTORY-BASE`:

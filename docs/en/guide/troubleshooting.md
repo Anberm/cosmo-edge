@@ -119,6 +119,37 @@ Common causes:
   rejected by design. Use SOURCE for ordinary source-code builds; do not bypass
   the formal release checks.
 
+## Protected Presets Do Not Load
+
+The device needs exactly one Guard state file:
+
+```text
+/data/cwaiuserdata/model-guard/device-certificate.bin
+```
+
+Check certificate status and service logs first:
+
+```bash
+sudo test -f /data/cwaiuserdata/model-guard/device-certificate.bin
+sudo journalctl -u cosmo.service -b --no-pager -n 200
+```
+
+If the controlled provisioner is still present in its temporary device
+directory, run `sudo /temporary-directory/cosmo-model-provision status` to
+validate the certificate against the live device. The SOURCE package does not
+provide that tool.
+
+- `-2001` (`CMG_V2_CERTIFICATE_UNAVAILABLE`) means the certificate is missing
+  or unreadable.
+- `-2002` (`CMG_V2_CERTIFICATE_REJECTED`) means the certificate is malformed,
+  has an invalid signature, or was issued for another device.
+
+Do not create per-model licenses or copy another device's certificate. Create
+a fresh request on this device, issue its certificate in the controlled
+offline environment, and run
+`cosmo-model-provision install --certificate <absolute-certificate-path>`.
+The SOURCE installer does not create, delete, or repair this certificate.
+
 ## nginx / SRS / cosmo-engine Not Started
 
 Run the script:

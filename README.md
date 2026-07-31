@@ -212,7 +212,7 @@ ls -lh build_output/public-runtime/
 > material, and signing transaction entry points.
 > The archive name records the base Edge commit, the packaged build identity,
 > and the outer archive SHA-256. After extraction, `install-device.sh status`
-> reports the Edge commit, build identity, and deterministic payload SHA-256;
+> reports the package version, Edge commit, build identity, and service state;
 > it does not claim to recover the no-longer-available outer archive digest.
 
 On Windows PowerShell to build the package:
@@ -226,7 +226,7 @@ package to `build_output/public-runtime/`. See the
 [Build Guide](docs/en/guide/build.md) for the SOURCE/controlled-release
 boundaries.
 
-After installing a signed release and rebooting the device:
+After installing a SOURCE or signed release and rebooting the device:
 
 - **Default IP**: `192.168.100.1` (ensure your computer is configured with a static IP in the `192.168.100.x` subnet to connect directly)
 - **Web Console URL**: `http://192.168.100.1`

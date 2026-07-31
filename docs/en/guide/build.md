@@ -111,7 +111,7 @@ installs the new tree, and starts the SOURCE service. It does not create an
 application backup and provides no rollback command. If the final health check
 fails, the command reports failure and leaves the newly installed tree in
 place for direct diagnosis or reinstall. `status` reports the active mode,
-build ID, base Edge commit, Guard SDK release, and service state.
+build ID, base Edge commit, package version, and service state.
 
 On a configured device, the existing
 `/data/cwaiuserdata/model-guard/device-certificate.bin` remains in place. That

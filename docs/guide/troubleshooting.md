@@ -117,6 +117,34 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package 2>&1 |
   信任身份、签发者或发布引导输入时按设计拒绝构建。普通源码修改应使用
   SOURCE，不要绕过正式发布检查。
 
+## 受保护 preset 无法加载
+
+设备只需要以下一个 Guard 状态文件：
+
+```text
+/data/cwaiuserdata/model-guard/device-certificate.bin
+```
+
+先检查证书状态和服务日志：
+
+```bash
+sudo test -f /data/cwaiuserdata/model-guard/device-certificate.bin
+sudo journalctl -u cosmo.service -b --no-pager -n 200
+```
+
+如果受控 provisioner 仍在设备的临时目录，还可以运行
+`sudo /临时目录/cosmo-model-provision status` 直接校验证书和本机绑定；SOURCE
+包本身不提供该工具。
+
+- `-2001`（`CMG_V2_CERTIFICATE_UNAVAILABLE`）：证书文件不存在或无法读取。
+- `-2002`（`CMG_V2_CERTIFICATE_REJECTED`）：证书损坏、签名无效，或证书不是
+  为本机签发。
+
+不要生成逐模型 license，也不要复制另一台设备的证书。使用本机生成的新请求在
+受控离线环境重新签发证书，再执行
+`cosmo-model-provision install --certificate <证书绝对路径>`。SOURCE 安装器
+不会创建、删除或修复该证书。
+
 ## nginx / SRS / cosmo-engine 未启动
 
 运行脚本：

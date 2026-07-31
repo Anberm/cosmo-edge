@@ -107,7 +107,7 @@ sudo ./install-device.sh status
 payload，停止 `cosmo.service`，删除现有 `cwai_data`，安装新应用树并启动 SOURCE
 服务。它不创建应用备份，也不提供回滚命令。最终健康检查失败时，命令会报告失败
 并保留新安装的应用树，便于直接诊断或重新安装。`status` 会显示当前模式、build
-ID、Edge 基准 commit、Guard SDK release 和服务状态。
+ID、Edge 基准 commit、包版本和服务状态。
 
 设备已经完成配置时，
 `/data/cwaiuserdata/model-guard/device-certificate.bin` 保持不变。这一张与本机
