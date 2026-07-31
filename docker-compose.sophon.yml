@@ -6,13 +6,28 @@ services:
       - .:/workspace
       - ./build_output:/build_output
     working_dir: /workspace
+    environment:
+      COSMO_MODEL_GUARD_BUILD_PROFILE: "${COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"
+      COSMO_EDGE_SOURCE_COMMIT: "${COSMO_EDGE_SOURCE_COMMIT:-}"
     command: >
       bash -lc "
       set -e;
-      echo 'Starting cross-compilation...';
+      if [ \"$${COSMO_MODEL_GUARD_BUILD_PROFILE}\" = public-runtime ]; then
+        package_variant=SOURCE;
+      else
+        package_variant=$${COSMO_MODEL_GUARD_BUILD_PROFILE};
+      fi;
+      echo \"Starting $${package_variant} cross-compilation...\";
       ./scripts/build.sh -T -m data/resource/aiboxresource;
-      mkdir -p /build_output;
-      cp -f build/packages/* /build_output/ 2>/dev/null || echo 'Warning: No packages found to copy.';
-      ls -lh /build_output;
+      output_dir=/build_output/$${COSMO_MODEL_GUARD_BUILD_PROFILE};
+      rm -rf -- \"$${output_dir}\";
+      mkdir -p \"$${output_dir}\";
+      set -- build/packages/*.tar.gz;
+      if [ \"$${#}\" -ne 1 ] || [ ! -f \"$${1}\" ]; then
+        echo 'ERROR: expected exactly one package artifact' >&2;
+        exit 1;
+      fi;
+      cp -f -- \"$${1}\" \"$${output_dir}/\";
+      ls -lh \"$${output_dir}\";
       echo 'Build finished.'
       "

@@ -1,5 +1,12 @@
-# set(DEVICE_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(DEVICE_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/libsophon-0.4.11)
+# Protected builds consume only the verifier-owned immutable Sophon snapshot.
+if(COSMO_MODEL_GUARD)
+    if(NOT COSMO_VERIFIED_SOPHON_ROOT)
+        message(FATAL_ERROR "Protected Sophon build has no verified Sophon snapshot")
+    endif()
+    set(DEVICE_ROOT_DIR ${COSMO_VERIFIED_SOPHON_ROOT})
+else()
+    set(DEVICE_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/libsophon-0.4.11)
+endif()
 set(DEVICE_HEADERS ${DEVICE_ROOT_DIR}/include)
 set(DEVICE_LIB_DIR ${DEVICE_ROOT_DIR}/lib)
 
@@ -46,7 +53,7 @@ set_target_properties(bmvenc PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${DEVICE_HEADERS}"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rd/libsophon-0.4.11/lib/
+install(DIRECTORY ${DEVICE_ROOT_DIR}/lib/
     DESTINATION lib
     FILES_MATCHING
         PATTERN "*so*"

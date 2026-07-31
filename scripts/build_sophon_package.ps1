@@ -15,12 +15,28 @@ $ErrorActionPreference = "Stop"
 # Subsequent builds copy only changed files.
 #
 # Prerequisites: Docker Desktop
-# Output:         build_output/cosmo-*.tar.gz
+# Output:         build_output/<build-profile>/cosmo-*.tar.gz
 # =============================================================================
 
 $VolumeName  = "cosmo-sophon-source"
 $ComposeFile = "docker-compose.sophon.yml"
 $OverrideFile = "docker-compose.sophon.override.yml"
+$BuildProfile = $env:COSMO_MODEL_GUARD_BUILD_PROFILE
+if ([string]::IsNullOrWhiteSpace($BuildProfile)) {
+    $BuildProfile = "public-runtime"
+}
+if ($BuildProfile -notin @("public-runtime", "production-release")) {
+    throw "COSMO_MODEL_GUARD_BUILD_PROFILE must be public-runtime or production-release"
+}
+$env:COSMO_MODEL_GUARD_BUILD_PROFILE = $BuildProfile
+$PackageVariant = if ($BuildProfile -eq "public-runtime") {
+    "SOURCE"
+} else {
+    $BuildProfile
+}
+if ($BuildProfile -eq "production-release") {
+    Write-Warning "production-release requires organization-approved controlled Compose inputs; selecting the profile alone fails closed."
+}
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +67,25 @@ function ConvertTo-DockerPath {
 $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDir ".."))
 $dockerSrc  = ConvertTo-DockerPath $projectRoot
+
+if ($BuildProfile -eq "public-runtime") {
+    $SourceCommit = $env:COSMO_EDGE_SOURCE_COMMIT
+    if ([string]::IsNullOrWhiteSpace($SourceCommit)) {
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            throw "SOURCE packaging requires Git or an explicit COSMO_EDGE_SOURCE_COMMIT"
+        }
+        $ResolvedCommit = & git -C $projectRoot rev-parse --verify 'HEAD^{commit}'
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cannot resolve the Edge commit; set COSMO_EDGE_SOURCE_COMMIT explicitly"
+        }
+        $SourceCommit = ([string]$ResolvedCommit).Trim()
+    }
+    if ($SourceCommit -notmatch '^[0-9a-f]{40}$') {
+        throw "COSMO_EDGE_SOURCE_COMMIT must be lower-case 40-hex"
+    }
+    $env:COSMO_EDGE_SOURCE_COMMIT = $SourceCommit
+    Write-Host "Edge source commit: $SourceCommit"
+}
 
 Write-Step "Step 1/5 - Checking Docker"
 try { Invoke-Docker info } catch { Write-Error "Docker is not running. Start Docker Desktop, then re-run."; exit 1 }
@@ -87,7 +122,7 @@ Invoke-Docker run --rm `
     alpine `
     sh /workspace/scripts/restore-symlinks.sh
 
-Write-Step "Step 4/5 - Running Sophon cross-compilation"
+Write-Step "Step 4/5 - Running Sophon cross-compilation ($PackageVariant)"
 
 # Generate a compose override that swaps the bind mount for our named volume.
 # The override REPLACES the volumes list; we keep ./build_output as a bind
@@ -117,7 +152,7 @@ try {
 }
 
 Write-Step "Step 5/5 - Build output"
-$outputDir = Join-Path $projectRoot "build_output"
+$outputDir = Join-Path (Join-Path $projectRoot "build_output") $BuildProfile
 if (Test-Path $outputDir) {
     $packages = Get-ChildItem $outputDir -Filter "*.tar.gz"
     if ($packages) {
@@ -125,10 +160,16 @@ if (Test-Path $outputDir) {
             Write-Host "  $($pkg.Name)  ($('{0:N0}' -f $pkg.Length) bytes)" -ForegroundColor Green
         }
     } else {
-        Write-Warning "No .tar.gz found in build_output/"
+        Write-Warning "No .tar.gz found in build_output/$BuildProfile/"
     }
 } else {
-    Write-Warning "build_output/ directory not found"
+    Write-Warning "build_output/$BuildProfile/ directory not found"
+}
+
+if ($BuildProfile -eq "public-runtime") {
+    Write-Host "SOURCE package created. Protected preset models require one separately provisioned device-bound certificate."
+} else {
+    Write-Warning "production-release artifacts are candidates only; controlled offline signing is still required before deployment."
 }
 
 Write-Host "`n=== Sophon build completed ===" -ForegroundColor Green

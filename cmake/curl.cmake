@@ -2,6 +2,10 @@ set(CURL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/curl-8.17.0)
 set(CURL_INSTALL_DIR ${THIRDPARTY_INSTALL_PREFIX}/curl)
 set(CURL_HEADERS ${CURL_INSTALL_DIR}/include)
 set(CURL_LIB ${CURL_INSTALL_DIR}/lib/libcurl.so)
+set(CURL_EXTERNAL_DEPENDS openssl_external)
+if(COSMO_MODEL_GUARD)
+    list(APPEND CURL_EXTERNAL_DEPENDS cosmo_model_guard_v2_reverify)
+endif()
 
 ExternalProject_Add(
     curl_external
@@ -12,7 +16,10 @@ ExternalProject_Add(
         -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_INSTALL_PREFIX=${CURL_INSTALL_DIR}
-        -DOPENSSL_ROOT_DIR=${THIRDPARTY_INSTALL_PREFIX}/openssl
+        -DOPENSSL_ROOT_DIR=${OPENSSL_INSTALL_DIR}
+        -DOPENSSL_INCLUDE_DIR=${OPENSSL_HEADERS}
+        -DOPENSSL_SSL_LIBRARY=${OPENSSL_SSL_LIB}
+        -DOPENSSL_CRYPTO_LIBRARY=${OPENSSL_CRYPTO_LIB}
         -DBUILD_SHARED_LIBS=ON
         -DCURL_USE_LIBPSL=OFF
         # Cross-compilation skips curl's host CA auto-detection. This path is
@@ -28,7 +35,7 @@ ExternalProject_Add(
     
     INSTALL_COMMAND ${CMAKE_COMMAND} --build . --target install
 
-    DEPENDS openssl_external
+    DEPENDS ${CURL_EXTERNAL_DEPENDS}
 
     UPDATE_COMMAND ""
     BUILD_ALWAYS OFF

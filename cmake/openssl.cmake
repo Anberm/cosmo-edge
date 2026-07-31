@@ -1,19 +1,24 @@
 set(OPENSSL_ORIGINAL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/openssl-3.5.3)
 set(OPENSSL_SOURCE_DIR ${OPENSSL_ORIGINAL_SOURCE_DIR})
-set(OPENSSL_INSTALL_DIR ${THIRDPARTY_INSTALL_PREFIX}/openssl)
+set(OPENSSL_BUILD_INSTALL_DIR ${THIRDPARTY_INSTALL_PREFIX}/openssl)
+set(OPENSSL_INSTALL_DIR ${OPENSSL_BUILD_INSTALL_DIR})
 set(OPENSSL_HEADERS ${OPENSSL_INSTALL_DIR}/include)
-set(OPENSSL_SSL_LIB ${OPENSSL_INSTALL_DIR}/lib/libssl.so)
-set(OPENSSL_CRYPTO_LIB ${OPENSSL_INSTALL_DIR}/lib/libcrypto.so)
+if(COSMO_MODEL_GUARD)
+    set(OPENSSL_SSL_LIB ${OPENSSL_INSTALL_DIR}/lib/libssl.so.3)
+    set(OPENSSL_CRYPTO_LIB ${OPENSSL_INSTALL_DIR}/lib/libcrypto.so.3)
+else()
+    set(OPENSSL_SSL_LIB ${OPENSSL_INSTALL_DIR}/lib/libssl.so)
+    set(OPENSSL_CRYPTO_LIB ${OPENSSL_INSTALL_DIR}/lib/libcrypto.so)
+endif()
 set(OPENSSL_DOWNLOAD_COMMAND "")
 set(OPENSSL_PATCH_COMMAND ${CMAKE_COMMAND} -E true)
 
 # OpenSSL embeds its build time in libcrypto. Keep the dependency byte-for-byte
 # compatible with the formally admitted Guard SDK instead of inheriting the
 # wall clock of each clean build.
-set(OPENSSL_SOURCE_DATE_EPOCH 1784776233)
 set(OPENSSL_REPRODUCIBLE_ENV
     ${CMAKE_COMMAND} -E env
-    SOURCE_DATE_EPOCH=${OPENSSL_SOURCE_DATE_EPOCH}
+    SOURCE_DATE_EPOCH=${COSMO_REPRODUCIBLE_BUILD_EPOCH}
 )
 
 if(COSMO_TARGET_ARCH STREQUAL "x86_64")
@@ -26,7 +31,7 @@ if(COSMO_TARGET_ARCH STREQUAL "x86_64")
 endif()
 
 set(OPENSSL_COMMON_CONFIGURE_ARGS
-    --prefix=${OPENSSL_INSTALL_DIR}
+    --prefix=${OPENSSL_BUILD_INSTALL_DIR}
     --openssldir=/usr/local/ssl
     --libdir=lib
     --release
@@ -89,8 +94,15 @@ set_target_properties(openssl_crypto PROPERTIES
 )
 add_dependencies(openssl_crypto openssl_external)
 
-install(DIRECTORY ${OPENSSL_INSTALL_DIR}/lib/
-    DESTINATION lib
-    FILES_MATCHING
-        PATTERN "*so*"
-)
+if(COSMO_MODEL_GUARD)
+    install(FILES
+        ${OPENSSL_INSTALL_DIR}/lib/libcrypto.so.3
+        ${OPENSSL_INSTALL_DIR}/lib/libssl.so.3
+        DESTINATION lib)
+else()
+    install(DIRECTORY ${OPENSSL_INSTALL_DIR}/lib/
+        DESTINATION lib
+        FILES_MATCHING
+            PATTERN "*so*"
+    )
+endif()

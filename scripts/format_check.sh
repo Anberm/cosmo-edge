@@ -63,7 +63,7 @@ collect_files() {
     if [[ "$STAGED_ONLY" == true ]]; then
         git -C "$PROJECT_ROOT" diff --cached --name-only --diff-filter=ACMR \
             | grep -E '\.(h|cc)$' \
-            | grep -vE '(^|/)3rd/' \
+            | grep -vE '(^|/)(3rd|prebuild)/' \
             | while read -r f; do echo "$PROJECT_ROOT/$f"; done
     else
         find "$PROJECT_ROOT/src" "$PROJECT_ROOT/test" \
