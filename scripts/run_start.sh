@@ -56,7 +56,12 @@ NGINX_CONF="${NGINX_PREFIX}/conf/nginx.conf"
 
 # Stop all running processes before starting (including nginx)
 cosmo_log "$logTag" "Stopping all running processes before start..." "$logFile"
-"${INSTALLPATH}/scripts/stop.sh"
+TRUSTED_STOP_SCRIPT="${COSMO_TRUSTED_STOP_SCRIPT:-${INSTALLPATH}/scripts/stop.sh}"
+if [ ! -f "${TRUSTED_STOP_SCRIPT}" ] || [ ! -x "${TRUSTED_STOP_SCRIPT}" ]; then
+    cosmo_log "$logTag" "Stop script is unavailable" "$logFile"
+    exit 1
+fi
+"${TRUSTED_STOP_SCRIPT}"
 
 # Add iptables rule (idempotent - skips if already exists)
 if hash iptables 2>/dev/null; then

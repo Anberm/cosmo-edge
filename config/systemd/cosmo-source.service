@@ -1,0 +1,18 @@
+[Unit]
+Description=Cosmo Edge AI Engine (SOURCE runtime)
+After=bmrt_setup.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=COSMO_SOURCE_RUNTIME=1
+WorkingDirectory=/appfs/cosmo_wander/cwai_data
+ExecStart=/appfs/cosmo_wander/cwai_data/scripts/source_run_start.sh
+ExecStop=/appfs/cosmo_wander/cwai_data/scripts/stop.sh
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
