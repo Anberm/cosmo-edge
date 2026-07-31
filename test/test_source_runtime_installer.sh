@@ -8,7 +8,6 @@ export IFS PATH
 readonly REPOSITORY_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 readonly TEST_ROOT="$(mktemp -d)"
 readonly EDGE_COMMIT='1234567890abcdef1234567890abcdef12345678'
-readonly GUARD_RELEASE='cmg-sdk-v2.3.3'
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
 fail() {
@@ -104,20 +103,15 @@ make_payload() {
     done
     printf 'guard-%s\n' "$version" \
         >"$destination/lib/libcosmo_model_guard.so.2.0.0"
-    cat >"$destination/share/cosmo-model-guard/sdk-release.env" <<EOF
-CMG_SDK_RELEASE_FORMAT=cosmo-model-guard-sdk-release-v2
-CMG_SDK_RELEASE_ID=${GUARD_RELEASE}
-EOF
     engine_sha="$(sha256sum "$destination/bin/cosmo-engine" | awk '{print $1}')"
     build_identity="$(
         printf '%s:%s:%s\n' "$EDGE_COMMIT" "$version" "$engine_sha" |
             sha256sum | awk '{print $1}'
     )"
     cat >"$destination/share/cosmo-source/build-identity.env" <<EOF
-format=cosmo-source-build-identity-v1
+format=cosmo-source-build-identity-v2
 edge_commit=${EDGE_COMMIT}
 version=V${version}
-guard_release_id=${GUARD_RELEASE}
 engine_sha256=${engine_sha}
 build_identity=${build_identity}
 EOF
@@ -177,8 +171,6 @@ test_fresh_install() {
     local status
     status="$(run_installer "$root" "$payload" status)"
     grep -Fxq 'mode=source' <<<"$status" || fail "status did not report SOURCE"
-    grep -Fxq "guard_release_id=${GUARD_RELEASE}" <<<"$status" ||
-        fail "status did not report Guard release"
     grep -Fxq 'service_active=yes' <<<"$status" ||
         fail "status did not report active service"
 }

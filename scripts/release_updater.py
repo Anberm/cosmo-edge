@@ -38,9 +38,6 @@ STATE_FORMAT = "cosmo-release-state-v2"
 JOURNAL_FORMAT = "cosmo-release-transaction-v2"
 BOOTSTRAP_JOURNAL_FORMAT = "cosmo-release-bootstrap-transaction-v1"
 PUBLICATION_FORMAT = "cosmo-release-publication-v1"
-GUARD_PROFILE = "v2-only"
-GUARD_ABI_CONTRACT_STATUS = "v2.3.3-stable-abi2"
-GUARD_IMPLEMENTATION_MILESTONE = "single-device-certificate"
 MODEL_IDENTITY_DOMAIN = b"cosmo-model-identity-v1"
 CEM_V2_SOURCE_FORMATS = {
     1: "cosmo-nn-v1",
@@ -50,28 +47,13 @@ CEM_V2_TARGET_PLATFORM = "sophon-bm1688-aarch64"
 GUARD_SONAME = "libcosmo_model_guard.so.2"
 GUARD_REAL_FILENAME = "libcosmo_model_guard.so.2.0.0"
 GUARD_HEADER_PATH = "share/cosmo-model-guard/cosmo_model_guard_v2.h"
-GUARD_ABI_MANIFEST_PATH = "share/cosmo-model-guard/cmg_v2_abi.json"
-GUARD_DEPENDENCY_MANIFEST_PATH = "share/cosmo-model-guard/cmg_v2_dependencies.json"
 RELEASE_BOOTSTRAP_PATH = "bin/cosmo-release-bootstrap"
 MODEL_PROVISION_PATH = "bin/cosmo-model-provision"
-DEPENDENCY_RUNTIME_BINDINGS = (
-    ("openssl", "libcrypto_sha256", "lib/libcrypto.so.3"),
-    ("sophon", "libbmrt_link_sha256", "lib/libbmrt.so"),
-    ("sophon", "libbmrt_runtime_sha256", "lib/libbmrt.so.1.0"),
-    ("sophon", "libbmlib_link_sha256", "lib/libbmlib.so"),
-    ("sophon", "libbmlib_runtime_sha256", "lib/libbmlib.so.0"),
-)
 REQUIRED_GUARD_EXPORTS = (
     "CmgV2CloseArtifact",
     "CmgV2GetArtifactInfo",
     "CmgV2LoadSophonSegment",
     "CmgV2OpenArtifact",
-)
-ABI_DECLARED_GUARD_EXPORTS = (
-    "CmgV2OpenArtifact",
-    "CmgV2GetArtifactInfo",
-    "CmgV2LoadSophonSegment",
-    "CmgV2CloseArtifact",
 )
 FACADE_DIRECTORIES = ("bin", "files", "font", "lib", "resource", "scripts", "web")
 REQUIRED_RELEASE_SCRIPTS = (
@@ -95,10 +77,6 @@ MAX_MANIFEST_BYTES = 128 * 1024
 MAX_PAYLOAD_MANIFEST_BYTES = 32 * 1024 * 1024
 MAX_HEALTH_SCRIPT_BYTES = 128 * 1024
 MAX_GUARD_HEADER_BYTES = 128 * 1024
-MAX_GUARD_ABI_MANIFEST_BYTES = 256 * 1024
-MAX_GUARD_DEPENDENCY_MANIFEST_BYTES = 64 * 1024
-MAX_LIBCRYPTO_BYTES = 128 * 1024 * 1024
-MAX_RUNTIME_LIBRARY_BYTES = 256 * 1024 * 1024
 CEM_V2_CORE_PREAMBLE_SIZE = 112
 CEM_V2_MAX_CORE_BYTES = 16 * 1024 * 1024 * 1024
 CEM_V2_MAX_MANIFEST_BYTES = 1024 * 1024
@@ -327,67 +305,6 @@ def _require_hex(value: Any, length: int, description: str, nonzero: bool = Fals
     return text
 
 
-def _single_version_define(
-    header: bytes, name: str, value_pattern: str, description: str
-) -> str:
-    try:
-        text = header.decode("ascii", "strict")
-    except UnicodeError as error:
-        raise ReleaseError(f"{description} is not ASCII") from error
-    text = text.replace("\r\n", "\n")
-    if "\r" in text:
-        _fail(f"{description} contains an invalid line ending")
-    matches = re.findall(
-        rf"^[ \t]*#[ \t]*define[ \t]+{re.escape(name)}[ \t]+"
-        rf"({value_pattern})[ \t]*(?:/\*.*\*/)?$",
-        text,
-        re.MULTILINE,
-    )
-    if len(matches) != 1:
-        _fail(f"{description} must define {name} exactly once")
-    return matches[0]
-
-
-def _openssl_version_from_header(header: bytes) -> str:
-    major = int(
-        _single_version_define(
-            header, "OPENSSL_VERSION_MAJOR", r"[0-9]+", "OpenSSL version header"
-        )
-    )
-    minor = int(
-        _single_version_define(
-            header, "OPENSSL_VERSION_MINOR", r"[0-9]+", "OpenSSL version header"
-        )
-    )
-    patch = int(
-        _single_version_define(
-            header, "OPENSSL_VERSION_PATCH", r"[0-9]+", "OpenSSL version header"
-        )
-    )
-    quoted = _single_version_define(
-        header,
-        "OPENSSL_VERSION_STR",
-        r'"[0-9]+\.[0-9]+\.[0-9]+"',
-        "OpenSSL version header",
-    )
-    version = f"{major}.{minor}.{patch}"
-    if quoted != f'"{version}"' or major < 3:
-        _fail("OpenSSL version header is incompatible")
-    return version
-
-
-def _openssl_version_from_library(library: bytes) -> str:
-    versions = {
-        match.decode("ascii")
-        for match in re.findall(
-            rb"OpenSSL ([0-9]+\.[0-9]+\.[0-9]+)(?:[ -])", library
-        )
-    }
-    if len(versions) != 1:
-        _fail("libcrypto embedded OpenSSL version banner is missing or ambiguous")
-    return next(iter(versions))
-
-
 def _validate_model_guard_header(header: bytes) -> None:
     if not header or len(header) > MAX_GUARD_HEADER_BYTES or b"\x00" in header:
         _fail("Model Guard v2 header size/content rejected")
@@ -405,230 +322,6 @@ def _validate_model_guard_header(header: bytes) -> None:
     for function in REQUIRED_GUARD_EXPORTS:
         if len(re.findall(rf"\b{re.escape(function)}\s*\(", text)) != 1:
             _fail(f"Model Guard v2 header declaration rejected: {function}")
-
-
-def _validate_model_guard_abi_manifest(
-    data: bytes,
-    expected_profile: str,
-) -> Mapping[str, Any]:
-    value = _strict_pretty_ascii_json(
-        data, MAX_GUARD_ABI_MANIFEST_BYTES, "Model Guard ABI manifest"
-    )
-    root = _require_object(
-        value,
-        {
-            "abi",
-            "compatibility_rules",
-            "constants",
-            "contract_status",
-            "header",
-            "implementation_milestone",
-            "name",
-            "runtime_profile",
-            "runtime_implemented",
-            "schema",
-            "schema_version",
-            "statuses",
-            "structs",
-            "symbols",
-            "visibility",
-        },
-        "Model Guard ABI manifest",
-    )
-    abi = _require_object(
-        root["abi"],
-        {
-            "calling_convention",
-            "language_compatibility",
-            "load_flags_type",
-            "major",
-            "public_sophon_header",
-            "soname",
-            "sophon_target",
-            "source_format_type",
-            "status_type",
-            "target",
-            "target_architecture",
-        },
-        "Model Guard ABI descriptor",
-    )
-    visibility = _require_object(
-        root["visibility"],
-        {
-            "all_other_symbols",
-            "default_visibility",
-            "exclude_static_dependency_symbols",
-            "global_function_allowlist",
-            "version_node",
-            "version_script_required",
-        },
-        "Model Guard ABI visibility",
-    )
-    runtime_profile = _require_object(
-        root["runtime_profile"],
-        {
-            "authorization_artifact",
-            "binding_profile",
-            "name",
-            "preset_scope",
-        },
-        "Model Guard runtime profile",
-    )
-    if expected_profile != GUARD_PROFILE:
-        _fail("expected Model Guard ABI profile is invalid")
-    expected_runtime_profile = {
-        "authorization_artifact": "device-certificate.bin",
-        "binding_profile": "software-bound-device-certificate-v1",
-        "name": expected_profile,
-        "preset_scope": "all-current-and-future-presets-under-one-pmk",
-    }
-    if (
-        root["schema"] != "cosmo.model-guard.abi"
-        or root["schema_version"] != 1
-        or root["name"] != "cosmo-model-guard"
-        or root["header"] != "include/cosmo_model_guard_v2.h"
-        or root["contract_status"] != GUARD_ABI_CONTRACT_STATUS
-        or root["runtime_implemented"] is not True
-        or root["implementation_milestone"] != GUARD_IMPLEMENTATION_MILESTONE
-        or abi["major"] != 2
-        or abi["calling_convention"] != "C"
-        or abi["target"] != "aarch64-linux-gnu"
-        or abi["target_architecture"] != "AArch64"
-        or abi["sophon_target"] != "BM1688"
-        or abi["soname"] != GUARD_SONAME
-        or abi["public_sophon_header"] != "bmlib_runtime.h"
-        or visibility["default_visibility"] != "hidden"
-        or visibility["version_script_required"] is not True
-        or visibility["version_node"] != "CMG_2.0"
-        or visibility["global_function_allowlist"]
-        != list(ABI_DECLARED_GUARD_EXPORTS)
-        or visibility["all_other_symbols"] != "local"
-        or visibility["exclude_static_dependency_symbols"] is not True
-        or runtime_profile != expected_runtime_profile
-    ):
-        _fail(
-            "Model Guard ABI manifest does not describe the supported "
-            "BM1688 v2.3 contract"
-        )
-    return root
-
-
-def _validate_model_guard_dependencies(
-    data: bytes,
-    header: bytes,
-    abi_manifest: bytes,
-    expected_profile: str,
-) -> Mapping[str, Any]:
-    value = _strict_json(
-        data,
-        MAX_GUARD_DEPENDENCY_MANIFEST_BYTES,
-        "Model Guard dependency manifest",
-        ascii_canonical=True,
-    )
-    root = _require_object(
-        value,
-        {
-            "abi",
-            "guard_profile",
-            "openssl",
-            "schema",
-            "schema_version",
-            "sophon",
-            "target",
-        },
-        "Model Guard dependency manifest",
-    )
-    abi = _require_object(
-        root["abi"],
-        {"header_path", "header_sha256", "manifest_path", "manifest_sha256"},
-        "Model Guard dependency ABI binding",
-    )
-    openssl = _require_object(
-        root["openssl"],
-        {
-            "headers_path",
-            "headers_file_count",
-            "headers_sha256",
-            "version",
-            "version_header_sha256",
-            "libcrypto_path",
-            "libcrypto_soname",
-            "libcrypto_sha256",
-        },
-        "Model Guard OpenSSL dependency",
-    )
-    sophon = _require_object(
-        root["sophon"],
-        {
-            "headers_path",
-            "headers_file_count",
-            "headers_sha256",
-            "libraries_path",
-            "libraries_file_count",
-            "libraries_sha256",
-            "libbmrt_link_path",
-            "libbmrt_link_sha256",
-            "libbmrt_runtime_path",
-            "libbmrt_runtime_sha256",
-            "libbmlib_link_path",
-            "libbmlib_link_sha256",
-            "libbmlib_runtime_path",
-            "libbmlib_runtime_sha256",
-        },
-        "Model Guard Sophon dependency",
-    )
-    if expected_profile != GUARD_PROFILE:
-        _fail("expected Model Guard dependency profile is invalid")
-    if (
-        root["schema"] != "cosmo.model-guard.dependencies"
-        or root["schema_version"] != 3
-        or root["target"] != "aarch64-linux-gnu"
-        or root["guard_profile"] != expected_profile
-        or abi["header_path"] != "include/cosmo_model_guard_v2.h"
-        or abi["manifest_path"] != GUARD_ABI_MANIFEST_PATH
-        or openssl["headers_path"] != "thirdparty/openssl/include"
-        or openssl["libcrypto_path"]
-        != "thirdparty/openssl/lib/libcrypto.so.3"
-        or openssl["libcrypto_soname"] != "libcrypto.so.3"
-        or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", str(openssl["version"])) is None
-        or sophon["headers_path"] != "thirdparty/sophon/include"
-        or sophon["libraries_path"] != "thirdparty/sophon/lib"
-        or sophon["libbmrt_link_path"] != "thirdparty/sophon/lib/libbmrt.so"
-        or sophon["libbmrt_runtime_path"]
-        != "thirdparty/sophon/lib/libbmrt.so.1.0"
-        or sophon["libbmlib_link_path"] != "thirdparty/sophon/lib/libbmlib.so"
-        or sophon["libbmlib_runtime_path"]
-        != "thirdparty/sophon/lib/libbmlib.so.0"
-    ):
-        _fail("Model Guard dependency manifest contract rejected")
-    openssl_version = tuple(int(part) for part in openssl["version"].split("."))
-    if openssl_version[0] < 3:
-        _fail("Model Guard OpenSSL dependency version is incompatible")
-    for value_to_check, description in (
-        (abi["header_sha256"], "dependency ABI header sha256"),
-        (abi["manifest_sha256"], "dependency ABI manifest sha256"),
-        (openssl["headers_sha256"], "OpenSSL headers sha256"),
-        (openssl["version_header_sha256"], "OpenSSL version-header sha256"),
-        (openssl["libcrypto_sha256"], "libcrypto sha256"),
-        (sophon["headers_sha256"], "Sophon headers sha256"),
-        (sophon["libraries_sha256"], "Sophon libraries sha256"),
-        (sophon["libbmrt_link_sha256"], "Sophon libbmrt link sha256"),
-        (sophon["libbmrt_runtime_sha256"], "Sophon libbmrt runtime sha256"),
-        (sophon["libbmlib_link_sha256"], "Sophon libbmlib link sha256"),
-        (sophon["libbmlib_runtime_sha256"], "Sophon libbmlib runtime sha256"),
-    ):
-        _require_hex(value_to_check, 64, description, nonzero=True)
-    for value_to_check, description in (
-        (openssl["headers_file_count"], "OpenSSL headers file count"),
-        (sophon["headers_file_count"], "Sophon headers file count"),
-        (sophon["libraries_file_count"], "Sophon libraries file count"),
-    ):
-        _require_uint(value_to_check, description, 1)
-    if abi["header_sha256"] != _sha256_bytes(header):
-        _fail("Model Guard dependency manifest header digest mismatch")
-    if abi["manifest_sha256"] != _sha256_bytes(abi_manifest):
-        _fail("Model Guard dependency manifest ABI digest mismatch")
-    return root
 
 
 def _canonical_relative_path(value: Any, description: str = "path") -> str:
@@ -993,13 +686,11 @@ def _validate_compatibility_manifest(value: Any) -> Mapping[str, Any]:
             "release_generation",
             "release_id",
             "release_key",
-            "runtime_libraries",
-            "target_arch",
         },
         "compatibility manifest",
     )
-    if root["format"] != FORMAT or root["target_arch"] != "aarch64":
-        _fail("compatibility manifest format/target rejected")
+    if root["format"] != FORMAT:
+        _fail("compatibility manifest format rejected")
     _validate_release_id(root["release_id"])
     _require_uint(root["release_generation"], "release_generation", 1)
     if (
@@ -1020,71 +711,36 @@ def _validate_compatibility_manifest(value: Any) -> Mapping[str, Any]:
 
     edge = _require_object(
         root["edge"],
-        {"compatibility_id", "needed_guard_soname", "path", "sha256"},
+        {"compatibility_id", "path", "sha256"},
         "edge compatibility",
     )
-    if edge["path"] != "bin/cosmo-engine" or edge["needed_guard_soname"] != GUARD_SONAME:
-        _fail("edge compatibility path/SONAME rejected")
+    if edge["path"] != "bin/cosmo-engine":
+        _fail("edge compatibility path rejected")
     _require_hex(edge["sha256"], 64, "edge sha256", nonzero=True)
     _require_hex(edge["compatibility_id"], 64, "edge compatibility id", nonzero=True)
 
     guard = _require_object(
         root["model_guard"],
         {
-            "abi_major",
-            "abi_manifest_path",
-            "abi_manifest_sha256",
-            "dependencies_manifest_path",
-            "dependencies_manifest_sha256",
             "exports",
             "exports_sha256",
             "header_path",
             "header_sha256",
             "path",
             "sha256",
-            "soname",
         },
         "model guard compatibility",
     )
     if (
-        _require_uint(guard["abi_major"], "guard ABI major", 2, 2) != 2
-        or guard["path"] != f"lib/{GUARD_REAL_FILENAME}"
-        or guard["soname"] != GUARD_SONAME
+        guard["path"] != f"lib/{GUARD_REAL_FILENAME}"
         or guard["header_path"] != GUARD_HEADER_PATH
-        or guard["abi_manifest_path"] != GUARD_ABI_MANIFEST_PATH
-        or guard["dependencies_manifest_path"] != GUARD_DEPENDENCY_MANIFEST_PATH
     ):
-        _fail("model guard ABI bundle rejected")
+        _fail("model guard bundle rejected")
     _require_hex(guard["sha256"], 64, "guard sha256", nonzero=True)
     _require_hex(guard["header_sha256"], 64, "guard header sha256", nonzero=True)
-    _require_hex(guard["abi_manifest_sha256"], 64, "guard ABI manifest sha256", nonzero=True)
-    _require_hex(
-        guard["dependencies_manifest_sha256"],
-        64,
-        "guard dependency manifest sha256",
-        nonzero=True,
-    )
     _require_hex(guard["exports_sha256"], 64, "guard exports sha256", nonzero=True)
     if guard["exports"] != list(REQUIRED_GUARD_EXPORTS):
         _fail("model guard export whitelist rejected")
-    runtime = _require_object(
-        root["runtime_libraries"], {"libbmlib", "libbmrt", "libcrypto"}, "runtime libraries"
-    )
-    for name in ("libbmlib", "libbmrt"):
-        item = _require_object(runtime[name], {"path", "sha256"}, name)
-        if item["path"] != f"lib/{name}.so":
-            _fail(f"{name} path rejected")
-        _require_hex(item["sha256"], 64, f"{name} sha256", nonzero=True)
-    libcrypto = _require_object(
-        runtime["libcrypto"], {"path", "sha256", "soname", "version"}, "libcrypto"
-    )
-    if (
-        libcrypto["path"] != "lib/libcrypto.so.3"
-        or libcrypto["soname"] != "libcrypto.so.3"
-        or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", str(libcrypto["version"])) is None
-    ):
-        _fail("libcrypto compatibility metadata rejected")
-    _require_hex(libcrypto["sha256"], 64, "libcrypto sha256", nonzero=True)
     return root
 
 
@@ -1104,18 +760,11 @@ def _exports_digest(exports: Sequence[str]) -> str:
 
 def _compatibility_id(manifest: Mapping[str, Any]) -> str:
     guard = manifest["model_guard"]
-    libcrypto = manifest["runtime_libraries"]["libcrypto"]
     fields = (
         f"edge_sha256={manifest['edge']['sha256']}",
-        f"guard_abi_major={guard['abi_major']}",
-        f"guard_soname={guard['soname']}",
         f"guard_sha256={guard['sha256']}",
         f"guard_exports_sha256={guard['exports_sha256']}",
         f"guard_header_sha256={guard['header_sha256']}",
-        f"guard_abi_manifest_sha256={guard['abi_manifest_sha256']}",
-        f"guard_dependencies_manifest_sha256={guard['dependencies_manifest_sha256']}",
-        f"libcrypto_version={libcrypto['version']}",
-        f"libcrypto_sha256={libcrypto['sha256']}",
     )
     domain = b"cosmo-edge-guard-compatibility-v3\x00"
     return _sha256_bytes(domain + ("\n".join(fields) + "\n").encode("ascii"))
@@ -1134,8 +783,6 @@ def _check_release_layout(release_root: Path) -> None:
         "lib/libcrypto.so.3",
         "lib/libssl.so.3",
         GUARD_HEADER_PATH,
-        GUARD_ABI_MANIFEST_PATH,
-        GUARD_DEPENDENCY_MANIFEST_PATH,
         *REQUIRED_RELEASE_SCRIPTS,
     }
     for relative in regular_files:
@@ -1173,101 +820,16 @@ def _check_release_layout(release_root: Path) -> None:
 def _check_component_hashes(
     release_root: Path, manifest: Mapping[str, Any]
 ) -> None:
-    runtime_limits = {
-        relative: (
-            MAX_LIBCRYPTO_BYTES
-            if relative == "lib/libcrypto.so.3"
-            else MAX_RUNTIME_LIBRARY_BYTES
-        )
-        for _, _, relative in DEPENDENCY_RUNTIME_BINDINGS
-    }
-    libcrypto = manifest["runtime_libraries"]["libcrypto"]
-    libcrypto_bytes: bytes | None = None
-    runtime_digests: dict[str, str] = {}
-
-    bindings = (
-        manifest["edge"],
-        manifest["model_guard"],
-        manifest["runtime_libraries"]["libbmlib"],
-        manifest["runtime_libraries"]["libbmrt"],
-        manifest["runtime_libraries"]["libcrypto"],
-    )
-    for binding in bindings:
+    for binding in (manifest["edge"], manifest["model_guard"]):
         relative = str(binding["path"])
-        candidate = release_root / relative
-        if relative in runtime_limits:
-            digest = runtime_digests.get(relative)
-            if digest is None:
-                if relative == libcrypto["path"]:
-                    libcrypto_bytes, digest = _read_with_digest(
-                        candidate,
-                        runtime_limits[relative],
-                        retain_data=True,
-                    )
-                else:
-                    digest = _sha256_limited(
-                        candidate,
-                        runtime_limits[relative],
-                    )
-                runtime_digests[relative] = digest
-        else:
-            digest = _sha256_file(candidate)
-        if digest != binding["sha256"]:
+        if _sha256_file(release_root / relative) != binding["sha256"]:
             _fail(f"signed component digest mismatch: {relative}")
-    header = release_root / manifest["model_guard"]["header_path"]
-    if _sha256_file(header) != manifest["model_guard"]["header_sha256"]:
+
+    guard = manifest["model_guard"]
+    header = release_root / guard["header_path"]
+    if _sha256_file(header) != guard["header_sha256"]:
         _fail("model guard header digest mismatch")
-    abi_manifest = release_root / manifest["model_guard"]["abi_manifest_path"]
-    if _sha256_file(abi_manifest) != manifest["model_guard"]["abi_manifest_sha256"]:
-        _fail("model guard ABI manifest digest mismatch")
-    dependencies = release_root / manifest["model_guard"]["dependencies_manifest_path"]
-    if (
-        _sha256_file(dependencies)
-        != manifest["model_guard"]["dependencies_manifest_sha256"]
-    ):
-        _fail("model guard dependency manifest digest mismatch")
-    header_bytes = _read_exact(header, MAX_GUARD_HEADER_BYTES)
-    abi_bytes = _read_exact(abi_manifest, MAX_GUARD_ABI_MANIFEST_BYTES)
-    dependency_bytes = _read_exact(
-        dependencies, MAX_GUARD_DEPENDENCY_MANIFEST_BYTES
-    )
-    _validate_model_guard_header(header_bytes)
-    expected_profile = GUARD_PROFILE
-    _validate_model_guard_abi_manifest(
-        abi_bytes,
-        expected_profile,
-    )
-    dependency_manifest = _validate_model_guard_dependencies(
-        dependency_bytes, header_bytes, abi_bytes, expected_profile
-    )
-    for section, digest_key, relative in DEPENDENCY_RUNTIME_BINDINGS:
-        if relative == "lib/libcrypto.so.3":
-            continue
-        digest = runtime_digests.get(relative)
-        if digest is None:
-            digest = _sha256_limited(
-                release_root / relative,
-                runtime_limits[relative],
-            )
-            runtime_digests[relative] = digest
-        if digest != dependency_manifest[section][digest_key]:
-            _fail(
-                "Model Guard dependency runtime digest mismatch: "
-                f"{relative}"
-            )
-    if libcrypto_bytes is None:
-        _fail("internal secure libcrypto read invariant failed")
-    if (
-        dependency_manifest["openssl"]["version"] != libcrypto["version"]
-        or dependency_manifest["openssl"]["libcrypto_soname"] != libcrypto["soname"]
-        or dependency_manifest["openssl"]["libcrypto_sha256"] != libcrypto["sha256"]
-    ):
-        _fail("signed libcrypto metadata differs from Model Guard dependency provenance")
-    if _openssl_version_from_library(libcrypto_bytes) != libcrypto["version"]:
-        _fail(
-            "signed libcrypto embedded OpenSSL version differs from Model Guard "
-            "dependency provenance"
-        )
+    _validate_model_guard_header(_read_exact(header, MAX_GUARD_HEADER_BYTES))
     if _compatibility_id(manifest) != manifest["edge"]["compatibility_id"]:
         _fail("edge/model-guard compatibility ID mismatch")
 
@@ -1675,13 +1237,7 @@ def _validate_cem_v2_core_fd(
         if payload_offset + manifest_facts.record_bytes != file_size:
             raise _CemV2FormatError("chunk-record layout does not cover the core")
 
-        structure_after = os.fstat(fd)
-        if not _same_file_snapshot(initial, structure_after):
-            raise _CemV2FormatError("core changed during validation")
         core_sha256 = _sha256_fd(fd, file_size)
-        after = os.fstat(fd)
-        if not _same_file_snapshot(initial, after):
-            raise _CemV2FormatError("core changed during validation")
         return _CemV2CoreSnapshot(
             artifact_id=artifact_id.hex(),
             cohort_id=cohort_id.hex(),
@@ -1780,54 +1336,20 @@ def _scan_preset_models(
 
 def _state_tree_fingerprint(root: Path) -> str:
     digest = hashlib.sha256(b"cosmo-model-guard-persistent-state-v2\x00")
-    try:
-        os.lstat(root)
-    except FileNotFoundError:
-        digest.update(b"absent")
-        return digest.hexdigest()
-
     certificate = root / "device-certificate.bin"
     try:
-        initial = os.stat(certificate)
+        certificate_bytes = certificate.read_bytes()
     except FileNotFoundError:
         return digest.hexdigest()
     except OSError as error:
-        raise ReleaseError("model-guard device certificate is unavailable") from error
-    if not stat.S_ISREG(initial.st_mode):
-        _fail("model-guard device certificate must resolve to a regular file")
-
-    try:
-        fd = os.open(certificate, os.O_RDONLY | os.O_CLOEXEC)
-    except OSError as error:
-        raise ReleaseError("model-guard device certificate cannot be opened") from error
-    try:
-        opened = os.fstat(fd)
-        if not _same_file_snapshot(initial, opened):
-            _fail("model-guard device certificate changed while opening")
-        certificate_digest = hashlib.sha256()
-        while True:
-            block = os.read(fd, 1024 * 1024)
-            if not block:
-                break
-            certificate_digest.update(block)
-        current = os.fstat(fd)
-        path_current = os.stat(certificate)
-        if (
-            not _same_file_snapshot(initial, current)
-            or not _same_file_snapshot(initial, path_current)
-        ):
-            _fail("model-guard device certificate changed while reading")
-    except OSError as error:
         raise ReleaseError("model-guard device certificate read failed") from error
-    finally:
-        os.close(fd)
 
     relative = b"device-certificate.bin"
     digest.update(b"F")
     digest.update(len(relative).to_bytes(4, "big"))
     digest.update(relative)
-    digest.update(initial.st_size.to_bytes(8, "big"))
-    digest.update(certificate_digest.digest())
+    digest.update(len(certificate_bytes).to_bytes(8, "big"))
+    digest.update(hashlib.sha256(certificate_bytes).digest())
     return digest.hexdigest()
 
 

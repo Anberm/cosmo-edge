@@ -3,9 +3,6 @@ set(CURL_INSTALL_DIR ${THIRDPARTY_INSTALL_PREFIX}/curl)
 set(CURL_HEADERS ${CURL_INSTALL_DIR}/include)
 set(CURL_LIB ${CURL_INSTALL_DIR}/lib/libcurl.so)
 set(CURL_EXTERNAL_DEPENDS openssl_external)
-if(COSMO_MODEL_GUARD)
-    list(APPEND CURL_EXTERNAL_DEPENDS cosmo_model_guard_v2_reverify)
-endif()
 
 ExternalProject_Add(
     curl_external

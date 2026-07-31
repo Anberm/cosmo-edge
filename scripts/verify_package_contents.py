@@ -48,10 +48,7 @@ COMMON_DIRECTORIES = {
 }
 COMMON_FILES = {
     "lib/libcosmo_model_guard.so.2.0.0",
-    "share/cosmo-model-guard/cmg_v2_abi.json",
-    "share/cosmo-model-guard/cmg_v2_dependencies.json",
     "share/cosmo-model-guard/cosmo_model_guard_v2.h",
-    "share/cosmo-model-guard/sdk-release.env",
 }
 COMMON_SYMLINKS = {
     "lib/libcosmo_model_guard.so": "libcosmo_model_guard.so.2",
@@ -73,45 +70,22 @@ SOURCE_FILES = {
     "share/cosmo-source/cosmo.service",
 }
 SOURCE_BUILD_IDENTITY = "share/cosmo-source/build-identity.env"
-SOURCE_BUILD_IDENTITY_FORMAT = "cosmo-source-build-identity-v1"
+SOURCE_BUILD_IDENTITY_FORMAT = "cosmo-source-build-identity-v2"
 SOURCE_BUILD_IDENTITY_KEYS = (
     "format",
     "edge_commit",
     "version",
-    "guard_release_id",
     "engine_sha256",
     "build_identity",
 )
 SOURCE_ENGINE = "bin/cosmo-engine"
 SOURCE_VERSION = "bin/version.txt"
-SOURCE_SDK_RELEASE = "share/cosmo-model-guard/sdk-release.env"
-SOURCE_SDK_RELEASE_KEYS = (
-    "CMG_SDK_ABI_SHA256",
-    "CMG_SDK_DEPENDENCIES_SHA256",
-    "CMG_SDK_HEADER_SHA256",
-    "CMG_SDK_LIBRARY_SHA256",
-    "CMG_SDK_RELEASE_FORMAT",
-    "CMG_SDK_RELEASE_ID",
-)
-SOURCE_SDK_COMPONENTS = {
-    "CMG_SDK_ABI_SHA256": "share/cosmo-model-guard/cmg_v2_abi.json",
-    "CMG_SDK_DEPENDENCIES_SHA256": (
-        "share/cosmo-model-guard/cmg_v2_dependencies.json"
-    ),
-    "CMG_SDK_HEADER_SHA256": (
-        "share/cosmo-model-guard/cosmo_model_guard_v2.h"
-    ),
-    "CMG_SDK_LIBRARY_SHA256": "lib/libcosmo_model_guard.so.2.0.0",
-}
 INSPECTED_FILE_LIMITS = {
     SOURCE_BUILD_IDENTITY: 4096,
     SOURCE_ENGINE: 512 * 1024 * 1024,
     SOURCE_VERSION: 1024,
-    SOURCE_SDK_RELEASE: 16 * 1024,
-    SOURCE_SDK_COMPONENTS["CMG_SDK_ABI_SHA256"]: 256 * 1024,
-    SOURCE_SDK_COMPONENTS["CMG_SDK_DEPENDENCIES_SHA256"]: 64 * 1024,
-    SOURCE_SDK_COMPONENTS["CMG_SDK_HEADER_SHA256"]: 128 * 1024,
-    SOURCE_SDK_COMPONENTS["CMG_SDK_LIBRARY_SHA256"]: 32 * 1024 * 1024,
+    "share/cosmo-model-guard/cosmo_model_guard_v2.h": 128 * 1024,
+    "lib/libcosmo_model_guard.so.2.0.0": 32 * 1024 * 1024,
 }
 PRIVATE_KEY_PEM_MARKERS = (
     b"-----BEGIN PRIVATE KEY-----",
@@ -411,7 +385,6 @@ def source_build_identity(
     identity_entry = inventory.get(SOURCE_BUILD_IDENTITY)
     engine_entry = inventory.get(SOURCE_ENGINE)
     version_entry = inventory.get(SOURCE_VERSION)
-    sdk_release_entry = inventory.get(SOURCE_SDK_RELEASE)
     if (
         identity_entry is None
         or identity_entry.content is None
@@ -419,8 +392,6 @@ def source_build_identity(
         or engine_entry.sha256 is None
         or version_entry is None
         or version_entry.content is None
-        or sdk_release_entry is None
-        or sdk_release_entry.content is None
     ):
         raise PackageAuditError(
             "SOURCE package identity inputs were not captured"
@@ -460,8 +431,6 @@ def source_build_identity(
         raise PackageAuditError("SOURCE Edge commit is malformed")
     if re.fullmatch(r"V[0-9]+(?:\.[0-9]+){2}", values["version"]) is None:
         raise PackageAuditError("SOURCE package version is malformed")
-    if values["guard_release_id"] != "cmg-sdk-v2.3.3":
-        raise PackageAuditError("SOURCE Guard release ID is incompatible")
     for key in ("engine_sha256", "build_identity"):
         if re.fullmatch(r"[0-9a-f]{64}", values[key]) is None:
             raise PackageAuditError(f"SOURCE {key} is malformed")
@@ -469,57 +438,10 @@ def source_build_identity(
         raise PackageAuditError("SOURCE engine SHA-256 differs from identity")
     if version_entry.content != f"{values['version']}\n".encode("ascii"):
         raise PackageAuditError("SOURCE version.txt differs from identity")
-    try:
-        sdk_release_text = sdk_release_entry.content.decode("ascii")
-    except UnicodeDecodeError as error:
-        raise PackageAuditError(
-            "SOURCE SDK release manifest must be ASCII"
-        ) from error
-    if (
-        not sdk_release_text.endswith("\n")
-        or "\r" in sdk_release_text
-        or "\x00" in sdk_release_text
-    ):
-        raise PackageAuditError("SOURCE SDK release manifest encoding is invalid")
-    sdk_values: dict[str, str] = {}
-    sdk_keys: list[str] = []
-    for line in sdk_release_text.removesuffix("\n").split("\n"):
-        if line.count("=") != 1:
-            raise PackageAuditError("SOURCE SDK release manifest line is invalid")
-        key, value = line.split("=", 1)
-        if not key or not value or key in sdk_values:
-            raise PackageAuditError("SOURCE SDK release manifest line is invalid")
-        sdk_keys.append(key)
-        sdk_values[key] = value
-    if tuple(sdk_keys) != SOURCE_SDK_RELEASE_KEYS:
-        raise PackageAuditError(
-            "SOURCE SDK release manifest keys or order are invalid"
-        )
-    if (
-        sdk_values["CMG_SDK_RELEASE_FORMAT"]
-        != "cosmo-model-guard-sdk-release-v2"
-        or sdk_values["CMG_SDK_RELEASE_ID"] != values["guard_release_id"]
-    ):
-        raise PackageAuditError(
-            "SOURCE SDK release ID differs from build identity"
-        )
-    for key, path in SOURCE_SDK_COMPONENTS.items():
-        component = inventory.get(path)
-        if (
-            component is None
-            or component.sha256 is None
-            or re.fullmatch(r"[0-9a-f]{64}", sdk_values[key]) is None
-            or component.sha256 != sdk_values[key]
-        ):
-            raise PackageAuditError(
-                f"SOURCE SDK component SHA-256 mismatch: {path}"
-            )
-
     hash_input = (
         f"{SOURCE_BUILD_IDENTITY_FORMAT}\n"
         f"edge_commit={values['edge_commit']}\n"
         f"version={values['version']}\n"
-        f"guard_release_id={values['guard_release_id']}\n"
         f"engine_sha256={values['engine_sha256']}\n"
     ).encode("ascii")
     if hashlib.sha256(hash_input).hexdigest() != values["build_identity"]:

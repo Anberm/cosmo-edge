@@ -84,24 +84,12 @@ endif()
 #-- Backend selection(mutually exclusive) --
 option(COSMO_NN_USE_SOPHON_BACKEND "Enable Sophon TPU backend" ON)
 option(COSMO_NN_USE_CPU_BACKEND "Enable CPU inference backend (ONNX Runtime)" OFF)
-option(COSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY
-       "Configure only the AArch64 OpenSSL producer needed by the protected build" OFF)
 
 if(COSMO_NN_USE_SOPHON_BACKEND AND COSMO_NN_USE_CPU_BACKEND)
     message(FATAL_ERROR "COSMO_NN_USE_SOPHON_BACKEND and COSMO_NN_USE_CPU_BACKEND are mutually exclusive")
 endif()
 if(NOT COSMO_NN_USE_SOPHON_BACKEND AND NOT COSMO_NN_USE_CPU_BACKEND)
     message(FATAL_ERROR "At least one NN backend must be enabled")
-endif()
-
-if(COSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY)
-    if(NOT COSMO_TARGET_ARCH STREQUAL "aarch64" OR
-       NOT COSMO_NN_USE_SOPHON_BACKEND OR
-       COSMO_NN_USE_CPU_BACKEND)
-        message(FATAL_ERROR
-            "The Model Guard dependency bootstrap is valid only for the "
-            "Sophon/AArch64 configuration")
-    endif()
 endif()
 
 # Media acceleration is selected independently from inference. Defaults keep
@@ -141,10 +129,7 @@ else()
     add_compile_definitions(COSMO_MEDIA_USE_CPU_BACKEND)
 endif()
 
-if(COSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY)
-    set(COSMO_ENABLE_OPENH264 OFF)
-    set(COSMO_OPENH264_USE_ASM OFF)
-elseif(COSMO_MEDIA_USE_CPU_BACKEND)
+if(COSMO_MEDIA_USE_CPU_BACKEND)
     set(COSMO_ENABLE_OPENH264 ON)
     set(COSMO_OPENH264_USE_ASM OFF)
 else()
@@ -152,9 +137,7 @@ else()
     set(COSMO_OPENH264_USE_ASM OFF)
 endif()
 
-if(COSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY)
-    set(COSMO_MODEL_GUARD OFF)
-elseif(COSMO_NN_USE_SOPHON_BACKEND)
+if(COSMO_NN_USE_SOPHON_BACKEND)
     set(COSMO_MODEL_GUARD ON)
 else()
     set(COSMO_MODEL_GUARD OFF)
@@ -181,23 +164,21 @@ if(NOT COSMO_MODEL_GUARD_BUILD_PROFILE IN_LIST
         "${COSMO_MODEL_GUARD_BUILD_PROFILE}. Expected public-runtime or "
         "production-release.")
 endif()
-if(NOT COSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY)
-    if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "public-runtime")
-        if(COSMO_REQUIRE_RELEASE_BOOTSTRAP)
-            message(FATAL_ERROR
-                "COSMO_MODEL_GUARD_BUILD_PROFILE=public-runtime conflicts with "
-                "COSMO_REQUIRE_RELEASE_BOOTSTRAP=ON")
-        endif()
-        if(NOT "${COSMO_RELEASE_PUBLIC_KEY_OBJECT}" STREQUAL "")
-            message(FATAL_ERROR
-                "COSMO_RELEASE_PUBLIC_KEY_OBJECT is valid only with "
-                "COSMO_MODEL_GUARD_BUILD_PROFILE=production-release")
-        endif()
-    elseif(NOT COSMO_REQUIRE_RELEASE_BOOTSTRAP)
+if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "public-runtime")
+    if(COSMO_REQUIRE_RELEASE_BOOTSTRAP)
         message(FATAL_ERROR
-            "COSMO_MODEL_GUARD_BUILD_PROFILE=production-release requires "
+            "COSMO_MODEL_GUARD_BUILD_PROFILE=public-runtime conflicts with "
             "COSMO_REQUIRE_RELEASE_BOOTSTRAP=ON")
     endif()
+    if(NOT "${COSMO_RELEASE_PUBLIC_KEY_OBJECT}" STREQUAL "")
+        message(FATAL_ERROR
+            "COSMO_RELEASE_PUBLIC_KEY_OBJECT is valid only with "
+            "COSMO_MODEL_GUARD_BUILD_PROFILE=production-release")
+    endif()
+elseif(NOT COSMO_REQUIRE_RELEASE_BOOTSTRAP)
+    message(FATAL_ERROR
+        "COSMO_MODEL_GUARD_BUILD_PROFILE=production-release requires "
+        "COSMO_REQUIRE_RELEASE_BOOTSTRAP=ON")
 endif()
 
 if(COSMO_MODEL_GUARD)
@@ -214,55 +195,8 @@ if(COSMO_MODEL_GUARD)
         set(MODEL_GUARD_V2_PROVISION_TOOL
             "${COSMO_MODEL_GUARD_SDK_ROOT}/bin/cosmo-model-provision")
     endif()
-    set(MODEL_GUARD_V2_ABI_MANIFEST
-        "${COSMO_MODEL_GUARD_SDK_ROOT}/share/cosmo-model-guard/cmg_v2_abi.json")
-    set(MODEL_GUARD_V2_DEPENDENCY_MANIFEST
-        "${COSMO_MODEL_GUARD_SDK_ROOT}/share/cosmo-model-guard/cmg_v2_dependencies.json")
-    set(MODEL_GUARD_V2_SDK_RELEASE_MANIFEST
-        "${COSMO_MODEL_GUARD_SDK_ROOT}/share/cosmo-model-guard/sdk-release.env")
     set(MODEL_GUARD_V2_TEST_FIXTURE_MARKER
         "${COSMO_MODEL_GUARD_SDK_ROOT}/share/cosmo-model-guard/TEST_FIXTURE_DO_NOT_DEPLOY")
-
-    # The SDK admission gate intentionally runs before the ExternalProject
-    # declarations below.  A protected build therefore requires the exact
-    # already-built dependency inputs used by the canonical Sophon workflow;
-    # it never guesses versions or silently falls back to host libraries.
-    set(COSMO_MODEL_GUARD_OPENSSL_INCLUDE_DIR
-        "${CMAKE_BINARY_DIR}/thirdparty_install/openssl/include")
-    set(COSMO_MODEL_GUARD_LIBCRYPTO
-        "${CMAKE_BINARY_DIR}/thirdparty_install/openssl/lib/libcrypto.so.3")
-    set(COSMO_MODEL_GUARD_SOPHON_INCLUDE_DIR
-        "${CMAKE_SOURCE_DIR}/3rd/libsophon-0.4.11/include")
-    set(COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR
-        "${CMAKE_SOURCE_DIR}/3rd/libsophon-0.4.11/lib")
-    foreach(MODEL_GUARD_DEPENDENCY_DIRECTORY IN ITEMS
-            COSMO_MODEL_GUARD_OPENSSL_INCLUDE_DIR
-            COSMO_MODEL_GUARD_SOPHON_INCLUDE_DIR
-            COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR)
-        if(NOT IS_DIRECTORY "${${MODEL_GUARD_DEPENDENCY_DIRECTORY}}")
-            message(FATAL_ERROR
-                "Protected Sophon configuration requires the existing exact "
-                "dependency directory ${MODEL_GUARD_DEPENDENCY_DIRECTORY}="
-                "${${MODEL_GUARD_DEPENDENCY_DIRECTORY}}. Run the canonical "
-                "third-party build prerequisite first; no host fallback is allowed.")
-        endif()
-    endforeach()
-    foreach(MODEL_GUARD_DEPENDENCY_INPUT IN ITEMS
-            COSMO_MODEL_GUARD_LIBCRYPTO
-            COSMO_MODEL_GUARD_SOPHON_INCLUDE_DIR
-            COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR)
-        if(MODEL_GUARD_DEPENDENCY_INPUT MATCHES "_DIR$")
-            continue()
-        endif()
-        if(NOT EXISTS "${${MODEL_GUARD_DEPENDENCY_INPUT}}" OR
-           IS_DIRECTORY "${${MODEL_GUARD_DEPENDENCY_INPUT}}")
-            message(FATAL_ERROR
-                "Protected Sophon configuration requires the existing exact "
-                "dependency input ${MODEL_GUARD_DEPENDENCY_INPUT}="
-                "${${MODEL_GUARD_DEPENDENCY_INPUT}}. Run the canonical "
-                "third-party build prerequisite first; no host fallback is allowed.")
-        endif()
-    endforeach()
 
     set(COSMO_PYTHON3_EXECUTABLE "/usr/bin/python3")
     if(NOT EXISTS "${COSMO_PYTHON3_EXECUTABLE}" OR
@@ -277,41 +211,24 @@ if(COSMO_MODEL_GUARD)
     set(MODEL_GUARD_V2_VERIFY_ARGUMENTS
         --admission-profile "${COSMO_MODEL_GUARD_BUILD_PROFILE}"
         --sdk-root "${COSMO_MODEL_GUARD_SDK_ROOT}"
-        --snapshot-base "${CMAKE_BINARY_DIR}/verified-inputs/model-guard-v2"
         --readelf "${CMAKE_READELF}"
-        --nm "${CMAKE_NM}"
-        --openssl-include-dir "${COSMO_MODEL_GUARD_OPENSSL_INCLUDE_DIR}"
-        --libcrypto "${COSMO_MODEL_GUARD_LIBCRYPTO}"
-        --sophon-include-dir "${COSMO_MODEL_GUARD_SOPHON_INCLUDE_DIR}"
-        --sophon-library-dir "${COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR}"
-        --expected-profile "v2-only")
+        --nm "${CMAKE_NM}")
     if(EXISTS "${MODEL_GUARD_V2_TEST_FIXTURE_MARKER}")
         message(FATAL_ERROR
             "A marked Model Guard test fixture cannot satisfy either public-runtime "
             "or production-release SDK admission")
     endif()
 
-    set(MODEL_GUARD_V2_REVERIFY_DEPENDS
+    set(MODEL_GUARD_V2_ADMISSION_INPUTS
         "${MODEL_GUARD_V2_HEADER}"
         "${MODEL_GUARD_V2_LIBRARY}"
-        "${MODEL_GUARD_V2_ABI_MANIFEST}"
-        "${MODEL_GUARD_V2_DEPENDENCY_MANIFEST}"
-        "${MODEL_GUARD_V2_SDK_RELEASE_MANIFEST}"
-        "${COSMO_MODEL_GUARD_OPENSSL_INCLUDE_DIR}/openssl/opensslv.h"
-        "${COSMO_MODEL_GUARD_LIBCRYPTO}"
-        "${COSMO_MODEL_GUARD_SOPHON_INCLUDE_DIR}/bmruntime_interface.h"
-        "${COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR}/libbmrt.so"
-        "${COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR}/libbmrt.so.1.0"
-        "${COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR}/libbmlib.so"
-        "${COSMO_MODEL_GUARD_SOPHON_LIBRARY_DIR}/libbmlib.so.0"
-        "${CMAKE_SOURCE_DIR}/scripts/release_updater.py"
         "${CMAKE_SOURCE_DIR}/scripts/verify_model_guard_v2_sdk.py")
     if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
-        list(APPEND MODEL_GUARD_V2_REVERIFY_DEPENDS
+        list(APPEND MODEL_GUARD_V2_ADMISSION_INPUTS
             "${MODEL_GUARD_V2_PROVISION_TOOL}")
     endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-        ${MODEL_GUARD_V2_REVERIFY_DEPENDS})
+        ${MODEL_GUARD_V2_ADMISSION_INPUTS})
 
     execute_process(
         COMMAND "${COSMO_PYTHON3_EXECUTABLE}" -I -B
@@ -325,8 +242,7 @@ if(COSMO_MODEL_GUARD)
     )
     if(NOT MODEL_GUARD_V2_VERIFY_RESULT EQUAL 0)
         message(FATAL_ERROR
-            "COSMO_MODEL_GUARD requires one complete ABI-major-2 SDK; "
-            "mixed, missing, legacy, or unverified inputs are forbidden.\n"
+            "COSMO_MODEL_GUARD requires a usable v2 SDK.\n"
             "${MODEL_GUARD_V2_VERIFY_ERROR}")
     endif()
 
@@ -335,7 +251,7 @@ if(COSMO_MODEL_GUARD)
     set(MODEL_GUARD_V2_VERIFIED_SDK_ROOT "${CMAKE_MATCH_2}")
     if(NOT IS_ABSOLUTE "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}" OR
        NOT EXISTS "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}")
-        message(FATAL_ERROR "Model Guard verifier did not return a valid private SDK snapshot")
+        message(FATAL_ERROR "Model Guard verifier did not return a valid SDK root")
     endif()
     set(MODEL_GUARD_V2_HEADER
         "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/include/cosmo_model_guard_v2.h")
@@ -345,46 +261,6 @@ if(COSMO_MODEL_GUARD)
         set(MODEL_GUARD_V2_PROVISION_TOOL
             "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/bin/cosmo-model-provision")
     endif()
-    set(MODEL_GUARD_V2_ABI_MANIFEST
-        "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/share/cosmo-model-guard/cmg_v2_abi.json")
-    set(MODEL_GUARD_V2_DEPENDENCY_MANIFEST
-        "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/share/cosmo-model-guard/cmg_v2_dependencies.json")
-    set(MODEL_GUARD_V2_SDK_RELEASE_MANIFEST
-        "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/share/cosmo-model-guard/sdk-release.env")
-    set(COSMO_MODEL_GUARD_VERIFIED_OPENSSL_ROOT
-        "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/thirdparty/openssl")
-    set(COSMO_VERIFIED_SOPHON_ROOT
-        "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/thirdparty/sophon")
-    foreach(MODEL_GUARD_VERIFIED_DEPENDENCY_PATH IN ITEMS
-            "${COSMO_MODEL_GUARD_VERIFIED_OPENSSL_ROOT}/include/openssl/opensslv.h"
-            "${COSMO_MODEL_GUARD_VERIFIED_OPENSSL_ROOT}/lib/libcrypto.so.3"
-            "${COSMO_VERIFIED_SOPHON_ROOT}/include/bmruntime_interface.h"
-            "${COSMO_VERIFIED_SOPHON_ROOT}/lib/libbmrt.so"
-            "${COSMO_VERIFIED_SOPHON_ROOT}/lib/libbmrt.so.1.0"
-            "${COSMO_VERIFIED_SOPHON_ROOT}/lib/libbmlib.so"
-            "${COSMO_VERIFIED_SOPHON_ROOT}/lib/libbmlib.so.0")
-        if(NOT EXISTS "${MODEL_GUARD_VERIFIED_DEPENDENCY_PATH}" OR
-           IS_DIRECTORY "${MODEL_GUARD_VERIFIED_DEPENDENCY_PATH}")
-            message(FATAL_ERROR
-                "Model Guard verifier returned an incomplete dependency snapshot: "
-                "${MODEL_GUARD_VERIFIED_DEPENDENCY_PATH}")
-        endif()
-    endforeach()
-    # This target intentionally has no output stamp: every requested build
-    # reopens and revalidates the compatibility set before any consumer can
-    # link or package it. DEPENDS also gives normal build systems precise
-    # invalidation when a controlled input changes.
-    set(MODEL_GUARD_V2_REVERIFY_ARGUMENTS
-        ${MODEL_GUARD_V2_VERIFY_ARGUMENTS}
-        --expected-snapshot-root "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}")
-    add_custom_target(cosmo_model_guard_v2_reverify ALL
-        COMMAND "${COSMO_PYTHON3_EXECUTABLE}" -I -B
-                "${CMAKE_SOURCE_DIR}/scripts/verify_model_guard_v2_sdk.py"
-                ${MODEL_GUARD_V2_REVERIFY_ARGUMENTS}
-        DEPENDS ${MODEL_GUARD_V2_REVERIFY_DEPENDS}
-        COMMENT "Re-verifying the Model Guard v2 SDK compatibility set"
-        VERBATIM)
-
     add_library(cosmo_model_guard_v2 SHARED IMPORTED GLOBAL)
     set_target_properties(cosmo_model_guard_v2 PROPERTIES
         IMPORTED_LOCATION "${MODEL_GUARD_V2_LIBRARY}"
@@ -399,11 +275,7 @@ endif()
 # The production bootstrap embeds the release signing public key. Public builds
 # emit the installable SOURCE package without this formal OTA entry point.
 set(COSMO_HAS_RELEASE_BOOTSTRAP OFF)
-if(COSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY)
-    # The bootstrap-only configure pass produces dependency inputs and returns
-    # before application targets. Production trust is admitted on the second,
-    # protected configure pass.
-elseif(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
+if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
     if(NOT COSMO_MODEL_GUARD)
         message(FATAL_ERROR
             "COSMO_MODEL_GUARD_BUILD_PROFILE=production-release requires the "
@@ -472,14 +344,8 @@ else()
         "or install cosmo-release-bootstrap and is not a signed production release")
 endif()
 
-# CMake target dependencies do not protect direct `cmake --install` or raw
-# `cpack` entry paths.  Emit the same fail-closed checks as the first install
-# rule so no file is copied before the verified compatibility snapshot (and,
-# for production builds, its release-key object) has been reopened.
-#
-# Bracket-quote every configured command argument independently.  This keeps
-# paths containing whitespace literal in the generated install script without
-# delegating any part of the command to a shell.
+# A production install reopens its signing trust anchor immediately before
+# copying files. Model Guard SDK admission is performed once at configure time.
 function(cosmo_append_install_command_argument output_name argument)
     set(argument_delimiter "=")
     while("${argument}" MATCHES "]${argument_delimiter}]")
@@ -492,64 +358,27 @@ function(cosmo_append_install_command_argument output_name argument)
         PARENT_SCOPE)
 endfunction()
 
-if(COSMO_MODEL_GUARD)
-    string(CONCAT COSMO_INSTALL_TRUST_REVERIFY_CODE
-        "message(STATUS \"Re-verifying Model Guard v2 before installation\")\n"
+if(COSMO_HAS_RELEASE_BOOTSTRAP)
+    string(CONCAT COSMO_INSTALL_RELEASE_KEY_REVERIFY_CODE
+        "message(STATUS \"Re-verifying release public key before installation\")\n"
         "execute_process(\n"
         "    COMMAND")
-    foreach(MODEL_GUARD_INSTALL_VERIFY_ARGUMENT IN ITEMS
-            "${COSMO_PYTHON3_EXECUTABLE}"
+    foreach(COSMO_RELEASE_KEY_INSTALL_VERIFY_ARGUMENT IN ITEMS
+            "${COSMO_RELEASE_PYTHON3_EXECUTABLE}"
             "-I"
             "-B"
-            "${CMAKE_SOURCE_DIR}/scripts/verify_model_guard_v2_sdk.py")
+            "${CMAKE_SOURCE_DIR}/scripts/verify_release_public_key_object.py"
+            "--object"
+            "${COSMO_RELEASE_PUBLIC_KEY_LINK_OBJECT}"
+            "--readelf"
+            "${CMAKE_READELF}"
+            "--nm"
+            "${CMAKE_NM}")
         cosmo_append_install_command_argument(
-            COSMO_INSTALL_TRUST_REVERIFY_CODE
-            "${MODEL_GUARD_INSTALL_VERIFY_ARGUMENT}")
+            COSMO_INSTALL_RELEASE_KEY_REVERIFY_CODE
+            "${COSMO_RELEASE_KEY_INSTALL_VERIFY_ARGUMENT}")
     endforeach()
-    foreach(MODEL_GUARD_INSTALL_VERIFY_ARGUMENT IN LISTS
-            MODEL_GUARD_V2_REVERIFY_ARGUMENTS)
-        cosmo_append_install_command_argument(
-            COSMO_INSTALL_TRUST_REVERIFY_CODE
-            "${MODEL_GUARD_INSTALL_VERIFY_ARGUMENT}")
-    endforeach()
-    string(APPEND COSMO_INSTALL_TRUST_REVERIFY_CODE [=[
-
-    RESULT_VARIABLE model_guard_install_verify_result
-    OUTPUT_VARIABLE model_guard_install_verify_output
-    ERROR_VARIABLE model_guard_install_verify_error
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT model_guard_install_verify_result EQUAL 0)
-    message(FATAL_ERROR
-        "Install-time Model Guard v2 verification failed before any file was copied.\n"
-        "${model_guard_install_verify_output}\n"
-        "${model_guard_install_verify_error}")
-endif()
-message(STATUS "Install-time Model Guard v2 verification passed")
-]=])
-
-    if(COSMO_HAS_RELEASE_BOOTSTRAP)
-        string(APPEND COSMO_INSTALL_TRUST_REVERIFY_CODE
-            "\nmessage(STATUS \"Re-verifying release public key before installation\")\n"
-            "execute_process(\n"
-            "    COMMAND")
-        foreach(COSMO_RELEASE_KEY_INSTALL_VERIFY_ARGUMENT IN ITEMS
-                "${COSMO_RELEASE_PYTHON3_EXECUTABLE}"
-                "-I"
-                "-B"
-                "${CMAKE_SOURCE_DIR}/scripts/verify_release_public_key_object.py"
-                "--object"
-                "${COSMO_RELEASE_PUBLIC_KEY_LINK_OBJECT}"
-                "--readelf"
-                "${CMAKE_READELF}"
-                "--nm"
-                "${CMAKE_NM}")
-            cosmo_append_install_command_argument(
-                COSMO_INSTALL_TRUST_REVERIFY_CODE
-                "${COSMO_RELEASE_KEY_INSTALL_VERIFY_ARGUMENT}")
-        endforeach()
-        string(APPEND COSMO_INSTALL_TRUST_REVERIFY_CODE [=[
+    string(APPEND COSMO_INSTALL_RELEASE_KEY_REVERIFY_CODE [=[
 
     RESULT_VARIABLE release_key_install_verify_result
     OUTPUT_VARIABLE release_key_install_verify_output
@@ -565,9 +394,7 @@ if(NOT release_key_install_verify_result EQUAL 0)
 endif()
 message(STATUS "Install-time release public-key verification passed")
 ]=])
-    endif()
-
-    install(CODE "${COSMO_INSTALL_TRUST_REVERIFY_CODE}")
+    install(CODE "${COSMO_INSTALL_RELEASE_KEY_REVERIFY_CODE}")
 endif()
 
 message(STATUS "=======================")
@@ -585,8 +412,7 @@ set(THIRDPARTY_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/thirdparty_install CACHE PATH 
 add_custom_target(third_build)
 
 # Third-party projects must not inherit wall-clock or ephemeral container
-# identity in release artifacts. This epoch is also the one admitted by the
-# formal Model Guard SDK dependency manifest.
+# identity in release artifacts.
 set(COSMO_REPRODUCIBLE_BUILD_EPOCH 1784776233)
 set(COSMO_REPRODUCIBLE_BUILD_UTC "2026-07-23 03:10:33")
 set(COSMO_REPRODUCIBLE_BUILD_UNAME
@@ -604,17 +430,6 @@ endforeach()
 
 include(ExternalProject)
 
-if(COSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY)
-    # A clean protected build cannot verify generated OpenSSL inputs before
-    # they exist. The canonical build script configures this narrow
-    # producer-only graph first, then reconfigures the same build tree with the
-    # full fail-closed Model Guard gate enabled.
-    include(cmake/openssl.cmake)
-    add_custom_target(cosmo_model_guard_dependency_inputs
-        DEPENDS openssl_external)
-    return()
-endif()
-
 include(cmake/fmt.cmake)
 include(cmake/glog.cmake)
 include(cmake/zlib.cmake)
@@ -624,11 +439,6 @@ include(cmake/uSockets.cmake)
 include(cmake/mp4v2.cmake)
 include(cmake/openssl.cmake)
 include(cmake/cryptopp.cmake)
-if(COSMO_MODEL_GUARD)
-    # Only the mutable Guard dependency producer precedes verification.
-    add_dependencies(cosmo_model_guard_v2_reverify
-        openssl_external)
-endif()
 include(cmake/curl.cmake)
 include(cmake/mqtt.cmake)
 include(cmake/event.cmake)
@@ -714,13 +524,7 @@ set(ALL_OBJECT_LIBS
 foreach(lib ${ALL_OBJECT_LIBS})
     target_compile_options(${lib} PRIVATE ${COSMO_STRICT_WARNINGS})
     add_dependencies(${lib} third_build)
-    if(COSMO_MODEL_GUARD)
-        add_dependencies(${lib} cosmo_model_guard_v2_reverify)
-    endif()
 endforeach()
-if(COSMO_MODEL_GUARD)
-    add_dependencies(cosmo_nn cosmo_model_guard_v2_reverify)
-endif()
 
 #Collect all OBJECT outputs for linking
 set(ALL_OBJECTS
@@ -766,10 +570,6 @@ if(COSMO_HAS_RELEASE_BOOTSTRAP)
     add_dependencies(cosmo-release-bootstrap
         third_build
         cosmo_release_public_key_reverify)
-    if(COSMO_MODEL_GUARD)
-        add_dependencies(cosmo-release-bootstrap
-            cosmo_model_guard_v2_reverify)
-    endif()
     target_include_directories(cosmo-release-bootstrap PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(cosmo-release-bootstrap PRIVATE ${COSMO_STRICT_WARNINGS})
     target_link_libraries(cosmo-release-bootstrap PRIVATE openssl_crypto)
@@ -795,10 +595,6 @@ if(BUILD_TESTS)
         ${CMAKE_SOURCE_DIR}/test/fixtures/ReleaseBootstrapTestKey.cc
         ${COSMO_RELEASE_BOOTSTRAP_VERIFIER_SOURCE})
     add_dependencies(cosmo-release-bootstrap-verifier-tests third_build)
-    if(COSMO_MODEL_GUARD)
-        add_dependencies(cosmo-release-bootstrap-verifier-tests
-            cosmo_model_guard_v2_reverify)
-    endif()
     target_include_directories(cosmo-release-bootstrap-verifier-tests PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(cosmo-release-bootstrap-verifier-tests PRIVATE
@@ -819,10 +615,6 @@ if(BUILD_TESTS)
         ${COSMO_RELEASE_BOOTSTRAP_VERIFIER_SOURCE}
         ${CMAKE_SOURCE_DIR}/test/fixtures/ReleaseBootstrapTestKey.cc)
     add_dependencies(cosmo-release-bootstrap-test-fixture third_build)
-    if(COSMO_MODEL_GUARD)
-        add_dependencies(cosmo-release-bootstrap-test-fixture
-            cosmo_model_guard_v2_reverify)
-    endif()
     target_include_directories(cosmo-release-bootstrap-test-fixture PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(cosmo-release-bootstrap-test-fixture PRIVATE
@@ -861,7 +653,6 @@ endif()
 if(COSMO_MODEL_GUARD)
     target_compile_definitions(${EXECUTABLE_NAME} PRIVATE COSMO_HAS_MODEL_GUARD=1)
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE cosmo_model_guard_v2)
-    add_dependencies(${EXECUTABLE_NAME} cosmo_model_guard_v2_reverify)
 endif()
 if(COSMO_NN_USE_CPU_BACKEND)
     target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
@@ -900,7 +691,6 @@ if(BUILD_TESTS)
     if(COSMO_MODEL_GUARD)
         target_compile_definitions(cosmo-tests PRIVATE COSMO_HAS_MODEL_GUARD=1)
         target_link_libraries(cosmo-tests PRIVATE cosmo_model_guard_v2)
-        add_dependencies(cosmo-tests cosmo_model_guard_v2_reverify)
     endif()
     if(COSMO_NN_USE_CPU_BACKEND)
         target_compile_definitions(cosmo-tests PRIVATE
@@ -1185,18 +975,6 @@ if(COSMO_MODEL_GUARD)
         DESTINATION share/cosmo-model-guard
         PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
     )
-    install(FILES "${MODEL_GUARD_V2_ABI_MANIFEST}"
-        DESTINATION share/cosmo-model-guard
-        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
-    )
-    install(FILES "${MODEL_GUARD_V2_DEPENDENCY_MANIFEST}"
-        DESTINATION share/cosmo-model-guard
-        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
-    )
-    install(FILES "${MODEL_GUARD_V2_SDK_RELEASE_MANIFEST}"
-        DESTINATION share/cosmo-model-guard
-        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
-    )
     install(CODE [[
         set(model_guard_lib_dir "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/lib")
         file(CREATE_LINK libcosmo_model_guard.so.2.0.0
@@ -1232,12 +1010,9 @@ if(_COSMO_SOURCE_PACKAGE)
             "${source_identity_root}/bin/cosmo-engine")
         set(source_identity_version
             "${source_identity_root}/bin/version.txt")
-        set(source_identity_sdk_release
-            "${source_identity_root}/share/cosmo-model-guard/sdk-release.env")
         foreach(source_identity_input IN ITEMS
                 "${source_identity_engine}"
-                "${source_identity_version}"
-                "${source_identity_sdk_release}")
+                "${source_identity_version}")
             if(NOT EXISTS "${source_identity_input}" OR
                IS_DIRECTORY "${source_identity_input}" OR
                IS_SYMLINK "${source_identity_input}")
@@ -1252,25 +1027,12 @@ if(_COSMO_SOURCE_PACKAGE)
             message(FATAL_ERROR
                 "SOURCE version.txt differs from the configured package version")
         endif()
-        file(STRINGS "${source_identity_sdk_release}"
-            source_identity_guard_lines
-            REGEX "^CMG_SDK_RELEASE_ID=[A-Za-z0-9._+-]+$")
-        list(LENGTH source_identity_guard_lines source_identity_guard_count)
-        if(NOT source_identity_guard_count EQUAL 1)
-            message(FATAL_ERROR
-                "SOURCE SDK release manifest has an ambiguous release ID")
-        endif()
-        list(GET source_identity_guard_lines 0 source_identity_guard_line)
-        string(REGEX REPLACE "^CMG_SDK_RELEASE_ID=" ""
-            source_identity_guard_release_id
-            "${source_identity_guard_line}")
         file(SHA256 "${source_identity_engine}" source_identity_engine_sha256)
 
         string(CONCAT source_identity_hash_input
-            "cosmo-source-build-identity-v1\n"
+            "cosmo-source-build-identity-v2\n"
             "edge_commit=@COSMO_EDGE_SOURCE_COMMIT@\n"
             "version=@PACKAGE_VERSION@\n"
-            "guard_release_id=${source_identity_guard_release_id}\n"
             "engine_sha256=${source_identity_engine_sha256}\n")
         string(SHA256 source_identity_build_id
             "${source_identity_hash_input}")
@@ -1280,10 +1042,9 @@ if(_COSMO_SOURCE_PACKAGE)
             "${source_identity_directory}/build-identity.env")
         file(MAKE_DIRECTORY "${source_identity_directory}")
         file(WRITE "${source_identity_file}"
-            "format=cosmo-source-build-identity-v1\n"
+            "format=cosmo-source-build-identity-v2\n"
             "edge_commit=@COSMO_EDGE_SOURCE_COMMIT@\n"
             "version=@PACKAGE_VERSION@\n"
-            "guard_release_id=${source_identity_guard_release_id}\n"
             "engine_sha256=${source_identity_engine_sha256}\n"
             "build_identity=${source_identity_build_id}\n")
         message(STATUS
@@ -1328,9 +1089,6 @@ add_custom_target(package_all
     DEPENDS ${COSMO_PACKAGE_TARGETS}
     COMMENT "Creating package with SHA-256 in filename"
 )
-if(COSMO_MODEL_GUARD)
-    add_dependencies(package_all cosmo_model_guard_v2_reverify)
-endif()
 if(COSMO_HAS_RELEASE_BOOTSTRAP)
     add_dependencies(package_all cosmo_release_public_key_reverify)
 endif()

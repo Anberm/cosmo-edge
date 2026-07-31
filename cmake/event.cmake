@@ -8,9 +8,6 @@ set(EVENT_EXTRA_LIB ${EVENT_INSTALL_DIR}/lib/libevent_extra.so)
 set(EVENT_OPENSSL_LIB ${EVENT_INSTALL_DIR}/lib/libevent_openssl.so)
 set(EVENT_PTHREADS_LIB ${EVENT_INSTALL_DIR}/lib/libevent_pthreads.so)
 set(EVENT_EXTERNAL_DEPENDS openssl_external)
-if(COSMO_MODEL_GUARD)
-    list(APPEND EVENT_EXTERNAL_DEPENDS cosmo_model_guard_v2_reverify)
-endif()
 
 ExternalProject_Add(
     event_external

@@ -92,7 +92,6 @@ validate_payload() {
         scripts/source_run_start.sh \
         scripts/source_health_check.sh \
         scripts/stop.sh \
-        share/cosmo-model-guard/sdk-release.env \
         share/cosmo-source/build-identity.env \
         share/cosmo-source/cosmo.service
     do
@@ -110,19 +109,6 @@ validate_payload() {
             fail "SOURCE payload is not executable: ${path}"
     done
 
-    local sdk_release identity_release
-    sdk_release="$(
-        manifest_value \
-            "${payload_root}/share/cosmo-model-guard/sdk-release.env" \
-            CMG_SDK_RELEASE_ID
-    )" || fail "Guard SDK release ID is invalid"
-    identity_release="$(
-        manifest_value \
-            "${payload_root}/share/cosmo-source/build-identity.env" \
-            guard_release_id
-    )" || fail "SOURCE build identity is invalid"
-    [ "$sdk_release" = "$identity_release" ] ||
-        fail "SOURCE build identity and Guard SDK differ"
 }
 
 prepare_staging() {
@@ -177,7 +163,7 @@ install_action() {
         fail "SOURCE runtime was installed but failed its health check"
     fi
 
-    local build_id edge_commit guard_release
+    local build_id edge_commit
     build_id="$(
         manifest_value \
             "${active_root}/share/cosmo-source/build-identity.env" \
@@ -188,13 +174,8 @@ install_action() {
             "${active_root}/share/cosmo-source/build-identity.env" \
             edge_commit
     )"
-    guard_release="$(
-        manifest_value \
-            "${active_root}/share/cosmo-source/build-identity.env" \
-            guard_release_id
-    )"
     log "SOURCE runtime installed at ${active_root}"
-    log "build_id=${build_id} edge_commit=${edge_commit} guard_release_id=${guard_release}"
+    log "build_id=${build_id} edge_commit=${edge_commit}"
     log "No application backup was created; Guard certificate state was not accessed"
 }
 
@@ -219,7 +200,7 @@ status_action() {
         return 0
     fi
     echo 'mode=source'
-    for key in edge_commit version guard_release_id build_identity; do
+    for key in edge_commit version build_identity; do
         printf '%s=%s\n' "$key" "$(manifest_value "$identity" "$key")"
     done
     print_service_status

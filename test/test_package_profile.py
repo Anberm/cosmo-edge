@@ -30,7 +30,6 @@ loader.exec_module(verifier)
 EDGE_COMMIT = "1" * 40
 ENGINE = b"test-cosmo-engine\n"
 VERSION = "V1.2.3"
-GUARD_RELEASE_ID = "cmg-sdk-v2.3.3"
 # Byte-for-byte public synthetic core from Guard's committed CEM v2 golden
 # fixture. It contains no production model data or key material.
 CEM_V2_GOLDEN_CORE = bytes.fromhex(
@@ -87,7 +86,6 @@ def build_identity_content() -> bytes:
         f"{verifier.SOURCE_BUILD_IDENTITY_FORMAT}\n"
         f"edge_commit={EDGE_COMMIT}\n"
         f"version={VERSION}\n"
-        f"guard_release_id={GUARD_RELEASE_ID}\n"
         f"engine_sha256={engine_sha256}\n"
     ).encode("ascii")
     build_identity = hashlib.sha256(hash_input).hexdigest()
@@ -95,7 +93,6 @@ def build_identity_content() -> bytes:
         f"format={verifier.SOURCE_BUILD_IDENTITY_FORMAT}\n"
         f"edge_commit={EDGE_COMMIT}\n"
         f"version={VERSION}\n"
-        f"guard_release_id={GUARD_RELEASE_ID}\n"
         f"engine_sha256={engine_sha256}\n"
         f"build_identity={build_identity}\n"
     ).encode("ascii")
@@ -107,25 +104,6 @@ def common_inventory() -> dict[str, verifier.ArchiveEntry]:
         for path in verifier.COMMON_DIRECTORIES
     }
     inventory.update({path: entry() for path in verifier.COMMON_FILES})
-    component_hashes: dict[str, str] = {}
-    for key, path in verifier.SOURCE_SDK_COMPONENTS.items():
-        content = f"test-{key.lower()}\n".encode("ascii")
-        digest = hashlib.sha256(content).hexdigest()
-        component_hashes[key] = digest
-        inventory[path] = entry(content=content, sha256=digest)
-    sdk_values = {
-        **component_hashes,
-        "CMG_SDK_RELEASE_FORMAT": "cosmo-model-guard-sdk-release-v2",
-        "CMG_SDK_RELEASE_ID": GUARD_RELEASE_ID,
-    }
-    sdk_release = "".join(
-        f"{key}={sdk_values[key]}\n"
-        for key in verifier.SOURCE_SDK_RELEASE_KEYS
-    ).encode("ascii")
-    inventory[verifier.SOURCE_SDK_RELEASE] = entry(
-        content=sdk_release,
-        sha256=hashlib.sha256(sdk_release).hexdigest(),
-    )
     inventory.update(
         {
             path: entry("symlink", 0o777, target)
@@ -190,9 +168,12 @@ class PackageProfileTest(unittest.TestCase):
         self.assertEqual(
             verifier.verify_inventory(inventory, "public-runtime"), "SOURCE"
         )
-        self.assertIn(
-            "share/cosmo-model-guard/sdk-release.env",
+        self.assertEqual(
             verifier.COMMON_FILES,
+            {
+                "lib/libcosmo_model_guard.so.2.0.0",
+                "share/cosmo-model-guard/cosmo_model_guard_v2.h",
+            },
         )
         self.assertEqual(
             verifier.SOURCE_EXECUTABLES,
@@ -429,7 +410,7 @@ class PackageProfileTest(unittest.TestCase):
                 )
             )
 
-    def test_source_build_identity_binds_engine_version_and_guard(self) -> None:
+    def test_source_build_identity_binds_engine_and_version(self) -> None:
         inventory = source_inventory()
         identity = verifier.source_build_identity(inventory)
         self.assertEqual(identity["edge_commit"], EDGE_COMMIT)

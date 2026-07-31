@@ -87,11 +87,6 @@ RELEASE_BOOTSTRAP_ARGS=(
     -DCOSMO_REQUIRE_RELEASE_BOOTSTRAP="${COSMO_REQUIRE_RELEASE_BOOTSTRAP:-OFF}"
     -DCOSMO_RELEASE_PUBLIC_KEY_OBJECT="${COSMO_RELEASE_PUBLIC_KEY_OBJECT:-}"
 )
-DEPENDENCY_BOOTSTRAP_TRUST_RESET_ARGS=(
-    -DCOSMO_REQUIRE_RELEASE_BOOTSTRAP=OFF
-    -DCOSMO_RELEASE_PUBLIC_KEY_OBJECT=
-)
-
 if [ -d "${INSTALL_DIR}" ]; then
     rm -rf -- "${INSTALL_DIR}"
 fi
@@ -106,34 +101,11 @@ echo "Internal Model Guard build profile: ${COSMO_MODEL_GUARD_BUILD_PROFILE}"
 if [ "${COSMO_MODEL_GUARD_BUILD_PROFILE}" = "public-runtime" ]; then
     echo "Edge source commit: ${COSMO_EDGE_SOURCE_COMMIT}"
 fi
-echo "Bootstrapping protected dependency producer..."
-cmake   -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
-        -DCOSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY=ON \
-        -DRESOURCE_DIR="${RESOURCE_DIR}" \
-        "${MODEL_GUARD_PROFILE_ARGS[@]}" \
-        "${DEPENDENCY_BOOTSTRAP_TRUST_RESET_ARGS[@]}" \
-        ..
-cmake --build . --target cosmo_model_guard_dependency_inputs -j"$(nproc)"
-
-# Docker-generated dependency install directories may be 0777 even though the
-# captured files are immutable inputs. Normalize only those generated
-# directory modes after the producer build and before the fail-closed snapshot;
-# source trees and file contents are untouched.
-for generated_dependency_tree in \
-        "${BUILD_DIR}/thirdparty_install/openssl/include" \
-        "${BUILD_DIR}/thirdparty_install/openssl/lib"
-do
-    test -d "${generated_dependency_tree}"
-    find "${generated_dependency_tree}" -type d -exec chmod go-w {} +
-done
-
 echo "Configuring protected build..."
 cmake   -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
         -DBUILD_TESTS="${BUILD_TESTS_FLAG}" \
         -DCOSMO_DEV_MODE="${DEV_MODE}" \
-        -DCOSMO_MODEL_GUARD_DEPENDENCY_BOOTSTRAP_ONLY=OFF \
         -DCOSMO_MODEL_GUARD_SDK_ROOT="${COSMO_GUARD_SDK_DIR}" \
         -DRESOURCE_DIR="${RESOURCE_DIR}" \
         "${MODEL_GUARD_PROFILE_ARGS[@]}" \

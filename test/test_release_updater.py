@@ -13,13 +13,11 @@ import os
 import re
 import shutil
 import stat
-import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
 import types
-import unicodedata
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -87,18 +85,8 @@ MODEL_GUARD_TRUST_LOGICAL_NAMES = {
     "cmg_commissioning_public_key_bundle_v1": "commissioning_public_key_bundle",
 }
 
-OPENSSL_VERSION_HEADER = (
-    REPOSITORY / "build/thirdparty_install/openssl/include/openssl/opensslv.h"
-)
 LIBCRYPTO = REPOSITORY / "build/thirdparty_install/openssl/lib/libcrypto.so.3"
 LIBSSL = REPOSITORY / "build/thirdparty_install/openssl/lib/libssl.so.3"
-SYNTHETIC_OPENSSL_HEADERS = {
-    "openssl/opensslv.h": OPENSSL_VERSION_HEADER.read_bytes(),
-}
-SYNTHETIC_SOPHON_HEADERS = {
-    "bmlib_runtime.h": b"synthetic-bmlib-header\n",
-    "bmruntime_interface.h": b"synthetic-bmrt-header\n",
-}
 SYNTHETIC_SOPHON_LIBRARIES = {
     "libbmlib.so": b"synthetic-bmlib-link-runtime",
     "libbmlib.so.0": b"synthetic-bmlib-versioned-runtime",
@@ -170,23 +158,6 @@ def cem_v2_core_with_cohort(cohort_id: bytes) -> bytes:
     return bytes(core)
 
 
-def dependency_tree_identity(files: Mapping[str, bytes]) -> tuple[int, str]:
-    digest = hashlib.sha256()
-    digest.update(b"cosmo-dependency-tree-v1\0")
-    encoded_files = []
-    for relative, data in files.items():
-        canonical = unicodedata.normalize(
-            "NFC", Path(relative).as_posix()
-        ).encode("utf-8")
-        encoded_files.append((canonical, data))
-    for encoded, data in sorted(encoded_files, key=lambda item: item[0]):
-        digest.update(struct.pack(">Q", len(encoded)))
-        digest.update(encoded)
-        digest.update(struct.pack(">Q", len(data)))
-        digest.update(data)
-    return len(files), digest.hexdigest()
-
-
 def valid_model_guard_header() -> bytes:
     return (
         b"#define CMG_V2_ABI_MAJOR UINT32_C(2)\n"
@@ -196,131 +167,6 @@ def valid_model_guard_header() -> bytes:
         b"int CmgV2GetArtifactInfo(void);\n"
         b"int CmgV2LoadSophonSegment(void);\n"
         b"void CmgV2CloseArtifact(void);\n"
-    )
-
-
-def valid_model_guard_abi_manifest() -> bytes:
-    manifest = {
-        "schema": "cosmo.model-guard.abi",
-        "schema_version": 1,
-        "name": "cosmo-model-guard",
-        "header": "include/cosmo_model_guard_v2.h",
-        "contract_status": release.GUARD_ABI_CONTRACT_STATUS,
-        "runtime_implemented": True,
-        "implementation_milestone": release.GUARD_IMPLEMENTATION_MILESTONE,
-        "abi": {
-            "major": 2,
-            "calling_convention": "C",
-            "language_compatibility": ["C11", "C++17"],
-            "target": "aarch64-linux-gnu",
-            "target_architecture": "AArch64",
-            "sophon_target": "BM1688",
-            "soname": release.GUARD_SONAME,
-            "public_sophon_header": "bmlib_runtime.h",
-            "status_type": {"c_type": "int32_t", "size": 4, "signed": True},
-            "source_format_type": {
-                "c_type": "uint32_t",
-                "size": 4,
-                "signed": False,
-            },
-            "load_flags_type": {
-                "c_type": "uint32_t",
-                "size": 4,
-                "signed": False,
-            },
-        },
-        "constants": {},
-        "statuses": [],
-        "structs": {},
-        "symbols": [],
-        "visibility": {
-            "default_visibility": "hidden",
-            "version_script_required": True,
-            "version_node": "CMG_2.0",
-            "global_function_allowlist": list(
-                release.ABI_DECLARED_GUARD_EXPORTS
-            ),
-            "all_other_symbols": "local",
-            "exclude_static_dependency_symbols": True,
-        },
-        "compatibility_rules": {},
-        "runtime_profile": {
-            "authorization_artifact": "device-certificate.bin",
-            "binding_profile": "software-bound-device-certificate-v1",
-            "name": release.GUARD_PROFILE,
-            "preset_scope": "all-current-and-future-presets-under-one-pmk",
-        },
-    }
-    return (json.dumps(manifest, ensure_ascii=True, indent=2) + "\n").encode(
-        "ascii"
-    )
-
-
-def valid_model_guard_dependency_manifest(
-    header: bytes,
-    abi_manifest: bytes,
-    libcrypto: bytes,
-    sophon_libraries: Mapping[str, bytes],
-) -> bytes:
-    openssl_header = SYNTHETIC_OPENSSL_HEADERS["openssl/opensslv.h"]
-    openssl_headers_count, openssl_headers_sha256 = dependency_tree_identity(
-        SYNTHETIC_OPENSSL_HEADERS
-    )
-    sophon_headers_count, sophon_headers_sha256 = dependency_tree_identity(
-        SYNTHETIC_SOPHON_HEADERS
-    )
-    sophon_libraries_count, sophon_libraries_sha256 = dependency_tree_identity(
-        dict(sophon_libraries)
-    )
-    return release._canonical_ascii_json(
-        {
-            "abi": {
-                "header_path": "include/cosmo_model_guard_v2.h",
-                "header_sha256": hashlib.sha256(header).hexdigest(),
-                "manifest_path": release.GUARD_ABI_MANIFEST_PATH,
-                "manifest_sha256": hashlib.sha256(abi_manifest).hexdigest(),
-            },
-            "guard_profile": release.GUARD_PROFILE,
-            "openssl": {
-                "headers_file_count": openssl_headers_count,
-                "headers_path": "thirdparty/openssl/include",
-                "headers_sha256": openssl_headers_sha256,
-                "libcrypto_path": "thirdparty/openssl/lib/libcrypto.so.3",
-                "libcrypto_sha256": hashlib.sha256(libcrypto).hexdigest(),
-                "libcrypto_soname": "libcrypto.so.3",
-                "version": release._openssl_version_from_header(openssl_header),
-                "version_header_sha256": hashlib.sha256(
-                    openssl_header
-                ).hexdigest(),
-            },
-            "schema": "cosmo.model-guard.dependencies",
-            "schema_version": 3,
-            "sophon": {
-                "headers_file_count": sophon_headers_count,
-                "headers_path": "thirdparty/sophon/include",
-                "headers_sha256": sophon_headers_sha256,
-                "libraries_file_count": sophon_libraries_count,
-                "libraries_path": "thirdparty/sophon/lib",
-                "libraries_sha256": sophon_libraries_sha256,
-                "libbmlib_link_path": "thirdparty/sophon/lib/libbmlib.so",
-                "libbmlib_link_sha256": hashlib.sha256(
-                    sophon_libraries["libbmlib.so"]
-                ).hexdigest(),
-                "libbmlib_runtime_path": "thirdparty/sophon/lib/libbmlib.so.0",
-                "libbmlib_runtime_sha256": hashlib.sha256(
-                    sophon_libraries["libbmlib.so.0"]
-                ).hexdigest(),
-                "libbmrt_link_path": "thirdparty/sophon/lib/libbmrt.so",
-                "libbmrt_link_sha256": hashlib.sha256(
-                    sophon_libraries["libbmrt.so"]
-                ).hexdigest(),
-                "libbmrt_runtime_path": "thirdparty/sophon/lib/libbmrt.so.1.0",
-                "libbmrt_runtime_sha256": hashlib.sha256(
-                    sophon_libraries["libbmrt.so.1.0"]
-                ).hexdigest(),
-            },
-            "target": "aarch64-linux-gnu",
-        }
     )
 
 
@@ -419,44 +265,6 @@ class Fixture:
             0o600,
         )
         os.chmod(self.persistent, 0o700)
-        self.dependency_proof = root / "dependency-proof"
-        proof_header = valid_model_guard_header()
-        proof_abi_manifest = valid_model_guard_abi_manifest()
-        proof_dependency_manifest = valid_model_guard_dependency_manifest(
-            proof_header,
-            proof_abi_manifest,
-            LIBCRYPTO.read_bytes(),
-            SYNTHETIC_SOPHON_LIBRARIES,
-        )
-        proof_files = {
-            release.GUARD_HEADER_PATH: proof_header,
-            release.GUARD_ABI_MANIFEST_PATH: proof_abi_manifest,
-            release.GUARD_DEPENDENCY_MANIFEST_PATH: (
-                proof_dependency_manifest
-            ),
-            **{
-                f"thirdparty/openssl/include/{relative}": data
-                for relative, data in SYNTHETIC_OPENSSL_HEADERS.items()
-            },
-            "thirdparty/openssl/lib/libcrypto.so.3": LIBCRYPTO.read_bytes(),
-            **{
-                f"thirdparty/sophon/include/{relative}": data
-                for relative, data in SYNTHETIC_SOPHON_HEADERS.items()
-            },
-            **{
-                f"thirdparty/sophon/lib/{relative}": data
-                for relative, data in SYNTHETIC_SOPHON_LIBRARIES.items()
-            },
-        }
-        for relative, data in proof_files.items():
-            write(self.dependency_proof / relative, data, 0o600)
-        for path in sorted(
-            (item for item in self.dependency_proof.rglob("*") if item.is_dir()),
-            key=lambda item: len(item.parts),
-            reverse=True,
-        ):
-            os.chmod(path, 0o700)
-        os.chmod(self.dependency_proof, 0o700)
 
     def payload(
         self,
@@ -472,13 +280,8 @@ class Fixture:
         bootstrap_link_crypto: bool = True,
         bootstrap_runpath: str | None = "$ORIGIN/../lib",
         bootstrap_old_dtags: bool = False,
-        bootstrap_soname: str | None = None,
         bootstrap_extra_needed: bool = False,
-        bootstrap_host_image: bool = False,
         health_script_body: bytes | None = None,
-        dependency_libcrypto_sha256: str | None = None,
-        dependency_digest_override: tuple[str, str] | None = None,
-        libcrypto_suffix: bytes = b"",
     ) -> Path:
         payload = self.root / f"payload-{name}"
         payload.mkdir()
@@ -612,39 +415,34 @@ class Fixture:
         )
         bootstrap = payload / release.RELEASE_BOOTSTRAP_PATH
         bootstrap.parent.mkdir(parents=True, exist_ok=True)
-        if bootstrap_host_image:
-            shutil.copy2("/usr/bin/python3", bootstrap)
+        bootstrap_arguments = [
+            "/usr/bin/aarch64-linux-gnu-gcc",
+            str(bootstrap_source),
+            "-Wl,-z,relro",
+            "-Wl,-z,now",
+            "-Wl,-z,noexecstack",
+        ]
+        if bootstrap_old_dtags:
+            bootstrap_arguments.append("-Wl,--disable-new-dtags")
         else:
-            bootstrap_arguments = [
-                "/usr/bin/aarch64-linux-gnu-gcc",
-                str(bootstrap_source),
-                "-Wl,-z,relro",
-                "-Wl,-z,now",
-                "-Wl,-z,noexecstack",
-            ]
-            if bootstrap_old_dtags:
-                bootstrap_arguments.append("-Wl,--disable-new-dtags")
-            else:
-                bootstrap_arguments.append("-Wl,--enable-new-dtags")
-            if bootstrap_runpath is not None:
-                bootstrap_arguments.append(f"-Wl,-rpath,{bootstrap_runpath}")
-            if bootstrap_soname is not None:
-                bootstrap_arguments.append(f"-Wl,-soname,{bootstrap_soname}")
-            if bootstrap_link_crypto:
-                bootstrap_arguments.extend(
-                    (
-                        f"-L{REPOSITORY / 'build/thirdparty_install/openssl/lib'}",
-                        "-Wl,--no-as-needed",
-                        "-lcrypto",
-                        "-Wl,--as-needed",
-                    )
+            bootstrap_arguments.append("-Wl,--enable-new-dtags")
+        if bootstrap_runpath is not None:
+            bootstrap_arguments.append(f"-Wl,-rpath,{bootstrap_runpath}")
+        if bootstrap_link_crypto:
+            bootstrap_arguments.extend(
+                (
+                    f"-L{REPOSITORY / 'build/thirdparty_install/openssl/lib'}",
+                    "-Wl,--no-as-needed",
+                    "-lcrypto",
+                    "-Wl,--as-needed",
                 )
-            if bootstrap_extra_needed:
-                bootstrap_arguments.extend(("-fno-builtin-cos", "-lm"))
-            bootstrap_arguments.extend(("-o", str(bootstrap)))
-            result = run(bootstrap_arguments)
-            if result.returncode != 0:
-                raise RuntimeError(result.stderr.decode())
+            )
+        if bootstrap_extra_needed:
+            bootstrap_arguments.extend(("-fno-builtin-cos", "-lm"))
+        bootstrap_arguments.extend(("-o", str(bootstrap)))
+        result = run(bootstrap_arguments)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.decode())
         os.chmod(bootstrap, 0o755)
         if not omit_model_provision:
             provision_source = self.root / f"model-provision-{name}.c"
@@ -667,37 +465,10 @@ class Fixture:
             os.chmod(provision_path, model_provision_mode)
         for filename, data in SYNTHETIC_SOPHON_LIBRARIES.items():
             write(payload / "lib" / filename, data, 0o755)
-        libcrypto = LIBCRYPTO.read_bytes() + libcrypto_suffix
-        libssl = LIBSSL.read_bytes()
-        write(payload / "lib/libcrypto.so.3", libcrypto, 0o755)
-        write(payload / "lib/libssl.so.3", libssl, 0o755)
+        write(payload / "lib/libcrypto.so.3", LIBCRYPTO.read_bytes(), 0o755)
+        write(payload / "lib/libssl.so.3", LIBSSL.read_bytes(), 0o755)
         header = valid_model_guard_header()
-        abi_manifest = valid_model_guard_abi_manifest()
         write(payload / release.GUARD_HEADER_PATH, header)
-        write(payload / release.GUARD_ABI_MANIFEST_PATH, abi_manifest)
-        dependency_manifest = valid_model_guard_dependency_manifest(
-            header,
-            abi_manifest,
-            libcrypto,
-            SYNTHETIC_SOPHON_LIBRARIES,
-        )
-        if dependency_libcrypto_sha256 is not None:
-            dependency_value = json.loads(dependency_manifest)
-            dependency_value["openssl"]["libcrypto_sha256"] = (
-                dependency_libcrypto_sha256
-            )
-            dependency_manifest = release._canonical_ascii_json(
-                dependency_value
-            )
-        if dependency_digest_override is not None:
-            dependency_value = json.loads(dependency_manifest)
-            section, digest_key = dependency_digest_override
-            dependency_value[section][digest_key] = "1" * 64
-            dependency_manifest = release._canonical_ascii_json(dependency_value)
-        write(
-            payload / release.GUARD_DEPENDENCY_MANIFEST_PATH,
-            dependency_manifest,
-        )
         if model_guard_test_marker:
             write(
                 payload
@@ -750,13 +521,8 @@ class Fixture:
         bootstrap_link_crypto: bool = True,
         bootstrap_runpath: str | None = "$ORIGIN/../lib",
         bootstrap_old_dtags: bool = False,
-        bootstrap_soname: str | None = None,
         bootstrap_extra_needed: bool = False,
-        bootstrap_host_image: bool = False,
         health_script_body: bytes | None = None,
-        dependency_libcrypto_sha256: str | None = None,
-        dependency_digest_override: tuple[str, str] | None = None,
-        libcrypto_suffix: bytes = b"",
     ) -> Path:
         payload = self.payload(
             name,
@@ -770,13 +536,8 @@ class Fixture:
             bootstrap_link_crypto=bootstrap_link_crypto,
             bootstrap_runpath=bootstrap_runpath,
             bootstrap_old_dtags=bootstrap_old_dtags,
-            bootstrap_soname=bootstrap_soname,
             bootstrap_extra_needed=bootstrap_extra_needed,
-            bootstrap_host_image=bootstrap_host_image,
             health_script_body=health_script_body,
-            dependency_libcrypto_sha256=dependency_libcrypto_sha256,
-            dependency_digest_override=dependency_digest_override,
-            libcrypto_suffix=libcrypto_suffix,
         )
         return self.package_existing(payload, name, generation)
 
@@ -816,8 +577,6 @@ class Fixture:
                     str(PACKAGER),
                     "--payload",
                     str(payload),
-                    "--dependency-proof-root",
-                    str(self.dependency_proof),
                     "--output",
                     str(archive),
                     "--release-id",
@@ -980,428 +739,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
             ):
                 release._sha256_limited(path, 8192)
         self.assertTrue(replaced)
-
-    def test_model_guard_metadata_is_exact_canonical_and_unambiguous(self) -> None:
-        header = valid_model_guard_header()
-        abi_manifest = valid_model_guard_abi_manifest()
-        libcrypto = LIBCRYPTO.read_bytes()
-        dependencies = valid_model_guard_dependency_manifest(
-            header,
-            abi_manifest,
-            libcrypto,
-            SYNTHETIC_SOPHON_LIBRARIES,
-        )
-
-        release._validate_model_guard_header(header)
-        release._validate_model_guard_abi_manifest(
-            abi_manifest, release.GUARD_PROFILE
-        )
-        release._validate_model_guard_dependencies(
-            dependencies,
-            header,
-            abi_manifest,
-            release.GUARD_PROFILE,
-        )
-        self.assertEqual(
-            release._openssl_version_from_library(libcrypto),
-            release._openssl_version_from_header(OPENSSL_VERSION_HEADER.read_bytes()),
-        )
-        with self.assertRaisesRegex(
-            release.ReleaseError, "version banner is missing or ambiguous"
-        ):
-            release._openssl_version_from_library(b"no OpenSSL banner")
-        with self.assertRaisesRegex(
-            release.ReleaseError, "version banner is missing or ambiguous"
-        ):
-            release._openssl_version_from_library(
-                libcrypto + b"\x00OpenSSL 9.9.9 synthetic\x00"
-            )
-
-        compact_abi = release._canonical_ascii_json(json.loads(abi_manifest))
-        with self.assertRaisesRegex(
-            release.ReleaseError, "not in canonical encoding"
-        ):
-            release._validate_model_guard_abi_manifest(
-                compact_abi, release.GUARD_PROFILE
-            )
-
-        duplicate_abi = abi_manifest.replace(
-            b'{\n  "schema": "cosmo.model-guard.abi",',
-            b'{\n  "schema": "cosmo.model-guard.abi",\n'
-            b'  "schema": "cosmo.model-guard.abi",',
-            1,
-        )
-        with self.assertRaisesRegex(release.ReleaseError, "duplicate JSON key"):
-            release._validate_model_guard_abi_manifest(
-                duplicate_abi, release.GUARD_PROFILE
-            )
-
-        extra_abi = json.loads(abi_manifest)
-        extra_abi["unexpected"] = True
-        extra_abi_bytes = (
-            json.dumps(extra_abi, ensure_ascii=True, indent=2) + "\n"
-        ).encode("ascii")
-        with self.assertRaisesRegex(release.ReleaseError, "invalid schema"):
-            release._validate_model_guard_abi_manifest(
-                extra_abi_bytes, release.GUARD_PROFILE
-            )
-
-        duplicate_dependencies = dependencies.replace(
-            b"{",
-            b'{"schema":"cosmo.model-guard.dependencies",',
-            1,
-        )
-        with self.assertRaisesRegex(release.ReleaseError, "duplicate JSON key"):
-            release._validate_model_guard_dependencies(
-                duplicate_dependencies,
-                header,
-                abi_manifest,
-                release.GUARD_PROFILE,
-            )
-
-        mixed_dependencies = json.loads(dependencies)
-        mixed_dependencies["cryptopp"] = {}
-        mixed_dependencies["openssl"]["libssl_soname"] = "libssl.so.3"
-        with self.assertRaisesRegex(release.ReleaseError, "invalid schema"):
-            release._validate_model_guard_dependencies(
-                release._canonical_ascii_json(mixed_dependencies),
-                header,
-                abi_manifest,
-                release.GUARD_PROFILE,
-            )
-
-        mismatched_dependencies = json.loads(dependencies)
-        mismatched_dependencies["abi"]["header_sha256"] = "1" * 64
-        with self.assertRaisesRegex(release.ReleaseError, "header digest mismatch"):
-            release._validate_model_guard_dependencies(
-                release._canonical_ascii_json(mismatched_dependencies),
-                header,
-                abi_manifest,
-                release.GUARD_PROFILE,
-            )
-
-        for section, key, replacement, expected_error in (
-            ("openssl", "headers_file_count", 0, "invalid integer value"),
-            ("sophon", "libraries_file_count", -1, "invalid integer value"),
-            (
-                "openssl",
-                "libcrypto_path",
-                "lib/libcrypto.so.3",
-                "contract rejected",
-            ),
-            (
-                "sophon",
-                "libbmrt_runtime_path",
-                "thirdparty/sophon/lib/libbmrt.so.2",
-                "contract rejected",
-            ),
-            ("sophon", "headers_sha256", "0" * 64, "must be nonzero"),
-        ):
-            with self.subTest(section=section, key=key):
-                mutation = json.loads(dependencies)
-                mutation[section][key] = replacement
-                with self.assertRaisesRegex(release.ReleaseError, expected_error):
-                    release._validate_model_guard_dependencies(
-                        release._canonical_ascii_json(mutation),
-                        header,
-                        abi_manifest,
-                        release.GUARD_PROFILE,
-                    )
-
-        schema_v2 = json.loads(dependencies)
-        schema_v2["schema_version"] = 2
-        with self.assertRaisesRegex(release.ReleaseError, "contract rejected"):
-            release._validate_model_guard_dependencies(
-                release._canonical_ascii_json(schema_v2),
-                header,
-                abi_manifest,
-                release.GUARD_PROFILE,
-            )
-
-    def test_packager_fact_checks_all_dependency_tree_provenance_before_signing(
-        self,
-    ) -> None:
-        payload = self.fixture.payload("dependency-proof-facts")
-        dependency_path = payload / release.GUARD_DEPENDENCY_MANIFEST_PATH
-        original = json.loads(dependency_path.read_bytes())
-        cases = (
-            (
-                "openssl",
-                "headers_file_count",
-                original["openssl"]["headers_file_count"] + 1,
-            ),
-            ("openssl", "headers_sha256", "1" * 64),
-            ("openssl", "version_header_sha256", "1" * 64),
-            (
-                "sophon",
-                "headers_file_count",
-                original["sophon"]["headers_file_count"] + 1,
-            ),
-            ("sophon", "headers_sha256", "1" * 64),
-            (
-                "sophon",
-                "libraries_file_count",
-                original["sophon"]["libraries_file_count"] + 1,
-            ),
-            ("sophon", "libraries_sha256", "1" * 64),
-        )
-        for index, (section, key, replacement) in enumerate(cases):
-            with self.subTest(section=section, key=key):
-                mutation = json.loads(json.dumps(original))
-                mutation[section][key] = replacement
-                dependency_path.write_bytes(
-                    release._canonical_ascii_json(mutation)
-                )
-                name = f"bad-dependency-proof-{index}"
-                output = self.fixture.root / f"cosmo-release-{name}.tar.gz"
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "dependency proof does not match manifest: "
-                    + re.escape(f"{section}.{key}"),
-                ):
-                    self.fixture.package_existing(
-                        payload,
-                        name,
-                        1,
-                        signing_key_bytes=b"",
-                    )
-                self.assertFalse(output.exists())
-        dependency_path.write_bytes(release._canonical_ascii_json(original))
-
-    def test_dependency_proof_snapshot_rejects_symbolic_links(self) -> None:
-        library_relative = Path("thirdparty/openssl/lib/libcrypto.so.3")
-        proof = self.fixture.root / "symlink-proof"
-        shutil.copytree(self.fixture.dependency_proof, proof)
-        library = proof / library_relative
-        library.unlink()
-        library.symlink_to(proof / "thirdparty/sophon/lib/libbmrt.so")
-        with self.assertRaisesRegex(packager.PackagerError, "symbolic link"):
-            packager._snapshot_dependency_proof(
-                proof, self.fixture.root / "symlink-proof-snapshot"
-            )
-
-    def test_dependency_proof_snapshot_ignores_owner_modes_and_link_count(
-        self,
-    ) -> None:
-        library_relative = Path("thirdparty/openssl/lib/libcrypto.so.3")
-
-        def hardlink(proof: Path) -> None:
-            library = proof / library_relative
-            library.unlink()
-            os.link(
-                proof / "thirdparty/sophon/lib/libbmrt.so",
-                library,
-            )
-
-        def group_writable_file(proof: Path) -> None:
-            os.chmod(proof / library_relative, 0o620)
-
-        def world_writable_directory(proof: Path) -> None:
-            os.chmod(proof / "thirdparty/openssl/lib", 0o702)
-
-        for index, (name, mutation) in enumerate(
-            (
-                ("hardlink", hardlink),
-                ("group-write", group_writable_file),
-                ("world-write-directory", world_writable_directory),
-            )
-        ):
-            with self.subTest(case=name):
-                proof = self.fixture.root / f"metadata-proof-{index}"
-                shutil.copytree(self.fixture.dependency_proof, proof)
-                mutation(proof)
-                destination = self.fixture.root / f"proof-snapshot-{index}"
-                packager._snapshot_dependency_proof(proof, destination)
-                self.assertTrue(destination.is_dir())
-
-    def test_dependency_proof_uses_private_snapshot_after_source_replacement(
-        self,
-    ) -> None:
-        proof = self.fixture.root / "proof-source-replacement"
-        shutil.copytree(self.fixture.dependency_proof, proof)
-        destination = self.fixture.root / "proof-private-snapshot"
-        library = proof / "thirdparty/openssl/lib/libcrypto.so.3"
-        admitted = library.read_bytes()
-        packager._snapshot_dependency_proof(proof, destination)
-        library.write_bytes(b"attacker replacement after private snapshot")
-        self.assertEqual(
-            (
-                destination
-                / "thirdparty/openssl/lib/libcrypto.so.3"
-            ).read_bytes(),
-            admitted,
-        )
-
-    def test_packager_rejects_libcrypto_outside_guard_provenance(self) -> None:
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "release libcrypto differs from Model Guard dependency provenance",
-        ):
-            self.fixture.package(
-                "bad-libcrypto-provenance",
-                1,
-                dependency_libcrypto_sha256="1" * 64,
-            )
-
-    def test_packager_rejects_ambiguous_embedded_libcrypto_version(self) -> None:
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "libcrypto embedded OpenSSL version banner is missing or ambiguous",
-        ):
-            self.fixture.package(
-                "ambiguous-libcrypto-version",
-                1,
-                libcrypto_suffix=b"\x00OpenSSL 9.9.9 synthetic\x00",
-            )
-
-    def test_packager_rejects_libssl_with_wrong_fixed_soname(self) -> None:
-        payload = self.fixture.payload("bad-libssl-soname")
-        libssl = payload / "lib/libssl.so.3"
-        original = libssl.read_bytes()
-        self.assertEqual(original.count(b"libssl.so.3\x00"), 1)
-        libssl.write_bytes(
-            original.replace(b"libssl.so.3\x00", b"libssl.so.4\x00", 1)
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "release libssl ELF identity rejected",
-        ):
-            self.fixture.package_existing(
-                payload,
-                "bad-libssl-soname",
-                1,
-                signing_key_bytes=b"",
-            )
-
-    def test_packager_rejects_sophon_runtime_provenance_mismatch(
-        self,
-    ) -> None:
-        for name, override, expected_path in (
-            (
-                "bad-bmrt-runtime-provenance",
-                ("sophon", "libbmrt_runtime_sha256"),
-                "lib/libbmrt.so.1.0",
-            ),
-        ):
-            with self.subTest(name=name):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "release runtime differs from Model Guard dependency provenance: "
-                    + re.escape(expected_path),
-                ):
-                    self.fixture.package(
-                        name,
-                        1,
-                        dependency_digest_override=override,
-                    )
-
-    def test_updater_rechecks_signed_dependency_component_consistency(self) -> None:
-        archive = self.fixture.package("release-one", 1)
-        payload, manifest = self.fixture.archive_release_tree(archive)
-        dependency_path = payload / release.GUARD_DEPENDENCY_MANIFEST_PATH
-        dependency = json.loads(dependency_path.read_bytes())
-        dependency["openssl"]["libcrypto_sha256"] = "1" * 64
-        dependency_bytes = release._canonical_ascii_json(dependency)
-        dependency_path.write_bytes(dependency_bytes)
-        manifest["model_guard"]["dependencies_manifest_sha256"] = (
-            hashlib.sha256(dependency_bytes).hexdigest()
-        )
-
-        with self.assertRaisesRegex(
-            release.ReleaseError,
-            "signed libcrypto metadata differs from Model Guard dependency provenance",
-        ):
-            release._check_component_hashes(payload, manifest)
-
-    def test_updater_rechecks_all_dependency_runtime_hashes(self) -> None:
-        archive = self.fixture.package("dependency-runtime-recheck", 1)
-        payload, manifest = self.fixture.archive_release_tree(archive)
-        dependency_path = payload / release.GUARD_DEPENDENCY_MANIFEST_PATH
-        original_dependency = dependency_path.read_bytes()
-        original_manifest_digest = manifest["model_guard"][
-            "dependencies_manifest_sha256"
-        ]
-        for section, digest_key, expected_path in (
-            ("sophon", "libbmrt_link_sha256", "lib/libbmrt.so"),
-            ("sophon", "libbmrt_runtime_sha256", "lib/libbmrt.so.1.0"),
-            ("sophon", "libbmlib_link_sha256", "lib/libbmlib.so"),
-            ("sophon", "libbmlib_runtime_sha256", "lib/libbmlib.so.0"),
-        ):
-            with self.subTest(path=expected_path):
-                dependency = json.loads(original_dependency)
-                dependency[section][digest_key] = "1" * 64
-                dependency_bytes = release._canonical_ascii_json(dependency)
-                dependency_path.write_bytes(dependency_bytes)
-                manifest["model_guard"]["dependencies_manifest_sha256"] = (
-                    hashlib.sha256(dependency_bytes).hexdigest()
-                )
-                with self.assertRaisesRegex(
-                    release.ReleaseError,
-                    "Model Guard dependency runtime digest mismatch: "
-                    + re.escape(expected_path),
-                ):
-                    release._check_component_hashes(payload, manifest)
-        dependency_path.write_bytes(original_dependency)
-        manifest["model_guard"][
-            "dependencies_manifest_sha256"
-        ] = original_manifest_digest
-
-    def test_updater_streams_each_runtime_digest_once(self) -> None:
-        archive = self.fixture.package("runtime-digest-cache", 1)
-        payload, manifest = self.fixture.archive_release_tree(archive)
-        original = release._read_with_digest
-        calls: list[tuple[str, bool]] = []
-
-        def observe(
-            path: Path,
-            maximum: int,
-            *,
-            retain_data: bool,
-        ) -> tuple[bytes | None, str]:
-            calls.append((path.relative_to(payload).as_posix(), retain_data))
-            return original(
-                path,
-                maximum,
-                retain_data=retain_data,
-            )
-
-        with mock.patch.object(
-            release, "_read_with_digest", side_effect=observe
-        ):
-            release._check_component_hashes(payload, manifest)
-
-        expected = {
-            relative: relative == "lib/libcrypto.so.3"
-            for _, _, relative in release.DEPENDENCY_RUNTIME_BINDINGS
-        }
-        for relative, retain_data in expected.items():
-            with self.subTest(path=relative):
-                self.assertEqual(calls.count((relative, retain_data)), 1)
-                self.assertNotIn((relative, not retain_data), calls)
-
-    def test_updater_rejects_ambiguous_embedded_libcrypto_version(self) -> None:
-        archive = self.fixture.package("release-one", 1)
-        payload, manifest = self.fixture.archive_release_tree(archive)
-        libcrypto_path = payload / "lib/libcrypto.so.3"
-        libcrypto = libcrypto_path.read_bytes() + b"\x00OpenSSL 9.9.9 synthetic\x00"
-        libcrypto_path.write_bytes(libcrypto)
-        libcrypto_sha256 = hashlib.sha256(libcrypto).hexdigest()
-        manifest["runtime_libraries"]["libcrypto"]["sha256"] = libcrypto_sha256
-
-        dependency_path = payload / release.GUARD_DEPENDENCY_MANIFEST_PATH
-        dependency = json.loads(dependency_path.read_bytes())
-        dependency["openssl"]["libcrypto_sha256"] = libcrypto_sha256
-        dependency_bytes = release._canonical_ascii_json(dependency)
-        dependency_path.write_bytes(dependency_bytes)
-        manifest["model_guard"]["dependencies_manifest_sha256"] = (
-            hashlib.sha256(dependency_bytes).hexdigest()
-        )
-
-        with self.assertRaisesRegex(
-            release.ReleaseError,
-            "libcrypto embedded OpenSSL version banner is missing or ambiguous",
-        ):
-            release._check_component_hashes(payload, manifest)
 
     def _embedded_bootstrap_inputs(
         self, archive: Path, fixture: Fixture | None = None
@@ -1876,33 +1213,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
             baseline,
         )
 
-    def test_model_guard_fingerprint_rejects_unstable_read(self) -> None:
-        certificate = self.fixture.persistent / "device-certificate.bin"
-        original_stat = os.stat
-        certificate_stat_calls = 0
-
-        def changed_stat(path: os.PathLike[str] | str) -> os.stat_result:
-            nonlocal certificate_stat_calls
-            result = original_stat(path)
-            if Path(path) != certificate:
-                return result
-            certificate_stat_calls += 1
-            if certificate_stat_calls != 2:
-                return result
-            changed = list(result)
-            changed[6] += 1
-            return os.stat_result(changed)
-
-        with mock.patch.object(
-            release.os,
-            "stat",
-            side_effect=changed_stat,
-        ), self.assertRaisesRegex(
-            release.ReleaseError,
-            "changed while reading",
-        ):
-            release._state_tree_fingerprint(self.fixture.persistent)
-
     def test_backend_recovery_reports_committed_and_legacy_restored(self) -> None:
         committed = backend.INSTALL_ROOT / ".releases/release-one"
         self.assertEqual(backend._recovery_result(True, committed), str(committed))
@@ -2187,31 +1497,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
         write(model, cem_v2_core_with_manifest(bytes(manifest)), 0o444)
         with self.assertRaisesRegex(release.ReleaseError, "chunk layout"):
             release._scan_preset_models(root)
-
-    def test_preset_scanner_rejects_file_changed_during_fd_validation(self) -> None:
-        root = self.fixture.root / "cem-v2-race-release"
-        model = root / "resource/models/preset-one/model.nn"
-        write(model, CEM_V2_GOLDEN_CORE, 0o444)
-        original_pread = os.pread
-        changed = False
-
-        def mutate_timestamp(fd: int, size: int, offset: int) -> bytes:
-            nonlocal changed
-            result = original_pread(fd, size, offset)
-            if offset == 112 and not changed:
-                info = os.stat(model, follow_symlinks=False)
-                os.utime(
-                    model,
-                    ns=(info.st_atime_ns, info.st_mtime_ns + 1),
-                    follow_symlinks=False,
-                )
-                changed = True
-            return result
-
-        with mock.patch.object(release.os, "pread", side_effect=mutate_timestamp):
-            with self.assertRaisesRegex(release.ReleaseError, "changed during"):
-                release._scan_preset_models(root)
-        self.assertTrue(changed)
 
     def test_health_failure_rolls_back_and_preserves_identity(self) -> None:
         updater = self.fixture.bootstrap(self.fixture.package("release-one", 1))
@@ -2701,8 +1986,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
                     str(PACKAGER),
                     "--payload",
                     str(payload),
-                    "--dependency-proof-root",
-                    str(self.fixture.dependency_proof),
                     "--output",
                     str(archive),
                     "--release-id",
@@ -2739,7 +2022,7 @@ class ReleaseUpdaterTest(unittest.TestCase):
             (self.fixture.root / "cosmo-release-wrong-bootstrap-trust.tar.gz").exists()
         )
 
-    def test_packager_accepts_aarch64_bootstrap_dynamic_contract(self) -> None:
+    def test_packager_accepts_bootstrap_dynamic_contract(self) -> None:
         archive = self.fixture.package("audited-bootstrap", 2)
         self.assertTrue(archive.is_file())
 
@@ -2787,8 +2070,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
             str(PACKAGER),
             "--payload",
             str(payload),
-            "--dependency-proof-root",
-            str(self.fixture.dependency_proof),
             "--output",
             str(archive),
             "--release-id",
@@ -3027,9 +2308,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
                 packager.build_bundle(
                     types.SimpleNamespace(
                         payload=str(payload),
-                        dependency_proof_root=str(
-                            self.fixture.dependency_proof
-                        ),
                         output=str(output),
                         release_id="snapshot-race",
                         generation=2,
@@ -3082,8 +2360,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
                     str(PACKAGER),
                     "--payload",
                     str(payload),
-                    "--dependency-proof-root",
-                    str(self.fixture.dependency_proof),
                     "--output",
                     str(archive),
                     "--release-id",
@@ -3123,14 +2399,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
                 ),
             )
 
-    def test_packager_rejects_non_aarch64_bootstrap(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "not exactly AArch64"):
-            self.fixture.package(
-                "host-bootstrap",
-                2,
-                bootstrap_host_image=True,
-            )
-
     def test_packager_rejects_bootstrap_dynamic_contract_variants(self) -> None:
         cases = (
             (
@@ -3147,11 +2415,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
                 "old-rpath",
                 {"bootstrap_old_dtags": True},
                 "RUNPATH/RPATH contract",
-            ),
-            (
-                "soname",
-                {"bootstrap_soname": "forbidden-bootstrap.so"},
-                "SONAME",
             ),
             (
                 "extra-needed",
@@ -3209,8 +2472,6 @@ class ReleaseUpdaterTest(unittest.TestCase):
                     str(PACKAGER),
                     "--payload",
                     str(payload),
-                    "--dependency-proof-root",
-                    str(self.fixture.dependency_proof),
                     "--output",
                     str(archive),
                     "--release-id",

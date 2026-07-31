@@ -4,9 +4,6 @@ set(MQTT_HEADERS ${MQTT_INSTALL_DIR}/include)
 set(MQTT_C_LIB ${MQTT_INSTALL_DIR}/lib/libpaho-mqtt3c.so)
 set(MQTT_CS_LIB ${MQTT_INSTALL_DIR}/lib/libpaho-mqtt3cs.so)
 set(MQTT_EXTERNAL_DEPENDS openssl_external)
-if(COSMO_MODEL_GUARD)
-    list(APPEND MQTT_EXTERNAL_DEPENDS cosmo_model_guard_v2_reverify)
-endif()
 
 set(MQTT_CONFIGURE_ARGS
     -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}

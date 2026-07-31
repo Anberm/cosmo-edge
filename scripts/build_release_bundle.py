@@ -35,7 +35,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import unicodedata
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -81,10 +80,6 @@ BOOTSTRAP_ALLOWED_NEEDED = BOOTSTRAP_REQUIRED_NEEDED | {
 EXPECTED_BOOTSTRAP_RUNPATH = "$ORIGIN/../lib"
 MAX_BOOTSTRAP_ELF_BYTES = 64 * 1024 * 1024
 MAX_MODEL_GUARD_ELF_BYTES = 64 * 1024 * 1024
-MAX_DEPENDENCY_PROOF_FILE_BYTES = 512 * 1024 * 1024
-MAX_DEPENDENCY_PROOF_FILES = 100_000
-MAX_DEPENDENCY_PROOF_BYTES = 4 * 1024 * 1024 * 1024
-DEPENDENCY_TREE_HASH_DOMAIN = b"cosmo-dependency-tree-v1\0"
 
 
 def _fail(message: str) -> "NoReturn":
@@ -1134,21 +1129,13 @@ def audit_model_guard_trust_objects(image: bytes) -> dict[str, bytes]:
 
 
 def _audit_bootstrap_dynamic_contract(path: Path, readelf: Path) -> None:
-    header = schema._run_tool((str(readelf), "-hW", str(path))).decode(
-        "utf-8", "replace"
-    )
-    if re.search(r"^\s*Machine:\s+AArch64\s*$", header, re.MULTILINE) is None:
-        _fail("release bootstrap is not exactly AArch64")
     dynamic = schema._run_tool((str(readelf), "-dW", str(path))).decode(
         "utf-8", "replace"
     )
     needed = re.findall(r"\(NEEDED\).*\[([^\]]+)\]", dynamic)
     runpaths = re.findall(r"\(RUNPATH\).*\[([^\]]+)\]", dynamic)
-    sonames = re.findall(r"\(SONAME\).*\[([^\]]+)\]", dynamic)
     if runpaths != [EXPECTED_BOOTSTRAP_RUNPATH] or "(RPATH)" in dynamic:
         _fail("release bootstrap RUNPATH/RPATH contract rejected")
-    if sonames:
-        _fail("release bootstrap must not carry a shared-library SONAME")
     needed_set = set(needed)
     if (
         len(needed_set) != len(needed)
@@ -1289,453 +1276,11 @@ def _snapshot_payload(source: Path, destination: Path) -> None:
         _fail("private payload snapshot differs from the admitted source tree")
 
 
-def _dependency_relative(parts: tuple[str, ...]) -> str:
-    normalized = tuple(unicodedata.normalize("NFC", part) for part in parts)
-    if any(
-        part in ("", ".", "..") or "/" in part or "\0" in part
-        for part in normalized
-    ):
-        _fail("dependency proof contains an invalid path")
-    return Path(*normalized).as_posix()
-
-
-def _dependency_directory_inventory(path: Path) -> tuple[str, ...]:
-    with os.scandir(path) as entries:
-        return tuple(
-            sorted(
-                (entry.name for entry in entries),
-                key=lambda item: item.encode("utf-8"),
-            )
-        )
-
-
-def _checked_dependency_directory(path: Path, description: str) -> os.stat_result:
-    info = os.lstat(path)
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or stat.S_ISLNK(info.st_mode)
-    ):
-        _fail(f"{description} must be a real directory")
-    return info
-
-
-def _copy_dependency_proof_file(
-    source: Path,
-    destination: Path,
-    expected: os.stat_result,
-    relative: str,
-) -> None:
-    if (
-        not stat.S_ISREG(expected.st_mode)
-        or stat.S_ISLNK(expected.st_mode)
-        or expected.st_size > MAX_DEPENDENCY_PROOF_FILE_BYTES
-    ):
-        _fail(f"dependency proof file type or size rejected: {relative}")
-    source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    destination_fd = os.open(
-        destination,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
-        0o600,
-    )
-    try:
-        os.fchmod(destination_fd, 0o600)
-        before = os.fstat(source_fd)
-        if _metadata_snapshot(before) != _metadata_snapshot(expected):
-            _fail(f"dependency proof file changed before snapshot: {relative}")
-        copied = 0
-        while copied < before.st_size:
-            block = os.read(
-                source_fd,
-                min(1024 * 1024, before.st_size - copied),
-            )
-            if not block:
-                _fail(f"dependency proof file was truncated: {relative}")
-            offset = 0
-            while offset < len(block):
-                offset += os.write(destination_fd, block[offset:])
-            copied += len(block)
-        if os.read(source_fd, 1):
-            _fail(f"dependency proof file grew while snapshotting: {relative}")
-        os.fdatasync(destination_fd)
-        after = os.fstat(source_fd)
-    finally:
-        os.close(destination_fd)
-        os.close(source_fd)
-    current = os.lstat(source)
-    if (
-        copied != expected.st_size
-        or _metadata_snapshot(after) != _metadata_snapshot(before)
-        or _metadata_snapshot(current) != _metadata_snapshot(before)
-    ):
-        _fail(f"dependency proof file changed while snapshotting: {relative}")
-
-
-def _snapshot_dependency_proof(source: Path, destination: Path) -> None:
-    root_before = _checked_dependency_directory(source, "dependency proof root")
-    destination.mkdir(mode=0o700)
-    os.chmod(destination, 0o700)
-    normalized_paths: set[str] = set()
-    file_count = 0
-    total_size = 0
-
-    def visit(
-        source_directory: Path,
-        destination_directory: Path,
-        parts: tuple[str, ...],
-    ) -> None:
-        nonlocal file_count, total_size
-        before = _checked_dependency_directory(
-            source_directory,
-            f"dependency proof directory {_dependency_relative(parts) if parts else '.'}",
-        )
-        initial_inventory = _dependency_directory_inventory(source_directory)
-        for name in initial_inventory:
-            source_path = source_directory / name
-            child_parts = (*parts, name)
-            relative = _dependency_relative(child_parts)
-            if relative in normalized_paths:
-                _fail(f"dependency proof has colliding normalized paths: {relative}")
-            normalized_paths.add(relative)
-            info = os.lstat(source_path)
-            destination_path = destination_directory / unicodedata.normalize("NFC", name)
-            if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode):
-                _checked_dependency_directory(
-                    source_path, f"dependency proof directory {relative}"
-                )
-                destination_path.mkdir(mode=0o700)
-                os.chmod(destination_path, 0o700)
-                visit(source_path, destination_path, child_parts)
-            elif stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode):
-                file_count += 1
-                total_size += info.st_size
-                if (
-                    file_count > MAX_DEPENDENCY_PROOF_FILES
-                    or total_size > MAX_DEPENDENCY_PROOF_BYTES
-                ):
-                    _fail("dependency proof size limit exceeded")
-                _copy_dependency_proof_file(
-                    source_path, destination_path, info, relative
-                )
-            elif stat.S_ISLNK(info.st_mode):
-                _fail(f"dependency proof contains a symbolic link: {relative}")
-            else:
-                _fail(f"dependency proof contains a special file: {relative}")
-        if (
-            initial_inventory != _dependency_directory_inventory(source_directory)
-            or _metadata_snapshot(before)
-            != _metadata_snapshot(os.lstat(source_directory))
-        ):
-            _fail(
-                "dependency proof directory changed while snapshotting: "
-                f"{_dependency_relative(parts) if parts else '.'}"
-            )
-
-    visit(source, destination, ())
-    if file_count == 0:
-        _fail("dependency proof contains no files")
-    if _metadata_snapshot(root_before) != _metadata_snapshot(os.lstat(source)):
-        _fail("dependency proof root changed while snapshotting")
-
-
-def _checked_dependency_file_bytes(
-    path: Path, description: str, *, allow_empty: bool
-) -> bytes:
-    try:
-        info = os.lstat(path)
-    except FileNotFoundError:
-        _fail(f"dependency proof is missing {description}: {path}")
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or stat.S_ISLNK(info.st_mode)
-        or (not allow_empty and info.st_size == 0)
-        or info.st_size > MAX_DEPENDENCY_PROOF_FILE_BYTES
-    ):
-        _fail(f"dependency proof {description} type or size rejected")
-    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    try:
-        before = os.fstat(descriptor)
-        if _metadata_snapshot(before) != _metadata_snapshot(info):
-            _fail(f"dependency proof {description} changed before open")
-        data = bytearray()
-        while len(data) < before.st_size:
-            block = os.read(
-                descriptor, min(1024 * 1024, before.st_size - len(data))
-            )
-            if not block:
-                _fail(f"dependency proof {description} was truncated")
-            data.extend(block)
-        if os.read(descriptor, 1):
-            _fail(f"dependency proof {description} grew while reading")
-        after = os.fstat(descriptor)
-    finally:
-        os.close(descriptor)
-    current = os.lstat(path)
-    if (
-        _metadata_snapshot(after) != _metadata_snapshot(before)
-        or _metadata_snapshot(current) != _metadata_snapshot(before)
-    ):
-        _fail(f"dependency proof {description} changed while reading")
-    return bytes(data)
-
-
-def _dependency_tree(root: Path) -> tuple[int, str]:
-    files: list[tuple[bytes, bytes]] = []
-    directories: set[Path] = set()
-
-    def visit(directory: Path, parts: tuple[str, ...]) -> None:
-        relative_directory = _dependency_relative(parts) if parts else "."
-        before = _checked_dependency_directory(
-            directory, f"dependency proof tree directory {relative_directory}"
-        )
-        directories.add(directory)
-        initial_inventory = _dependency_directory_inventory(directory)
-        for name in initial_inventory:
-            path = directory / name
-            child_parts = (*parts, name)
-            relative = _dependency_relative(child_parts)
-            info = os.lstat(path)
-            if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode):
-                visit(path, child_parts)
-            elif stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode):
-                data = _checked_dependency_file_bytes(
-                    path, f"tree file {relative}", allow_empty=True
-                )
-                files.append((relative.encode("utf-8"), data))
-            elif stat.S_ISLNK(info.st_mode):
-                _fail(f"dependency proof tree contains a symbolic link: {relative}")
-            else:
-                _fail(f"dependency proof tree contains a special file: {relative}")
-        if (
-            initial_inventory != _dependency_directory_inventory(directory)
-            or _metadata_snapshot(before) != _metadata_snapshot(os.lstat(directory))
-        ):
-            _fail(
-                "dependency proof tree directory changed while hashing: "
-                f"{relative_directory}"
-            )
-
-    visit(root, ())
-    if not files:
-        _fail(f"dependency proof tree contains no files: {root}")
-    expected_directories = {root}
-    for encoded, _ in files:
-        parent = (root / encoded.decode("utf-8")).parent
-        while parent != root:
-            expected_directories.add(parent)
-            parent = parent.parent
-    if directories != expected_directories:
-        _fail(f"dependency proof tree contains an empty directory: {root}")
-    digest = hashlib.sha256()
-    digest.update(DEPENDENCY_TREE_HASH_DOMAIN)
-    for canonical, data in sorted(files, key=lambda item: item[0]):
-        digest.update(struct.pack(">Q", len(canonical)))
-        digest.update(canonical)
-        digest.update(struct.pack(">Q", len(data)))
-        digest.update(data)
-    return len(files), digest.hexdigest()
-
-
-def _proof_file_bytes(root: Path, relative: str, description: str) -> bytes:
-    return _checked_dependency_file_bytes(
-        root / relative, description, allow_empty=False
-    )
-
-
-def _require_dependency_fact(
-    dependencies: Mapping[str, Any],
-    section: str,
-    key: str,
-    actual: Any,
-) -> None:
-    if dependencies[section][key] != actual:
-        _fail(f"dependency proof does not match manifest: {section}.{key}")
-
-
-def _dependency_proof_layout(root: Path) -> tuple[set[str], set[str]]:
-    files: set[str] = set()
-    directories: set[str] = set()
-
-    def visit(directory: Path, parts: tuple[str, ...]) -> None:
-        relative_directory = _dependency_relative(parts) if parts else "."
-        before = _checked_dependency_directory(
-            directory, f"dependency proof directory {relative_directory}"
-        )
-        if parts:
-            directories.add(relative_directory)
-        initial_inventory = _dependency_directory_inventory(directory)
-        for name in initial_inventory:
-            path = directory / name
-            child_parts = (*parts, name)
-            relative = _dependency_relative(child_parts)
-            info = os.lstat(path)
-            if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode):
-                visit(path, child_parts)
-            elif stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode):
-                if info.st_size > MAX_DEPENDENCY_PROOF_FILE_BYTES:
-                    _fail(
-                        "dependency proof layout file size rejected: "
-                        f"{relative}"
-                    )
-                files.add(relative)
-            elif stat.S_ISLNK(info.st_mode):
-                _fail(f"dependency proof contains a symbolic link: {relative}")
-            else:
-                _fail(f"dependency proof contains a special file: {relative}")
-        if (
-            initial_inventory != _dependency_directory_inventory(directory)
-            or _metadata_snapshot(before) != _metadata_snapshot(os.lstat(directory))
-        ):
-            _fail(
-                "dependency proof directory changed during layout audit: "
-                f"{relative_directory}"
-            )
-
-    visit(root, ())
-    return files, directories
-
-
-def _verify_dependency_proof(
-    root: Path,
-    dependencies: Mapping[str, Any],
-    dependency_manifest: bytes,
-    guard_header: bytes,
-    guard_abi_manifest: bytes,
-) -> None:
-    allowed_roots = (
-        "thirdparty/openssl/include/",
-        "thirdparty/sophon/include/",
-        "thirdparty/sophon/lib/",
-    )
-    allowed_exact = {
-        schema.GUARD_HEADER_PATH,
-        schema.GUARD_ABI_MANIFEST_PATH,
-        schema.GUARD_DEPENDENCY_MANIFEST_PATH,
-        "thirdparty/openssl/lib/libcrypto.so.3",
-    }
-    actual_files, actual_directories = _dependency_proof_layout(root)
-    if any(
-        relative not in allowed_exact
-        and not any(relative.startswith(prefix) for prefix in allowed_roots)
-        for relative in actual_files
-    ):
-        _fail("dependency proof fixed layout contains an unexpected file")
-    expected_directories = {
-        "thirdparty",
-        "thirdparty/openssl",
-        "thirdparty/openssl/include",
-        "thirdparty/openssl/lib",
-        "thirdparty/sophon",
-        "thirdparty/sophon/include",
-        "thirdparty/sophon/lib",
-    }
-    for relative in actual_files:
-        parent = Path(relative).parent
-        while parent != Path("."):
-            expected_directories.add(parent.as_posix())
-            parent = parent.parent
-    if actual_directories != expected_directories:
-        _fail("dependency proof fixed directory layout rejected")
-
-    tree_contracts = (
-        ("openssl", "headers", "thirdparty/openssl/include"),
-        ("sophon", "headers", "thirdparty/sophon/include"),
-        ("sophon", "libraries", "thirdparty/sophon/lib"),
-    )
-    for section, stem, relative in tree_contracts:
-        count, digest = _dependency_tree(root / relative)
-        _require_dependency_fact(
-            dependencies, section, f"{stem}_file_count", count
-        )
-        _require_dependency_fact(
-            dependencies, section, f"{stem}_sha256", digest
-        )
-
-    openssl_header = _proof_file_bytes(
-        root,
-        "thirdparty/openssl/include/openssl/opensslv.h",
-        "OpenSSL version header",
-    )
-    _require_dependency_fact(
-        dependencies,
-        "openssl",
-        "version_header_sha256",
-        hashlib.sha256(openssl_header).hexdigest(),
-    )
-    _require_dependency_fact(
-        dependencies,
-        "openssl",
-        "version",
-        schema._openssl_version_from_header(openssl_header),
-    )
-
-    proof_files = (
-        ("openssl", "libcrypto_sha256", "thirdparty/openssl/lib/libcrypto.so.3"),
-        ("sophon", "libbmrt_link_sha256", "thirdparty/sophon/lib/libbmrt.so"),
-        (
-            "sophon",
-            "libbmrt_runtime_sha256",
-            "thirdparty/sophon/lib/libbmrt.so.1.0",
-        ),
-        ("sophon", "libbmlib_link_sha256", "thirdparty/sophon/lib/libbmlib.so"),
-        (
-            "sophon",
-            "libbmlib_runtime_sha256",
-            "thirdparty/sophon/lib/libbmlib.so.0",
-        ),
-    )
-    for section, key, relative in proof_files:
-        value = _proof_file_bytes(root, relative, relative)
-        _require_dependency_fact(
-            dependencies, section, key, hashlib.sha256(value).hexdigest()
-        )
-    snapshot_metadata = (
-        (
-            schema.GUARD_HEADER_PATH,
-            guard_header,
-            "Model Guard header",
-        ),
-        (
-            schema.GUARD_ABI_MANIFEST_PATH,
-            guard_abi_manifest,
-            "Model Guard ABI manifest",
-        ),
-        (
-            schema.GUARD_DEPENDENCY_MANIFEST_PATH,
-            dependency_manifest,
-            "Model Guard dependency manifest",
-        ),
-    )
-    for relative, expected, description in snapshot_metadata:
-        actual = _proof_file_bytes(root, relative, description)
-        if not hmac.compare_digest(actual, expected):
-            _fail(
-                "dependency proof snapshot metadata differs from payload: "
-                f"{relative}"
-            )
-    if _dependency_proof_layout(root) != (actual_files, actual_directories):
-        _fail("dependency proof changed during provenance verification")
-
-
 def _audit_for_manifest(
     payload: Path,
-    readelf: Path,
     nm: Path,
 ) -> tuple[list[str], str]:
     guard = payload / f"lib/{schema.GUARD_REAL_FILENAME}"
-    engine = payload / "bin/cosmo-engine"
-    # Verify ELF metadata before signing so the device needs only the signed
-    # byte hashes and compatibility manifest, not cross-binutils.
-    for candidate in (engine, guard):
-        header = schema._run_tool((str(readelf), "-hW", str(candidate))).decode("utf-8", "replace")
-        if re.search(r"^\s*Machine:\s+AArch64\s*$", header, re.MULTILINE) is None:
-            _fail("release payload contains a non-AArch64 engine/guard")
-    dynamic = schema._run_tool((str(readelf), "-dW", str(guard))).decode("utf-8", "replace")
-    if re.findall(r"\(SONAME\).*\[([^\]]+)\]", dynamic) != [schema.GUARD_SONAME]:
-        _fail("release guard SONAME rejected")
-    engine_dynamic = schema._run_tool((str(readelf), "-dW", str(engine))).decode("utf-8", "replace")
-    needed = re.findall(r"\(NEEDED\).*\[([^\]]+)\]", engine_dynamic)
-    if [name for name in needed if name.startswith("libcosmo_model_guard.so")] != [schema.GUARD_SONAME]:
-        _fail("release engine is not linked to guard SONAME 2")
     output = schema._run_tool((str(nm), "-D", "--defined-only", "--format=posix", str(guard))).decode(
         "utf-8", "replace"
     )
@@ -1884,7 +1429,6 @@ def _write_bundle(
 def _build_bundle_from_snapshot(
     arguments: argparse.Namespace,
     payload: Path,
-    dependency_proof: Path,
     output: ControlledOutput,
     public_key: Path,
     signing_key_fd_inherited: bool,
@@ -1905,7 +1449,7 @@ def _build_bundle_from_snapshot(
     key_id, key_sha256, expected_bootstrap_trust, public_key_pem = (
         _public_key_identity(openssl, public_key)
     )
-    exports, exports_sha256 = _audit_for_manifest(payload, readelf, nm)
+    exports, exports_sha256 = _audit_for_manifest(payload, nm)
 
     regular_required_paths = {
         "bin/cosmo-engine",
@@ -1919,8 +1463,6 @@ def _build_bundle_from_snapshot(
         "lib/libcrypto.so.3",
         "lib/libssl.so.3",
         schema.GUARD_HEADER_PATH,
-        schema.GUARD_ABI_MANIFEST_PATH,
-        schema.GUARD_DEPENDENCY_MANIFEST_PATH,
         *schema.REQUIRED_RELEASE_SCRIPTS,
     }
     symlink_targets = {
@@ -1953,11 +1495,7 @@ def _build_bundle_from_snapshot(
         expected_modes = (0o644, 0o755) if path.endswith(".py") else (0o755,)
         if entry_by_path[path]["mode"] not in expected_modes:
             _fail(f"required release script mode rejected: {path}")
-    for path in (
-        schema.GUARD_HEADER_PATH,
-        schema.GUARD_ABI_MANIFEST_PATH,
-        schema.GUARD_DEPENDENCY_MANIFEST_PATH,
-    ):
+    for path in (schema.GUARD_HEADER_PATH,):
         if entry_by_path[path]["mode"] != 0o644:
             _fail(f"release compatibility metadata mode rejected: {path}")
     for directory in schema.FACADE_DIRECTORIES:
@@ -1967,140 +1505,32 @@ def _build_bundle_from_snapshot(
     # read. This keeps plaintext presets from ever reaching the
     # release-signing boundary.
     schema._scan_preset_models(payload)
-    expected_profile = schema.GUARD_PROFILE
     header_bytes = _checked_file_bytes(
         payload / schema.GUARD_HEADER_PATH,
         schema.MAX_GUARD_HEADER_BYTES,
         "release Model Guard header",
     )
-    abi_bytes = _checked_file_bytes(
-        payload / schema.GUARD_ABI_MANIFEST_PATH,
-        schema.MAX_GUARD_ABI_MANIFEST_BYTES,
-        "release Model Guard ABI manifest",
-    )
-    dependency_bytes = _checked_file_bytes(
-        payload / schema.GUARD_DEPENDENCY_MANIFEST_PATH,
-        schema.MAX_GUARD_DEPENDENCY_MANIFEST_BYTES,
-        "release Model Guard dependency manifest",
-    )
     schema._validate_model_guard_header(header_bytes)
-    schema._validate_model_guard_abi_manifest(
-        abi_bytes,
-        expected_profile,
-    )
-    dependencies = schema._validate_model_guard_dependencies(
-        dependency_bytes, header_bytes, abi_bytes, expected_profile
-    )
-    for section, digest_key, relative in schema.DEPENDENCY_RUNTIME_BINDINGS:
-        if relative == "lib/libcrypto.so.3":
-            continue
-        component_bytes = _checked_file_bytes(
-            payload / relative,
-            (
-                schema.MAX_LIBCRYPTO_BYTES
-                if relative == "lib/libcrypto.so.3"
-                else schema.MAX_RUNTIME_LIBRARY_BYTES
-            ),
-            f"release dependency runtime {relative}",
-        )
-        if hashlib.sha256(component_bytes).hexdigest() != dependencies[section][digest_key]:
-            _fail(
-                "release runtime differs from Model Guard dependency provenance: "
-                f"{relative}"
-            )
-    libcrypto_path = payload / "lib/libcrypto.so.3"
-    libcrypto_bytes = _checked_file_bytes(
-        libcrypto_path,
-        schema.MAX_LIBCRYPTO_BYTES,
-        "release libcrypto",
-    )
-    if (
-        hashlib.sha256(libcrypto_bytes).hexdigest()
-        != dependencies["openssl"]["libcrypto_sha256"]
-    ):
-        _fail("release libcrypto differs from Model Guard dependency provenance")
-    if (
-        schema._openssl_version_from_library(libcrypto_bytes)
-        != dependencies["openssl"]["version"]
-    ):
-        _fail(
-            "release libcrypto embedded OpenSSL version differs from Model Guard "
-            "dependency provenance"
-        )
-    libcrypto_header = schema._run_tool((str(readelf), "-hW", str(libcrypto_path))).decode(
-        "utf-8", "replace"
-    )
-    libcrypto_dynamic = schema._run_tool((str(readelf), "-dW", str(libcrypto_path))).decode(
-        "utf-8", "replace"
-    )
-    if (
-        re.search(r"^\s*Machine:\s+AArch64\s*$", libcrypto_header, re.MULTILINE)
-        is None
-        or re.findall(r"\(SONAME\).*\[([^\]]+)\]", libcrypto_dynamic)
-        != [dependencies["openssl"]["libcrypto_soname"]]
-    ):
-        _fail("release libcrypto ELF identity differs from dependency provenance")
-    libssl_path = payload / "lib/libssl.so.3"
-    libssl_header = schema._run_tool((str(readelf), "-hW", str(libssl_path))).decode(
-        "utf-8", "replace"
-    )
-    libssl_dynamic = schema._run_tool((str(readelf), "-dW", str(libssl_path))).decode(
-        "utf-8", "replace"
-    )
-    if (
-        re.search(r"^\s*Machine:\s+AArch64\s*$", libssl_header, re.MULTILINE)
-        is None
-        or re.findall(r"\(SONAME\).*\[([^\]]+)\]", libssl_dynamic)
-        != ["libssl.so.3"]
-    ):
-        _fail("release libssl ELF identity rejected")
-    _verify_dependency_proof(
-        dependency_proof,
-        dependencies,
-        dependency_bytes,
-        header_bytes,
-        abi_bytes,
-    )
     manifest: dict[str, Any] = {
         "edge": {
             "compatibility_id": "0" * 64,
-            "needed_guard_soname": schema.GUARD_SONAME,
             "path": "bin/cosmo-engine",
             "sha256": _sha256_file(payload / "bin/cosmo-engine"),
         },
         "device_certificate_schema": 1,
         "format": schema.FORMAT,
         "model_guard": {
-            "abi_major": 2,
-            "abi_manifest_path": schema.GUARD_ABI_MANIFEST_PATH,
-            "abi_manifest_sha256": _sha256_file(payload / schema.GUARD_ABI_MANIFEST_PATH),
-            "dependencies_manifest_path": schema.GUARD_DEPENDENCY_MANIFEST_PATH,
-            "dependencies_manifest_sha256": _sha256_file(
-                payload / schema.GUARD_DEPENDENCY_MANIFEST_PATH
-            ),
             "exports": exports,
             "exports_sha256": exports_sha256,
             "header_path": schema.GUARD_HEADER_PATH,
             "header_sha256": _sha256_file(payload / schema.GUARD_HEADER_PATH),
             "path": f"lib/{schema.GUARD_REAL_FILENAME}",
             "sha256": _sha256_file(payload / f"lib/{schema.GUARD_REAL_FILENAME}"),
-            "soname": schema.GUARD_SONAME,
         },
         "payload_manifest_sha256": hashlib.sha256(payload_bytes).hexdigest(),
         "release_generation": generation,
         "release_id": release_id,
         "release_key": {"id": key_id, "public_key_sha256": key_sha256},
-        "runtime_libraries": {
-            "libbmlib": {"path": "lib/libbmlib.so", "sha256": _sha256_file(payload / "lib/libbmlib.so")},
-            "libbmrt": {"path": "lib/libbmrt.so", "sha256": _sha256_file(payload / "lib/libbmrt.so")},
-            "libcrypto": {
-                "path": "lib/libcrypto.so.3",
-                "sha256": _sha256_file(libcrypto_path),
-                "soname": dependencies["openssl"]["libcrypto_soname"],
-                "version": dependencies["openssl"]["version"],
-            },
-        },
-        "target_arch": "aarch64",
     }
     manifest["edge"]["compatibility_id"] = schema._compatibility_id(manifest)
     schema._validate_compatibility_manifest(manifest)
@@ -2178,11 +1608,6 @@ def _snapshot_controlled_file(
 def build_bundle(arguments: argparse.Namespace) -> None:
     signing_key_fd_inherited = _signing_key_fd_is_inherited()
     source_payload = Path(arguments.payload).resolve(strict=True)
-    dependency_proof_argument = Path(arguments.dependency_proof_root)
-    dependency_proof_argument_info = os.lstat(dependency_proof_argument)
-    if stat.S_ISLNK(dependency_proof_argument_info.st_mode):
-        _fail("dependency proof root must not be a symbolic link")
-    source_dependency_proof = dependency_proof_argument.resolve(strict=True)
     public_key = Path(arguments.release_public_key).resolve(strict=True)
     output = _prepare_controlled_output(arguments.output)
     try:
@@ -2190,11 +1615,7 @@ def build_bundle(arguments: argparse.Namespace) -> None:
             snapshot_parent = Path(temporary)
             os.chmod(snapshot_parent, 0o700)
             snapshot_payload = snapshot_parent / "payload"
-            snapshot_dependency_proof = snapshot_parent / "dependency-proof"
             _snapshot_payload(source_payload, snapshot_payload)
-            _snapshot_dependency_proof(
-                source_dependency_proof, snapshot_dependency_proof
-            )
             snapshot_controls = snapshot_parent / "release-controls"
             snapshot_public_key = _snapshot_controlled_file(
                 public_key,
@@ -2205,7 +1626,6 @@ def build_bundle(arguments: argparse.Namespace) -> None:
             _build_bundle_from_snapshot(
                 arguments,
                 snapshot_payload,
-                snapshot_dependency_proof,
                 output,
                 snapshot_public_key,
                 signing_key_fd_inherited,
@@ -2222,7 +1642,6 @@ def main(argv: Sequence[str]) -> int:
         return 1
     parser = argparse.ArgumentParser(description="Create a signed Cosmo release archive")
     parser.add_argument("--payload", required=True)
-    parser.add_argument("--dependency-proof-root", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--release-id", required=True)
     parser.add_argument("--generation", required=True, type=int)
