@@ -255,7 +255,12 @@ class AgentWorkflowTest(unittest.TestCase):
         self.assertEqual(agent_workflow._objective_target_chip(contract), "bm1684x")
 
     def test_memory_probe_tolerates_windows_missing_sysconf(self):
-        with mock.patch.object(agent_workflow.os, "sysconf", side_effect=AttributeError("missing")):
+        with mock.patch.object(
+            agent_workflow.os,
+            "sysconf",
+            side_effect=AttributeError("missing"),
+            create=True,
+        ):
             total, available = agent_workflow._memory_bytes()
         self.assertTrue(total is None or isinstance(total, int))
         self.assertTrue(available is None or isinstance(available, int))
