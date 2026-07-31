@@ -1,214 +1,196 @@
 #!/bin/bash
-set -e
+set -eu
+IFS=$' \t\n'
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+export IFS PATH
 
-# Upgrade orchestrator - log rotation, OTA upgrade detection, MD5 verify, install, start.
-# Called by inte_run_start.sh at system boot.
+# Boot/start orchestrator for signed, versioned releases.  Upgrade archives are
+# parsed and verified only by the updater from the currently trusted release.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
 # shellcheck source=common.sh
 . "${SCRIPT_DIR}/common.sh"
 
-if [ -z "${INSTALLPATH}" ]; then
-    INSTALLPATH="$(cd "${SCRIPT_DIR}/../" && pwd)"
-    echo "INSTALLPATH=${INSTALLPATH}"
-fi
-
-# Ensure all runtime directories exist
+legacy_install_path="${COSMO_INSTALL_DIR}"
 ensure_runtime_dirs
 
-# Rotate nginx logs
 mv -f "${COSMO_LOG_DIR}/nginx_access.log" "${COSMO_LOG_DIR}/nginx_access_last.log" 2>/dev/null || true
 mv -f "${COSMO_LOG_DIR}/nginx_error.log" "${COSMO_LOG_DIR}/nginx_error_last.log" 2>/dev/null || true
 
-# ── Log rotation ──
-# Maintains up to 10 rotated log files: INTE_RUN.1 .. INTE_RUN.10
-# The current active log is always named INTE_RUN_now.<N>
-nowLogFileDefault="${COSMO_LOG_DIR}/INTE_RUN_now.1"
-nowLogFile="$nowLogFileDefault"
-
-getNowFile() {
-    local latest=""
-    for f in "${COSMO_LOG_DIR}"/INTE_RUN_now.*; do
-        [ -f "$f" ] && latest="$f"
-    done
-    if [ -n "$latest" ]; then
-        nowLogFile="$latest"
-        return 0
-    fi
-    return 1
-}
-
-getNowFile || true
-nowFileIndex="${nowLogFile##*.}"
-nextFileIndex=$((nowFileIndex + 1))
-
-if [ "$nextFileIndex" -gt 10 ]; then
-    nextFileIndex=1
-fi
-
-if [ -f "${nowLogFile}" ]; then
-    mv -f "$nowLogFile" "${COSMO_LOG_DIR}/INTE_RUN.$nowFileIndex"
-    nowLogFile="${COSMO_LOG_DIR}/INTE_RUN_now.$nextFileIndex"
-fi
-
-echo "Log file: $nowLogFile"
-
-logTag="INTE_RUN"
-logFile="$nowLogFile"
-
-action="$1"
-
-cosmo_log "$logTag" "In start.sh, action=${action}" "$logFile"
-
-# Clean previous upgrade sign, convert HW upgrade sign if present
-rm -f "$COSMO_UPGRADE_SIGN"
-if [ -f "${COSMO_HW_UPGRADE_SIGN}" ]; then
-    # Convert HW upgrade marker to upgrade-success marker for MQTT reporting
-    mv -f "$COSMO_HW_UPGRADE_SIGN" "$COSMO_UPGRADE_SIGN"
-    cosmo_log "$logTag" "HW upgrade detected, marker converted." "$logFile"
-fi
-
-# Handle stop action
-if [ "$action" = "stop" ]; then
-    "${INSTALLPATH}/scripts/stop.sh"
-    cosmo_log "$logTag" "Stop action completed." "$logFile"
-    exit 0
-fi
-
-# ── OTA upgrade detection ──
-TARGZ_SUFFIX="tar.gz"
-INSTALL_TYPE=""
-EXIST_IF="unexists"
-DIRECTORY_STATIC="${COSMO_UPGRADE_DIR}"
-DIRECTORY_SHELL="${INSTALLPATH}/scripts/"
-START_SHELL_PATH="${INSTALLPATH}/scripts/run_start.sh"
-
-# Regex pattern for full package name
-# Example: cosmo-V1.1.0-52d08574819464a735d4b0a90f26c924.tar.gz
-TARGZ_PATTERN='^cosmo-[Vv][0-9]{1,}\.[0-9]{1,}\.[0-9]{1,}-[0-9a-fA-F]{32}\.tar\.gz$'
-
-# Execute run_start.sh and exit
-RUN() {
-    cosmo_log "$logTag" "[RUN] Before starting run_start.sh" "$logFile"
-    rm -rf "${DIRECTORY_STATIC:?}"/*
-    if [ "$action" = "start" ]; then
-        cd "$DIRECTORY_SHELL" || exit 1
-        cosmo_log "$logTag" "[RUN] Executing $START_SHELL_PATH" "$logFile"
-        sh "$START_SHELL_PATH" start "$logFile"
-    fi
-    cosmo_log "$logTag" "Script ended." "$logFile"
-    exit 0
-}
-
-# Check the legality of package name
-# $1: filename string, $2: regex pattern
-checkFileName() {
-    cosmo_log "$logTag" "Checking filename legality: $1" "$logFile"
-    local regex_ret
-    regex_ret=$(echo "$1" | grep -E "$2") || true
-    if [ -n "${regex_ret}" ]; then
-        cosmo_log "$logTag" "Valid filename." "$logFile"
-        return 0
-    else
-        cosmo_log "$logTag" "$1 file format error!" "$logFile"
-        return 1
-    fi
-}
-
-# Validate that extracted directory has the expected package layout
-hasUpgradePackageLayout() {
-    local root="$1"
-    for dir in bin files font scripts web; do
-        if [ ! -d "$root/$dir" ]; then
-            cosmo_log "$logTag" "Missing required package directory: $root/$dir" "$logFile"
-            return 1
-        fi
-    done
-    return 0
-}
-
-if [ ! -d "$DIRECTORY_STATIC" ]; then
-    RUN
-    # NOTE: RUN() calls exit, code below is unreachable
-fi
-
-# Scan for upgrade package
-cosmo_log "$logTag" "Checking for upgrade package..." "$logFile"
-for FILENAME_WHOLE in "$DIRECTORY_STATIC"/*; do
-    FILE_NAME_WITHOUT_PATH=$(basename "${FILENAME_WHOLE}")
-    if [ "${FILE_NAME_WITHOUT_PATH}" != "*" ] && echo "$FILE_NAME_WITHOUT_PATH" | grep -q "\.${TARGZ_SUFFIX}$"; then
-        if checkFileName "$FILE_NAME_WITHOUT_PATH" "$TARGZ_PATTERN"; then
-            INSTALL_TYPE="install"
-            EXIST_IF="exists"
-            break
-        fi
+now_log_file="${COSMO_LOG_DIR}/INTE_RUN_now.1"
+for candidate_log in "${COSMO_LOG_DIR}"/INTE_RUN_now.*; do
+    if [ -f "$candidate_log" ]; then
+        now_log_file="$candidate_log"
     fi
 done
-
-cosmo_log "$logTag" "INSTALL_TYPE: ${INSTALL_TYPE}" "$logFile"
-
-if [ "$EXIST_IF" = "exists" ]; then
-    cosmo_log "$logTag" "Upgrade package found: $FILENAME_WHOLE" "$logFile"
-else
-    cosmo_log "$logTag" "No upgrade package found, starting normally." "$logFile"
-    RUN
+now_index="${now_log_file##*.}"
+case "$now_index" in
+    ''|*[!0-9]*) now_index=1 ;;
+esac
+next_index=$((now_index + 1))
+if [ "$next_index" -gt 10 ]; then
+    next_index=1
+fi
+if [ -f "$now_log_file" ]; then
+    mv -f "$now_log_file" "${COSMO_LOG_DIR}/INTE_RUN.${now_index}"
+    now_log_file="${COSMO_LOG_DIR}/INTE_RUN_now.${next_index}"
 fi
 
-# ── MD5 verification ──
-cosmo_log "$logTag" "Verifying MD5 checksum..." "$logFile"
-MD5_VALUE_IN_FILENAME="${FILENAME_WHOLE%.tar.gz}"
-MD5_VALUE_IN_FILENAME="${MD5_VALUE_IN_FILENAME##*-}"
-MD5_VALUE_IN_FILENAME=$(echo "$MD5_VALUE_IN_FILENAME" | tr 'A-F' 'a-f')
-cosmo_log "$logTag" "MD5 from filename: $MD5_VALUE_IN_FILENAME" "$logFile"
+log_tag="INTE_RUN"
+log_file="$now_log_file"
+action="${1:-}"
+cosmo_log "$log_tag" "Start action=${action}" "$log_file"
 
-REAL_MD5_VALUE=$(/usr/bin/md5sum "${FILENAME_WHOLE}")
-REAL_MD5_VALUE="${REAL_MD5_VALUE:0:${#MD5_VALUE_IN_FILENAME}}"
-cosmo_log "$logTag" "MD5 computed: $REAL_MD5_VALUE" "$logFile"
-
-if [ "$MD5_VALUE_IN_FILENAME" = "$REAL_MD5_VALUE" ]; then
-    cosmo_log "$logTag" "MD5 verified. Proceeding with upgrade..." "$logFile"
-else
-    cosmo_log "$logTag" "MD5 mismatch! Discarding package." "$logFile"
-    RUN
+rm -f "$COSMO_UPGRADE_SIGN"
+if [ -f "$COSMO_HW_UPGRADE_SIGN" ]; then
+    mv -f "$COSMO_HW_UPGRADE_SIGN" "$COSMO_UPGRADE_SIGN"
+    cosmo_log "$log_tag" "Hardware upgrade marker converted" "$log_file"
 fi
 
-# Stop all processes before upgrade
-cosmo_log "$logTag" "Stopping processes for upgrade..." "$logFile"
-"${INSTALLPATH}/scripts/stop.sh"
+if [ "$action" = "stop" ]; then
+    "${SCRIPT_DIR}/stop.sh"
+    exit 0
+fi
+if [ "$action" != "start" ]; then
+    cosmo_log "$log_tag" "Unsupported action: ${action}" "$log_file"
+    exit 2
+fi
 
-# Extract upgrade package
-cosmo_log "$logTag" "Extracting upgrade package..." "$logFile"
-tar -zxf "$FILENAME_WHOLE" -C "$DIRECTORY_STATIC"
+run_foreground() {
+    release_root="$1"
+    cosmo_log "$log_tag" "Starting active release $(basename "$release_root")" "$log_file"
+    cd "${release_root}/scripts"
+    INSTALLPATH="$release_root" exec "${release_root}/scripts/run_start.sh" start "$log_file"
+}
 
-# Detect package layout (flat or nested directory)
-if hasUpgradePackageLayout "$DIRECTORY_STATIC"; then
-    PACKAGE_ROOT="$DIRECTORY_STATIC"
-else
-    # Find the top-level directory extracted by tar
-    UNZIP_DIRNAME=""
-    for d in "$DIRECTORY_STATIC"/*/; do
-        if [ -d "$d" ]; then
-            UNZIP_DIRNAME="$(basename "$d")"
-            break
-        fi
-    done
-    PACKAGE_ROOT="$DIRECTORY_STATIC/$UNZIP_DIRNAME"
-    if ! hasUpgradePackageLayout "$PACKAGE_ROOT"; then
-        cosmo_log "$logTag" "Upgrade package layout error, discarding." "$logFile"
-        RUN
+run_candidate_with_health_gate() {
+    release_root="$1"
+    archive="$2"
+    if ! "${SCRIPT_DIR}/install.sh" pending-health-script >/dev/null 2>> "$log_file"; then
+        cosmo_log "$log_tag" "Candidate health script validation failed; rolling back" "$log_file"
+        previous_release="$("${SCRIPT_DIR}/install.sh" rollback 2>> "$log_file")"
+        cosmo_log "$log_tag" "Rollback restored $(basename "$previous_release")" "$log_file"
+        run_foreground "$previous_release"
     fi
+    cosmo_log "$log_tag" "Starting candidate release $(basename "$release_root")" "$log_file"
+    (
+        cd "${release_root}/scripts"
+        INSTALLPATH="$release_root" exec "${release_root}/scripts/run_start.sh" start "$log_file"
+    ) &
+    runner_pid=$!
+
+    if "${SCRIPT_DIR}/install.sh" run-pending-health \
+        "$runner_pid" "$release_root" >> "$log_file" 2>&1; then
+        if "${SCRIPT_DIR}/install.sh" commit-healthy >> "$log_file" 2>&1; then
+            mkdir -p "$(dirname "$COSMO_UPGRADE_SIGN")"
+            : > "$COSMO_UPGRADE_SIGN"
+            sync
+            rm -f -- "$archive"
+            cosmo_log "$log_tag" "Candidate startup accepted and release committed" "$log_file"
+            wait "$runner_pid"
+            return $?
+        fi
+        cosmo_log "$log_tag" "Durable release commit failed; rolling back" "$log_file"
+    else
+        cosmo_log "$log_tag" "Candidate startup health failed; rolling back" "$log_file"
+    fi
+
+    # The currently trusted updater validates and executes the signed candidate
+    # stop script before it reverses the pointer or removes the incoming tree.
+    previous_release="$("${SCRIPT_DIR}/install.sh" rollback 2>> "$log_file")"
+    cosmo_log "$log_tag" "Rollback restored $(basename "$previous_release")" "$log_file"
+    run_foreground "$previous_release"
+}
+
+find_signed_release_archive() {
+    signed_archive_count=0
+    signed_archive=""
+    for candidate in "${COSMO_UPGRADE_DIR}"/*.tar.gz; do
+        [ -f "$candidate" ] || continue
+        signed_archive_count=$((signed_archive_count + 1))
+        signed_archive="$candidate"
+    done
+}
+
+release_state="${COSMO_RELEASE_STATE_DIR}/compatibility.state.json"
+if [ ! -f "$release_state" ]; then
+    # First-release recovery and install always enter through the stable,
+    # embedded-key verifier outside the movable facades.  An interrupted
+    # migration is reconciled before inspecting a new archive.
+    factory_bootstrap="${COSMO_INSTALL_DIR}/.release-bootstrap/bin/cosmo-release-bootstrap"
+    bootstrap_journal="${COSMO_RELEASE_STATE_DIR}/bootstrap-transaction.json"
+    if [ -f "$bootstrap_journal" ]; then
+        if [ ! -x "$factory_bootstrap" ]; then
+            cosmo_log "$log_tag" "Factory recovery journal exists but stable verifier is unavailable" "$log_file"
+            exit 1
+        fi
+        cosmo_log "$log_tag" "Recovering interrupted factory release migration" "$log_file"
+        if ! "$factory_bootstrap" recover >> "$log_file" 2>&1; then
+            cosmo_log "$log_tag" "Factory release recovery failed closed" "$log_file"
+            exit 1
+        fi
+        if [ -f "$release_state" ]; then
+            exec "${COSMO_RELEASE_CURRENT}/scripts/start.sh" start
+        fi
+    fi
+
+    find_signed_release_archive
+
+    if [ "$signed_archive_count" -gt 1 ]; then
+        cosmo_log "$log_tag" "Ambiguous first-release archive set; retaining legacy release" "$log_file"
+        run_foreground "$legacy_install_path"
+    fi
+    if [ "$signed_archive_count" -eq 1 ]; then
+        if [ ! -x "$factory_bootstrap" ]; then
+            cosmo_log "$log_tag" "Signed release found but stable embedded-key verifier is absent" "$log_file"
+            run_foreground "$legacy_install_path"
+        fi
+        cosmo_log "$log_tag" "Installing first signed compatibility release" "$log_file"
+        if "$factory_bootstrap" install "$signed_archive" >> "$log_file" 2>&1; then
+            rm -f -- "$signed_archive"
+            sync
+            if [ ! -f "$release_state" ] || [ ! -x "${COSMO_RELEASE_CURRENT}/scripts/start.sh" ]; then
+                cosmo_log "$log_tag" "Factory verifier returned without a complete active release" "$log_file"
+                exit 1
+            fi
+            exec "${COSMO_RELEASE_CURRENT}/scripts/start.sh" start
+        fi
+        cosmo_log "$log_tag" "First signed release rejected; recovering legacy release" "$log_file"
+        if [ -f "$bootstrap_journal" ] && ! "$factory_bootstrap" recover >> "$log_file" 2>&1; then
+            cosmo_log "$log_tag" "Factory rollback failed closed" "$log_file"
+            exit 1
+        fi
+    fi
+    run_foreground "$legacy_install_path"
 fi
-cosmo_log "$logTag" "PACKAGE_ROOT: $PACKAGE_ROOT" "$logFile"
-cd "$PACKAGE_ROOT" || exit 1
 
-cosmo_log "$logTag" "Extraction complete." "$logFile"
+if ! active_release="$("${SCRIPT_DIR}/install.sh" recover 2>> "$log_file")"; then
+    cosmo_log "$log_tag" "Release recovery failed closed" "$log_file"
+    exit 1
+fi
 
-# Run install script from the upgrade package
-cosmo_log "$logTag" "Running install.sh from upgrade package..." "$logFile"
-cd "$PACKAGE_ROOT/scripts/" || exit 1
-sh "$PACKAGE_ROOT/scripts/install.sh" "$logFile"
-cosmo_log "$logTag" "install.sh completed." "$logFile"
+find_signed_release_archive
 
-# Start services
-RUN
+if [ "$signed_archive_count" -eq 0 ]; then
+    run_foreground "$active_release"
+fi
+if [ "$signed_archive_count" -ne 1 ]; then
+    cosmo_log "$log_tag" "Ambiguous release archive set; exactly one signed archive is required" "$log_file"
+    run_foreground "$active_release"
+fi
+
+cosmo_log "$log_tag" "Preflighting signed release archive" "$log_file"
+if ! "${SCRIPT_DIR}/install.sh" prepare "$signed_archive" "$log_file" >> "$log_file" 2>&1; then
+    cosmo_log "$log_tag" "Release archive rejected; retaining active release" "$log_file"
+    run_foreground "$active_release"
+fi
+
+"${active_release}/scripts/stop.sh"
+if ! candidate_release="$("${SCRIPT_DIR}/install.sh" activate 2>> "$log_file")"; then
+    cosmo_log "$log_tag" "Release activation failed; recovering previous release" "$log_file"
+    active_release="$("${SCRIPT_DIR}/install.sh" recover)"
+    run_foreground "$active_release"
+fi
+
+run_candidate_with_health_gate "$candidate_release" "$signed_archive"

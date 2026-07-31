@@ -1,121 +1,52 @@
 #!/bin/bash
-set -e
+set -eu
+IFS=$' \t\n'
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+export IFS PATH
 
-# Enter the directory where the install script is located (before calling stop.sh)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+# Trusted release-transaction wrapper.  This file is always executed from the
+# currently active release; an incoming archive's install script is never run.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
 # shellcheck source=common.sh
 . "${SCRIPT_DIR}/common.sh"
 
-# Stop running processes first
-./stop.sh
-
-# WARNING: Do not modify INSTALLPATH - it is the production deployment root
-INSTALLPATH="${COSMO_INSTALL_DIR}"
-
-INSTALL_SUCCESS_SIGN="${COSMO_UPGRADE_SIGN}"
-
-logFile="${1:-/dev/null}"
-logTag="[INSTALL]"
-
-echo "${logTag} Install Start" >> "$logFile"
-echo "${logTag} script=$0, logFile=$1" >> "$logFile"
-echo "${logTag} script dir: $SCRIPT_DIR" >> "$logFile"
-
-echo "Install path is ${INSTALLPATH}"
-
-echo "${logTag} Installing files..." >> "$logFile"
-echo "Installing files..."
-
-# Ensure install path exists and is non-empty
-if [ -z "${INSTALLPATH}" ]; then
-    echo "${logTag} ERROR: INSTALLPATH is empty, aborting!" >> "$logFile"
+updater="${SCRIPT_DIR}/release_updater.sh"
+if [ ! -f "$updater" ]; then
+    echo "[INSTALL] release updater is unavailable" >&2
     exit 1
 fi
 
-mkdir -p "${INSTALLPATH}"
-
-# Remove old directories
-PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-for dir in bin lib scripts web font files; do
-    if [ -d "${INSTALLPATH}/${dir}" ]; then
-        rm -rf "${INSTALLPATH:?}/${dir}"
-    fi
-done
-
-# Install new files (skip missing directories)
-for dir in bin lib scripts web font files resource; do
-    if [ -d "${PACKAGE_DIR}/${dir}" ]; then
-        if [ "$dir" = "resource" ]; then
-            echo "${logTag} Overwriting ${dir}..." >> "$logFile"
-            if [ "${CLEAN_RESOURCE:-0}" = "1" ] && [ -d "${INSTALLPATH}/resource" ]; then
-                echo "${logTag} CLEAN_RESOURCE=1, removing ${INSTALLPATH}/resource before install" >> "$logFile"
-                rm -rf "${INSTALLPATH:?}/resource"
-            fi
-            mkdir -p "${INSTALLPATH}/resource"
-            cp -rf "${PACKAGE_DIR}/resource/." "${INSTALLPATH}/resource/"
-        else
-            mv -f "${PACKAGE_DIR}/${dir}" "${INSTALLPATH}/"
+action="${1:-}"
+case "$action" in
+    prepare)
+        if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+            echo "Usage: $0 prepare <signed-release.tar.gz> [logfile]" >&2
+            exit 2
         fi
-    else
-        echo "${logTag} WARNING: ${dir} not found in package, skipping" >> "$logFile"
-    fi
-done
-
-# Setup static file symlinks
-mkdir -p "${INSTALLPATH}/web/staticfile"
-rm -f "${INSTALLPATH}/web/staticfile/httpInterface.html"
-rm -f "${INSTALLPATH}/web/staticfile/mqttInterface.html"
-ln -sf "${INSTALLPATH}/files/Interface/ai-box-interface_v1.0.html" "${INSTALLPATH}/web/staticfile/httpInterface.html"
-ln -sf "${INSTALLPATH}/files/Interface/mqtt_v1.0.html" "${INSTALLPATH}/web/staticfile/mqttInterface.html"
-
-mkdir -p "${INSTALLPATH}/bin/nginx_conf/logs"
-
-# Remove install script from deployed location (self-cleanup)
-rm -f "${INSTALLPATH}/scripts/install.sh"
-
-echo "Install files Done."
-echo "${logTag} Install files Done." >> "$logFile"
-
-# Setup systemd auto-start service
-SERVICE_FILE="/etc/systemd/system/cosmo.service"
-SERVICE_LINK="/etc/systemd/system/multi-user.target.wants/cosmo.service"
-
-echo "${logTag} Setting up systemd auto-start service..." >> "$logFile"
-
-cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=Cosmo Edge AI Engine
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-User=root
-ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
-Type=simple
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Create symlink for auto-start on boot
-if [ ! -L "$SERVICE_LINK" ]; then
-    ln -sf "$SERVICE_FILE" "$SERVICE_LINK"
-fi
-
-# Reload systemd to pick up the new/updated service file
-systemctl daemon-reload
-
-echo "${logTag} systemd service [cosmo] installed and enabled." >> "$logFile"
-echo "systemd service [cosmo] installed and enabled."
-
-# Upgrade completion marker for MQTT reporting
-mkdir -p "$(dirname "$INSTALL_SUCCESS_SIGN")"
-touch "$INSTALL_SUCCESS_SIGN"
-sync
-
-echo "${logTag} Install End."
-echo "${logTag} Install End." >> "$logFile"
+        archive="$2"
+        log_file="${3:-/dev/null}"
+        cosmo_log "INSTALL" "Validating and staging signed compatibility release" "$log_file"
+        "$updater" prepare "$archive"
+        cosmo_log "INSTALL" "Signed release staged; active release is unchanged" "$log_file"
+        ;;
+    run-pending-health)
+        if [ "$#" -ne 3 ]; then
+            echo "Usage: $0 run-pending-health <runner-pid> <expected-release-directory>" >&2
+            exit 2
+        fi
+        "$updater" "$action" "$2" "$3"
+        ;;
+    activate|commit-healthy|rollback|recover|active-path|pending-path|pending-health-script)
+        if [ "$#" -ne 1 ]; then
+            echo "Usage: $0 ${action}" >&2
+            exit 2
+        fi
+        "$updater" "$action"
+        ;;
+    *)
+        echo "Usage: $0 {prepare <archive> [logfile]|activate|commit-healthy|rollback|recover|active-path|pending-path|pending-health-script|run-pending-health <runner-pid> <expected-release-directory>}" >&2
+        exit 2
+        ;;
+esac

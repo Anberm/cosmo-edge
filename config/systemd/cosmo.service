@@ -1,0 +1,17 @@
+[Unit]
+Description=Cosmo Edge AI Engine
+After=bmrt_setup.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/appfs/cosmo_wander/cwai_data
+ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh
+ExecStop=/appfs/cosmo_wander/cwai_data/scripts/stop.sh
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
