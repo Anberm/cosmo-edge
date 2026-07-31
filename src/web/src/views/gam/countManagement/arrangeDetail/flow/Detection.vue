@@ -60,7 +60,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { t } from '@/i18n'
 
 const props = defineProps({
@@ -70,7 +70,7 @@ const props = defineProps({
   }
 })
 
-const options = [
+const options = computed(() => [
   {
     value: 'hexagon',
     label: t('glossary.hexagon')
@@ -87,9 +87,9 @@ const options = [
     value: 'cordon',
     label: t('glossary.twoWayLine')
   }
-]
+])
 
-const associatedOptions = [
+const associatedOptions = computed(() => [
   {
     value: 'hexagon',
     label: t('glossary.hexagon')
@@ -98,7 +98,7 @@ const associatedOptions = [
     value: 'quadrilateral',
     label: t('glossary.quadrilateral')
   }
-]
+])
 
 const areaType = ref('hexagon')
 const checked = ref(false)
@@ -106,7 +106,7 @@ const shieldAreaChecked = ref(false)
 const fullScreenChecked = ref(false)
 const associatedAreaChecked = ref(false)
 const maxAreaCount = ref(4)
-const areaCntOptions = [
+const areaCntOptions = computed(() => [
   {
     label: '1',
     value: 1
@@ -123,7 +123,7 @@ const areaCntOptions = [
     label: t('glossary.nDefault', { n: 4 }),
     value: 4
   }
-]
+])
 const associatedAreaConfig = ref({
   mainName: '',
   associatedName: '',

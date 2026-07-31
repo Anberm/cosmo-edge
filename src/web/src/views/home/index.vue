@@ -192,11 +192,11 @@ import VideoFrequency from '../box/eventQuery/components/videoPlaying265.vue'
 
 const { proxy } = getCurrentInstance()
 const router = useRouter()
-const DEFAULT_PLATFORM_NAME = t('system.defaultPlatformName')
+const DEFAULT_PLATFORM_NAME = computed(() => t('system.defaultPlatformName'))
 
 const normalizePlatformName = (name) => {
   if (!name || name === '智能终端管理平台' || name === '智能终端管理系统' || name === '智能盒子' || name === '边缘智能中枢') {
-    return DEFAULT_PLATFORM_NAME
+    return DEFAULT_PLATFORM_NAME.value
   }
   return name
 }
