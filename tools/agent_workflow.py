@@ -13,7 +13,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+from secrets import token_hex
 from typing import Any, Iterable
 
 
@@ -33,7 +35,18 @@ REQUIRED_CONTRACT_FIELDS = (
 ENVIRONMENT_VERDICTS = {"READY", "REPAIRABLE", "NEEDS_ENVIRONMENT", "UNSUPPORTED"}
 CHECK_STATUSES = {"PASS", "FAIL", "BLOCKED", "SKIP", "UNVERIFIED"}
 ASSESSMENT_VERDICTS = {"READY", "NEEDS_INPUT", "NEEDS_ENVIRONMENT", "UNSUPPORTED"}
-SENSITIVE_NAME = r"(?:password|passwd|pwd|token|api[_-]?key|authorization|credential|secret)"
+SENSITIVE_NAME = (
+    r"(?:password|passwd|pwd|token|api[_-]?key|authorization|credential|secret|"
+    r"username|user[_-]?name|account|密码|口令|令牌|密钥|凭据|用户名|账号)"
+)
+SENSITIVE_VALUE_NAME = (
+    r"(?:password|passwd|pwd|token|api[_-]?key|credential|secret|"
+    r"username|user[_-]?name|account)"
+)
+PRIVATE_NETWORK_PATTERN = re.compile(
+    r"(?<!\d)(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|"
+    r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|127(?:\.\d{1,3}){3})(?!\d)"
+)
 IMAGE_REFERENCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]+$")
 TOOLCHAIN_KINDS = {"auto", "python-package", "container-image"}
 TOOLCHAIN_PACKAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -300,7 +313,18 @@ def redact_text(text: str) -> str:
         r"\1[REDACTED]",
         redacted,
     )
-    return redacted
+    redacted = re.sub(
+        rf"(?i)((?<!\w){SENSITIVE_VALUE_NAME}\s*[:=]\s*)([A-Za-z0-9._~+/@=-]{{2,}})",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"((?:密码|口令|令牌|密钥|凭据|用户名|账号)\s*(?:是|为)?\s*[:：=]?\s*)"
+        r"([A-Za-z0-9._~+/@=-]{2,})",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    return PRIVATE_NETWORK_PATTERN.sub("[PRIVATE_TARGET]", redacted)
 
 
 def redact_data(value: Any, key: str = "") -> Any:
@@ -680,6 +704,37 @@ def assess_task_report(
     }
 
 
+def read_route_assessment(
+    contract_path: Path,
+    run_dir: Path,
+    contract: dict[str, Any],
+    *,
+    require_ready: bool = True,
+) -> dict[str, Any]:
+    """Load the assessment that admits this exact contract to the next stage."""
+    report_path = run_dir / "route-assessment.json"
+    report = load_json(report_path)
+    if not isinstance(report, dict):
+        raise WorkflowError("route-assessment.json must be an object")
+    if report.get("schemaVersion") != "1.0" or report.get("mode") != "assessment":
+        raise WorkflowError("route assessment has an unsupported schema or mode; rerun assess")
+    if report.get("runId") != contract["runId"] or report.get("task") != contract["task"]:
+        raise WorkflowError("route assessment does not belong to this task contract")
+    if report.get("contractSha256") != sha256_file(contract_path):
+        raise WorkflowError("task contract changed after route assessment; rerun assess")
+    needs_input = report.get("needsInput")
+    if not isinstance(needs_input, list):
+        raise WorkflowError("route assessment needsInput must be an array")
+    verdict = report.get("routeVerdict")
+    if verdict not in ASSESSMENT_VERDICTS:
+        raise WorkflowError("route assessment has an unknown verdict; rerun assess")
+    if require_ready and (verdict != "READY" or needs_input):
+        raise WorkflowError(
+            "route assessment is not READY; resolve needsInput and rerun assess before doctor"
+        )
+    return report
+
+
 def _check(
     check_id: str,
     status: str,
@@ -1031,6 +1086,11 @@ def task_environment_report(
 ) -> dict[str, Any]:
     if task != contract["task"]:
         raise WorkflowError("--task must match task-contract.json")
+    route_assessment: dict[str, Any] | None = None
+    route_assessment_sha256: str | None = None
+    if task == "model-conversion":
+        route_assessment = read_route_assessment(contract_path, run_dir, contract)
+        route_assessment_sha256 = sha256_file(run_dir / "route-assessment.json")
     inventory = host_inventory(project_root)
     params = contract.get("parameters", {})
     checks: list[dict[str, Any]] = []
@@ -1417,6 +1477,8 @@ def task_environment_report(
         "task": task,
         "runId": contract["runId"],
         "contractSha256": sha256_file(contract_path),
+        "routeAssessment": "route-assessment.json" if route_assessment else None,
+        "routeAssessmentSha256": route_assessment_sha256,
         "authority": redact_data(contract["authority"]),
         "host": inventory["host"],
         "repository": inventory["repository"],
@@ -1432,14 +1494,212 @@ def atomic_write_json(path: Path, data: Any) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
-        os.fchmod(descriptor, 0o600)
+        fchmod = getattr(os, "fchmod", None)
+        if callable(fchmod):
+            fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             json.dump(data, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
         temporary.replace(path)
+        path.chmod(0o600)
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _new_run_id(task: str) -> str:
+    prefix = re.sub(r"[^A-Za-z0-9._-]+", "-", task).strip(".-_") or "task"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{prefix[:32]}-{timestamp}-{token_hex(4)}"
+
+
+def _safe_record_text(value: str, field: str) -> str:
+    _require_nonempty_string(value, field)
+    return redact_text(value.strip())
+
+
+def _authority_record_payload(
+    grants: Iterable[str],
+    *,
+    scope: str,
+    target_reference: str,
+    impact: str,
+    recovery: str,
+) -> dict[str, Any]:
+    return {
+        "recordedAt": _utc_now(),
+        "confirmedByUser": True,
+        "grants": sorted({str(item) for item in grants}),
+        "scope": _safe_record_text(scope, "scope"),
+        "targetReference": _safe_record_text(target_reference, "target reference"),
+        "impact": _safe_record_text(impact, "impact"),
+        "recovery": _safe_record_text(recovery, "recovery"),
+        "credentialMaterialStored": False,
+    }
+
+
+def create_task_run(
+    *,
+    task: str,
+    objective: str,
+    deliverables: Iterable[str] = (),
+    materials: Iterable[str | os.PathLike[str]] = (),
+    target_chip: str | None = None,
+    remote_linux: bool = False,
+    user_requested_remote_access: bool = False,
+    run_id: str | None = None,
+    project_root: Path = PROJECT_ROOT,
+) -> tuple[Path, Path, dict[str, Any], dict[str, Any]]:
+    """Create a private agent-owned task record from ordinary user intent."""
+    task = _safe_record_text(task, "task")
+    objective = _safe_record_text(objective, "objective")
+    selected_run_id = run_id or _new_run_id(task)
+    if not RUN_ID_PATTERN.fullmatch(selected_run_id):
+        raise WorkflowError("runId must contain only letters, numbers, dot, underscore, or dash")
+    if target_chip and task != "model-conversion":
+        raise WorkflowError("--target-chip is only valid with task=model-conversion")
+    if user_requested_remote_access and not remote_linux:
+        raise WorkflowError("explicit remote access requires --remote-linux")
+
+    requested_deliverables = [
+        _safe_record_text(str(item), "deliverable") for item in deliverables
+    ]
+    if not requested_deliverables:
+        requested_deliverables = (
+            ["模型转换产物与可复核的开发验证证据"]
+            if task == "model-conversion"
+            else ["用户请求的交付物与可复核验证证据"]
+        )
+
+    sources: list[Path] = []
+    names: set[str] = set()
+    for raw_material in materials:
+        candidate = Path(raw_material).expanduser()
+        try:
+            source = candidate.resolve(strict=True)
+        except FileNotFoundError as error:
+            raise WorkflowError(f"material does not exist: {candidate}") from error
+        if not source.is_file():
+            raise WorkflowError(f"material must be a file: {candidate}")
+        if source.name in names:
+            raise WorkflowError(f"material file names must be unique: {source.name}")
+        names.add(source.name)
+        sources.append(source)
+
+    root = project_root.resolve()
+    runs_root = root / "output" / "agent-runs"
+    runs_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    run_dir = runs_root / selected_run_id
+    try:
+        run_dir.mkdir(mode=0o700)
+    except FileExistsError as error:
+        raise WorkflowError(f"run already exists and will not be overwritten: {selected_run_id}") from error
+    run_dir.chmod(0o700)
+
+    material_paths: list[str] = []
+    if sources:
+        inputs_dir = run_dir / "inputs"
+        inputs_dir.mkdir(mode=0o700)
+        for source in sources:
+            destination = inputs_dir / source.name
+            shutil.copyfile(source, destination)
+            destination.chmod(0o600)
+            material_paths.append(destination.relative_to(run_dir).as_posix())
+
+    parameters: dict[str, Any] = {}
+    if task == "model-conversion" and len(material_paths) == 1:
+        parameters["sourceModel"] = material_paths[0]
+    if target_chip:
+        parameters["targetChip"] = target_chip.strip().lower()
+    if remote_linux:
+        parameters["developmentEnvironment"] = {
+            "os": "linux",
+            "architecture": "x86_64",
+            "reference": "customer-provided isolated Linux development environment",
+        }
+        parameters["requiresRemoteExecution"] = True
+        parameters["requiresModelTransfer"] = bool(material_paths)
+
+    authority: dict[str, Any] = {
+        "workspace": "current isolated checkout and this private run directory",
+        "grants": [],
+    }
+    if user_requested_remote_access:
+        initial_grants = {"remote-execution"}
+        if material_paths:
+            initial_grants.add("model-transfer")
+        authority["grants"] = sorted(initial_grants)
+        authority["grantRecords"] = [
+            _authority_record_payload(
+                initial_grants,
+                scope="current isolated development task only",
+                target_reference="user-provided isolated Linux development environment",
+                impact="remote inspection and task-scoped work requested by the user",
+                recovery="close the remote session and remove task-scoped temporary files",
+            )
+        ]
+
+    contract: dict[str, Any] = {
+        "schemaVersion": "1.0",
+        "runId": selected_run_id,
+        "task": task,
+        "userObjective": objective,
+        "expectedDeliverables": requested_deliverables,
+        "allowedChanges": [f"output/agent-runs/{selected_run_id}/"],
+        "requiredCapabilities": [],
+        "acceptance": {},
+        "authority": authority,
+        "parameters": parameters,
+    }
+    validate_contract(contract)
+    contract_path = run_dir / "task-contract.json"
+    atomic_write_json(contract_path, contract)
+    assessment = assess_task_report(contract_path, run_dir, contract, project_root=root)
+    atomic_write_json(run_dir / "route-assessment.json", assessment)
+    return run_dir, contract_path, contract, assessment
+
+
+def record_authority_grants(
+    contract_path: Path,
+    run_dir: Path,
+    contract: dict[str, Any],
+    *,
+    grants: Iterable[str],
+    confirmed_by_user: bool,
+    scope: str = "current isolated development task only",
+    target_reference: str = "task-scoped isolated target",
+    impact: str = "limited to the explicitly granted capability",
+    recovery: str = "stop the action and restore or recreate the isolated development environment",
+) -> dict[str, Any]:
+    """Record coarse authority after an explicit user confirmation, without credentials."""
+    if not confirmed_by_user:
+        raise WorkflowError("authority cannot be recorded without explicit user confirmation")
+    requested = {str(item) for item in grants}
+    if not requested:
+        raise WorkflowError("at least one authority grant is required")
+    unknown = sorted(requested - AUTHORITY_GRANTS)
+    if unknown:
+        raise WorkflowError(f"unknown authority grants: {', '.join(unknown)}")
+    record = _authority_record_payload(
+        requested,
+        scope=scope,
+        target_reference=target_reference,
+        impact=impact,
+        recovery=recovery,
+    )
+    authority = contract["authority"]
+    authority["grants"] = sorted(_authority_grants(contract) | requested)
+    records = authority.setdefault("grantRecords", [])
+    if not isinstance(records, list):
+        raise WorkflowError("authority.grantRecords must be an array when present")
+    records.append(record)
+    validate_contract(contract)
+    atomic_write_json(contract_path, contract)
+    return record
 
 
 def _print_report(report: dict[str, Any], output_format: str) -> None:
@@ -1510,15 +1770,101 @@ def assess_main(arguments: list[str]) -> int:
     return 0 if report["routeVerdict"] == "READY" else 1
 
 
+def start_main(arguments: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="start.sh",
+        description="Create a private task run from ordinary user intent and assess its route.",
+    )
+    parser.add_argument("--task", default="model-conversion")
+    parser.add_argument("--objective", required=True)
+    parser.add_argument("--deliverable", action="append", default=[])
+    parser.add_argument("--material", action="append", default=[])
+    parser.add_argument("--target-chip")
+    parser.add_argument("--remote-linux", action="store_true")
+    parser.add_argument("--user-requested-remote-access", action="store_true")
+    parser.add_argument("--run-id")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
+    options = parser.parse_args(arguments)
+    run_dir, contract_path, contract, assessment = create_task_run(
+        task=options.task,
+        objective=options.objective,
+        deliverables=options.deliverable,
+        materials=options.material,
+        target_chip=options.target_chip,
+        remote_linux=options.remote_linux,
+        user_requested_remote_access=options.user_requested_remote_access,
+        run_id=options.run_id,
+    )
+    result = {
+        "runDirectory": run_dir.relative_to(PROJECT_ROOT).as_posix(),
+        "contract": contract_path.relative_to(PROJECT_ROOT).as_posix(),
+        "routeAssessment": (run_dir / "route-assessment.json").relative_to(PROJECT_ROOT).as_posix(),
+        "routeVerdict": assessment["routeVerdict"],
+        "needsInput": assessment["needsInput"],
+        "authorityGrants": sorted(_authority_grants(contract)),
+        "remoteConnectionAllowed": "remote-execution" in _authority_grants(contract),
+    }
+    if options.format == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(f"Private run: {result['runDirectory']}")
+        print(f"Route verdict: {result['routeVerdict']}")
+        for item in result["needsInput"]:
+            print(f"[NEEDS_INPUT] {item['question']}")
+        if result["remoteConnectionAllowed"]:
+            print("Next: connect to the declared development environment for read-only inspection.")
+        else:
+            print("Next: resolve needsInput, record any explicit authority, then rerun assess before doctor.")
+    return 0
+
+
+def authorize_main(arguments: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="authorize.sh",
+        description="Record task-scoped coarse authority after explicit user confirmation.",
+    )
+    parser.add_argument("--contract", required=True)
+    parser.add_argument("--grant", action="append", choices=sorted(AUTHORITY_GRANTS), required=True)
+    parser.add_argument("--confirmed-by-user", action="store_true")
+    parser.add_argument("--scope", default="current isolated development task only")
+    parser.add_argument("--target-reference", default="task-scoped isolated target")
+    parser.add_argument("--impact", default="limited to the explicitly granted capability")
+    parser.add_argument(
+        "--recovery",
+        default="stop the action and restore or recreate the isolated development environment",
+    )
+    options = parser.parse_args(arguments)
+    contract_path, run_dir, contract = resolve_contract_context(options.contract)
+    record = record_authority_grants(
+        contract_path,
+        run_dir,
+        contract,
+        grants=options.grant,
+        confirmed_by_user=options.confirmed_by_user,
+        scope=options.scope,
+        target_reference=options.target_reference,
+        impact=options.impact,
+        recovery=options.recovery,
+    )
+    print("Recorded grants: " + ", ".join(record["grants"]))
+    print("Existing assessment and environment reports are now stale.")
+    print("Next: rerun assess, then doctor on the actual execution machine.")
+    return 0
+
+
 def main(arguments: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if arguments is None else arguments)
     if not args:
-        print("usage: agent_workflow.py assess|doctor ...", file=sys.stderr)
+        print("usage: agent_workflow.py start|assess|authorize|doctor ...", file=sys.stderr)
         return 2
     command = args.pop(0)
     try:
+        if command == "start":
+            return start_main(args)
         if command == "assess":
             return assess_main(args)
+        if command == "authorize":
+            return authorize_main(args)
         if command == "doctor":
             return doctor_main(args)
         raise WorkflowError(f"unknown command: {command}")

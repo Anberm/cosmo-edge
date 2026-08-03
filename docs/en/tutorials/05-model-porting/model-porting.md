@@ -188,10 +188,22 @@ candidate together.
 When delegating the task to a coding agent, first read
 [Agent-Assisted Development](/en/development/agent-assisted-development). An ordinary user states the target
 device, model materials, business preference, and expected deliverable. The agent generates the run-local
-contract, uses `scripts/agent/assess.sh` to select a route, and runs `doctor.sh` in the actual Linux execution
+contract through `scripts/agent/start.sh`, which copies named materials and selects a route. It reruns
+`assess.sh` after task or authority changes, then runs `doctor.sh` in the actual Linux execution
 environment. Once admitted, `convert_model.sh` and `verify.sh` record the toolchain, commands, hashes, and
 layered evidence. Users do not hand-pick releases, images, or commands; the content below is an advanced
 manual and troubleshooting reference.
+
+When the user supplies an isolated Linux development host, account, and password and explicitly asks to
+connect, that already confirms this task's remote execution. The agent creates a sanitized record and uses
+the password only through `scripts/agent/connect.sh`'s interactive OpenSSH prompt; it does not ask again for
+an SSH key or authorization form. Installation, privilege elevation, and device writes remain separate
+decisions when they become necessary.
+
+The formal executor currently begins with ONNX. `.pt` and `.pth` may be assessed as materials, but exporting
+ONNX from the training framework is a separate requested or assessed stage. `doctor`, conversion, and the
+evidence chain remain blocked while route assessment is unresolved. Do not install Ultralytics first,
+perform one ad hoc export, and describe that as a fixed repository capability.
 
 Separate an officially supported installation route, local capability, and this run's resolved identity.
 Use the current [official TPU-MLIR installation instructions](https://github.com/sophgo/tpu-mlir#-installation)

@@ -20,6 +20,36 @@ workflow.
   Sophon and x86 model resources and templates.
 - `3rd/` and `prebuild/` — third-party and prebuilt dependencies; do not edit.
 
+## Mandatory agent-assistance trigger
+
+For a task that combines customer/task model material with model conversion,
+remote execution, model transfer, or test-device work, activate this repository's
+workflow before the first external or environment-changing command:
+
+1. Restate the business outcome and intended deliverables, then run
+   `scripts/agent/start.sh` (or `start.ps1`) with the objective and named
+   materials. This creates the private task contract and route assessment; the
+   customer does not write JSON or select an implementation recipe.
+2. Resolve `needsInput`. A user message that supplies a development host and
+   credentials and asks the agent to connect/check/develop is already explicit
+   task-scoped `remote-execution` authority; when model material is named for
+   that host it also grants `model-transfer`. Pass
+   `--user-requested-remote-access` to `start` and do not ask the same question
+   again. If intent is unclear, ask one natural-language question, then use
+   `authorize.sh --confirmed-by-user` and reassess.
+3. A `READY` assessment is required before task `doctor`; that admitted doctor
+   report is required before conversion; both are rechecked by verification.
+   Changing the contract or assessment invalidates downstream admission.
+
+After the private record and explicit remote grant exist, use `connect.sh` (or
+`connect.ps1`) to open interactive SSH; OpenSSH receives the password through
+its terminal prompt and the repository stores only a sanitized event. Invoke it
+in an interactive terminal/PTY and answer the prompt without repeating the
+password in commentary or a command. Raw `ssh`,
+`scp`, installation, `sudo`, conversion, or deployment before the record/grant is
+outside the assisted workflow. This trigger does not alter ordinary local
+repository development that needs none of these task-specific capabilities.
+
 ## Working order
 
 1. Start from the user's business outcome, available materials, target context,
@@ -28,15 +58,17 @@ workflow.
    container, script, or repository example when those facts can be inspected
    or recommended from the material, target device, repository, and current
    official documentation.
-2. Create the private task contract under `output/agent-runs/<run-id>/`. The
-   contract is an agent-owned execution record, not a form for the customer.
-   Run `./scripts/agent/assess.sh --contract ...` to inventory materials,
-   compare credible routes, and emit only unresolved business, environment, or
-   authority questions. Translate `needsInput` into one concise user question;
-   do not expose internal JSON for confirmation.
-3. Run `./scripts/agent/doctor.sh --baseline` for a read-only inventory before
-   changing the development environment. Run task admission on the machine
-   that will actually execute the work, not merely on the orchestration client.
+2. Use `./scripts/agent/start.sh --objective ...` to create the private task
+   contract under `output/agent-runs/<run-id>/` and perform the first assessment.
+   The contract is an agent-owned execution record, not a customer form. Use
+   `assess.sh --contract ...` again after task or authority changes. Translate
+   `needsInput` into one concise user question; do not expose internal JSON for
+   confirmation.
+3. Run `./scripts/agent/doctor.sh --baseline` for a local read-only inventory.
+   If the user supplied a remote development machine and explicitly requested
+   connection, open it through `connect.sh` even when other business input is
+   still unresolved, inspect it read-only, and run task admission on the machine
+   that will actually execute the work.
 4. Select relevant tutorials, examples, templates, tests, and code facts. When
    reusing an example or template, record why it applies and how the task
    differs. A direct code or documentation task may record these sources in its
@@ -45,7 +77,10 @@ workflow.
    current machine is ready. Admit by required capabilities and callable tools;
    after admission, freeze the actual Python/package/image/tool identities and
    commands used by this run. Do not require one globally fixed recipe.
-6. Execute only inside the granted scope. Use four coarse gates when applicable:
+6. Execute only inside the granted scope. Infer no authority from credentials
+   alone, but treat credentials plus an explicit connect/check/develop request
+   as confirmation and record it without another round trip. Otherwise use
+   `authorize.sh`, then reassess. Use four coarse gates when applicable:
    `environment-change`, `remote-execution`, `model-transfer`, and
    `device-deployment`. Keep the exact target, read/write scope, impact, and
    recovery plan in the task context without turning every implementation
@@ -60,7 +95,7 @@ workflow.
 | C++ | `bash scripts/build_cpu_test.sh`, then `./build_cpu/cosmo-tests`; before submission run `scripts/format_check.sh` |
 | Documentation | `npm run docs:verify` |
 | Frontend | `cd src/web && npm ci && npm run build` |
-| Sophon model conversion selected by assessment | `./scripts/agent/assess.sh --contract ...`, then on admitted Linux `./scripts/agent/doctor.sh --task model-conversion --contract ...`, `./scripts/agent/convert_model.sh --contract ...`, and `./scripts/agent/verify.sh --contract ...` |
+| Sophon model conversion selected by assessment | `./scripts/agent/start.sh --objective ... --material ...`, resolve and reassess any `needsInput`, then on admitted Linux run `doctor.sh --task model-conversion --contract ...`, `convert_model.sh --contract ...`, and `verify.sh --contract ...` |
 | Other task | Use its task contract and the closest native test commands; list anything not verified |
 
 ## Engineering boundaries
@@ -81,6 +116,10 @@ workflow.
   example index only after two real recordings pass its promotion rules; an
   empty index is not a success claim and does not make unrelated development
   unsupported.
+- `.pt` and `.pth` training artifacts are accepted as task materials, but this
+  release does not claim an automatic training-framework-to-ONNX executor.
+  Assess that export as a separate stage or request a suitable ONNX; do not
+  improvise an export command and call it the supported conversion path.
 - x86 or mock success is not Sophon-device or production acceptance. Report
   conclusions by the layer actually tested.
 - Preparing an upstream change to `src/nn/`, `src/infer/`, model templates,
@@ -93,9 +132,19 @@ workflow.
 - Development-machine authority covers only the workspace, commands, and writes
   explicitly granted by the user. It does not imply software installation,
   administrator access, device access, or production access.
-- Do not request, print, persist, or commit credentials, tokens, private
+- `--confirmed-by-user` and `--user-requested-remote-access` record authority
+  already expressed in the current interaction; neither lets the agent invent
+  authority. Supplying credentials without an action request is not enough.
+- A user may provide an isolated development host, account, and password in the
+  current private task interaction after the risk is stated. Use them only for
+  the immediate interactive OpenSSH prompt. Never echo them, pass the password
+  as a command argument/URL/environment variable, or persist raw connection
+  data in the contract, run events, evidence, documentation, or Git. Sanitize
+  record text instead of blocking the requested connection.
+- Customer materials explicitly put in scope may be copied only into the
+  current private, ignored run when the task needs them. Never place private
   streams, customer data, device serial numbers, private models, or new model
-  binaries.
+  binaries in repository-tracked paths or evidence text.
 - Create run directories with private permissions. Redact credential-like
   arguments, environment variables, and URL user information before recording
   commands. Work only in the current run directory; isolate workspaces on
@@ -107,6 +156,9 @@ workflow.
   isolated Linux x86_64 environment. Guide the user to local/remote Linux or an
   explicitly experimental compatibility layer; do not label CosmoEdge itself
   unsupported merely because this compiler ecosystem is Linux-oriented.
+- A development-machine connection does not authorize `sudo`, dependency
+  installation, global configuration changes, production access, or test-device
+  writes. Ask only when one of those additional actions becomes necessary.
 - Preserve prior failed attempts and data-flow status. A later unverified run
   must not erase an earlier failure; a measured pass may supersede it, or the
   evidence must record an explicit user-confirmed waiver.

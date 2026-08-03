@@ -102,6 +102,16 @@ def prepare_run(root: Path, contract: dict) -> tuple[Path, Path]:
     (run_dir / "inputs" / "candidate.onnx").write_bytes(b"synthetic-onnx-fixture")
     contract_path = run_dir / "task-contract.json"
     contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    route = {
+        "schemaVersion": "1.0",
+        "mode": "assessment",
+        "task": contract["task"],
+        "runId": contract["runId"],
+        "contractSha256": core.sha256_file(contract_path),
+        "needsInput": [],
+        "routeVerdict": "READY",
+    }
+    (run_dir / "route-assessment.json").write_text(json.dumps(route), encoding="utf-8")
     return run_dir, contract_path
 
 
@@ -227,6 +237,9 @@ class ModelConversionWorkflowTest(unittest.TestCase):
                 "runId": contract["runId"],
                 "task": contract["task"],
                 "contractSha256": core.sha256_file(contract_path),
+                "routeAssessmentSha256": core.sha256_file(
+                    run_dir / "route-assessment.json"
+                ),
                 "environmentVerdict": "READY",
                 "repository": core._git_snapshot(),
                 "toolchain": make_toolchain_identity(),
@@ -239,6 +252,36 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             contract["userObjective"] = "changed after admission"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
             with self.assertRaisesRegex(core.WorkflowError, "changed after"):
+                conversion._read_environment_report(contract_path, run_dir, contract)
+
+    def test_conversion_rejects_missing_or_changed_route_assessment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = make_contract()
+            run_dir, contract_path = prepare_run(root, contract)
+            route_path = run_dir / "route-assessment.json"
+            original_route = route_path.read_text(encoding="utf-8")
+            report = {
+                "runId": contract["runId"],
+                "task": contract["task"],
+                "contractSha256": core.sha256_file(contract_path),
+                "routeAssessmentSha256": core.sha256_file(route_path),
+                "environmentVerdict": "READY",
+                "repository": core._git_snapshot(),
+                "toolchain": make_toolchain_identity(),
+            }
+            (run_dir / "environment-report.json").write_text(
+                json.dumps(report), encoding="utf-8"
+            )
+            route_path.unlink()
+            with self.assertRaisesRegex(core.WorkflowError, "file does not exist"):
+                conversion._read_environment_report(contract_path, run_dir, contract)
+
+            route_path.write_text(original_route, encoding="utf-8")
+            route = json.loads(original_route)
+            route["recommendedRoute"] = "changed-after-doctor"
+            route_path.write_text(json.dumps(route), encoding="utf-8")
+            with self.assertRaisesRegex(core.WorkflowError, "changed after environment admission"):
                 conversion._read_environment_report(contract_path, run_dir, contract)
 
     def test_previous_execution_manifest_is_archived_before_rerun(self):
@@ -309,6 +352,9 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             "commit": "1" * 40,
             "tree": "2" * 40,
             "contractSha256": core.sha256_file(contract_path),
+            "routeAssessmentSha256": core.sha256_file(
+                run_dir / "route-assessment.json"
+            ),
             "environmentVerdict": "READY",
             "repository": core._git_snapshot(),
             "toolchain": make_toolchain_identity(),

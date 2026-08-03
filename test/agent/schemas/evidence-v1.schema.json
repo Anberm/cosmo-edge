@@ -10,6 +10,10 @@
     "userObjective",
     "commit",
     "timestamp",
+    "routeAssessment",
+    "routeAssessmentSha256",
+    "environmentReport",
+    "authorityGrants",
     "stages",
     "deliverables",
     "developmentVerdict",
@@ -42,6 +46,28 @@
     "timestamp": {
       "type": "string",
       "minLength": 1
+    },
+    "routeAssessment": {
+      "const": "route-assessment.json"
+    },
+    "routeAssessmentSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "environmentReport": {
+      "const": "environment-report.json"
+    },
+    "authorityGrants": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "environment-change",
+          "remote-execution",
+          "model-transfer",
+          "device-deployment"
+        ]
+      }
     },
     "stages": {
       "type": "array",

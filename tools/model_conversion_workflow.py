@@ -115,6 +115,8 @@ def conversion_parameters(contract: dict[str, Any], run_dir: Path) -> dict[str, 
 def _read_environment_report(
     contract_path: Path, run_dir: Path, contract: dict[str, Any]
 ) -> dict[str, Any]:
+    core.read_route_assessment(contract_path, run_dir, contract)
+    route_sha256 = core.sha256_file(run_dir / "route-assessment.json")
     report_path = run_dir / "environment-report.json"
     report = core.load_json(report_path)
     if not isinstance(report, dict):
@@ -123,6 +125,8 @@ def _read_environment_report(
         raise core.WorkflowError("environment report does not belong to this task contract")
     if report.get("contractSha256") != core.sha256_file(contract_path):
         raise core.WorkflowError("task contract changed after environment admission; rerun doctor")
+    if report.get("routeAssessmentSha256") != route_sha256:
+        raise core.WorkflowError("route assessment changed after environment admission; rerun doctor")
     if report.get("environmentVerdict") != "READY":
         raise core.WorkflowError("environment admission is not READY; conversion must not start")
     admitted_repository = report.get("repository")
@@ -508,6 +512,8 @@ def execute_conversion(
         "tree": environment.get("tree"),
         "repository": environment["repository"],
         "contractSha256": core.sha256_file(contract_path),
+        "routeAssessment": "route-assessment.json",
+        "routeAssessmentSha256": environment["routeAssessmentSha256"],
         "startedAt": utc_now(),
         "source": _artifact(source_model, run_dir, "source-onnx"),
         "target": {
@@ -1193,7 +1199,10 @@ def verify_conversion(
         "commit": environment.get("commit"),
         "timestamp": utc_now(),
         "environmentReport": "environment-report.json",
+        "routeAssessment": "route-assessment.json",
+        "routeAssessmentSha256": environment["routeAssessmentSha256"],
         "contractSha256": core.sha256_file(contract_path),
+        "authorityGrants": sorted(core._authority_grants(contract)),
         "selectedAssets": core.redact_data(selection["selectedAssets"]),
         "assetDifferences": core.redact_data(selection["differences"]),
         "selectedExample": selected_example.get("exampleId") if selected_example else None,

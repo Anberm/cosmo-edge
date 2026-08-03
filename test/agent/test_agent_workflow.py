@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import stat
 import sys
 import tempfile
 import unittest
@@ -58,6 +59,19 @@ class AgentWorkflowTest(unittest.TestCase):
             },
             "tools": {},
         }
+
+    def _write_ready_assessment(self, contract_path: Path, run_dir: Path, contract: dict) -> dict:
+        report = {
+            "schemaVersion": "1.0",
+            "mode": "assessment",
+            "task": contract["task"],
+            "runId": contract["runId"],
+            "contractSha256": agent_workflow.sha256_file(contract_path),
+            "needsInput": [],
+            "routeVerdict": "READY",
+        }
+        agent_workflow.atomic_write_json(run_dir / "route-assessment.json", report)
+        return report
 
     def test_contract_schema_and_runtime_validator_share_thin_required_shell(self):
         schema = json.loads((SCHEMAS / "task-contract-v1.schema.json").read_text(encoding="utf-8"))
@@ -265,6 +279,13 @@ class AgentWorkflowTest(unittest.TestCase):
         self.assertTrue(total is None or isinstance(total, int))
         self.assertTrue(available is None or isinstance(available, int))
 
+    def test_private_json_write_tolerates_windows_missing_fchmod(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "private.json"
+            with mock.patch.object(agent_workflow.os, "fchmod", None, create=True):
+                agent_workflow.atomic_write_json(path, {"status": "PASS"})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "PASS")
+
     def test_assessment_asks_only_for_missing_business_input(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -359,6 +380,185 @@ class AgentWorkflowTest(unittest.TestCase):
                 "source-model-selection", [item["id"] for item in report["needsInput"]]
             )
 
+    def test_start_creates_private_agent_owned_run_from_ordinary_intent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "customer-model.onnx"
+            source.write_bytes(b"private-model-fixture")
+            with mock.patch.object(
+                agent_workflow, "host_inventory", return_value=self._model_inventory()
+            ):
+                run_dir, contract_path, contract, report = agent_workflow.create_task_run(
+                    task="model-conversion",
+                    objective="让这个检测模型能在测试设备运行，并交付可复核证据。",
+                    materials=[source],
+                    target_chip="BM1688",
+                    run_id="ordinary-user-start",
+                    project_root=root,
+                )
+            self.assertEqual(report["routeVerdict"], "READY")
+            self.assertEqual(contract["parameters"]["sourceModel"], "inputs/customer-model.onnx")
+            self.assertNotIn(str(source.parent), contract_path.read_text(encoding="utf-8"))
+            copied = run_dir / "inputs" / source.name
+            self.assertEqual(copied.read_bytes(), source.read_bytes())
+            self.assertEqual(stat.S_IMODE(run_dir.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(copied.stat().st_mode), 0o600)
+            self.assertTrue((run_dir / "route-assessment.json").is_file())
+
+    def test_start_refuses_overwrite_and_pt_cannot_bypass_route_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "training-checkpoint.pt"
+            source.write_bytes(b"private-pt-fixture")
+            with mock.patch.object(
+                agent_workflow, "host_inventory", return_value=self._model_inventory()
+            ):
+                run_dir, contract_path, contract, report = agent_workflow.create_task_run(
+                    task="model-conversion",
+                    objective="把现有训练物料适配到 BM1688。",
+                    materials=[source],
+                    target_chip="bm1688",
+                    run_id="pt-route-gate",
+                    project_root=root,
+                )
+            self.assertEqual(report["routeVerdict"], "NEEDS_INPUT")
+            self.assertIn("onnx-material", [item["id"] for item in report["needsInput"]])
+            with self.assertRaisesRegex(agent_workflow.WorkflowError, "not READY"):
+                agent_workflow.task_environment_report(
+                    "model-conversion", contract_path, run_dir, contract, project_root=root
+                )
+            with self.assertRaisesRegex(agent_workflow.WorkflowError, "will not be overwritten"):
+                agent_workflow.create_task_run(
+                    task="model-conversion",
+                    objective="another task",
+                    materials=[source],
+                    target_chip="bm1688",
+                    run_id="pt-route-gate",
+                    project_root=root,
+                )
+
+    def test_remote_route_requires_explicit_grants_and_authorization_invalidates_assessment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "candidate.onnx"
+            source.write_bytes(b"private-onnx-fixture")
+            inventory = self._model_inventory()
+            inventory["host"].update({"os": "Windows", "architecture": "AMD64"})
+            with mock.patch.object(agent_workflow, "host_inventory", return_value=inventory):
+                run_dir, contract_path, contract, report = agent_workflow.create_task_run(
+                    task="model-conversion",
+                    objective="让模型在隔离测试设备运行。",
+                    materials=[source],
+                    target_chip="bm1688",
+                    remote_linux=True,
+                    run_id="remote-authority",
+                    project_root=root,
+                )
+            authority = next(
+                item for item in report["needsInput"] if item["id"] == "route-authority"
+            )
+            self.assertIn("remote-execution", authority["question"])
+            self.assertIn("model-transfer", authority["question"])
+            with self.assertRaisesRegex(agent_workflow.WorkflowError, "explicit user confirmation"):
+                agent_workflow.record_authority_grants(
+                    contract_path,
+                    run_dir,
+                    contract,
+                    grants=["remote-execution"],
+                    confirmed_by_user=False,
+                )
+            record = agent_workflow.record_authority_grants(
+                contract_path,
+                run_dir,
+                contract,
+                grants=["remote-execution", "model-transfer"],
+                confirmed_by_user=True,
+                target_reference="isolated Linux development host",
+            )
+            self.assertFalse(record["credentialMaterialStored"])
+            with self.assertRaisesRegex(agent_workflow.WorkflowError, "changed after route assessment"):
+                agent_workflow.read_route_assessment(contract_path, run_dir, contract)
+            with mock.patch.object(agent_workflow, "host_inventory", return_value=inventory):
+                refreshed = agent_workflow.assess_task_report(
+                    contract_path, run_dir, contract, project_root=root
+                )
+            agent_workflow.atomic_write_json(run_dir / "route-assessment.json", refreshed)
+            self.assertEqual(refreshed["routeVerdict"], "READY")
+
+            direct_objective = (
+                "连接隔离开发机检查环境，地址 "
+                + ".".join(("192", "168", "50", "20"))
+                + "，账号example-user，密码example-secret。"
+            )
+            with mock.patch.object(agent_workflow, "host_inventory", return_value=inventory):
+                _, direct_contract_path, direct_contract, direct_report = (
+                    agent_workflow.create_task_run(
+                        task="model-conversion",
+                        objective=direct_objective,
+                        materials=[source],
+                        target_chip="bm1688",
+                        remote_linux=True,
+                        user_requested_remote_access=True,
+                        run_id="remote-direct-request",
+                        project_root=root,
+                    )
+                )
+            self.assertEqual(direct_report["routeVerdict"], "READY")
+            self.assertEqual(
+                set(direct_contract["authority"]["grants"]),
+                {"remote-execution", "model-transfer"},
+            )
+            serialized = direct_contract_path.read_text(encoding="utf-8")
+            self.assertIn("[PRIVATE_TARGET]", serialized)
+            self.assertIn("[REDACTED]", serialized)
+            self.assertNotIn("example-secret", serialized)
+            self.assertFalse(
+                any(item["id"] == "route-authority" for item in direct_report["needsInput"])
+            )
+
+    def test_authority_record_sanitizes_connection_material_without_blocking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("credential-sanitization")
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            url_record = agent_workflow.record_authority_grants(
+                contract_path,
+                run_dir,
+                contract,
+                grants=["remote-execution"],
+                confirmed_by_user=True,
+                target_reference="ssh://user:password@example.invalid",
+            )
+            account_record = agent_workflow.record_authority_grants(
+                contract_path,
+                run_dir,
+                contract,
+                grants=["remote-execution"],
+                confirmed_by_user=True,
+                target_reference="测试环境账号 example-user",
+            )
+            address_record = agent_workflow.record_authority_grants(
+                contract_path,
+                run_dir,
+                contract,
+                grants=["remote-execution"],
+                confirmed_by_user=True,
+                target_reference="isolated host " + ".".join(("192", "168", "10", "20")),
+            )
+            self.assertIn("[REDACTED]", url_record["targetReference"])
+            self.assertIn("[REDACTED]", account_record["targetReference"])
+            self.assertIn("[PRIVATE_TARGET]", address_record["targetReference"])
+            serialized = contract_path.read_text(encoding="utf-8")
+            self.assertNotIn("example-user", serialized)
+            self.assertNotIn("user:password", serialized)
+            ordinary = "Add username and password validation fields to the local form."
+            self.assertEqual(
+                agent_workflow._safe_record_text(ordinary, "objective"), ordinary
+            )
+
     def test_command_redaction(self):
         cases = json.loads((FIXTURES / "redaction-cases.json").read_text(encoding="utf-8"))
         for case in cases:
@@ -398,6 +598,7 @@ class AgentWorkflowTest(unittest.TestCase):
             (run_dir / "model.onnx").write_bytes(b"fixture")
             contract_path = run_dir / "task-contract.json"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            self._write_ready_assessment(contract_path, run_dir, contract)
             with (
                 mock.patch.object(
                     agent_workflow,
@@ -438,6 +639,7 @@ class AgentWorkflowTest(unittest.TestCase):
             (run_dir / "model.onnx").write_bytes(b"fixture")
             contract_path = run_dir / "task-contract.json"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            self._write_ready_assessment(contract_path, run_dir, contract)
             identity = {
                 "kind": "python-package",
                 "id": "sha256:" + "a" * 64,
@@ -487,6 +689,7 @@ class AgentWorkflowTest(unittest.TestCase):
             (run_dir / "model.onnx").write_bytes(b"fixture")
             contract_path = run_dir / "task-contract.json"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            self._write_ready_assessment(contract_path, run_dir, contract)
             identity = {
                 "kind": "python-package",
                 "id": "sha256:" + "f" * 64,
@@ -524,6 +727,7 @@ class AgentWorkflowTest(unittest.TestCase):
             (run_dir / "model.onnx").write_bytes(b"fixture")
             contract_path = run_dir / "task-contract.json"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            self._write_ready_assessment(contract_path, run_dir, contract)
             inventory = self._model_inventory()
             inventory["host"].update({"os": "Windows", "architecture": "AMD64"})
             identity = {
@@ -563,6 +767,7 @@ class AgentWorkflowTest(unittest.TestCase):
             (run_dir / "model.onnx").write_bytes(b"fixture")
             contract_path = run_dir / "task-contract.json"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            self._write_ready_assessment(contract_path, run_dir, contract)
             identity = {
                 "kind": "python-package",
                 "id": "sha256:" + "a" * 64,
@@ -607,6 +812,7 @@ class AgentWorkflowTest(unittest.TestCase):
             (run_dir / "model.onnx").write_bytes(b"fixture")
             contract_path = run_dir / "task-contract.json"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            self._write_ready_assessment(contract_path, run_dir, contract)
             docker_info = subprocess.CompletedProcess(
                 ["docker", "info"],
                 0,

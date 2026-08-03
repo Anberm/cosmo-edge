@@ -43,10 +43,24 @@ Known technical constraints are useful optional input. Otherwise provide the dev
 device information. The agent recommends a route from the material, repository, actual environment, and
 current official instructions. If no reliable mapping exists, it keeps that layer unverified.
 
+When work must run on another isolated development machine, the direct path is to give the agent the host,
+account, password, and requested action together in the current private interaction: “Connect to this Linux
+development machine, inspect model-conversion readiness read-only, and continue if it is ready; here are the
+host, account, and password.” That sentence already authorizes this task's remote connection and, when a
+model is named, transfer of that model. The agent must not require an SSH key, alias, or authorization form.
+
+This is a supported but risky development mode. The agent product may retain connection data in private
+conversation history, so use only a production-isolated development machine, a temporary or least-privilege
+account, and a rotatable password. Production credentials do not belong on this path.
+
 The agent should not ask about technical facts it can discover. It should interrupt only for a consolidated
 minimum question when business/material input changes the deliverable, no executable isolated environment
 exists, or the next step needs new environment-change, remote-execution, model-transfer, or device-deployment
 authority.
+
+You do not need to run repository scripts first. For model conversion, remote development environments,
+model transfer, or test-device operations, the repository-root `AGENTS.md` tells the agent to activate this
+entry. Normal local code, frontend, and documentation commands remain unchanged.
 
 ## Optional Full Work Request
 
@@ -68,9 +82,25 @@ production credentials.
 ```
 
 The agent turns this request into a private, run-local task record. Before execution, it restates the task
-and deliverables in one or two sentences; you confirm that language, not JSON. It then runs read-only
-`assess` to produce route candidates and `needsInput`. Those structures are internal execution inputs.
-Only unresolved entries are translated into an ordinary-language question.
+and deliverables in one or two sentences; you confirm that language, not JSON. It then runs the unified
+`scripts/agent/start.sh` entry (`start.ps1` on Windows), safely copies the materials you named, creates the
+record, and performs the first read-only route assessment. Only unresolved `needsInput` entries are
+translated into an ordinary-language question.
+When the user already requested connection and supplied credentials, the agent records sanitized remote
+authority at the same time; host, account, and password are not copied into task JSON. Connection data that
+accidentally appears in record text is redacted instead of blocking the task.
+
+This is an illustrative command for the agent, not something the user must copy. If the target chip is
+unknown, the agent omits that option and lets assessment ask for target context:
+
+```bash
+./scripts/agent/start.sh \
+  --objective "Make this detector run on an isolated test device and return reviewable evidence" \
+  --material /secure-input/person-detector.onnx \
+  --target-chip bm1688 \
+  --remote-linux \
+  --user-requested-remote-access
+```
 
 Run records live under the Git-ignored `output/agent-runs/<run-id>/`. That directory must still never
 contain passwords, tokens, private keys, or credential-bearing URLs. Use isolated checkouts or workspaces
@@ -78,12 +108,35 @@ for different customers on a shared development machine.
 
 ## How Route Selection and Environment Admission Work
 
-The agent first runs `scripts/agent/assess.sh` (or `scripts/agent/assess.ps1` on Windows) to inventory
-materials, the current host, repository facts, and authority, then compare credible routes. Coverage in
+The unified entry first calls `assess` to inventory materials, the current host, repository facts, and
+authority, then compare credible routes. After task or authority changes, the agent refreshes it with
+`scripts/agent/assess.sh` (or `assess.ps1` on Windows). Coverage in
 current official upstream instructions makes a route eligible to assess; it does not prove that this
 machine is ready. After selecting a route, `doctor` checks only the architecture, resources, runtimes, and
 callable tools required by this task. This read-only phase does not install software, pull images, start
 services, change groups, or elevate privileges.
+
+Model-conversion stage evidence is chained. The current task's `route-assessment.json` must be `READY`
+before `doctor` can create environment admission; conversion and final verification then check the task,
+assessment, and environment-report hashes. Changing the task or adding authority invalidates downstream
+reports and requires the earlier stages to run again. Advanced manual commands remain useful for
+troubleshooting, but they cannot impersonate this agent evidence chain.
+
+Remote connection is an environment-discovery action and does not wait for every business input to become
+`READY`. Once the task record is current, the user explicitly requested connection, and assessment has not
+declared the route unsupported, the agent can run:
+
+```bash
+./scripts/agent/connect.sh \
+  --contract output/agent-runs/<run-id>/task-contract.json \
+  --host <development-host> \
+  --user <development-account>
+```
+
+OpenSSH then asks for the password in the interactive terminal. The agent enters the password supplied in
+the current private interaction. It never becomes a script argument or run record. Host and account may be
+visible in the agent product's conversation/terminal history, while the repository stores only a sanitized
+connection result. Inspect read-only after login; `doctor` still waits for a fully `READY` route assessment.
 
 Route assessment can return `READY`, `NEEDS_INPUT`, `NEEDS_ENVIRONMENT`, or `UNSUPPORTED`; users do not
 need to memorize these states. `needsInput` exists so the agent can generate the minimum question. The
@@ -123,9 +176,33 @@ remote execution, model transfer, and test-device deployment. They are risk gate
 fill. The agent consolidates missing grants for one stage and states the target, impact, and recovery plan.
 Workspace access does not imply any of these actions and authority does not carry between tasks.
 
-Passwords, tokens, and private keys belong only in the agent product's secure credential mechanism or a
-temporary private session. They must not enter task JSON, command arguments, evidence, documentation, or
-Git. Records contain only the granted action class and a sanitized target reference.
+If one user message supplies development-machine connection details and explicitly asks to connect, inspect,
+or begin development, it already confirms this task's `remote-execution`. When the task also names a model
+to upload, it confirms `model-transfer`. `start` records those sanitized grants without asking again. Ask
+once only when connection details are pasted without a requested action.
+
+After the user confirms in ordinary language, the agent records the coarse grant for this task, for example:
+
+```bash
+./scripts/agent/authorize.sh \
+  --contract output/agent-runs/<run-id>/task-contract.json \
+  --grant remote-execution \
+  --grant model-transfer \
+  --confirmed-by-user \
+  --target-reference "isolated Linux development environment"
+./scripts/agent/assess.sh --contract output/agent-runs/<run-id>/task-contract.json
+```
+
+`--confirmed-by-user` records a confirmation already obtained and does not let the agent invent authority.
+After the task record and grant exist, connect through `connect.sh`. Installing dependencies, pulling an
+image, using `sudo`, changing system configuration, and device deployment still require an impact statement
+and any additional authority when they actually become necessary.
+
+The user may provide an isolated development-machine account and password in the current private task
+interaction. The agent may enter the password only into OpenSSH's hidden interactive prompt. It must not be
+appended to a command, URL, environment variable, task JSON, evidence, documentation, or Git. Records contain
+only the action class and sanitized target reference. Temporary accounts, network isolation, and password
+rotation control the remaining conversation-retention risk.
 
 ## Selectable Repository Assets
 
@@ -164,12 +241,13 @@ and return an importable artifact and verification conclusion,” the agent shou
 1. Inventory the supplied model, training/export notes, test samples, and device information. Infer format,
    target mapping, I/O, and preprocessing from inspectable facts; ask only about an unresolved fact that
    changes the deliverable.
-2. Run `scripts/agent/assess.sh` to compare credible local-Linux and remote-Linux routes, recommend one,
-   and identify any coarse-grained authority gap. A Windows host is not mislabeled as product unsupported.
+2. Run `scripts/agent/start.sh` to copy named materials into the Git-ignored private run, create the task
+   record, compare credible local-Linux and remote-Linux routes, and identify any coarse-grained authority
+   gap. A Windows host is not mislabeled as product unsupported.
 3. Select the closest tutorial, template, and example and record applicability and differences. Example
    parameters do not silently become user requirements.
-4. Place the source in the private current run and generate the task record; the user writes neither a
-   Schema nor a toolchain release.
+4. Consolidate unresolved business, environment, and authority questions. After user confirmation, record
+   coarse authority and rerun `assess`; the user writes no Schema, authority JSON, or toolchain release.
 5. Run `scripts/agent/doctor.sh` in the Linux environment that will execute the conversion. It discovers
    compatible capabilities and freezes actual releases, paths, and hashes after admission. It never pulls
    an image or installs a dependency.
@@ -184,6 +262,11 @@ and return an importable artifact and verification conclusion,” the agent shou
 Candidate parameters come from this task, not a YOLOv8n example's fixed shape, class count, or hash. An
 explicit request for another chip must not be rewritten as BM1688. Without independent evidence mapping
 compiler option to runtime identifier and artifact, only chip-independent preparation can complete.
+
+`.pt` and `.pth` files can enter the unified entry as materials to assess, but this release's formal
+executor begins with ONNX. Export from the training framework is a separate stage: request a suitable ONNX
+or separately assess the user's training project and an official export route. Do not install Ultralytics
+ad hoc and present one temporary export as a supported capability.
 
 The first conversion deliverable is `.bmodel + execution-manifest.json + evidence`. A `.bmodel` can continue
 through **Add Model**, but it is not the `model.nn` file in a full import package and cannot become CENN by
@@ -210,12 +293,13 @@ This path does not connect to or deploy onto a real device by default. Developme
 extends automatically to a device.
 
 If you deliberately want the agent to operate a recoverable test device isolated from production, state
-the exact target, read-only versus deployment scope, recovery method, and risk in the private session. Use
-the agent product's secure connection or credential input mechanism. Giving a test-device IP, username,
+the exact target, read-only versus deployment scope, recovery method, and risk in the private session. Giving
+a test-device IP, username,
 and password to an agent is still a risky development experiment: product accounts may have write access,
 and the agent host may retain conversation data. Prefer temporary or least-privilege accounts, network and
 data isolation, and credential rotation after the task.
 
-Never put credentials in a prompt template, task JSON, `AGENTS.md`, documentation, command evidence, or
-Git. Production devices, production credentials, and unrecoverable writes are outside this entry's
+Credentials may appear in one private task interaction, but never put them in a reusable prompt template,
+task JSON, `AGENTS.md`, documentation, command evidence, or Git. Production devices, production credentials,
+and unrecoverable writes are outside this entry's
 default support boundary.

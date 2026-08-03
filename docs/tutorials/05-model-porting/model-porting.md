@@ -183,9 +183,18 @@ PY
 
 如果把任务交给编码智能体，先阅读[智能体辅助二次开发](/development/agent-assisted-development)。
 普通用户只需说明目标设备、模型物料、业务偏好和期望交付。智能体应生成本次运行的任务契约，
-先执行 `scripts/agent/assess.sh` 选择路径，再在实际 Linux 执行环境运行 `doctor.sh`。环境满足后，
+先执行 `scripts/agent/start.sh` 复制所指物料、生成任务记录并选择路径；任务或授权变化后重跑
+`assess.sh`，再在实际 Linux 执行环境运行 `doctor.sh`。环境满足后，
 通过 `convert_model.sh` 和 `verify.sh` 留下工具链、命令、哈希与分层证据。用户无需手工选择版本、
 镜像或命令；下面的内容仅是高级人工执行和排障参考。
+
+如果用户给出隔离 Linux 开发机的地址、账户、密码并明确要求连接，这已经是本任务的远程执行
+确认。智能体应生成脱敏记录并通过 `scripts/agent/connect.sh` 的 OpenSSH 交互提示使用密码，不重复
+要求 SSH Key 或授权表；安装、提权和设备写入仍在实际需要时单独确认。
+
+当前正式执行器从 ONNX 开始。`.pt`/`.pth` 可作为待评估物料，但训练框架导出 ONNX 必须作为独立
+阶段请求或评估；路径评估未就绪时，`doctor`、转换和证据链不会放行。不要先安装 Ultralytics、
+临时导出一次，再把该过程写成仓库已经支持的固定能力。
 
 先把“官方支持的安装路径”“本机是否具备能力”和“本次实际身份”分开。执行时应以算能
 [TPU-MLIR 官方安装说明](https://github.com/sophgo/tpu-mlir#-installation)为准：其支持的 wheel、
