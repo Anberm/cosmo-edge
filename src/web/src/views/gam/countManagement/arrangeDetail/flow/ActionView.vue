@@ -40,7 +40,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import _ from 'lodash'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { t } from '@/i18n'
@@ -57,11 +57,11 @@ const emit = defineEmits(['onAction'])
 
 const actions = ref({})
 const expandedGroups = ref({})
-const groupDict = {
+const groupDict = computed(() => ({
   1: t('glossary.algorithmActions'),
   2: t('glossary.businessProcessing'),
   3: t('glossary.otherComponents')
-}
+}))
 
 const rebuildGroups = (list) => {
   const grouped = _.groupBy(Array.isArray(list) ? list : [], 'actionType')

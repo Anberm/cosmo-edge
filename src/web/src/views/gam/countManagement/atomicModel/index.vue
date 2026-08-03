@@ -536,14 +536,6 @@ const deleteFromDetail = () => {
 }
 
 // ── 原有数据 ──
-const topBarData = reactive({
-  formList: [
-    { label: t('field.modelName'), model: 'modelName' },
-    { label: t('field.modelId'), model: 'modelCode' },
-    { label: t('glossary.computeType'), model: 'gpuCode', type: 'select', dataList: [] }
-  ]
-})
-
 const tableData = ref([])
 const formData = reactive({
   gpuCode: '',
@@ -568,6 +560,18 @@ const detailModel = ref({})
 const modelLabelData = ref([])
 const engineTypeList = ref([])
 const platformType = ref(localStorage.getItem('platformType') || '')
+const topBarData = computed(() => ({
+  formList: [
+    { label: t('field.modelName'), model: 'modelName' },
+    { label: t('field.modelId'), model: 'modelCode' },
+    {
+      label: t('glossary.computeType'),
+      model: 'gpuCode',
+      type: 'select',
+      dataList: gpuCodes.value
+    }
+  ]
+}))
 const isX86 = ref(false)
 const addModelDialogTitle = computed(() => addModelMode.value === 'edit' ? t('action.editModel') : t('action.addModel'))
 const addModelMode = ref('add')
@@ -823,7 +827,7 @@ const indexcount = (index) => {
 }
 
 const getGPUCodes = () => {
-  gpuCodes.value = [{ label: t('common.all'), value: '' }]
+  gpuCodes.value = [{ labelI18nKey: 'common.all', value: '' }]
   proxy.$API.getGPUCodes().then((res) => {
     const { resData } = res
     resData.forEach((item) => {
@@ -832,7 +836,6 @@ const getGPUCodes = () => {
         value: item.code
       })
     })
-    topBarData.formList[2].dataList = gpuCodes.value
   })
 }
 

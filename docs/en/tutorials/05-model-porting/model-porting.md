@@ -20,13 +20,13 @@ next: false
 
 Complete third-party integration in this order:
 
-1. Confirm support conditions.
-2. Export or convert the model.
-3. Validate it on the conversion host.
-4. Upload and configure it.
-5. Run image inference first.
+1. Confirm support conditions and the model contract.
+2. Export ONNX; for Sophon, convert it again into a chip-specific `bmodel`.
+3. Validate the artifact on the conversion host.
+4. Upload and configure the model.
+5. Run positive and negative image tests first.
 6. Connect it to a video Pipeline.
-7. Validate parsing and sustained operation.
+7. Validate loading, parsing, events, and sustained operation.
 
 “Upload succeeded” proves only that the file was accepted. It does not prove that operators, input shape,
 output layout, and postprocessing are compatible with CosmoEdge.
@@ -67,7 +67,7 @@ or runtime code.
 
 - **Directly supported by current code**: Add `.onnx` on x86, add `.bmodel` on Sophon, and import packages
   containing `model.onnx` or `model.nn`.
-- **Reference evidence in this repository**: a YOLOv8 detector has completed x86 ONNX import, live OSD,
+- **Reference evidence in this repository**: a YOLOv8 detector has completed x86 ONNX import, live overlay,
   and event output.
 - **Still required on the target candidate**: validate your exact model, Sophon artifact, performance,
   resource usage, concurrency, and long-term stability.
@@ -115,7 +115,7 @@ sha256sum yolov8n.pt
 
 On macOS, use `shasum -a 256 yolov8n.pt`.
 
-Export:
+Export and record the ONNX hash:
 
 ```bash
 yolo export \
@@ -180,6 +180,13 @@ PY
 Stop and correct the export or implement a matching parser if the ONNX output already contains NMS, does
 not use the expected raw YOLOv8 layout, or has a different label count.
 
+::: tip About the Earlier VisDrone Screenshots Below
+This page restores every UI screenshot from the earlier VisDrone walkthrough so that no operational step is
+lost. Its ten labels are `pedestrian`, `people`, `bicycle`, `car`, `van`, `truck`, `tricycle`,
+`awning-tricycle`, `bus`, and `motor`; do not copy them to the COCO YOLOv8n example. If you reuse VisDrone,
+pin the model source, version, hash, I/O contract, and license. A screenshot is not reproducibility evidence.
+:::
+
 ## 3. Sophon Path: Convert the Same ONNX to bmodel
 
 Run this section only for a Sophon target. Record the conversion tool version, target chip, and model
@@ -218,54 +225,119 @@ compatibility layer only as an experimental route with explicitly accepted risk.
 
 An official development image represents a base execution environment; capability checks determine whether
 it also contains a complete compiler. Pulling, starting, or changing it requires separate authority, and
-the resolved image identity must be recorded:
+the resolved image identity must be recorded. The v3.2 image below is a reusable repository example, not
+the only admitted version for every task; other upstream-supported routes are assessed by callable
+capabilities.
+
+### 3.1 Install and Verify Docker
+
+Follow the [official Docker Engine installation instructions](https://docs.docker.com/engine/install/) for
+the target operating system. Do not treat the earlier tutorial's single `apt` or `yum` command as a
+universal installation method.
+
+![Docker installation process shown in the earlier walkthrough](images/img_01.webp)
+
+Check both the client and daemon after installation:
 
 ```bash
-docker pull sophgo/tpuc_dev:latest
+docker --version
+docker info
+```
+
+![Checking the Docker installation with docker --version](images/img_02.webp)
+
+On Linux, if non-root users must run Docker, follow Docker's post-install instructions for the `docker`
+group and sign in again. Membership grants high host privileges, so follow the host security policy.
+
+![Docker user-group configuration in the earlier walkthrough](images/img_03.webp)
+
+### 3.2 Download and Load the Pinned Conversion Image
+
+The commands below use the repository's existing v3.2 reference toolchain. Download the archive and record
+its hash:
+
+```bash
+curl -L \
+  -o sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz \
+  https://sophon-file.sophon.cn/sophon-prod-s3/drive/24/06/14/12/sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+sha256sum sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+```
+
+![Downloading the pinned Sophon TPU-MLIR image archive](images/img_04.webp)
+
+Load the image and confirm its tag:
+
+```bash
+docker load -i sophgo-tpuc_dev-v3.2_191a433358ad.tar.gz
+docker images sophgo/tpuc_dev
+```
+
+![Loading the Sophon conversion image with docker load](images/img_05.webp)
+
+![Terminal output after the conversion image loads](images/img_06.webp)
+
+Common commands:
+
+| Command | Purpose |
+| --- | --- |
+| `docker images` | List local images and tags |
+| `docker run --rm -it -v "$PWD:/workspace" sophgo/tpuc_dev:v3.2 bash` | Start the pinned image and mount the current directory |
+| `exit` | Leave the container; `--rm` also removes the stopped temporary container |
+
+### 3.3 Start the Container and Check the Tools
+
+Put `yolov8n.onnx` in the current directory and start the container:
+
+```bash
 docker run --rm -it \
   -v "$PWD:/workspace" \
   -w /workspace \
-  sophgo/tpuc_dev:latest \
+  sophgo/tpuc_dev:v3.2 \
   bash
 ```
 
-Docker is optional. On the host or in the container, choose an official release compatible with the
-current Python, model, and chip, install it in isolation, and check capabilities. Do not execute the
-following placeholder as-is; the release page supplies the actual version and filename:
+![Starting the Sophon conversion container with a mounted model directory](images/img_07.webp)
+
+The image should contain the conversion tools. Check `model_transform --help`, `model_deploy --help`, and
+version output first. Install another package only if the pinned image actually lacks the commands, and
+record its source and version instead of silently replacing the image environment.
+
+![TPU-MLIR environment check shown in the earlier walkthrough](images/img_08.webp)
+
+### 3.4 Transform to MLIR
+
+The following command is for the pinned v3.2 reference image. Check the relevant `--help` before changing
+toolchain versions. Inside the container, run:
 
 ```bash
-python3 -m venv .venv-tpu-mlir
-source .venv-tpu-mlir/bin/activate
-# Install the selected wheel or source release per upstream instructions after checking its digest.
-python -c 'from importlib.metadata import version; print(version("tpu_mlir"))'
-command -v model_transform.py || command -v model_transform
-command -v model_deploy.py || command -v model_deploy
-```
-
-Installing packages, pulling an image, or downloading a large file changes the environment or consumes
-network and requires approval. Official coverage makes a route eligible to try, not proof of model
-compatibility; record actual package release, source digest, and commands every time. Automated admission
-also accepts compiler entries in explicit paths or `PATH`, rather than treating one scaffold layout as a
-global standard.
-
-The following is the manual BM1688/F16 command reference. Calling each entry script through the selected
-Python also detects an entry file whose shebang became invalid after an environment was moved:
-
-```bash
-python "$VIRTUAL_ENV/bin/model_transform.py" \
+cd /workspace
+model_transform \
   --model_name yolov8n \
   --model_def yolov8n.onnx \
   --input_shapes '[[1,3,640,640]]' \
   --pixel_format rgb \
   --mlir yolov8n.mlir
+```
 
-python "$VIRTUAL_ENV/bin/model_deploy.py" \
+![Where model_transform is run in the earlier VisDrone example](images/img_09.webp)
+
+![Terminal output after model_transform creates the MLIR](images/img_10.webp)
+
+If the model needs explicit output names, mean, scale, or a test input, use the actual export contract and
+that tool version's help. Do not copy VisDrone-specific arguments from the screenshot.
+
+### 3.5 Compile a bmodel for the Target Chip
+
+BM1688 F16 example:
+
+```bash
+model_deploy \
   --mlir yolov8n.mlir \
   --quantize F16 \
   --chip bm1688 \
   --model yolov8n_bm1688_f16.bmodel
 
-python "$VIRTUAL_ENV/bin/model_tool" --info yolov8n_bm1688_f16.bmodel
+model_tool --info yolov8n_bm1688_f16.bmodel
 sha256sum yolov8n_bm1688_f16.bmodel
 ```
 
@@ -275,15 +347,28 @@ selected TPU-MLIR. Combine the [ONNX versioning rules](https://onnx.ai/onnx/repo
 of the actual candidate's IR, opset, and operators in the frozen compiler. If incompatible, re-export a
 supported ONNX from the source weights; do not edit `ir_version` to pretend it is compatible.
 
+![Where model_deploy is run in the earlier VisDrone example](images/img_11.webp)
+
+![The generated bmodel after conversion completes](images/img_12.webp)
+
 CV186X requires a toolchain and chip option that support CV186X. A BM1688 artifact cannot be used on a
 CV186X device. Unsupported operators, output mismatches, or compilation errors mean conversion failed;
 renaming the extension does not fix them.
 
-Post-conversion evidence must include:
+### 3.6 Validate After Conversion
+
+Inspect model metadata first:
+
+```bash
+model_tool --info yolov8n_bm1688_f16.bmodel
+```
+
+Then use the toolchain's model runner and one fixed test image to compare boxes, classes, and scores across
+the source framework, ONNX, and bmodel. Post-conversion evidence must include:
 
 - toolchain version, chip option, and full command;
-- `.bmodel` hash;
-- model inspection with the conversion tool;
+- ONNX, MLIR, and `.bmodel` hashes;
+- input shape, output tensors, and model inspection;
 - when test input exists, pre/post-conversion tensor comparison using a user override or the current tool's
   default tolerance policy, with that policy recorded;
 - after device authorization, box, class, and score comparison across the source framework, ONNX, and
@@ -298,25 +383,42 @@ An entry can join the verified-example index only after two real recordings with
 passing tensor comparison. A normal candidate can still be delivered against its own task acceptance,
 but it must not borrow another example's fixed shapes or hashes as proof.
 
-![The Sophon Add Model page requiring a bmodel file](images/img_15.webp)
+The Sophon Add Model page requires a `.bmodel` file.
 
 ## 4. Upload and Configure the Model
 
-### 4.1 Add the Model
+### 4.1 Open Model Repository
 
-1. Open **Model Repository**.
-2. Select **Add Model**, not **Import Model**, which is for a complete package.
-3. Enter main type, subtype, model name, normalization, and color channel.
-4. Upload `yolov8n.onnx` on x86 or the chip-specific `.bmodel` on Sophon.
-5. Save.
+Open **Model Repository**. Its list supports search and shows each model's type and related tasks.
 
 ![The model list and Add Model entry in Model Repository](images/img_13.webp)
 
-![The imported YOLOv8 ONNX model in an x86 environment](../06-ultralytics-yolo-edge/images/model-import.webp)
+Select **Add Model**. **Import Model** is for a complete model package, not the single-file path used here.
 
-Record the model ID assigned by the system. The model is not yet proven runnable.
+![Opening Add Model from Model Repository](images/img_14.webp)
 
-### 4.2 Configure Input, Postprocessing, and Labels
+### 4.2 Enter Details and Upload
+
+1. Set the main type to **Detection**.
+2. Select `YOLOV8_DET` only when it matches the output parsing contract.
+3. Use a model name and description that identify the candidate version.
+4. Select normalization and color channel.
+5. Upload `yolov8n.onnx` on x86 or a bmodel compiled for the exact Sophon chip.
+6. Save.
+
+![The Add Model form for the earlier VisDrone bmodel](images/img_15.webp)
+
+::: warning Screenshot Difference
+The screenshot uses a Sophon VisDrone model, so it shows a `.bmodel` and VisDrone name. The x86 example on
+this page uploads `yolov8n.onnx`. Both backends must use preprocessing and labels that match the artifact.
+:::
+
+Confirm that the entry appears in the list and record the model ID assigned by the system. The model is not
+yet proven runnable.
+
+![The newly added model in Model Repository](images/img_16.webp)
+
+### 4.3 Configure Input, Postprocessing, and Labels
 
 Open **Configure** and compare every item with the export record:
 
@@ -327,20 +429,74 @@ Open **Configure** and compare every item with the export record:
 - class IDs, names, and order;
 - output or advanced settings shown by the page.
 
-![Configuring input size, confidence, NMS, and class labels](images/img_17.webp)
+![Configuring input size, confidence, and NMS](images/img_17.webp)
 
-Save and reopen the page to prove persistence. Do not reuse the VisDrone labels shown in the screenshot for
-this COCO example.
+![Configuring class IDs, thresholds, and label names](images/img_18.webp)
+
+Save and reopen the page to prove persistence. The ten VisDrone labels in the screenshot apply only to that
+model. Keep the original 80-class COCO order for this YOLOv8n, then enable only `person` in the video
+Pipeline.
 
 ## 5. Image Validation: Prove Loading and Parsing First
 
-1. Create a **Detection / Analysis** task with **Image Analysis** as its data source.
-2. Select **Arrange Algorithm** and add only **Object Detection**.
-3. Select the uploaded YOLOv8n and enable only the `person` label.
-4. Save and open **Image Analysis**.
-5. Upload one clear positive image containing a person and one negative image without a person.
+The image path removes video decoding, tracking, and event rules from the problem, making model and parser
+faults easier to isolate.
 
-![A third-party Object Detection node in an image-analysis task](images/img_23.webp)
+### 5.1 Create an Image-Analysis Task
+
+Open **Task Configuration** and select **New Task**.
+
+![The New Task entry in Task Configuration](images/img_19.webp)
+
+Enter:
+
+- task name: `YOLOv8n Person Image Validation`;
+- data source type: **Image Analysis**;
+- task type: **Detection / Analysis**.
+
+![Entering the basic settings for an image-analysis task](images/img_20.webp)
+
+Save and confirm that the task appears in the list with a normal status.
+
+![The new image-analysis task in the task list](images/img_21.webp)
+
+### 5.2 Arrange the Minimum Image Chain
+
+Select **Arrange Algorithm** for the task.
+
+![Opening Algorithm Arrangement from the image-analysis task](images/img_22.webp)
+
+Add only **Object Detection** to keep the causal chain short.
+
+![The Object Detection node in an image-analysis task](images/img_23.webp)
+
+Select the uploaded YOLOv8n, enable only `person`, and save.
+
+![Selecting the third-party model and labels in Object Detection](images/img_24.webp)
+
+### 5.3 Upload Positive and Negative Samples
+
+Open **Image Analysis** and choose `YOLOv8n Person Image Validation`.
+
+![Selecting the newly created algorithm in Image Analysis](images/img_25.webp)
+
+Prepare at least:
+
+- one clear positive image containing a sufficiently large person;
+- one negative image without a person;
+- optionally, small, occluded, and edge-position targets.
+
+Upload the images.
+
+![An uploaded image waiting for analysis](images/img_26.webp)
+
+Select **Start Analysis** and wait for the completed status.
+
+![Completed image analysis with detected classes](images/img_27.webp)
+
+Open details and inspect boxes, classes, confidence, and the result list.
+
+![Boxes, classes, and confidence in image-analysis details](images/img_28.webp)
 
 Pass criteria:
 
@@ -349,51 +505,136 @@ Pass criteria:
 - the negative image does not produce many person boxes;
 - confidence values are finite and plausible, not empty, NaN, or a fixed abnormal value.
 
-![Boxes, classes, and confidence in an image-analysis result](images/img_28.webp)
-
 Do not proceed to video while image validation fails.
 
 ## 6. Connect the Model to a Video Pipeline
 
-Create a “YOLOv8n Person Detection Validation” video task with this minimum chain:
+### 6.1 Create a Video-Analysis Task
 
-1. **Video Decode**
-2. **Object Detection**: select the uploaded YOLOv8n and enable only `person`
-3. **Category Filter**: keep `person`, starting with **Min Pedestrian Size** at `60`
-4. **Region Alarm**: use the main area
-5. **Event Report**: retain at least a snapshot for the first test
+Return to **Task Configuration** and create another task.
 
-![Selecting the third-party detector and labels in a Pipeline](images/img_32.webp)
+![Entering the basic settings for a video-analysis task](images/img_29.webp)
 
-Assign the task to an offline channel using `data/test-video/Safety Helmet.mp4`, draw a region over the
-people's movement area, include the current time in the running strategy, save, and enable the service.
+Enter:
+
+- task name: `YOLOv8n Person Detection Validation`;
+- data source type: **Video Analysis**;
+- task type: **Detection / Analysis**.
+
+Save and confirm that the new task appears in the list.
+
+![The new video-analysis task in the task list](images/img_30.webp)
+
+### 6.2 Build the Minimum Acceptable Chain
+
+Select **Arrange Algorithm** and start from the empty flow.
+
+![The empty Algorithm Arrangement page for the new video task](images/img_31.webp)
+
+Configure these components in order:
+
+1. **Video Decode**.
+2. **Object Detection**: select the uploaded YOLOv8n and enable only `person`.
+3. **Tracking**.
+4. **Category Filter**: keep `person`; start **Min Pedestrian Size** at `60`.
+5. **Region Alarm**: use the main area and configure detection time.
+6. **Event Report**: retain a snapshot for the first validation.
+
+![Selecting the third-party model, labels, and frame sampling](images/img_32.webp)
+
+![Connecting Tracking after the third-party detector](images/img_33.webp)
+
+![The earlier quantity-limit region rule and its UI location](images/img_34.webp)
+
+::: warning Current Rule vs Earlier Screenshot
+The screenshot shows a quantity-limit rule suited to off-post or gathering use cases. This person-entry
+validation should use the current **Region Alarm** semantics for the main area and detection time. Do not
+copy the old quantity threshold into an intrusion chain mechanically.
+:::
+
+![Adding Event Report at the end of the Pipeline](images/img_35.webp)
+
+Review model, tracking, region-rule, and event fields under **Parameter Configuration**, then save.
+
+![Model, tracking, and region fields in the earlier detailed parameter page](images/img_36.webp)
+
+The current action catalog has no standalone OSD component that must be inserted manually. Live boxes are
+rendered from result metadata. First prove that **Video Decode → Object Detection** produces stable boxes,
+then restore tracking, filtering, region, and report nodes one by one to isolate failures.
 
 ## 7. End-to-End Acceptance
 
-### 7.1 Model Loading
+### 7.1 Add a Test Channel
 
-- The task moves from stopped to running without a repeating initialization error.
-- Logs report that the model loaded.
-- Host or device memory does not grow until the task is terminated.
+Prepare a video containing people. You can use `data/test-video/Safety Helmet.mp4` from this repository.
+Open **Video Access** and add an **Offline Video** channel.
 
-### 7.2 Inference Output
+![Adding an offline channel and uploading a test video](images/img_37.webp)
 
-- Live Display plays continuously.
-- People receive boxes at the expected positions.
-- The class is `person`, and scores and coordinates vary with the image.
-- Segments without people do not show many fixed boxes.
+::: warning Use the Current Capacity Message
+The screenshot is from an earlier version, and its “maximum 1 GB” text is not a current fixed limit. Upload
+now uses chunks and a safe-space check. Admission depends on the device's safe available space at that
+moment; if capacity is insufficient, follow the required-space, available-space, and suggested-action
+message in the UI.
+:::
 
-![Third-party model overlays in Live Display](images/img_42.webp)
+Wait for upload and channel processing to complete, then select **Service Assignment**.
 
-### 7.3 Parsing and Events
+![The Service Assignment entry after the offline channel is ready](images/img_38.webp)
 
-- A person inside the ROI creates an event after the rule is satisfied.
-- The event snapshot has the correct box, class, channel, and time.
-- Event Center can query by task and channel.
+### 7.2 Assign the Task, Region, and Running Strategy
+
+Choose `YOLOv8n Person Detection Validation` from the task list.
+
+![Selecting the third-party model validation task in Service Assignment](images/img_39.webp)
+
+Add a detection region that covers where people move. If the region is too small, the model can draw boxes
+without producing an event.
+
+![Drawing and saving the detection region](images/img_40.webp)
+
+Under **Running Strategy**, ensure the current time is in an active period. The current form accepts
+`0–100`: `0` means an infinite loop, and a positive value is the total play count. Resource help text that
+says “negative means infinite and zero means one” conflicts with form validation and runtime code. Follow
+the earlier screenshot and enter `0` to loop on this version; a negative value is rejected by the form.
+
+![Configuring offline-video strategy and repeat count](images/img_41.webp)
+
+Save and enable the service.
+
+### 7.3 Check Live Inference
+
+Open **Live Display** and choose the test channel.
+
+![Selecting the third-party model test channel in Live Display](images/img_42.webp)
+
+Select the validation task in algorithm-overlay settings.
+
+![Selecting the third-party task as an algorithm overlay](images/img_43.webp)
+
+Check that:
+
+- video keeps playing;
+- boxes appear at person locations;
+- the class is `person`, and scores and coordinates vary with the image;
+- segments without people do not show many fixed boxes;
+- when tracking is enabled, one target remains reasonably continuous.
+
+### 7.4 Check the Alert and Event Center
+
+An alert should appear after a target satisfies the region and detection-time rules.
+
+![An alert pop-up triggered by the third-party model task](images/img_44.webp)
+
+Open **Event Center → Detection / Analysis** and query by task and channel.
 
 ![Third-party model detection records in Event Center](images/img_45.webp)
 
-### 7.4 Sustained Operation
+Confirm that the event snapshot has the correct box, class, channel, region, and time. If live boxes appear
+but no event does, check the region, detection time, running strategy, and Event Report before changing the
+model.
+
+### 7.5 Sustained Operation
 
 Run at least one full loop of the offline video and define a longer project-specific soak window. Record:
 
@@ -446,6 +687,12 @@ Check whether video preprocessing matches the image path, whether the ROI covers
 sampling is reasonable, and whether tracking, filtering, or event rules remove correct detections. Reduce
 the Pipeline temporarily to **Video Decode + Object Detection**, then restore rule nodes one at a time.
 
+### Live Boxes Appear but No Alert Is Created
+
+Check in this order: the current time is in the running strategy; the ROI covers the target; the region rule
+matches; detection time has elapsed; Event Report is connected; and the service is enabled. A successful
+image analysis does not prove the event rule is active.
+
 ## Acceptance Checklist
 
 - [ ] The candidate has a source, version, input/output record, and SHA-256.
@@ -456,3 +703,6 @@ the Pipeline temporarily to **Video Decode + Object Detection**, then restore ru
 - [ ] The video Pipeline outputs correct boxes, classes, and events.
 - [ ] The soak window has no crash, unbounded resource growth, or parsing interruption.
 - [ ] Evidence is bound to the CosmoEdge version, model hash, device, and configuration.
+
+All eight checks are required for a complete third-party integration. A successful upload or one correct
+image result alone is not final acceptance.

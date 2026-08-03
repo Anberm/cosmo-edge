@@ -192,8 +192,26 @@ export const resolveResourceParamOptionLabel = (
 
 export const resolveResourceAlgorithmName = (item) => {
   if (!item) return ''
-  const code = item.algorithmCode || item.algorithmId
-  if (code) {
+
+  // Prefer the explicit sidecar key when resource data provides one. Some
+  // built-in algorithms use a zero-padded algorithmId for their i18n key
+  // while algorithmCode is numeric (for example: 029 vs 29).
+  if (item.algorithmNameI18nKey && te(item.algorithmNameI18nKey)) {
+    return t(item.algorithmNameI18nKey)
+  }
+
+  const rawCodes = [item.algorithmId, item.algorithmCode].filter(
+    (code) => code !== undefined && code !== null && code !== ''
+  )
+  const codes = [
+    ...new Set(
+      rawCodes.flatMap((code) => {
+        const value = String(code)
+        return /^\d+$/.test(value) ? [value, value.padStart(3, '0')] : [value]
+      })
+    )
+  ]
+  for (const code of codes) {
     const key = `resource.algorithm.${String(code).toLowerCase()}.algorithmname`
     if (te(key)) return t(key)
   }
@@ -291,6 +309,9 @@ export const resolveResourceActionName = (item, field = 'actionName') => {
  */
 export const resolveResourceActionRemark = (item) => {
   if (!item) return ''
+  if (item.remarkI18nKey && te(item.remarkI18nKey)) {
+    return t(item.remarkI18nKey)
+  }
   const id = item.id || item.actionId
   if (id) {
     const key = `resource.action.${String(id).toLowerCase()}.remark`

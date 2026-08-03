@@ -1653,6 +1653,151 @@ export default {
     }
   },
   flow: {
+    areaRule: {
+      title: '区域规则配置',
+      purposeLabel: '输出目的',
+      purposes: {
+        alarm: '异常告警',
+        statistics: '统计上报',
+        compatibility: '兼容配置'
+      },
+      typeLabel: '区域规则类型',
+      summaryLabel: '规则说明',
+      downstreamNote: '最终是否形成告警记录，仍受下游“事件上报”节点的限频、去重和复核规则影响。',
+      legacyNote: '这是旧版多节点配置。编辑后仍按原来的类型6和参数键保存，不会自动迁移。',
+      types: {
+        targetLimit: '区域目标数量条件',
+        areaCount: '区域目标数量统计',
+        passFlow: '进出流量统计',
+        tripwire: '目标越线',
+        direction: '垂直方向异常',
+        duration: '目标区域停留',
+        presence: '区域内存在目标',
+        legacyTargetLimit: '区域目标数量条件（旧版多节点配置）',
+        unknown: '无法识别的旧版区域规则'
+      },
+      fields: {
+        decisionRegion: {
+          name: '判断区域',
+          description: '选择使用主区域还是关联区域进行规则判断。'
+        },
+        targetCountThreshold: {
+          name: '目标数量阈值',
+          description: '用于和区域内实际有效目标数量比较。'
+        },
+        triggerCondition: {
+          name: '触发条件',
+          description: '选择实际目标数量与阈值之间的比较关系。'
+        },
+        conditionDuration: {
+          name: '条件持续时间',
+          description: '数量条件需要连续满足的时间；0表示按当前帧判断。'
+        },
+        durationUnit: {
+          name: '持续时间单位',
+          description: '条件持续时间使用的时间单位。'
+        },
+        reportingPeriod: {
+          name: '统计上报周期',
+          description: '周期性产生区域数量或进出流量统计数据。'
+        },
+        reportingPeriodUnit: {
+          name: '上报周期单位',
+          description: '统计上报周期使用的时间单位。'
+        },
+        crossingDirection: {
+          name: '越线方向',
+          description: '目标按警戒线标记方向穿越时命中。'
+        },
+        requiredLineCount: {
+          name: '触发所需警戒线数量',
+          description: '同一跟踪目标需要穿越的警戒线数量。'
+        },
+        stayStartCondition: {
+          name: '停留开始条件',
+          description: '选择只要求目标位于区域内，还是必须先观察到目标从区域外进入。'
+        },
+        minimumStayDuration: {
+          name: '最短停留时间',
+          description: '同一跟踪目标在区域内连续停留多久后命中。'
+        },
+        stayDurationUnit: {
+          name: '停留时间单位',
+          description: '最短停留时间使用的时间单位。'
+        },
+        prohibitedDirection: {
+          name: '禁止移动方向',
+          description: '当前实现按画面上下方向判断，需要稳定的目标跟踪。'
+        },
+        minimumAbnormalDisplacement: {
+          name: '最小异常位移',
+          description: '相对画面高度的比例；0.05表示画面高度的5%。'
+        },
+        legacyTargetCountThreshold: {
+          name: '目标数量阈值',
+          description: '旧版多节点配置使用的目标数量阈值。'
+        },
+        legacyTriggerCondition: {
+          name: '触发条件',
+          description: '旧版多节点配置使用的数量比较关系。'
+        },
+        legacyConditionDuration: {
+          name: '条件持续时间',
+          description: '旧版多节点配置使用的条件持续时间。'
+        },
+        legacyDurationUnit: {
+          name: '持续时间单位',
+          description: '旧版多节点配置使用的时间单位。'
+        },
+        periodicDataChangeMarker: {
+          name: '周期数据变化标记',
+          description: '开启后，在周期上报时标记目标数量是否发生变化；当前不会绕过上报周期。'
+        }
+      },
+      options: {
+        compare: {
+          lessThan: '少于',
+          greaterThan: '多于',
+          notGreaterThan: '不多于',
+          notLessThan: '不少于',
+          equalTo: '等于'
+        },
+        unit: {
+          milliseconds: '毫秒',
+          seconds: '秒',
+          minutes: '分钟',
+          hours: '小时'
+        },
+        tripwire: {
+          count1: '穿越1条警戒线',
+          count2: '穿越2条警戒线'
+        },
+        stayStart: {
+          inside: '目标位于区域内',
+          entered: '目标从区域外进入',
+          insideFallback: '位于区域内'
+        },
+        direction: {
+          bottomToTop: '从画面下方向上移动',
+          topToBottom: '从画面上方向下移动',
+          specified: '指定方向'
+        }
+      },
+      summary: {
+        currentFrame: '按当前帧判断',
+        satisfiedFor: '持续{value}{unit}',
+        targetExpression: '有效目标数 {symbol} {count}',
+        targetExpressionFallback: '有效目标数与阈值满足所选关系',
+        targetLimit: '将区域内有效目标数与目标数量阈值进行比较，支持 <、>、≤、≥、=。当前配置：{expression}；条件{duration}时产生候选告警。',
+        areaCount: '按配置周期上报区域内当前有效目标数，包括目标数为0的情况；这是统计数据，不是异常告警。',
+        passFlow: '按配置周期上报警戒线的进入数、离开数和累计流量；该规则依赖稳定的目标跟踪。',
+        tripwire: '同一跟踪目标按标记方向穿越{count}条警戒线时产生候选告警。',
+        direction: '同一目标按“{direction}”移动超过画面高度的{distance}%时产生候选告警。',
+        duration: '同一目标满足“{condition}”且停留条件{duration}时产生候选告警。',
+        presence: '检测到任一上游有效目标位于判断区域内时产生候选告警；目标类别由上游模型和类别筛选决定。',
+        unknown: '该配置包含当前界面无法识别的旧版规则值。为避免覆盖，建议使用兼容模式只读检查。'
+      }
+    },
     actionNames: {
       '目标检测算法': '目标检测算法',
       '目标分类算法': '目标分类算法',

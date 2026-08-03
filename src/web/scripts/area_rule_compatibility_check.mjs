@@ -3,9 +3,25 @@ import {
   AREA_RULE_UI_TYPES,
   applyAreaRuleUiType,
   buildAreaRuleSummary,
+  getAreaRuleFieldText,
+  getAreaRuleOptionLabel,
   inferAreaRuleUiType,
   mergeParamsPreservingUnknown
 } from '../src/views/gam/countManagement/arrangeDetail/flow/areaRuleCompatibility.js'
+import zhCN from '../src/i18n/locales/zh-CN.js'
+import enUS from '../src/i18n/locales/en-US.js'
+
+const createTranslator = (messages) => (key, params = {}) => {
+  const value = key.split('.').reduce((current, segment) => current?.[segment], messages)
+  assert.equal(typeof value, 'string', `missing translation: ${key}`)
+  return Object.entries(params).reduce(
+    (text, [name, replacement]) => text.replaceAll(`{${name}}`, String(replacement)),
+    value
+  )
+}
+
+const zhT = createTranslator(zhCN)
+const enT = createTranslator(enUS)
 
 const legacy = [
   { key: 'areaAlarmType', value: '6' },
@@ -14,7 +30,7 @@ const legacy = [
 ]
 assert.equal(inferAreaRuleUiType(legacy), AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT)
 assert.match(
-  buildAreaRuleSummary(legacy, AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT),
+  buildAreaRuleSummary(legacy, AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT, zhT),
   /有效目标数 < 2/
 )
 
@@ -31,7 +47,8 @@ compareCases.forEach(([compare, symbol]) => {
       { key: 'param.areaLimitTargetCount', value: '3' },
       { key: 'param.areaLimitTargetType', value: compare }
     ],
-    AREA_RULE_UI_TYPES.TARGET_LIMIT
+    AREA_RULE_UI_TYPES.TARGET_LIMIT,
+    zhT
   )
   assert.match(summary, new RegExp(`有效目标数 ${symbol} 3`))
 })
@@ -65,5 +82,51 @@ assert.deepEqual(merged, [
 const unknown = [{ key: 'areaAlarmType', value: '99' }]
 assert.equal(inferAreaRuleUiType(unknown), AREA_RULE_UI_TYPES.UNKNOWN)
 assert.deepEqual(applyAreaRuleUiType(unknown, AREA_RULE_UI_TYPES.UNKNOWN), unknown)
+
+assert.equal(
+  getAreaRuleFieldText('inputAreaType', enT).name,
+  'Decision Region'
+)
+assert.equal(
+  getAreaRuleOptionLabel('param.areaLimitTargetType', '0', '', enT),
+  'Less than'
+)
+
+const englishSummaryCases = [
+  [
+    AREA_RULE_UI_TYPES.TARGET_LIMIT,
+    [
+      { key: 'param.areaLimitTargetCount', value: '3' },
+      { key: 'param.areaLimitTargetType', value: '0' }
+    ]
+  ],
+  [AREA_RULE_UI_TYPES.AREA_COUNT, []],
+  [AREA_RULE_UI_TYPES.PASS_FLOW, []],
+  [AREA_RULE_UI_TYPES.TRIPWIRE, [{ key: 'param.trippingWireType', value: '1' }]],
+  [
+    AREA_RULE_UI_TYPES.DIRECTION,
+    [
+      { key: 'param.retroDirect', value: '0' },
+      { key: 'param.retroDistance', value: '0.05' }
+    ]
+  ],
+  [
+    AREA_RULE_UI_TYPES.DURATION,
+    [
+      { key: 'durationBreakAreaType', value: '0' },
+      { key: 'param.areaDuration', value: '10' },
+      { key: 'param.areaDurationTimeType', value: '1000' }
+    ]
+  ],
+  [AREA_RULE_UI_TYPES.PRESENCE, []],
+  [AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT, legacy],
+  [AREA_RULE_UI_TYPES.UNKNOWN, unknown]
+]
+
+englishSummaryCases.forEach(([type, params]) => {
+  const summary = buildAreaRuleSummary(params, type, enT)
+  assert.ok(summary.length > 0, `empty English summary for ${type}`)
+  assert.doesNotMatch(summary, /\p{Script=Han}/u, `Chinese leaked into ${type}: ${summary}`)
+})
 
 console.log('area rule compatibility checks passed')

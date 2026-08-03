@@ -13,7 +13,7 @@
             <el-tree id="onboarding-algorithm-tree" class="filter-tree" :data="arithmeticTree" :props="defaultProps" highlight-current default-expand-all :filter-node-method="filterNode" ref="tree" @node-click="chooseType" node-key="algorithmId">
               <template #default="{ data }">
                 <span class="custom-tree-node">
-                  <span v-if="!data.algorithmCode" class="custom-treeText">{{ data.algorithmCategoryName }}</span>
+                  <span v-if="!data.algorithmCode" class="custom-treeText">{{ resolveAlgorithmCategoryName(data) }}</span>
                   <span v-else class="custom-treeText">{{ resolveAlgorithmName(data) }}</span>
                   <span v-if="data.algorithmCode">
                     <el-icon v-if="data.isSave == true" class="el-menu-icon" color="#67C23A">
@@ -192,16 +192,6 @@ const defaultProps = ref({
 const scheduleSupport = ref(null)
 const algorithmUsage = window.localStorage.getItem('algorithmUsage')
 const arithmeticTree = ref([])
-const analyze = ref([
-  {
-    label: t('glossary.normalSpeed'),
-    value: 1
-  },
-  {
-    label: t('glossary.doubleSpeed'),
-    value: 2
-  }
-])
 const timeTemplateList = ref([])
 const sourceSchedulePollingList = ref([])
 const schedulePollingList = ref([])
@@ -217,17 +207,31 @@ const runTypeOptions = computed(() => [
   { label: t('glossary.realtime'), value: 0 },
   { label: t('glossary.polling'), value: 1 }
 ])
-const algorithmCategoryOptions = computed(() => [
-  { label: t('glossary.faceAndBody'), value: '1' },
-  { label: t('glossary.detection'), value: '2' },
-  { label: t('glossary.detection'), value: '3' },
-  { label: t('glossary.countingAnalytics'), value: '8' },
-  { label: t('glossary.countingAnalytics'), value: '9' },
-  { label: t('glossary.vehicleAnalysis'), value: '10' },
-  { label: t('glossary.countingAnalytics'), value: '11' }
+const algorithmCategoryGroups = computed(() => [
+  {
+    key: 'face-body',
+    label: t('glossary.faceAndBody'),
+    values: ['1']
+  },
+  {
+    key: 'detection',
+    label: t('glossary.detection'),
+    values: ['2', '3']
+  },
+  {
+    key: 'counting',
+    label: t('glossary.countingAnalytics'),
+    values: ['8', '9', '11']
+  },
+  {
+    key: 'vehicle',
+    label: t('glossary.vehicleAnalysis'),
+    values: ['10']
+  }
 ])
 const warningVisible = ref(false)
-const warningContent = ref(t('validate.addDetectionAreaFirst'))
+const warningContentKey = ref('validate.addDetectionAreaFirst')
+const warningContent = computed(() => t(warningContentKey.value))
 
 const tree = ref(null)
 const selectedAlgorithm = computed(() => {
@@ -240,6 +244,21 @@ const selectedAlgorithm = computed(() => {
   return null
 })
 const resolveAlgorithmName = (item) => resolveResourceAlgorithmName(item)
+const getAlgorithmCategoryGroup = (category) =>
+  algorithmCategoryGroups.value.find((group) =>
+    group.values.includes(String(category ?? ''))
+  )
+const resolveAlgorithmCategoryName = (item) => {
+  const group =
+    algorithmCategoryGroups.value.find(
+      (option) => option.key === item?.algorithmCategoryGroup
+    ) || getAlgorithmCategoryGroup(item?.algorithmCategory)
+  return (
+    group?.label ||
+    item?.algorithmCategoryName ||
+    t('glossary.other')
+  )
+}
 const resolvedAlgorithmName = computed(() =>
   resolveAlgorithmName(selectedAlgorithm.value) || algorithmName.value
 )
@@ -263,6 +282,12 @@ watch(filterText, (val) => {
 
 watch(BatchApplication, (newVal) => {
   BatchType.value = newVal
+})
+
+watch(currentLocale, () => {
+  nextTick(() => {
+    tree.value?.filter(filterText.value)
+  })
 })
 
 const init = () => {
@@ -377,6 +402,7 @@ const filterNode = (value, data) => {
   if (!keyword) return true
 
   const searchText = [
+    resolveAlgorithmCategoryName(data),
     data.algorithmCategoryName,
     data.algorithmName,
     data.algorithmCode,
@@ -434,16 +460,29 @@ const getServeTypes = () => {
     const savedAlgIds = channelRes.resData?.algorithmIds || []
 
     // 按 algorithmCategory 分组，构建与场景任务页面一致的树结构
-    const groupMap = {}
+    const groupMap = Object.fromEntries(
+      algorithmCategoryGroups.value.map((group) => [
+        group.key,
+        {
+          algorithmId: `category:${group.key}`,
+          algorithmCategoryGroup: group.key,
+          algorithmCategoryName: group.label,
+          simpleAlgorithmInfos: []
+        }
+      ])
+    )
     let selectedList = []
 
     rows.forEach((alg) => {
       const catValue = String(alg.algorithmCategory || '0')
-      const catOption = algorithmCategoryOptions.value.find(opt => opt.value === catValue)
-      const catLabel = catOption ? catOption.label : t('glossary.other')
+      const categoryGroup = getAlgorithmCategoryGroup(catValue)
+      const groupKey = categoryGroup?.key || `other:${catValue}`
+      const catLabel = categoryGroup?.label || t('glossary.other')
 
-      if (!groupMap[catLabel]) {
-        groupMap[catLabel] = {
+      if (!groupMap[groupKey]) {
+        groupMap[groupKey] = {
+          algorithmId: `category:${groupKey}`,
+          algorithmCategoryGroup: groupKey,
           algorithmCategoryName: catLabel,
           algorithmCategory: catValue,
           simpleAlgorithmInfos: []
@@ -455,13 +494,16 @@ const getServeTypes = () => {
         algorithmId: alg.algorithmId,
         algorithmCode: alg.algorithmCode || alg.algorithmId,
         algorithmName: alg.algorithmName,
+        algorithmNameI18nKey: alg.algorithmNameI18nKey,
+        algorithmCategoryGroup: groupKey,
         algorithmCategoryName: catLabel,
+        algorithmCategory: catValue,
         models: alg.models || [],
         envStatus: alg.envStatus || {},
         modelSearchText: collectModelSearchText(alg),
         isSave: isSave
       }
-      groupMap[catLabel].simpleAlgorithmInfos.push(algItem)
+      groupMap[groupKey].simpleAlgorithmInfos.push(algItem)
 
       if (isSave) {
         selectedList.push(algItem)
@@ -469,7 +511,7 @@ const getServeTypes = () => {
     })
 
     const algorithmList = Object.values(groupMap).filter(
-      g => g.simpleAlgorithmInfos.length > 0
+      (group) => group.simpleAlgorithmInfos.length > 0
     )
 
     if (algorithmList.length === 0) {
@@ -481,7 +523,7 @@ const getServeTypes = () => {
     if (!algorithmCode.value && !algorithmId.value) {
       const firstAlg = selectedList.length > 0
         ? selectedList[0]
-        : algorithmList[0]?.simpleAlgorithmInfos[0]
+        : algorithmList.flatMap((group) => group.simpleAlgorithmInfos)[0]
       if (firstAlg) {
         algorithmCode.value = firstAlg.algorithmCode
         algorithmId.value = firstAlg.algorithmId
@@ -828,7 +870,7 @@ const newSave = (skipRefresh = false) => {
   ) {
     if (params.taskConfig.areas.length === 0) {
       warningVisible.value = true
-      warningContent.value = t('validate.addDetectionLineFirst')
+      warningContentKey.value = 'validate.addDetectionLineFirst'
       return
     }
   }
@@ -839,7 +881,7 @@ const newSave = (skipRefresh = false) => {
     config.value.shieldAreaHeader
   ) {
     warningVisible.value = true
-    warningContent.value = t('validate.addShieldAreaFirst')
+    warningContentKey.value = 'validate.addShieldAreaFirst'
     return
   }
 

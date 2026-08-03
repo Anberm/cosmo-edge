@@ -13,7 +13,7 @@
         <el-table-column type="index" :label="t('field.no')" prop="date" width="100" :index="indexcount"></el-table-column>
         <el-table-column prop="algorithmName" :label="t('field.algorithmName')">
           <template #default="scope">
-            <span>{{ scope.row.algorithmName }}</span>
+            <span>{{ resolveResourceAlgorithmName(scope.row) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="algorithmId" :label="t('field.algorithmId')"></el-table-column>
@@ -72,8 +72,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
 import { t, localeColon } from '@/i18n'
+import { resolveResourceAlgorithmName } from '@/utils/i18nResource'
 import TopBar from '@/components/TopBar.vue'
 
 const { proxy } = getCurrentInstance()
@@ -100,7 +101,8 @@ const handleResize = () => {
   resizeTimer = setTimeout(() => calculateTableHeight(), 100)
 }
 
-const topBarData = reactive({
+const supplierOptions = ref([])
+const topBarData = computed(() => ({
   formList: [
     {
       label: t('field.algorithmName'),
@@ -114,10 +116,10 @@ const topBarData = reactive({
       label: t('field.serviceProvider'),
       model: 'supplier',
       type: 'select',
-      dataList: []
+      dataList: supplierOptions.value
     }
-  ]
-})
+  ].filter((item) => platformType.value !== '15' || item.model !== 'supplier')
+}))
 
 const formData = reactive({
   algorithmId: '',
@@ -172,11 +174,11 @@ const getEngineTypeList = () => {
 const getSupplier = () => {
   proxy.$API.getSupplier().then((res) => {
     const { resData } = res
-    resData.forEach((item) => {
-      topBarData.formList[2].dataList.push({
+    supplierOptions.value = resData.map((item) => {
+      return {
         label: item.value,
         value: item.code
-      })
+      }
     })
   })
 }
@@ -202,7 +204,6 @@ const returnSpanStyle = (obj) => {
 
 onMounted(() => {
   if (platformType.value === '15') {
-    topBarData.formList.splice(2, 1)
     init()
   } else {
     getEngineTypeList()

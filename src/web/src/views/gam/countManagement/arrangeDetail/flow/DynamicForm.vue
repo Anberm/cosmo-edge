@@ -2,8 +2,8 @@
   <div class="form-body">
     <el-form label-position="left">
       <div v-if="isAreaAlarmAction" class="area-rule-overview">
-        <div class="area-rule-overview__title">区域规则配置</div>
-        <el-form-item label="输出目的" class="form-flex">
+        <div class="area-rule-overview__title">{{ t('flow.areaRule.title') }}</div>
+        <el-form-item :label="t('flow.areaRule.purposeLabel')" class="form-flex">
           <el-select
             v-model="areaRulePurpose"
             class="form-content"
@@ -11,16 +11,16 @@
             :disabled="areaRuleUiType === AREA_RULE_UI_TYPES.UNKNOWN"
             @change="handleAreaRulePurposeChange"
           >
-            <el-option label="异常告警" value="alarm" />
-            <el-option label="统计上报" value="statistics" />
+            <el-option :label="t('flow.areaRule.purposes.alarm')" value="alarm" />
+            <el-option :label="t('flow.areaRule.purposes.statistics')" value="statistics" />
             <el-option
               v-if="areaRulePurpose === 'compatibility'"
-              label="兼容配置"
+              :label="t('flow.areaRule.purposes.compatibility')"
               value="compatibility"
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="区域规则类型" class="form-flex">
+        <el-form-item :label="t('flow.areaRule.typeLabel')" class="form-flex">
           <el-select
             v-model="areaRuleUiType"
             class="form-content"
@@ -37,13 +37,13 @@
           </el-select>
         </el-form-item>
         <div class="area-rule-summary" :class="{ 'is-warning': areaRuleUiType === AREA_RULE_UI_TYPES.UNKNOWN }">
-          <div class="area-rule-summary__label">规则说明</div>
+          <div class="area-rule-summary__label">{{ t('flow.areaRule.summaryLabel') }}</div>
           <div>{{ areaRuleSummary }}</div>
           <div v-if="areaRuleUiType !== AREA_RULE_UI_TYPES.AREA_COUNT && areaRuleUiType !== AREA_RULE_UI_TYPES.PASS_FLOW && areaRuleUiType !== AREA_RULE_UI_TYPES.UNKNOWN" class="area-rule-summary__note">
-            最终是否形成告警记录，仍受下游“事件上报”节点的限频、去重和复核规则影响。
+            {{ t('flow.areaRule.downstreamNote') }}
           </div>
           <div v-if="areaRuleUiType === AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT" class="area-rule-summary__note">
-            这是旧版多节点配置。编辑后仍按原来的类型6和参数键保存，不会自动迁移。
+            {{ t('flow.areaRule.legacyNote') }}
           </div>
         </div>
       </div>
@@ -334,29 +334,32 @@ const originalAreaWebConfig = isAreaAlarmAction.value
 const areaRuleUiType = ref(AREA_RULE_UI_TYPES.TARGET_LIMIT)
 const areaRulePurpose = ref('alarm')
 
-const areaAlarmRuleOptions = [
-  { label: '区域目标数量条件', value: AREA_RULE_UI_TYPES.TARGET_LIMIT },
-  { label: '目标越线', value: AREA_RULE_UI_TYPES.TRIPWIRE },
-  { label: '垂直方向异常', value: AREA_RULE_UI_TYPES.DIRECTION },
-  { label: '目标区域停留', value: AREA_RULE_UI_TYPES.DURATION },
-  { label: '区域内存在目标', value: AREA_RULE_UI_TYPES.PRESENCE }
-]
-const areaStatisticsRuleOptions = [
-  { label: '区域目标数量统计', value: AREA_RULE_UI_TYPES.AREA_COUNT },
-  { label: '进出流量统计', value: AREA_RULE_UI_TYPES.PASS_FLOW }
-]
+const areaAlarmRuleOptions = computed(() => [
+  { label: t('flow.areaRule.types.targetLimit'), value: AREA_RULE_UI_TYPES.TARGET_LIMIT },
+  { label: t('flow.areaRule.types.tripwire'), value: AREA_RULE_UI_TYPES.TRIPWIRE },
+  { label: t('flow.areaRule.types.direction'), value: AREA_RULE_UI_TYPES.DIRECTION },
+  { label: t('flow.areaRule.types.duration'), value: AREA_RULE_UI_TYPES.DURATION },
+  { label: t('flow.areaRule.types.presence'), value: AREA_RULE_UI_TYPES.PRESENCE }
+])
+const areaStatisticsRuleOptions = computed(() => [
+  { label: t('flow.areaRule.types.areaCount'), value: AREA_RULE_UI_TYPES.AREA_COUNT },
+  { label: t('flow.areaRule.types.passFlow'), value: AREA_RULE_UI_TYPES.PASS_FLOW }
+])
 
 const areaRuleTypeOptions = computed(() => {
   if (areaRuleUiType.value === AREA_RULE_UI_TYPES.UNKNOWN) {
-    return [{ label: '无法识别的旧版区域规则', value: AREA_RULE_UI_TYPES.UNKNOWN }]
+    return [{
+      label: t('flow.areaRule.types.unknown'),
+      value: AREA_RULE_UI_TYPES.UNKNOWN
+    }]
   }
   const options =
     areaRulePurpose.value === 'statistics'
-      ? areaStatisticsRuleOptions
-      : [...areaAlarmRuleOptions]
+      ? [...areaStatisticsRuleOptions.value]
+      : [...areaAlarmRuleOptions.value]
   if (areaRuleUiType.value === AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT) {
     options.unshift({
-      label: '区域目标数量条件（旧版多节点配置）',
+      label: t('flow.areaRule.types.legacyTargetLimit'),
       value: AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT
     })
   }
@@ -369,7 +372,7 @@ const currentAreaParams = computed(() =>
     .map((item) => ({ key: item.key, value: item.value }))
 )
 const areaRuleSummary = computed(() =>
-  buildAreaRuleSummary(currentAreaParams.value, areaRuleUiType.value)
+  buildAreaRuleSummary(currentAreaParams.value, areaRuleUiType.value, t)
 )
 
 // Get instance
@@ -420,25 +423,25 @@ const trackSelectType = ref(false)
 const conditionType = ref(false)
 const treeSelectData = ref([])
 const labelTargetLimitType = ref(false)
-const warnConditions = ref([
+const warnConditions = computed(() => [
   {
-    name: t('glossary.warnLtTarget'),
+    labelI18nKey: 'glossary.warnLtTarget',
     value: '0'
   },
   {
-    name: t('glossary.warnGtTarget'),
+    labelI18nKey: 'glossary.warnGtTarget',
     value: '1'
   },
   {
-    name: t('glossary.warnLeTarget'),
+    labelI18nKey: 'glossary.warnLeTarget',
     value: '2'
   },
   {
-    name: t('glossary.warnGeTarget'),
+    labelI18nKey: 'glossary.warnGeTarget',
     value: '3'
   },
   {
-    name: t('glossary.warnEqTarget'),
+    labelI18nKey: 'glossary.warnEqTarget',
     value: '4'
   }
 ])
@@ -907,7 +910,7 @@ const areaRuleTechnicalKeys = [
 
 const resolveParamText = (item, field) => {
   if (isAreaAlarmAction.value) {
-    const text = getAreaRuleFieldText(item?.key)
+    const text = getAreaRuleFieldText(item?.key, t)
     if (text?.[field]) return text[field]
   }
   return resolveI18nText(item, field)
@@ -916,7 +919,7 @@ const resolveParamText = (item, field) => {
 const resolveParamOptionLabel = (item, option) => {
   const fallback = resolveI18nOptionLabel(option)
   if (!isAreaAlarmAction.value) return fallback
-  return getAreaRuleOptionLabel(item?.key, option?.value, fallback)
+  return getAreaRuleOptionLabel(item?.key, option?.value, fallback, t)
 }
 
 const syncAreaRuleParams = (type) => {

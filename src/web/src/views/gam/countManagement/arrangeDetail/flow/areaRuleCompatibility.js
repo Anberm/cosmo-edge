@@ -88,93 +88,47 @@ export const mergeParamsPreservingUnknown = (original, generated) => {
 export const mergeMetaParamsPreservingUnknown = (original, generated) =>
   mergeParamsPreservingUnknown(original, generated)
 
-const AREA_RULE_FIELD_TEXT = Object.freeze({
-  inputAreaType: {
-    name: '判断区域',
-    description: '选择使用主区域还是关联区域进行规则判断。'
-  },
-  'param.areaLimitTargetCount': {
-    name: '目标数量阈值',
-    description: '用于和区域内实际有效目标数量比较。'
-  },
-  'param.areaLimitTargetType': {
-    name: '触发条件',
-    description: '选择实际目标数量与阈值之间的比较关系。'
-  },
-  'param.areaLimitDuration': {
-    name: '条件持续时间',
-    description: '数量条件需要连续满足的时间；0表示按当前帧判断。'
-  },
-  'param.areaLimitDurationTimeType': {
-    name: '持续时间单位',
-    description: '条件持续时间使用的时间单位。'
-  },
-  'param.areaCalcDuration': {
-    name: '统计上报周期',
-    description: '周期性产生区域数量或进出流量统计数据。'
-  },
-  'param.areaCalcDurationTimeType': {
-    name: '上报周期单位',
-    description: '统计上报周期使用的时间单位。'
-  },
-  breakAreaType: {
-    name: '越线方向',
-    description: '目标按警戒线标记方向穿越时命中。'
-  },
-  'param.trippingWireType': {
-    name: '触发所需警戒线数量',
-    description: '同一跟踪目标需要穿越的警戒线数量。'
-  },
-  durationBreakAreaType: {
-    name: '停留开始条件',
-    description: '选择只要求目标位于区域内，还是必须先观察到目标从区域外进入。'
-  },
-  'param.areaDuration': {
-    name: '最短停留时间',
-    description: '同一跟踪目标在区域内连续停留多久后命中。'
-  },
-  'param.areaDurationTimeType': {
-    name: '停留时间单位',
-    description: '最短停留时间使用的时间单位。'
-  },
-  'param.retroDirect': {
-    name: '禁止移动方向',
-    description: '当前实现按画面上下方向判断，需要稳定的目标跟踪。'
-  },
-  'param.retroDistance': {
-    name: '最小异常位移',
-    description: '相对画面高度的比例；0.05表示画面高度的5%。'
-  },
-  areaLimitTargetCount: {
-    name: '目标数量阈值',
-    description: '旧版多节点配置使用的目标数量阈值。'
-  },
-  areaLimitTargetType: {
-    name: '触发条件',
-    description: '旧版多节点配置使用的数量比较关系。'
-  },
-  areaLimitDuration: {
-    name: '条件持续时间',
-    description: '旧版多节点配置使用的条件持续时间。'
-  },
-  areaDurationTimeType: {
-    name: '持续时间单位',
-    description: '旧版多节点配置使用的时间单位。'
-  },
-  targetCountChange: {
-    name: '周期数据变化标记',
-    description: '开启后，在周期上报时标记目标数量是否发生变化；当前不会绕过上报周期。'
-  }
+const AREA_RULE_FIELD_KEYS = Object.freeze({
+  inputAreaType: 'decisionRegion',
+  'param.areaLimitTargetCount': 'targetCountThreshold',
+  'param.areaLimitTargetType': 'triggerCondition',
+  'param.areaLimitDuration': 'conditionDuration',
+  'param.areaLimitDurationTimeType': 'durationUnit',
+  'param.areaCalcDuration': 'reportingPeriod',
+  'param.areaCalcDurationTimeType': 'reportingPeriodUnit',
+  breakAreaType: 'crossingDirection',
+  'param.trippingWireType': 'requiredLineCount',
+  durationBreakAreaType: 'stayStartCondition',
+  'param.areaDuration': 'minimumStayDuration',
+  'param.areaDurationTimeType': 'stayDurationUnit',
+  'param.retroDirect': 'prohibitedDirection',
+  'param.retroDistance': 'minimumAbnormalDisplacement',
+  areaLimitTargetCount: 'legacyTargetCountThreshold',
+  areaLimitTargetType: 'legacyTriggerCondition',
+  areaLimitDuration: 'legacyConditionDuration',
+  areaDurationTimeType: 'legacyDurationUnit',
+  targetCountChange: 'periodicDataChangeMarker'
 })
 
-export const getAreaRuleFieldText = (key) => AREA_RULE_FIELD_TEXT[key] || null
+const translate = (translator, key, params = {}) =>
+  typeof translator === 'function' ? translator(key, params) : key
 
-const COMPARE_TEXT = {
-  '0': '少于',
-  '1': '多于',
-  '2': '不多于',
-  '3': '不少于',
-  '4': '等于'
+export const getAreaRuleFieldText = (key, translator) => {
+  const fieldKey = AREA_RULE_FIELD_KEYS[key]
+  if (!fieldKey) return null
+  const prefix = `flow.areaRule.fields.${fieldKey}`
+  return {
+    name: translate(translator, `${prefix}.name`),
+    description: translate(translator, `${prefix}.description`)
+  }
+}
+
+const COMPARE_OPTION_KEYS = {
+  '0': 'lessThan',
+  '1': 'greaterThan',
+  '2': 'notGreaterThan',
+  '3': 'notLessThan',
+  '4': 'equalTo'
 }
 
 const COMPARE_SYMBOL = {
@@ -185,38 +139,51 @@ const COMPARE_SYMBOL = {
   '4': '='
 }
 
-const UNIT_TEXT = {
-  '1': '毫秒',
-  '1000': '秒',
-  '60000': '分钟',
-  '3600000': '小时'
+const UNIT_OPTION_KEYS = {
+  '1': 'milliseconds',
+  '1000': 'seconds',
+  '60000': 'minutes',
+  '3600000': 'hours'
 }
 
-export const getAreaRuleOptionLabel = (key, value, fallback) => {
+export const getAreaRuleOptionLabel = (key, value, fallback, translator) => {
   const stringValue = String(value)
   if (['param.areaLimitTargetType', 'areaLimitTargetType'].includes(key)) {
-    return COMPARE_TEXT[stringValue] || fallback
+    const optionKey = COMPARE_OPTION_KEYS[stringValue]
+    return optionKey
+      ? translate(translator, `flow.areaRule.options.compare.${optionKey}`)
+      : fallback
   }
   if (key === 'param.trippingWireType') {
-    return stringValue === '1' ? '穿越1条警戒线' : stringValue === '2' ? '穿越2条警戒线' : fallback
+    if (!['1', '2'].includes(stringValue)) return fallback
+    return translate(translator, `flow.areaRule.options.tripwire.count${stringValue}`)
   }
   if (key === 'durationBreakAreaType') {
-    return stringValue === '0' ? '目标位于区域内' : stringValue === '2' ? '目标从区域外进入' : fallback
+    const optionKey = stringValue === '0' ? 'inside' : stringValue === '2' ? 'entered' : ''
+    return optionKey
+      ? translate(translator, `flow.areaRule.options.stayStart.${optionKey}`)
+      : fallback
   }
   if (key === 'param.retroDirect') {
-    return stringValue === '0' ? '从画面下方向上移动' : stringValue === '1' ? '从画面上方向下移动' : fallback
+    const optionKey = stringValue === '0' ? 'bottomToTop' : stringValue === '1' ? 'topToBottom' : ''
+    return optionKey
+      ? translate(translator, `flow.areaRule.options.direction.${optionKey}`)
+      : fallback
   }
   return fallback
 }
 
-const summaryParamValue = (params, primaryKey, legacyKey, fallback = '未设置') =>
+const summaryParamValue = (params, primaryKey, legacyKey, fallback = '') =>
   getParamValue(params, primaryKey, getParamValue(params, legacyKey, fallback))
 
-export const buildAreaRuleSummary = (params, type) => {
+export const buildAreaRuleSummary = (params, type, translator) => {
   const duration = (valueKey, unitKey) => {
     const value = getParamValue(params, valueKey, '0')
-    const unit = UNIT_TEXT[String(getParamValue(params, unitKey, '1000'))] || '秒'
-    return value === '0' ? '按当前帧判断' : `持续${value}${unit}`
+    const unitKeyName = UNIT_OPTION_KEYS[String(getParamValue(params, unitKey, '1000'))] || 'seconds'
+    const unit = translate(translator, `flow.areaRule.options.unit.${unitKeyName}`)
+    return value === '0'
+      ? translate(translator, 'flow.areaRule.summary.currentFrame')
+      : translate(translator, 'flow.areaRule.summary.satisfiedFor', { value, unit })
   }
   if ([AREA_RULE_UI_TYPES.TARGET_LIMIT, AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT].includes(type)) {
     const legacy = type === AREA_RULE_UI_TYPES.LEGACY_TARGET_LIMIT
@@ -235,39 +202,53 @@ export const buildAreaRuleSummary = (params, type) => {
     const durationKey = legacy ? 'areaLimitDuration' : 'param.areaLimitDuration'
     const unitKey = legacy ? 'areaDurationTimeType' : 'param.areaLimitDurationTimeType'
     const expression = COMPARE_SYMBOL[String(compare)]
-      ? `有效目标数 ${COMPARE_SYMBOL[String(compare)]} ${count}`
-      : '有效目标数与阈值满足所选关系'
-    return `将区域内有效目标数与目标数量阈值进行比较，支持 <、>、≤、≥、=。当前配置：${expression}；条件${duration(durationKey, unitKey)}时产生候选告警。`
+      ? translate(translator, 'flow.areaRule.summary.targetExpression', {
+          symbol: COMPARE_SYMBOL[String(compare)],
+          count
+        })
+      : translate(translator, 'flow.areaRule.summary.targetExpressionFallback')
+    return translate(translator, 'flow.areaRule.summary.targetLimit', {
+      expression,
+      duration: duration(durationKey, unitKey)
+    })
   }
   if (type === AREA_RULE_UI_TYPES.AREA_COUNT) {
-    return `按配置周期上报区域内当前有效目标数，包括目标数为0的情况；这是统计数据，不是异常告警。`
+    return translate(translator, 'flow.areaRule.summary.areaCount')
   }
   if (type === AREA_RULE_UI_TYPES.PASS_FLOW) {
-    return `按配置周期上报警戒线的进入数、离开数和累计流量；该规则依赖稳定的目标跟踪。`
+    return translate(translator, 'flow.areaRule.summary.passFlow')
   }
   if (type === AREA_RULE_UI_TYPES.TRIPWIRE) {
     const count = getParamValue(params, 'param.trippingWireType', '1')
-    return `同一跟踪目标按标记方向穿越${count}条警戒线时产生候选告警。`
+    return translate(translator, 'flow.areaRule.summary.tripwire', { count })
   }
   if (type === AREA_RULE_UI_TYPES.DIRECTION) {
     const direction = getAreaRuleOptionLabel(
       'param.retroDirect',
       getParamValue(params, 'param.retroDirect', '0'),
-      '指定方向'
+      translate(translator, 'flow.areaRule.options.direction.specified'),
+      translator
     )
     const distance = Number(getParamValue(params, 'param.retroDistance', '0.05')) * 100
-    return `同一目标${direction}超过画面高度的${Number.isFinite(distance) ? distance : 5}%时产生候选告警。`
+    return translate(translator, 'flow.areaRule.summary.direction', {
+      direction,
+      distance: Number.isFinite(distance) ? distance : 5
+    })
   }
   if (type === AREA_RULE_UI_TYPES.DURATION) {
     const condition = getAreaRuleOptionLabel(
       'durationBreakAreaType',
       getParamValue(params, 'durationBreakAreaType', '0'),
-      '位于区域内'
+      translate(translator, 'flow.areaRule.options.stayStart.insideFallback'),
+      translator
     )
-    return `同一目标${condition}并${duration('param.areaDuration', 'param.areaDurationTimeType')}时产生候选告警。`
+    return translate(translator, 'flow.areaRule.summary.duration', {
+      condition,
+      duration: duration('param.areaDuration', 'param.areaDurationTimeType')
+    })
   }
   if (type === AREA_RULE_UI_TYPES.PRESENCE) {
-    return '检测到任一上游有效目标位于判断区域内时产生候选告警；目标类别由上游模型和类别筛选决定。'
+    return translate(translator, 'flow.areaRule.summary.presence')
   }
-  return '该配置包含当前界面无法识别的旧版规则值。为避免覆盖，建议使用兼容模式只读检查。'
+  return translate(translator, 'flow.areaRule.summary.unknown')
 }
