@@ -109,17 +109,8 @@ VideoTask::MsgQuerySwitchSend MessageVideoTaskHandler::Handle(VideoTask::MsgQuer
 VideoTask::MsgSaveOrUpdateSend MessageVideoTaskHandler::Handle(VideoTask::MsgSaveOrUpdateRecv&& data,
                                                                std::error_condition& errc) {
     VideoTask::MsgSaveOrUpdateSend retData{};
-    errc = task_config_.ModifyTaskParam(data.channelId, data.algorithmId, data.taskConfig);
-    if (util::ErrorEnum::Success != errc) {
-        return retData;
-    }
-
-    errc = task_config_.ModifyTaskStrategy(data.channelId, data.algorithmId, data.scheduleId);
-    if (util::ErrorEnum::Success != errc) {
-        return retData;
-    }
-
-    errc = task_config_.SwitchTask(data.channelId, data.algorithmId, true);
+    errc = task_config_.SaveOrUpdateTask(data.channelId, data.algorithmId, data.taskConfig,
+                                         data.scheduleId);
     return retData;
 }
 
@@ -237,14 +228,8 @@ VideoTask::MsgApplyParamsBatchSend MessageVideoTaskHandler::Handle(VideoTask::Ms
     VideoTask::MsgApplyParamsBatchSend retData{};
 
     for (const auto& channelId : data.targetChannelIds) {
-        auto params              = data.taskConfig;
-        std::error_condition ret = task_config_.ModifyTaskParam(channelId, data.algorithmId, params);
-        if (util::ErrorEnum::Success == ret) {
-            ret = task_config_.ModifyTaskStrategy(channelId, data.algorithmId, data.scheduleId);
-        }
-        if (util::ErrorEnum::Success == ret) {
-            ret = task_config_.SwitchTask(channelId, data.algorithmId, true);
-        }
+        std::error_condition ret = task_config_.SaveOrUpdateTask(
+            channelId, data.algorithmId, data.taskConfig, data.scheduleId);
         if (util::ErrorEnum::Success != ret) {
             MsgResultInfo failedEl;
             failedEl.id      = channelId;

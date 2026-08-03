@@ -312,28 +312,26 @@ TEST_CASE("VideoTaskHandler: SaveOrUpdate success", "[video-task-handler]") {
     recv.channelId   = "ch1";
     recv.algorithmId = "alg1";
 
-    REQUIRE_CALL(f.mocks.cameraSvc, ModifyTaskParam(trompeloeil::_, trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::Success);
-    REQUIRE_CALL(f.mocks.cameraSvc, ModifyTaskStrategy(trompeloeil::_, trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::Success);
-    REQUIRE_CALL(f.mocks.cameraSvc, SwitchTask(trompeloeil::_, trompeloeil::_, trompeloeil::_))
+    REQUIRE_CALL(f.mocks.cameraSvc,
+                 SaveOrUpdateTask(trompeloeil::_, trompeloeil::_, trompeloeil::_, trompeloeil::_))
         .RETURN(cosmo::util::ErrorEnum::Success);
     f.handler.Handle(std::move(recv), errc);
     REQUIRE(errc == cosmo::util::ErrorEnum::Success);
 }
 
-TEST_CASE("VideoTaskHandler: SaveOrUpdate fails at ModifyParam", "[video-task-handler]") {
+TEST_CASE("VideoTaskHandler: SaveOrUpdate resource rejection is a single atomic call",
+          "[video-task-handler]") {
     TestFixture f;
     std::error_condition errc;
     cosmo::VideoTask::MsgSaveOrUpdateRecv recv;
     recv.channelId   = "ch1";
     recv.algorithmId = "alg1";
 
-    REQUIRE_CALL(f.mocks.cameraSvc, ModifyTaskParam(trompeloeil::_, trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::CameraNotExist);
-    // ModifyTaskStrategy and SwitchTask should NOT be called
+    REQUIRE_CALL(f.mocks.cameraSvc,
+                 SaveOrUpdateTask(trompeloeil::_, trompeloeil::_, trompeloeil::_, trompeloeil::_))
+        .RETURN(cosmo::util::ErrorEnum::ResourceLimit);
     f.handler.Handle(std::move(recv), errc);
-    REQUIRE(errc == cosmo::util::ErrorEnum::CameraNotExist);
+    REQUIRE(errc == cosmo::util::ErrorEnum::ResourceLimit);
 }
 
 // ============================================================================
@@ -485,11 +483,8 @@ TEST_CASE("VideoTaskHandler: ApplyParamsBatch all success", "[video-task-handler
     recv.algorithmId      = "alg1";
     recv.targetChannelIds = {"ch1"};
 
-    REQUIRE_CALL(f.mocks.cameraSvc, ModifyTaskParam(trompeloeil::_, trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::Success);
-    REQUIRE_CALL(f.mocks.cameraSvc, ModifyTaskStrategy(trompeloeil::_, trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::Success);
-    REQUIRE_CALL(f.mocks.cameraSvc, SwitchTask(trompeloeil::_, trompeloeil::_, trompeloeil::_))
+    REQUIRE_CALL(f.mocks.cameraSvc,
+                 SaveOrUpdateTask(trompeloeil::_, trompeloeil::_, trompeloeil::_, trompeloeil::_))
         .RETURN(cosmo::util::ErrorEnum::Success);
 
     auto ret = f.handler.Handle(std::move(recv), errc);
@@ -504,21 +499,17 @@ TEST_CASE("VideoTaskHandler: ApplyParamsBatch partial failure", "[video-task-han
     recv.algorithmId      = "alg1";
     recv.targetChannelIds = {"ch1", "ch2"};
 
-    // ch1 succeeds fully
+    // ch1 succeeds atomically
     REQUIRE_CALL(f.mocks.cameraSvc,
-                 ModifyTaskParam(trompeloeil::eq(std::string("ch1")), trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::Success);
-    REQUIRE_CALL(f.mocks.cameraSvc,
-                 ModifyTaskStrategy(trompeloeil::eq(std::string("ch1")), trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::Success);
-    REQUIRE_CALL(f.mocks.cameraSvc,
-                 SwitchTask(trompeloeil::eq(std::string("ch1")), trompeloeil::_, trompeloeil::_))
+                 SaveOrUpdateTask(trompeloeil::eq(std::string("ch1")), trompeloeil::_,
+                                  trompeloeil::_, trompeloeil::_))
         .RETURN(cosmo::util::ErrorEnum::Success);
 
-    // ch2 fails at ModifyTaskParam
+    // ch2 is rejected without a partial task update
     REQUIRE_CALL(f.mocks.cameraSvc,
-                 ModifyTaskParam(trompeloeil::eq(std::string("ch2")), trompeloeil::_, trompeloeil::_))
-        .RETURN(cosmo::util::ErrorEnum::CameraNotExist);
+                 SaveOrUpdateTask(trompeloeil::eq(std::string("ch2")), trompeloeil::_,
+                                  trompeloeil::_, trompeloeil::_))
+        .RETURN(cosmo::util::ErrorEnum::ResourceLimit);
 
     auto ret = f.handler.Handle(std::move(recv), errc);
     REQUIRE(errc == cosmo::util::ErrorEnum::Success);

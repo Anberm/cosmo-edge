@@ -33,6 +33,13 @@ public:
                                                    const std::string& algorithmId,
                                                    cosmo::MsgTaskConfig& params) = 0;
 
+    /// Atomically validate, persist, and enable a camera-algorithm task.
+    /// Validation failures must leave the task list and task configuration unchanged.
+    virtual cosmo::util::ErrorEnum SaveOrUpdateTask(const std::string& cameraId,
+                                                    const std::string& algorithmId,
+                                                    const cosmo::MsgTaskConfig& params,
+                                                    const std::string& scheduleId) = 0;
+
     /// Query current dynamic parameters for a camera–algorithm task.
     /// @param cameraId    Camera identifier.
     /// @param algorithmId Algorithm identifier.
