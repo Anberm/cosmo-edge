@@ -36,8 +36,6 @@ public:
 
 private:
     bool OpenEncoder();
-    bool ContainsKeyFrame(const uint8_t* data, size_t size) const;
-    bool IsSmallStartupKeyFrame(const uint8_t* data, size_t size) const;
     void ProcFrame(VideoFramePtr frame);
 
     std::mutex mtx_;
@@ -45,8 +43,6 @@ private:
     media::VideoCodecType video_type_{media::VideoCodecType::kInvalid};
     int width_{0};
     int height_{0};
-    int startup_small_key_frame_count_{0};
-    bool startup_key_frame_accepted_{false};
     std::shared_ptr<media::VideoEncoder> encoder_ = nullptr;
     RtmpStreamPusherPtr video_pusher_{nullptr};
     AsyncQueue<VideoFramePtr> async_queue_;

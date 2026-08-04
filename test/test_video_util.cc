@@ -39,4 +39,12 @@ TEST_CASE("VideoUtil separator helpers honor supplied buffer lengths", "[media][
     CHECK(SeparateHVideoFrame(two_nalus.data(), two_nalus.size()) == 5);
 }
 
+TEST_CASE("Small H264 IDR packets remain valid startup frames", "[media][video-util][regression]") {
+    const std::array<std::uint8_t, 7> small_idr{0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84};
+
+    REQUIRE(small_idr.size() < 1024);
+    CHECK(SeparateHVideoFrame(small_idr.data(), small_idr.size()) == small_idr.size());
+    CHECK(GetFrameType(VideoCodecType::kH264, small_idr.data(), small_idr.size()) == HFrameType::I);
+}
+
 }  // namespace cosmo::media

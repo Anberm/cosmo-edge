@@ -5,6 +5,8 @@
  *  after CameraTaskMng was inlined.)
  */
 #include "mock/MockAppInfoService.h"
+#include "mock/MockConfigReadService.h"
+#include "mock/MockDeviceInfoService.h"
 #include "mock/MockScheduleService.h"
 #include "mock/MockServiceRegistry.h"
 #include "mock/MockTaskService.h"
@@ -66,6 +68,109 @@ TEST_CASE("CameraServiceImpl basic task operations", "[CameraServiceImpl]") {
         REQUIRE(ret == util::ErrorEnum::TaskNotExist);
     }
 }
+
+TEST_CASE("CameraServiceImpl SaveOrUpdateTask commits configuration atomically",
+          "[CameraServiceImpl][save-or-update]") {
+    (void)!system("rm -rf /tmp/cosmo_test/conf/camera/test_camera_atomic");
+    TestFixture fx("test_camera_atomic", "rtsp://test");
+
+    ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("sched1", _)).LR_SIDE_EFFECT(_2 = "Schedule 1").RETURN(true);
+    ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("missing", _)).RETURN(false);
+
+    MsgTaskConfig params;
+    MsgDynamicKeyValue threshold;
+    threshold.key   = "param.threshold";
+    threshold.value = "10";
+    params.params.push_back(threshold);
+    MsgTaskArea area;
+    area.name = "zone-1";
+    params.areas.push_back(area);
+
+    SECTION("successful save creates one enabled task with all configuration") {
+        auto ret = fx.svc.SaveOrUpdateTask(fx.cameraId, "test_alg", params, "sched1");
+        REQUIRE(ret == util::ErrorEnum::Success);
+
+        auto tasks = fx.svc.GetTasks(fx.cameraId);
+        REQUIRE(tasks.size() == 1);
+        CHECK(tasks[0].algorithmCode == "test_alg");
+        CHECK(tasks[0].scheduleId == "sched1");
+        CHECK(tasks[0].enable);
+
+        std::vector<MsgDynamicKeyValue> saved_params;
+        REQUIRE(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) == util::ErrorEnum::Success);
+        REQUIRE(saved_params.size() == 1);
+        CHECK(saved_params[0].value == "10");
+
+        std::vector<MsgTaskArea> saved_areas;
+        std::vector<MsgTaskArea> saved_shielded_areas;
+        REQUIRE(fx.svc.QueryTaskArea(fx.cameraId, "test_alg", saved_areas, saved_shielded_areas) ==
+                util::ErrorEnum::Success);
+        REQUIRE(saved_areas.size() == 1);
+        CHECK(saved_areas[0].name == "zone-1");
+    }
+
+    SECTION("validation failure leaves a new task absent") {
+        auto ret = fx.svc.SaveOrUpdateTask(fx.cameraId, "test_alg", params, "missing");
+        REQUIRE(ret == util::ErrorEnum::TimeTemplateNotExist);
+        CHECK(fx.svc.GetTasks(fx.cameraId).empty());
+
+        std::vector<MsgDynamicKeyValue> saved_params;
+        CHECK(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) == util::ErrorEnum::TaskNotExist);
+    }
+
+    SECTION("validation failure preserves an existing task") {
+        REQUIRE(fx.svc.SaveOrUpdateTask(fx.cameraId, "test_alg", params, "sched1") ==
+                util::ErrorEnum::Success);
+
+        params.params[0].value = "20";
+        auto ret               = fx.svc.SaveOrUpdateTask(fx.cameraId, "test_alg", params, "missing");
+        REQUIRE(ret == util::ErrorEnum::TimeTemplateNotExist);
+
+        std::vector<MsgDynamicKeyValue> saved_params;
+        REQUIRE(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) == util::ErrorEnum::Success);
+        REQUIRE(saved_params.size() == 1);
+        CHECK(saved_params[0].value == "10");
+    }
+}
+
+#ifdef COSMO_NN_USE_SOPHON_BACKEND
+TEST_CASE("CameraServiceImpl resource rejection leaves no partial task",
+          "[CameraServiceImpl][save-or-update][sophon]") {
+    (void)!system("rm -rf /tmp/cosmo_test/conf/camera/test_camera_resource");
+    TestFixture fx("test_camera_resource", "rtsp://test");
+
+    ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("sched1", _)).LR_SIDE_EFFECT(_2 = "Schedule 1").RETURN(true);
+    REQUIRE_CALL(fx.mocks.configReadSvc, GetResourceLimit()).RETURN(true);
+    REQUIRE_CALL(fx.mocks.taskSvc, PacketStatus(_, _, _, _))
+        .LR_SIDE_EFFECT(_1 = 100; _2 = 0; _3 = 100; _4 = 30);
+
+    MsgGpuInfo gpu_info;
+    gpu_info.gpuusage        = 1.0;
+    gpu_info.gpumemtotal     = 8000;
+    gpu_info.gpumemavailable = 0;
+    MsgGpuDevUsage device;
+    device.gpumemtotal     = 8000;
+    device.gpumemavailable = 0;
+    gpu_info.gpudevusage.push_back(device);
+    REQUIRE_CALL(fx.mocks.deviceInfoSvc, GetGpuUtilization()).RETURN(gpu_info);
+
+    MsgTaskConfig params;
+    MsgDynamicKeyValue threshold;
+    threshold.key   = "param.threshold";
+    threshold.value = "20";
+    params.params.push_back(threshold);
+    MsgTaskArea area;
+    area.name = "must-not-persist";
+    params.areas.push_back(area);
+
+    auto ret = fx.svc.SaveOrUpdateTask(fx.cameraId, "test_alg", params, "sched1");
+    REQUIRE(ret == util::ErrorEnum::ResourceLimit);
+    CHECK(fx.svc.GetTasks(fx.cameraId).empty());
+
+    std::vector<MsgDynamicKeyValue> saved_params;
+    CHECK(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) == util::ErrorEnum::TaskNotExist);
+}
+#endif
 
 TEST_CASE("CameraServiceImpl monitor logic", "[CameraServiceImpl]") {
     (void)!system("rm -rf /tmp/cosmo_test/conf/camera/test_camera_01");
