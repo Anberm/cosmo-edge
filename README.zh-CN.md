@@ -198,29 +198,17 @@ git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 # git clone https://gitee.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
 
-# 2. 使用默认 public-runtime 配置构建
+# 2. 使用默认 public-runtime 配置构建 Open MD5 升级包
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 
 # 3. 查看导出的构建产物
 ls -lh build_output/public-runtime/
-# 文件名包含：-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>.tar.gz
+# 文件名：cosmo-V<版本号>-<32位md5>.tar.gz
 ```
 
-> 默认产物是可以直接安装的 SOURCE 源码构建，但不是正式签名发布包。它包含
-> Guard 运行库和受保护 preset，不包含设备证书签发工具、私钥或正式发布入口。
-> 设备必须另行安装一张与本机绑定的设备证书；该证书授权使用同一产品模型密钥
-> 发布的当前及以后全部 preset，不存在逐模型 license。
-
-将 SOURCE 包复制到设备并解压，然后在解压后的包目录执行：
-
-```bash
-sudo ./install-device.sh install
-sudo ./install-device.sh status
-```
-
-安装器会在需要时创建 `/appfs/cosmo_wander`，直接替换
-`/appfs/cosmo_wander/cwai_data`，不备份旧应用，也不提供回滚命令。它不会读取
-或修改 `/data/cwaiuserdata/model-guard/device-certificate.bin`。
+> 默认 Open 包包含明文模型，不需要授权。Protected 包使用相同的 MD5 升级格式，
+> 但包含加密模型和授权工具；加密模型需要设备绑定证书。应用升级包本身不签名。
+> 两种包都可以从已安装 main 分支程序的管理页面直接升级。
 
 在 Windows PowerShell 下构建发布包：
 
@@ -230,9 +218,9 @@ sudo ./install-device.sh status
 
 PowerShell 入口使用相同的默认配置，输出到
 `build_output/public-runtime/`。配置边界详见[构建指南](docs/guide/build.md)。
-需要官方签名发布和 OTA 时，仍应使用独立的受控 `production-release` 流程。
+Protected 包通过受控 `production-release` 配置构建，但不再需要离线应用签名步骤。
 
-安装 SOURCE 或正式签名发布包并重启设备后：
+安装 Open 或 Protected 包并重启设备后：
 - **默认 IP**：`192.168.100.1`（请确保你的电脑与设备处于同一网段，例如配置静态 IP 为 `192.168.100.x`）
 - **登录地址**：`http://192.168.100.1`
 - **默认用户名**：`admin`

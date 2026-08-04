@@ -8,13 +8,8 @@ COSMO_LOG_DIR="${COSMO_DATA_DIR}/log/logs"
 COSMO_INSTALL_DIR="/appfs/cosmo_wander/cwai_data"
 COSMO_UPGRADE_DIR="${COSMO_DATA_DIR}/upgrade"
 COSMO_NGINX_TMP_DIR="${COSMO_DATA_DIR}/tmp"
-COSMO_RELEASES_DIR="${COSMO_INSTALL_DIR}/.releases"
-COSMO_RELEASE_CURRENT="${COSMO_INSTALL_DIR}/current"
-COSMO_RELEASE_STATE_DIR="${COSMO_INSTALL_DIR}/.release-state"
-COSMO_MODEL_GUARD_STATE_DIR="${COSMO_DATA_DIR}/model-guard"
 
 # Upgrade signal files
-COSMO_HW_UPGRADE_SIGN="${COSMO_DATA_DIR}/mqttHWUpgradeApp"
 COSMO_UPGRADE_SIGN="${COSMO_DATA_DIR}/mqttUpgradeApp"
 
 # ── Log helpers ──
@@ -40,13 +35,7 @@ ensure_runtime_dirs() {
     mkdir -p "${COSMO_NGINX_TMP_DIR}/nginx_scgi"
     mkdir -p "${COSMO_UPGRADE_DIR}"
 
-    # Versioned release trees are immutable before activation.  Runtime nginx
-    # state is created only below the already-active release.
-    if [ -L "${COSMO_RELEASE_CURRENT}" ] && [ -d "${COSMO_RELEASE_CURRENT}/bin/nginx_conf" ]; then
-        mkdir -p "${COSMO_RELEASE_CURRENT}/bin/nginx_conf/logs"
-    elif [ -d "${COSMO_INSTALL_DIR}/bin/nginx_conf" ]; then
-        # Legacy layout remains bootable until the factory bootstrap installs
-        # the first trust-anchored release state.
+    if [ -d "${COSMO_INSTALL_DIR}/bin/nginx_conf" ]; then
         mkdir -p "${COSMO_INSTALL_DIR}/bin/nginx_conf/logs"
     fi
 }

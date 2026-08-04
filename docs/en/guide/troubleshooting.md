@@ -90,11 +90,9 @@ Sophon output is not written directly to `build_output/`. It is isolated by
 - SOURCE build (internal profile `public-runtime`): `build_output/public-runtime/`;
 - controlled production build: `build_output/production-release/`.
 
-The default filename contains
-`-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>`. It is an installable
-source build, not a signed production release. Protected models still require
-a device-bound certificate provisioned through the separate authorized
-workflow.
+Both profiles produce `cosmo-V<version>-<32-char-md5>.tar.gz`. Protected models
+still require a device-bound certificate provisioned through the authorized
+workflow; application packages do not require release signatures.
 
 Note: `docker compose build` only builds the image and does not necessarily execute the container command that exports an artifact.
 

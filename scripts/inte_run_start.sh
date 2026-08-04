@@ -14,13 +14,5 @@ ensure_runtime_dirs
 
 cosmo_log "BOOT" "Starting Cosmo services..."
 
-# Keep the historical systemd ExecStart path stable.  Once factory bootstrap
-# has created the atomic release pointer, dispatch into that exact active
-# release; the compatibility transaction never rewrites the systemd unit.
-if [ -L "$COSMO_RELEASE_CURRENT" ] && [ -x "$COSMO_RELEASE_CURRENT/scripts/start.sh" ]; then
-    cd "$COSMO_RELEASE_CURRENT/scripts" || exit 1
-    exec "$COSMO_RELEASE_CURRENT/scripts/start.sh" start
-fi
-
 cd "$SCRIPT_DIR" || exit 1
 exec "$SCRIPT_DIR/start.sh" start

@@ -29,21 +29,7 @@ if ($BuildProfile -notin @("public-runtime", "production-release")) {
     throw "COSMO_MODEL_GUARD_BUILD_PROFILE must be public-runtime or production-release"
 }
 $env:COSMO_MODEL_GUARD_BUILD_PROFILE = $BuildProfile
-$LegacyMigration = $env:COSMO_LEGACY_MIGRATION_PACKAGE
-if ([string]::IsNullOrWhiteSpace($LegacyMigration)) {
-    $LegacyMigration = "ON"
-}
-$env:COSMO_LEGACY_MIGRATION_PACKAGE = $LegacyMigration
-$PackageVariant = if ($BuildProfile -eq "public-runtime" -and $LegacyMigration -eq "ON") {
-    "legacy-main-compatible"
-} elseif ($BuildProfile -eq "public-runtime") {
-    "SOURCE"
-} else {
-    $BuildProfile
-}
-if ($BuildProfile -eq "production-release") {
-    Write-Warning "production-release requires organization-approved controlled Compose inputs; selecting the profile alone fails closed."
-}
+$PackageVariant = if ($BuildProfile -eq "public-runtime") { "Open" } else { "Protected" }
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,27 +60,6 @@ function ConvertTo-DockerPath {
 $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDir ".."))
 $dockerSrc  = ConvertTo-DockerPath $projectRoot
-
-if ($BuildProfile -eq "public-runtime" -and $LegacyMigration -eq "ON") {
-    Write-Host "Legacy main-compatible MD5 package created."
-} elseif ($BuildProfile -eq "public-runtime") {
-    $SourceCommit = $env:COSMO_EDGE_SOURCE_COMMIT
-    if ([string]::IsNullOrWhiteSpace($SourceCommit)) {
-        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            throw "SOURCE packaging requires Git or an explicit COSMO_EDGE_SOURCE_COMMIT"
-        }
-        $ResolvedCommit = & git -C $projectRoot rev-parse --verify 'HEAD^{commit}'
-        if ($LASTEXITCODE -ne 0) {
-            throw "Cannot resolve the Edge commit; set COSMO_EDGE_SOURCE_COMMIT explicitly"
-        }
-        $SourceCommit = ([string]$ResolvedCommit).Trim()
-    }
-    if ($SourceCommit -notmatch '^[0-9a-f]{40}$') {
-        throw "COSMO_EDGE_SOURCE_COMMIT must be lower-case 40-hex"
-    }
-    $env:COSMO_EDGE_SOURCE_COMMIT = $SourceCommit
-    Write-Host "Edge source commit: $SourceCommit"
-}
 
 Write-Step "Step 1/5 - Checking Docker"
 try { Invoke-Docker info } catch { Write-Error "Docker is not running. Start Docker Desktop, then re-run."; exit 1 }
@@ -176,9 +141,9 @@ if (Test-Path $outputDir) {
 }
 
 if ($BuildProfile -eq "public-runtime") {
-    Write-Host "SOURCE package created. Protected preset models require one separately provisioned device-bound certificate."
+    Write-Host "Open MD5 upgrade package created."
 } else {
-    Write-Warning "production-release artifacts are candidates only; controlled offline signing is still required before deployment."
+    Write-Host "Protected MD5 upgrade package created. Model use requires device authorization."
 }
 
 Write-Host "`n=== Sophon build completed ===" -ForegroundColor Green

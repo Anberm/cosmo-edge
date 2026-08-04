@@ -1,11 +1,8 @@
 #include <array>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <optional>
 #include <sstream>
 #include <string>
-#include <string_view>
 
 #include "catch_amalgamated.hpp"
 #include "mock/MockServiceRegistry.h"
@@ -19,31 +16,6 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-constexpr const char* kSourceRuntimeEnvironment = "COSMO_SOURCE_RUNTIME";
-
-class ScopedSourceRuntimeEnvironment {
-public:
-    ScopedSourceRuntimeEnvironment() {
-        const char* value = std::getenv(kSourceRuntimeEnvironment);
-        original_value_   = value == nullptr ? std::nullopt : std::optional<std::string>(value);
-        unsetenv(kSourceRuntimeEnvironment);
-    }
-
-    ~ScopedSourceRuntimeEnvironment() {
-        if (original_value_) {
-            setenv(kSourceRuntimeEnvironment, original_value_->c_str(), 1);
-        } else {
-            unsetenv(kSourceRuntimeEnvironment);
-        }
-    }
-
-    ScopedSourceRuntimeEnvironment(const ScopedSourceRuntimeEnvironment&)            = delete;
-    ScopedSourceRuntimeEnvironment& operator=(const ScopedSourceRuntimeEnvironment&) = delete;
-
-private:
-    std::optional<std::string> original_value_;
-};
 
 void CreateUpgradeLayout(const fs::path& root) {
     static constexpr std::array required_dirs{"bin", "files", "font", "lib", "scripts", "web"};
@@ -111,24 +83,6 @@ TEST_CASE("SystemOperationServiceImpl: System operations", "[system][service]") 
     }
 }
 
-TEST_CASE("SystemOperationServiceImpl: SOURCE runtime disables software upgrade",
-          "[system][upgrade][source]") {
-    cosmo::test::MockServiceRegistry mocks;
-    ScopedSourceRuntimeEnvironment environment;
-    cosmo::service::SystemOperationServiceImpl sysOpSvc;
-    const auto missing_archive = fs::temp_directory_path() / "cosmo-source-upgrade-must-not-be-read.tar.gz";
-
-    SECTION("rejects before inspecting an archive when SOURCE is active") {
-        REQUIRE(setenv(kSourceRuntimeEnvironment, "1", 1) == 0);
-        REQUIRE(sysOpSvc.Upgrade(missing_archive.string()) == cosmo::util::ErrorEnum::OperationNotSupport);
-    }
-
-    SECTION("preserves the ordinary upgrade path when SOURCE is inactive") {
-        REQUIRE(sysOpSvc.Upgrade(missing_archive.string()) ==
-                cosmo::util::ErrorEnum::UpgradeFileVerifyFailed);
-    }
-}
-
 TEST_CASE("PacketUpgrade accepts cosmo tar.gz package names", "[system][upgrade]") {
     std::string md5sum;
 
@@ -162,22 +116,6 @@ TEST_CASE("PacketUpgrade rejects missing md5", "[system][upgrade]") {
     REQUIRE(result != cosmo::util::ErrorEnum::Success);
 }
 
-TEST_CASE("PacketUpgrade accepts only canonical signed release names", "[system][upgrade][signed]") {
-    REQUIRE(cosmo::SignedReleaseFileNameCheck("cosmo-release-factory-v23.1.tar.gz") ==
-            cosmo::util::ErrorEnum::Success);
-    REQUIRE(cosmo::SignedReleaseFileNameCheck("cosmo-release-a.tar.gz") == cosmo::util::ErrorEnum::Success);
-    REQUIRE(cosmo::SignedReleaseFileNameCheck("cosmo-release-" + std::string(64, 'a') + ".tar.gz") ==
-            cosmo::util::ErrorEnum::Success);
-    REQUIRE(cosmo::SignedReleaseFileNameCheck("cosmo-release-.tar.gz") != cosmo::util::ErrorEnum::Success);
-    REQUIRE(cosmo::SignedReleaseFileNameCheck("cosmo-release-Factory.tar.gz") !=
-            cosmo::util::ErrorEnum::Success);
-    REQUIRE(cosmo::SignedReleaseFileNameCheck("cosmo-release-../escape.tar.gz") !=
-            cosmo::util::ErrorEnum::Success);
-    REQUIRE(cosmo::SignedReleaseFileNameCheck(
-                "cosmo-release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.tar.gz") !=
-            cosmo::util::ErrorEnum::Success);
-}
-
 TEST_CASE("PacketUpgrade validates archive boundaries before extraction", "[system][upgrade][archive]") {
     const auto root      = fs::temp_directory_path() / "cosmo_packet_upgrade_validation_test";
     const auto data_root = root / "data";
@@ -203,32 +141,6 @@ TEST_CASE("PacketUpgrade validates archive boundaries before extraction", "[syst
         REQUIRE(fs::is_regular_file(upgrade_root / archive.filename()));
         REQUIRE(fs::is_directory(upgrade_root / "bin"));
         REQUIRE(fs::is_regular_file(upgrade_root / "scripts" / "install.sh"));
-    }
-
-    SECTION("stages a signed release archive without legacy extraction") {
-        const auto archive = staging / "cosmo-release-factory-v23.1.tar.gz";
-        constexpr std::array<unsigned char, 20> opaque_gzip{
-            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
-            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        };
-        {
-            std::ofstream stream(archive, std::ios::binary);
-            stream.write(reinterpret_cast<const char*>(opaque_gzip.data()), opaque_gzip.size());
-            REQUIRE(stream.good());
-        }
-
-        REQUIRE(cosmo::PacketUpgrade(archive) == cosmo::util::ErrorEnum::Success);
-        const auto upgrade_root   = fs::path(cosmo::path::GetUpgradePath());
-        const auto staged_archive = upgrade_root / archive.filename();
-        REQUIRE(fs::is_regular_file(staged_archive));
-        REQUIRE_FALSE(fs::exists(archive));
-
-        std::array<unsigned char, opaque_gzip.size()> staged_bytes{};
-        std::ifstream stream(staged_archive, std::ios::binary);
-        stream.read(reinterpret_cast<char*>(staged_bytes.data()), staged_bytes.size());
-        REQUIRE(stream.gcount() == static_cast<std::streamsize>(staged_bytes.size()));
-        REQUIRE(stream.peek() == std::char_traits<char>::eof());
-        REQUIRE(staged_bytes == opaque_gzip);
     }
 
     SECTION("rejects traversal without clearing the previous upgrade directory") {

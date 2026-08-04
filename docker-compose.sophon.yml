@@ -8,20 +8,14 @@ services:
     working_dir: /workspace
     environment:
       COSMO_MODEL_GUARD_BUILD_PROFILE: "${COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"
-      COSMO_EDGE_SOURCE_COMMIT: "${COSMO_EDGE_SOURCE_COMMIT:-}"
-      COSMO_LEGACY_MIGRATION_PACKAGE: "${COSMO_LEGACY_MIGRATION_PACKAGE:-ON}"
       COSMO_PACKAGE_MODELS: "${COSMO_PACKAGE_MODELS:-include}"
     command: >
       bash -lc "
       set -e;
       if [ \"$${COSMO_MODEL_GUARD_BUILD_PROFILE}\" = public-runtime ]; then
-        if [ \"$${COSMO_LEGACY_MIGRATION_PACKAGE}\" = ON ]; then
-          package_variant=legacy-main-compatible;
-        else
-          package_variant=SOURCE;
-        fi;
+        package_variant=Open;
       else
-        package_variant=$${COSMO_MODEL_GUARD_BUILD_PROFILE};
+        package_variant=Protected;
       fi;
       echo \"Starting $${package_variant} cross-compilation...\";
       ./scripts/build.sh -T -m data/resource/aiboxresource;

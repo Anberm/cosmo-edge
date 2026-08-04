@@ -196,24 +196,18 @@ git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 # git clone https://gitee.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
 
-# 2. Build the SOURCE package (internal profile: public-runtime)
+# 2. Build the Open MD5 upgrade package (internal profile: public-runtime)
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 
 # 3. View the exported build artifact
 ls -lh build_output/public-runtime/
-# Filename: ...-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>.tar.gz
+# Filename: cosmo-V<version>-<32-char-md5>.tar.gz
 ```
 
-> The SOURCE package is installable for source-modified CosmoEdge deployments,
-> but it is not a signed production release and cannot commission a blank
-> device. Protected preset models require one device-bound certificate installed
-> by a separate authorized workflow; there are no per-model licenses. The
-> package excludes production provisioning, release bootstrap, private trust
-> material, and signing transaction entry points.
-> The archive name records the base Edge commit, the packaged build identity,
-> and the outer archive SHA-256. After extraction, `install-device.sh status`
-> reports the package version, Edge commit, build identity, and service state;
-> it does not claim to recover the no-longer-available outer archive digest.
+> The default Open package contains plain models and requires no authorization.
+> A Protected package uses the same MD5 upgrade format, but contains encrypted
+> models and the provisioning tool; those models require a device-bound
+> certificate. Application packages are not signed.
 
 On Windows PowerShell to build the package:
 
@@ -221,12 +215,11 @@ On Windows PowerShell to build the package:
 .\scripts\build_sophon_package.ps1
 ```
 
-The PowerShell entry point uses the same internal profile and writes the SOURCE
+The PowerShell entry point uses the same internal profile and writes the Open
 package to `build_output/public-runtime/`. See the
-[Build Guide](docs/en/guide/build.md) for the SOURCE/controlled-release
-boundaries.
+[Build Guide](docs/en/guide/build.md) for the Open/Protected boundaries.
 
-After installing a SOURCE or signed release and rebooting the device:
+After installing an Open or Protected package and rebooting the device:
 
 - **Default IP**: `192.168.100.1` (ensure your computer is configured with a static IP in the `192.168.100.x` subnet to connect directly)
 - **Web Console URL**: `http://192.168.100.1`

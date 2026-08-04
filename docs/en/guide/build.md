@@ -85,15 +85,13 @@ The two supported profiles are deliberately isolated:
 
 | Profile | Intended use | Output directory | Deployment status |
 | --- | --- | --- | --- |
-| SOURCE (`public-runtime`, default) | Public aarch64 compile, link, package, and test validation using the tracked runtime SDK | `build_output/public-runtime/` | Installable source build; not a signed production release |
-| `production-release` | Controlled release build with the complete production SDK, provisioning tool, release public key, and release bootstrap inputs | `build_output/production-release/` | Emits a `FACTORY-BASE` only for blank-device setup; OTA still requires a signed release |
+| Open (`public-runtime`, default) | Public aarch64 compile, link, package, and test validation using the tracked runtime SDK | `build_output/public-runtime/` | Plain models; no device authorization required |
+| Protected (`production-release`) | Controlled build with the complete production SDK and provisioning tool | `build_output/production-release/` | Encrypted models; device authorization required |
 
-The SOURCE archive name ends with
-`-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>.tar.gz`. It includes
-the runtime Guard SDK and SOURCE installation assets, but no provisioner,
-release bootstrap, private signing material, or signing transaction entry
-point. It can update application code on a device prepared separately; it
-cannot commission a blank device or be renamed into a signed release.
+Both profiles produce `cosmo-V<version>-<32-char-md5>.tar.gz`. The same format
+can be uploaded through the management page on a main-branch installation and
+on every later version. Application archives are not signed. The profiles differ
+only in model protection and availability of `cosmo-model-provision`.
 
 ### Install a SOURCE Build on a Device
 
@@ -122,29 +120,21 @@ remain unavailable until the separate authorized Guard workflow installs the
 certificate. SOURCE `install` and `status` do not access
 `/data/cwaiuserdata/model-guard`.
 
-Maintainers select the production profile only inside the controlled release
-environment. The base Compose file alone intentionally cannot do this: an
-approved override must mount the complete SDK and each public trust input
-read-only and set all required production variables:
+Maintainers use one command in a controlled environment containing the complete
+Guard SDK and provisioning tool:
 
 ```bash
 COSMO_MODEL_GUARD_BUILD_PROFILE=production-release \
-  docker compose -f docker-compose.sophon.yml \
-  -f /path/to/approved-production.override.yml \
-  run --rm cosmo-sophon-package
+  docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ```
 
-The PowerShell entry point validates the same profile value for output
-selection, but setting that value alone does not provide the controlled inputs;
-it fails closed unless the organization's approved release automation supplies
-them.
+The Protected build fails immediately if the controlled SDK does not contain
+`cosmo-model-provision`.
 
-The `production-release` CPack artifact is not an OTA archive and is rejected
-by the updater. It may be used only as a SHA-256-pinned `FACTORY-BASE` in the
-controlled blank-device procedure. Normal installation and upgrades still use
-the signed release archive emitted by the offline release process. Release
-signing keys must never be placed in the repository or passed to the ordinary
-Compose build.
+The Protected CPack artifact is itself the upgrade archive accepted by the web
+management page. No offline application-signing step is required. Guard device
+certificates and model-encryption secrets remain controlled inputs and must never
+be placed in the public repository.
 
 This path is from:
 

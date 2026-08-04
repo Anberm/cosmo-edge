@@ -34,9 +34,8 @@ namespace cosmo {
 
 namespace {
 
-    constexpr size_t kMaxUpgradeArchiveEntries      = 20000;
-    constexpr size_t kMaxUpgradeListingBytes        = kMaxUpgradeArchiveEntries * 1024 + 16 * 1024;
-    constexpr std::uintmax_t kMaxSignedReleaseBytes = 128ULL * 1024 * 1024 * 1024;
+    constexpr size_t kMaxUpgradeArchiveEntries = 20000;
+    constexpr size_t kMaxUpgradeListingBytes   = kMaxUpgradeArchiveEntries * 1024 + 16 * 1024;
 
     struct UpgradeArchiveInspection {
         size_t entry_count{0};
@@ -298,31 +297,6 @@ util::ErrorEnum UpgradeFileNameCheck(std::string file_name, std::string& md5sum)
     return util::ErrorEnum::Success;
 }
 
-util::ErrorEnum SignedReleaseFileNameCheck(std::string_view file_name) {
-    constexpr std::string_view prefix = "cosmo-release-";
-    constexpr std::string_view suffix = ".tar.gz";
-    if (file_name.size() <= prefix.size() + suffix.size() ||
-        file_name.compare(0, prefix.size(), prefix) != 0 ||
-        file_name.compare(file_name.size() - suffix.size(), suffix.size(), suffix) != 0) {
-        return util::ErrorEnum::UpgradeFileVerifyFailed;
-    }
-
-    const std::string_view release_id =
-        file_name.substr(prefix.size(), file_name.size() - prefix.size() - suffix.size());
-    if (release_id.empty() || release_id.size() > 64 ||
-        !((release_id.front() >= 'a' && release_id.front() <= 'z') ||
-          (release_id.front() >= '0' && release_id.front() <= '9'))) {
-        return util::ErrorEnum::UpgradeFileVerifyFailed;
-    }
-    for (const char value : release_id) {
-        if (!((value >= 'a' && value <= 'z') || (value >= '0' && value <= '9') || value == '.' ||
-              value == '_' || value == '-')) {
-            return util::ErrorEnum::UpgradeFileVerifyFailed;
-        }
-    }
-    return util::ErrorEnum::Success;
-}
-
 util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     std::error_code ec;
     const auto absolute_file = fs::absolute(filePath, ec);
@@ -330,10 +304,9 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
         !cosmo::path::IsSafePathComponent(absolute_file.filename().string(), 255)) {
         return util::ErrorEnum::UpgradeFileVerifyFailed;
     }
-    std::string file_name     = absolute_file.filename().string();
-    const bool signed_release = SignedReleaseFileNameCheck(file_name) == util::ErrorEnum::Success;
+    std::string file_name = absolute_file.filename().string();
     std::string file_name_md5sum;
-    if (!signed_release && UpgradeFileNameCheck(file_name, file_name_md5sum) != util::ErrorEnum::Success) {
+    if (UpgradeFileNameCheck(file_name, file_name_md5sum) != util::ErrorEnum::Success) {
         return util::ErrorEnum::UpgradeFileVerifyFailed;
     }
 
@@ -346,38 +319,32 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     }
 
     const auto archive_size = fs::file_size(resolved_file, ec);
-    if (ec || archive_size == 0 || (signed_release && archive_size > kMaxSignedReleaseBytes) ||
-        !IsGzipFile(resolved_file)) {
+    if (ec || archive_size == 0 || !IsGzipFile(resolved_file)) {
         LOG_ERRO("upgrade package has invalid size or format: {}", resolved_file);
         return util::ErrorEnum::UpgradeFileVerifyFailed;
     }
 
+    const auto md5Str = Md5SumFile(resolved_file);
+    if (md5Str.empty() || (util::ToLower(md5Str) != file_name_md5sum)) {
+        LOG_ERRO("upgrade package md5 error, expected={}, actual={}", file_name_md5sum, md5Str);
+        return util::ErrorEnum::UpgradeFileNotMatch;
+    }
     UpgradeArchiveInspection inspection;
-    fs::path upgradeFileDir(cosmo::path::GetUpgradePath());
-    if (!signed_release) {
-        const auto md5Str = Md5SumFile(resolved_file);
-        if (md5Str.empty() || (util::ToLower(md5Str) != file_name_md5sum)) {
-            LOG_ERRO("upgrade package md5 error, expected={}, actual={}", file_name_md5sum, md5Str);
-            return util::ErrorEnum::UpgradeFileNotMatch;
-        }
-        if (!ValidateUpgradeArchiveListing(resolved_file, inspection)) {
-            return util::ErrorEnum::UpgradeFileVerifyFailed;
-        }
+    if (!ValidateUpgradeArchiveListing(resolved_file, inspection)) {
+        return util::ErrorEnum::UpgradeFileVerifyFailed;
+    }
 
-        const auto budget = util::InspectStorageResourceBudget(upgradeFileDir.string());
-        if (!budget.valid) {
-            throw util::ErrorMessage(util::ErrorEnum::SysErr, "Cannot inspect upgrade extraction storage");
-        }
-        // A valid package replaces the previous prepared upgrade tree. Include
-        // those allocated blocks in the admission budget, while keeping the tree
-        // intact until all package validation above has succeeded.
-        const auto usable_bytes =
-            util::UsableStorageBytesAfterReclaim(budget, AllocatedTreeBytes(upgradeFileDir));
-        if (inspection.total_bytes > usable_bytes) {
-            throw util::ResourceLimitError("Insufficient safe disk space to extract the upgrade package",
-                                           "archive-extraction", "upgrade", inspection.total_bytes,
-                                           usable_bytes, budget.reserve_bytes);
-        }
+    fs::path upgradeFileDir(cosmo::path::GetUpgradePath());
+    const auto budget = util::InspectStorageResourceBudget(upgradeFileDir.string());
+    if (!budget.valid) {
+        throw util::ErrorMessage(util::ErrorEnum::SysErr, "Cannot inspect upgrade extraction storage");
+    }
+    const auto usable_bytes =
+        util::UsableStorageBytesAfterReclaim(budget, AllocatedTreeBytes(upgradeFileDir));
+    if (inspection.total_bytes > usable_bytes) {
+        throw util::ResourceLimitError("Insufficient safe disk space to extract the upgrade package",
+                                       "archive-extraction", "upgrade", inspection.total_bytes, usable_bytes,
+                                       budget.reserve_bytes);
     }
     std::string resolved_upgrade_dir;
     if (!cosmo::path::ResolveExistingPathWithinRoot(cosmo::path::GetBaseDir(), upgradeFileDir.string(),
@@ -412,16 +379,6 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     if (ec) {
         remove_all(upgradeFileDir, ec);
         return util::ErrorEnum::FileMoveFailed;
-    }
-
-    // A signed compatibility release must remain byte-for-byte opaque here.
-    // The embedded-key bootstrap or the currently trusted updater pins this
-    // exact archive inode and performs the canonical tar, signature, payload,
-    // ELF, ABI, model-policy, and rollback checks after reboot.  Extracting it
-    // through the legacy MD5 path would destroy that authenticated container.
-    if (signed_release) {
-        LOG_INFO("signed compatibility release staged without extraction: {}", upgrade_file_name.string());
-        return util::ErrorEnum::Success;
     }
 
     // Extract tar.gz
