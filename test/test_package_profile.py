@@ -520,6 +520,11 @@ class PackageProfileTest(unittest.TestCase):
             'COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"',
             build_script,
         )
+        self.assertIn("COSMO_LEGACY_MIGRATION_PACKAGE:-ON", build_script)
+        self.assertIn(
+            "COSMO_LEGACY_MIGRATION_PACKAGE:-ON",
+            (REPOSITORY / "docker-compose.sophon.yml").read_text(encoding="utf-8"),
+        )
         self.assertIn("scripts/verify_package_contents.py", build_script)
         self.assertIn("COSMO_EDGE_SOURCE_COMMIT", build_script)
         self.assertIn(

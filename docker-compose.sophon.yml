@@ -9,13 +9,17 @@ services:
     environment:
       COSMO_MODEL_GUARD_BUILD_PROFILE: "${COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"
       COSMO_EDGE_SOURCE_COMMIT: "${COSMO_EDGE_SOURCE_COMMIT:-}"
-      COSMO_LEGACY_MIGRATION_PACKAGE: "${COSMO_LEGACY_MIGRATION_PACKAGE:-OFF}"
+      COSMO_LEGACY_MIGRATION_PACKAGE: "${COSMO_LEGACY_MIGRATION_PACKAGE:-ON}"
       COSMO_PACKAGE_MODELS: "${COSMO_PACKAGE_MODELS:-include}"
     command: >
       bash -lc "
       set -e;
       if [ \"$${COSMO_MODEL_GUARD_BUILD_PROFILE}\" = public-runtime ]; then
-        package_variant=SOURCE;
+        if [ \"$${COSMO_LEGACY_MIGRATION_PACKAGE}\" = ON ]; then
+          package_variant=legacy-main-compatible;
+        else
+          package_variant=SOURCE;
+        fi;
       else
         package_variant=$${COSMO_MODEL_GUARD_BUILD_PROFILE};
       fi;

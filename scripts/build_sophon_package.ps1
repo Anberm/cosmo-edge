@@ -29,7 +29,14 @@ if ($BuildProfile -notin @("public-runtime", "production-release")) {
     throw "COSMO_MODEL_GUARD_BUILD_PROFILE must be public-runtime or production-release"
 }
 $env:COSMO_MODEL_GUARD_BUILD_PROFILE = $BuildProfile
-$PackageVariant = if ($BuildProfile -eq "public-runtime") {
+$LegacyMigration = $env:COSMO_LEGACY_MIGRATION_PACKAGE
+if ([string]::IsNullOrWhiteSpace($LegacyMigration)) {
+    $LegacyMigration = "ON"
+}
+$env:COSMO_LEGACY_MIGRATION_PACKAGE = $LegacyMigration
+$PackageVariant = if ($BuildProfile -eq "public-runtime" -and $LegacyMigration -eq "ON") {
+    "legacy-main-compatible"
+} elseif ($BuildProfile -eq "public-runtime") {
     "SOURCE"
 } else {
     $BuildProfile
@@ -68,7 +75,9 @@ $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDir ".."))
 $dockerSrc  = ConvertTo-DockerPath $projectRoot
 
-if ($BuildProfile -eq "public-runtime") {
+if ($BuildProfile -eq "public-runtime" -and $LegacyMigration -eq "ON") {
+    Write-Host "Legacy main-compatible MD5 package created."
+} elseif ($BuildProfile -eq "public-runtime") {
     $SourceCommit = $env:COSMO_EDGE_SOURCE_COMMIT
     if ([string]::IsNullOrWhiteSpace($SourceCommit)) {
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) {

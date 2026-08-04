@@ -154,7 +154,7 @@ set(COSMO_EDGE_SOURCE_COMMIT "" CACHE STRING
 set_property(CACHE COSMO_MODEL_GUARD_BUILD_PROFILE PROPERTY STRINGS
     public-runtime production-release)
 option(COSMO_LEGACY_MIGRATION_PACKAGE
-    "Build an old-main-compatible bridge package with the historical MD5 name" OFF)
+    "Build an old-main-compatible bridge package with the historical MD5 name" ON)
 set(COSMO_PACKAGE_MODELS "include" CACHE STRING
     "Package preset models: include or preserve the installed model directory")
 set_property(CACHE COSMO_PACKAGE_MODELS PROPERTY STRINGS include preserve)
