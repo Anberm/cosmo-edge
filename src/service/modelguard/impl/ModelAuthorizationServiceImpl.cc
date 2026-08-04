@@ -9,8 +9,8 @@
 
 namespace cosmo::service {
 namespace {
-constexpr std::uintmax_t kDeviceRequestSize = 48;
-constexpr std::uintmax_t kCertificateSize   = 236;
+    constexpr std::uintmax_t kDeviceRequestSize = 48;
+    constexpr std::uintmax_t kCertificateSize   = 236;
 }  // namespace
 
 ModelAuthorizationServiceImpl::ModelAuthorizationServiceImpl(std::string provision_tool)
@@ -42,7 +42,7 @@ ModelAuthorizationStatus ModelAuthorizationServiceImpl::Status() {
 }
 
 util::ErrorEnum ModelAuthorizationServiceImpl::CreateDeviceRequest(std::string& file_path,
-                                                                    std::string& file_name) {
+                                                                   std::string& file_name) {
     file_path.clear();
     file_name.clear();
     if (!ToolAvailable()) {

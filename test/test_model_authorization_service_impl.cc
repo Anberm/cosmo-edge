@@ -1,6 +1,5 @@
-#include "service/modelguard/impl/ModelAuthorizationServiceImpl.h"
-
 #include "catch_amalgamated.hpp"
+#include "service/modelguard/impl/ModelAuthorizationServiceImpl.h"
 
 TEST_CASE("ModelAuthorizationServiceImpl hides authorization when the controlled tool is absent",
           "[service][model-authorization]") {
