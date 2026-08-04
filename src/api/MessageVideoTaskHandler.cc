@@ -109,8 +109,7 @@ VideoTask::MsgQuerySwitchSend MessageVideoTaskHandler::Handle(VideoTask::MsgQuer
 VideoTask::MsgSaveOrUpdateSend MessageVideoTaskHandler::Handle(VideoTask::MsgSaveOrUpdateRecv&& data,
                                                                std::error_condition& errc) {
     VideoTask::MsgSaveOrUpdateSend retData{};
-    errc = task_config_.SaveOrUpdateTask(data.channelId, data.algorithmId, data.taskConfig,
-                                         data.scheduleId);
+    errc = task_config_.SaveOrUpdateTask(data.channelId, data.algorithmId, data.taskConfig, data.scheduleId);
     return retData;
 }
 
@@ -228,8 +227,8 @@ VideoTask::MsgApplyParamsBatchSend MessageVideoTaskHandler::Handle(VideoTask::Ms
     VideoTask::MsgApplyParamsBatchSend retData{};
 
     for (const auto& channelId : data.targetChannelIds) {
-        std::error_condition ret = task_config_.SaveOrUpdateTask(
-            channelId, data.algorithmId, data.taskConfig, data.scheduleId);
+        std::error_condition ret =
+            task_config_.SaveOrUpdateTask(channelId, data.algorithmId, data.taskConfig, data.scheduleId);
         if (util::ErrorEnum::Success != ret) {
             MsgResultInfo failedEl;
             failedEl.id      = channelId;
@@ -275,7 +274,8 @@ namespace {
             std::error_condition qerr = queue_status.actionStatus;
             action.statusCode         = std::to_string(qerr.value());
             action.statusDesc         = qerr.message();
-            action.statusDescKey      = "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(qerr.value()));
+            action.statusDescKey =
+                "api.error." + util::ErrorEnumName(static_cast<util::ErrorEnum>(qerr.value()));
             action.holdCount          = queue_status.queueStatus.holdCount;
             action.alarmCount         = queue_status.alarmCount;
             action.insertCount        = queue_status.queueStatus.insertCount;

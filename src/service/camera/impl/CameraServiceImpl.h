@@ -106,8 +106,7 @@ public:
     util::ErrorEnum ModifyTaskParam(const std::string& cameraId, const std::string& algorithmId,
                                     MsgTaskConfig& params) override;
     util::ErrorEnum SaveOrUpdateTask(const std::string& cameraId, const std::string& algorithmId,
-                                     const MsgTaskConfig& params,
-                                     const std::string& scheduleId) override;
+                                     const MsgTaskConfig& params, const std::string& scheduleId) override;
     util::ErrorEnum QueryTaskParam(const std::string& cameraId, const std::string& algorithmId,
                                    std::vector<MsgDynamicKeyValue>& params) override;
     util::ErrorEnum ModifyTaskArea(const std::string& cameraId, const std::string& algorithmId,

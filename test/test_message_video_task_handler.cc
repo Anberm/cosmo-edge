@@ -500,15 +500,13 @@ TEST_CASE("VideoTaskHandler: ApplyParamsBatch partial failure", "[video-task-han
     recv.targetChannelIds = {"ch1", "ch2"};
 
     // ch1 succeeds atomically
-    REQUIRE_CALL(f.mocks.cameraSvc,
-                 SaveOrUpdateTask(trompeloeil::eq(std::string("ch1")), trompeloeil::_,
-                                  trompeloeil::_, trompeloeil::_))
+    REQUIRE_CALL(f.mocks.cameraSvc, SaveOrUpdateTask(trompeloeil::eq(std::string("ch1")), trompeloeil::_,
+                                                     trompeloeil::_, trompeloeil::_))
         .RETURN(cosmo::util::ErrorEnum::Success);
 
     // ch2 is rejected without a partial task update
-    REQUIRE_CALL(f.mocks.cameraSvc,
-                 SaveOrUpdateTask(trompeloeil::eq(std::string("ch2")), trompeloeil::_,
-                                  trompeloeil::_, trompeloeil::_))
+    REQUIRE_CALL(f.mocks.cameraSvc, SaveOrUpdateTask(trompeloeil::eq(std::string("ch2")), trompeloeil::_,
+                                                     trompeloeil::_, trompeloeil::_))
         .RETURN(cosmo::util::ErrorEnum::ResourceLimit);
 
     auto ret = f.handler.Handle(std::move(recv), errc);

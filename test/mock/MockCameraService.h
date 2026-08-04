@@ -22,8 +22,8 @@ public:
                cosmo::util::ErrorEnum(const std::string&, const std::string&, cosmo::MsgTaskConfig&),
                override);
     MAKE_MOCK4(SaveOrUpdateTask,
-               cosmo::util::ErrorEnum(const std::string&, const std::string&,
-                                      const cosmo::MsgTaskConfig&, const std::string&),
+               cosmo::util::ErrorEnum(const std::string&, const std::string&, const cosmo::MsgTaskConfig&,
+                                      const std::string&),
                override);
     MAKE_MOCK3(QueryTaskParam,
                cosmo::util::ErrorEnum(const std::string&, const std::string&,

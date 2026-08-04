@@ -74,9 +74,7 @@ TEST_CASE("CameraServiceImpl SaveOrUpdateTask commits configuration atomically",
     (void)!system("rm -rf /tmp/cosmo_test/conf/camera/test_camera_atomic");
     TestFixture fx("test_camera_atomic", "rtsp://test");
 
-    ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("sched1", _))
-        .LR_SIDE_EFFECT(_2 = "Schedule 1")
-        .RETURN(true);
+    ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("sched1", _)).LR_SIDE_EFFECT(_2 = "Schedule 1").RETURN(true);
     ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("missing", _)).RETURN(false);
 
     MsgTaskConfig params;
@@ -117,8 +115,7 @@ TEST_CASE("CameraServiceImpl SaveOrUpdateTask commits configuration atomically",
         CHECK(fx.svc.GetTasks(fx.cameraId).empty());
 
         std::vector<MsgDynamicKeyValue> saved_params;
-        CHECK(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) ==
-              util::ErrorEnum::TaskNotExist);
+        CHECK(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) == util::ErrorEnum::TaskNotExist);
     }
 
     SECTION("validation failure preserves an existing task") {
@@ -126,7 +123,7 @@ TEST_CASE("CameraServiceImpl SaveOrUpdateTask commits configuration atomically",
                 util::ErrorEnum::Success);
 
         params.params[0].value = "20";
-        auto ret = fx.svc.SaveOrUpdateTask(fx.cameraId, "test_alg", params, "missing");
+        auto ret               = fx.svc.SaveOrUpdateTask(fx.cameraId, "test_alg", params, "missing");
         REQUIRE(ret == util::ErrorEnum::TimeTemplateNotExist);
 
         std::vector<MsgDynamicKeyValue> saved_params;
@@ -142,9 +139,7 @@ TEST_CASE("CameraServiceImpl resource rejection leaves no partial task",
     (void)!system("rm -rf /tmp/cosmo_test/conf/camera/test_camera_resource");
     TestFixture fx("test_camera_resource", "rtsp://test");
 
-    ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("sched1", _))
-        .LR_SIDE_EFFECT(_2 = "Schedule 1")
-        .RETURN(true);
+    ALLOW_CALL(fx.mocks.scheduleSvc, Exist2("sched1", _)).LR_SIDE_EFFECT(_2 = "Schedule 1").RETURN(true);
     REQUIRE_CALL(fx.mocks.configReadSvc, GetResourceLimit()).RETURN(true);
     REQUIRE_CALL(fx.mocks.taskSvc, PacketStatus(_, _, _, _))
         .LR_SIDE_EFFECT(_1 = 100; _2 = 0; _3 = 100; _4 = 30);
@@ -173,8 +168,7 @@ TEST_CASE("CameraServiceImpl resource rejection leaves no partial task",
     CHECK(fx.svc.GetTasks(fx.cameraId).empty());
 
     std::vector<MsgDynamicKeyValue> saved_params;
-    CHECK(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) ==
-          util::ErrorEnum::TaskNotExist);
+    CHECK(fx.svc.QueryTaskParam(fx.cameraId, "test_alg", saved_params) == util::ErrorEnum::TaskNotExist);
 }
 #endif
 

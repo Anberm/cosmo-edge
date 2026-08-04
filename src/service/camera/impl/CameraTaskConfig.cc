@@ -149,8 +149,8 @@ util::ErrorEnum CameraServiceImpl::SaveOrUpdateTask(const std::string& cameraId,
             if (util::ErrorEnum::Success != ret) {
                 auto rollback_ret = task->task_->SetParams(previous);
                 if (util::ErrorEnum::Success != rollback_ret) {
-                    LOG_ERRO("[{}/{}] SaveOrUpdate parameter rollback failed: {}", cameraId,
-                             algorithmId, static_cast<uint32_t>(rollback_ret));
+                    LOG_ERRO("[{}/{}] SaveOrUpdate parameter rollback failed: {}", cameraId, algorithmId,
+                             static_cast<uint32_t>(rollback_ret));
                 }
                 return ret;
             }
