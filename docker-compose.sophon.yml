@@ -9,6 +9,8 @@ services:
     environment:
       COSMO_MODEL_GUARD_BUILD_PROFILE: "${COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"
       COSMO_EDGE_SOURCE_COMMIT: "${COSMO_EDGE_SOURCE_COMMIT:-}"
+      COSMO_LEGACY_MIGRATION_PACKAGE: "${COSMO_LEGACY_MIGRATION_PACKAGE:-OFF}"
+      COSMO_PACKAGE_MODELS: "${COSMO_PACKAGE_MODELS:-include}"
     command: >
       bash -lc "
       set -e;

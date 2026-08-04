@@ -153,6 +153,15 @@ set(COSMO_EDGE_SOURCE_COMMIT "" CACHE STRING
     "Exact lower-case Edge commit embedded in a SOURCE package identity")
 set_property(CACHE COSMO_MODEL_GUARD_BUILD_PROFILE PROPERTY STRINGS
     public-runtime production-release)
+option(COSMO_LEGACY_MIGRATION_PACKAGE
+    "Build an old-main-compatible bridge package with the historical MD5 name" OFF)
+set(COSMO_PACKAGE_MODELS "include" CACHE STRING
+    "Package preset models: include or preserve the installed model directory")
+set_property(CACHE COSMO_PACKAGE_MODELS PROPERTY STRINGS include preserve)
+if(NOT COSMO_PACKAGE_MODELS STREQUAL "include" AND
+   NOT COSMO_PACKAGE_MODELS STREQUAL "preserve")
+    message(FATAL_ERROR "COSMO_PACKAGE_MODELS must be include or preserve")
+endif()
 option(COSMO_REQUIRE_RELEASE_BOOTSTRAP
        "Fail configuration unless the production release bootstrap can be linked" OFF)
 
@@ -781,16 +790,18 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/SOURCEHANSANSCN-REGULAR.OTF
 # Resource (models, algorithm, layout, etc. from external repository)
 if(DEFINED RESOURCE_DIR AND IS_DIRECTORY "${RESOURCE_DIR}")
     message(STATUS "Resource directory: ${RESOURCE_DIR}")
-    install(DIRECTORY ${RESOURCE_DIR}/
-        DESTINATION resource
-        FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
-        PATTERN ".git" EXCLUDE
-        PATTERN "model.nn"
-            PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
-        PATTERN "__pycache__" EXCLUDE
-        PATTERN "*.pyc" EXCLUDE
-        PATTERN "*.pyo" EXCLUDE
-    )
+    if(COSMO_PACKAGE_MODELS STREQUAL "include")
+        install(DIRECTORY ${RESOURCE_DIR}/ DESTINATION resource
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE
+            PATTERN "model.nn" PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+            PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyo" EXCLUDE)
+    else()
+        install(DIRECTORY ${RESOURCE_DIR}/ DESTINATION resource
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE PATTERN "models" EXCLUDE
+            PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyo" EXCLUDE)
+    endif()
 else()
     message(STATUS "No resource directory specified — package will not contain models")
 endif()
@@ -897,6 +908,21 @@ else()
             PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
         )
     endif()
+endif()
+
+# One-time bridge consumed by the historical main-branch start.sh contract:
+# scripts/install.sh receives only the log-file path. Install this last so it
+# intentionally replaces the signed-release command wrapper in migration builds.
+if(COSMO_LEGACY_MIGRATION_PACKAGE)
+    install(PROGRAMS
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/legacy_migration_install.sh
+        DESTINATION scripts RENAME install.sh
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_READ GROUP_EXECUTE)
+    install(PROGRAMS
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/start.sh
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/inte_run_start.sh
+        DESTINATION scripts
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_READ GROUP_EXECUTE)
 endif()
 
 if(COSMO_HAS_RELEASE_BOOTSTRAP)
@@ -1086,6 +1112,7 @@ add_custom_target(package_all
         "${CMAKE_BINARY_DIR}/packages" "${PACKAGE_NAME}"
         "${COSMO_MODEL_GUARD_BUILD_PROFILE}"
         "${COSMO_REPRODUCIBLE_BUILD_EPOCH}"
+        "${COSMO_LEGACY_MIGRATION_PACKAGE}"
     DEPENDS ${COSMO_PACKAGE_TARGETS}
     COMMENT "Creating package with SHA-256 in filename"
 )

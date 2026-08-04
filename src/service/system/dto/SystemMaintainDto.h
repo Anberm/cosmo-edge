@@ -62,6 +62,35 @@ void from_json(const nlohmann::json& j, MsgUpgradeRecv& v);
 //
 struct MsgUpgradeSend : public MsgSendHead {};
 
+struct MsgQueryModelAuthorizationRecv : public MsgRecvHead {};
+struct MsgQueryModelAuthorizationSend : public MsgSendHead {
+    struct ResData {
+        bool supported{false};
+        bool authorized{false};
+        std::string state;
+        friend void to_json(nlohmann::json& j, const ResData& v);
+        friend void from_json(const nlohmann::json& j, ResData& v);
+    } resData;
+};
+void to_json(nlohmann::json& j, const MsgQueryModelAuthorizationSend& v);
+void from_json(const nlohmann::json& j, MsgQueryModelAuthorizationSend& v);
+
+struct MsgDownloadModelAuthorizationRequestRecv : public MsgRecvHead {};
+struct MsgDownloadModelAuthorizationRequestSend : public MsgSendHead {
+    std::string filePath;
+    std::string fileName;
+};
+void to_json(nlohmann::json& j, const MsgDownloadModelAuthorizationRequestSend& v);
+void from_json(const nlohmann::json& j, MsgDownloadModelAuthorizationRequestSend& v);
+
+struct MsgInstallModelAuthorizationRecv : public MsgRecvHead {
+    std::string uploadId;
+    std::string filePath;
+};
+void to_json(nlohmann::json& j, const MsgInstallModelAuthorizationRecv& v);
+void from_json(const nlohmann::json& j, MsgInstallModelAuthorizationRecv& v);
+struct MsgInstallModelAuthorizationSend : public MsgSendHead {};
+
 // Document download address request
 struct MsgQueryDocumentUrlRecv : public MsgRecvHead {
     int type{0};

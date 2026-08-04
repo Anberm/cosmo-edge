@@ -82,6 +82,8 @@ COSMO_GUARD_SDK_DIR="${COSMO_MODEL_GUARD_SDK_ROOT:-${PROJECT_ROOT_PATH}/prebuild
 MODEL_GUARD_PROFILE_ARGS=(
     -DCOSMO_MODEL_GUARD_BUILD_PROFILE="${COSMO_MODEL_GUARD_BUILD_PROFILE}"
     -DCOSMO_EDGE_SOURCE_COMMIT="${COSMO_EDGE_SOURCE_COMMIT:-}"
+    -DCOSMO_LEGACY_MIGRATION_PACKAGE="${COSMO_LEGACY_MIGRATION_PACKAGE:-OFF}"
+    -DCOSMO_PACKAGE_MODELS="${COSMO_PACKAGE_MODELS:-include}"
 )
 RELEASE_BOOTSTRAP_ARGS=(
     -DCOSMO_REQUIRE_RELEASE_BOOTSTRAP="${COSMO_REQUIRE_RELEASE_BOOTSTRAP:-OFF}"
@@ -223,10 +225,15 @@ if [ "${#package_artifacts[@]}" -ne 1 ] ||
     exit 1
 fi
 
+package_verify_args=()
+if [ "${COSMO_LEGACY_MIGRATION_PACKAGE:-OFF}" = "ON" ]; then
+    package_verify_args+=(--legacy-migration)
+fi
 /usr/bin/python3 -I -B \
     "${PROJECT_ROOT_PATH}/scripts/verify_package_contents.py" \
     --archive "${package_artifacts[0]}" \
-    --build-profile "${COSMO_MODEL_GUARD_BUILD_PROFILE}"
+    --build-profile "${COSMO_MODEL_GUARD_BUILD_PROFILE}" \
+    "${package_verify_args[@]}"
 
 package_sha256="$(sha256sum -- "${package_artifacts[0]}")"
 package_sha256="${package_sha256%% *}"

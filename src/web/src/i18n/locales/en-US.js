@@ -1137,6 +1137,16 @@ export default {
     clear: 'Clear'
   },
   systemManage: {
+    modelAuthorization: 'Model Authorization',
+    authorizationStatus: 'Authorization Status',
+    authorized: 'Authorized',
+    notAuthorized: 'Not Authorized',
+    downloadAuthorizationRequest: 'Download Device Request',
+    uploadAuthorizationFile: 'Upload Authorization File',
+    authorizationRequestFailed: 'Failed to create the device request',
+    invalidAuthorizationFile: 'Invalid authorization file',
+    authorizationInstalled: 'Authorization installed',
+    authorizationInstallFailed: 'Authorization installation failed',
     // Network Port Settings
     networkPortSettings: 'Network Port Settings',
     dnsSettings: 'DNS Settings',

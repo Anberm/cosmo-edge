@@ -67,6 +67,8 @@
 #include "service/model/IModelQuery.h"
 #include "service/model/IModelService.h"
 #include "service/model/impl/ModelServiceImpl.h"
+#include "service/modelguard/IModelAuthorizationService.h"
+#include "service/modelguard/impl/ModelAuthorizationServiceImpl.h"
 #include "service/network/INetworkService.h"
 #include "service/network/impl/AuthServiceImpl.h"
 #include "service/network/impl/ClientMessageServiceImpl.h"
@@ -222,6 +224,8 @@ static void RegisterBusinessServices() {
     registry.Register<cosmo::service::ISystemOperationService>(
         std::make_unique<cosmo::service::SystemOperationServiceImpl>());
     registry.Register<cosmo::service::IModelService>(std::make_unique<cosmo::service::ModelServiceImpl>());
+    registry.Register<cosmo::service::IModelAuthorizationService>(
+        std::make_unique<cosmo::service::ModelAuthorizationServiceImpl>());
     auto& modelImpl = registry.Get<cosmo::service::IModelService>();
     registry.Set<cosmo::service::IModelQuery>(static_cast<cosmo::service::IModelQuery*>(&modelImpl));
     registry.Set<cosmo::service::IModelPathMapping>(

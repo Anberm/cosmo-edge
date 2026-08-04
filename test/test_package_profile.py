@@ -257,6 +257,21 @@ class PackageProfileTest(unittest.TestCase):
                 ):
                     verifier.verify_inventory(inventory, "public-runtime")
 
+    def test_source_migration_allows_only_legacy_lifecycle_entry_points(self) -> None:
+        inventory = source_inventory()
+        for path in (
+            "scripts/install.sh",
+            "scripts/start.sh",
+            "scripts/inte_run_start.sh",
+        ):
+            inventory[path] = entry("file", 0o755)
+        self.assertEqual(
+            verifier.verify_inventory(inventory, "public-runtime", True), "SOURCE"
+        )
+        inventory["bin/cosmo-model-provision"] = entry("file", 0o755)
+        with self.assertRaises(verifier.PackageAuditError):
+            verifier.verify_inventory(inventory, "public-runtime", True)
+
     def test_source_inventory_requires_one_nonzero_preset_cohort(self) -> None:
         cohort = "11" * 16
         inventory = source_inventory()

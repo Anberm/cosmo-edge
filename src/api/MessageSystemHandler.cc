@@ -7,6 +7,7 @@
 #include "api/HttpUploadClaim.h"
 #include "media/PreviewPipelineMetrics.h"
 #include "service/detail/ServiceRegistry.h"
+#include "service/modelguard/IModelAuthorizationService.h"
 #include "service/path/IUploadStagingService.h"
 #include "service/system/IConfigReadService.h"
 #include "service/system/IConfigWriteService.h"
@@ -36,6 +37,24 @@ namespace {
     constexpr const char* kRebootMsg = "Rebooting, please do not power off";
     constexpr const char* kResetMsg  = "Resetting, please do not power off";
     constexpr int kRebootWaitSec     = 40;
+
+    class UnsupportedModelAuthorizationService final : public service::IModelAuthorizationService {
+    public:
+        service::ModelAuthorizationStatus Status() override {
+            return {};
+        }
+        util::ErrorEnum CreateDeviceRequest(std::string&, std::string&) override {
+            return util::ErrorEnum::OperationNotSupport;
+        }
+        util::ErrorEnum InstallCertificate(const std::string&) override {
+            return util::ErrorEnum::OperationNotSupport;
+        }
+    };
+
+    service::IModelAuthorizationService& UnsupportedModelAuthorization() {
+        static UnsupportedModelAuthorizationService service;
+        return service;
+    }
 }  // namespace
 
 MessageSystemHandler::MessageSystemHandler(service::IConfigReadService& config_read,
@@ -44,12 +63,23 @@ MessageSystemHandler::MessageSystemHandler(service::IConfigReadService& config_r
                                            service::IDeviceInfoService& device_info,
                                            service::ISystemOperationService& system_op,
                                            service::ITimeService& time_service)
+    : MessageSystemHandler(config_read, config_write, config_network, device_info, system_op, time_service,
+                           UnsupportedModelAuthorization()) {}
+
+MessageSystemHandler::MessageSystemHandler(service::IConfigReadService& config_read,
+                                           service::IConfigWriteService& config_write,
+                                           service::IConfigNetworkService& config_network,
+                                           service::IDeviceInfoService& device_info,
+                                           service::ISystemOperationService& system_op,
+                                           service::ITimeService& time_service,
+                                           service::IModelAuthorizationService& model_authorization)
     : config_read_(config_read),
       config_write_(config_write),
       config_network_(config_network),
       device_info_(device_info),
       system_op_(system_op),
-      time_service_(time_service) {}
+      time_service_(time_service),
+      model_authorization_(model_authorization) {}
 
 // Device information
 System::MsgQueryDeviceInfoSend MessageSystemHandler::Handle(System::MsgQueryDeviceInfoRecv&& /*data*/,
@@ -332,6 +362,48 @@ System::MsgUpgradeSend MessageSystemHandler::Handle(System::MsgUpgradeRecv&& dat
     }
     errc = system_op_.Upgrade(data.filePath);
     return retData;
+}
+
+System::MsgQueryModelAuthorizationSend MessageSystemHandler::Handle(
+    System::MsgQueryModelAuthorizationRecv&& /*data*/, std::error_condition& errc) {
+    System::MsgQueryModelAuthorizationSend result{};
+    const auto status         = model_authorization_.Status();
+    result.resData.supported  = status.supported;
+    result.resData.authorized = status.authorized;
+    result.resData.state      = status.state;
+    errc                      = util::ErrorEnum::Success;
+    return result;
+}
+
+System::MsgDownloadModelAuthorizationRequestSend MessageSystemHandler::Handle(
+    System::MsgDownloadModelAuthorizationRequestRecv&& /*data*/, std::error_condition& errc) {
+    System::MsgDownloadModelAuthorizationRequestSend result{};
+    errc = model_authorization_.CreateDeviceRequest(result.filePath, result.fileName);
+    return result;
+}
+
+System::MsgInstallModelAuthorizationSend MessageSystemHandler::Handle(
+    System::MsgInstallModelAuthorizationRecv&& data, const RequestDispatchContext& context,
+    std::error_condition& errc) {
+    System::MsgInstallModelAuthorizationSend result{};
+    if (context.transport != RequestTransport::kHttp || context.principal.empty()) {
+        errc = util::ErrorEnum::InvalidParam;
+        return result;
+    }
+    service::StagedFileLease lease;
+    if (!data.uploadId.empty()) {
+        errc = service::ServiceRegistry::Instance().Get<service::IUploadStagingService>().Consume(
+            context.principal, data.uploadId, service::UploadPurpose::kModelAuthorizationCertificate, lease);
+    } else {
+        errc = detail::ClaimHttpUpload(context, data.filePath,
+                                       service::UploadPurpose::kModelAuthorizationCertificate, lease);
+    }
+    if (!errc && lease.Revalidate()) {
+        errc = model_authorization_.InstallCertificate(lease.Path());
+    } else if (!errc) {
+        errc = util::ErrorEnum::FileAnalysisFailed;
+    }
+    return result;
 }
 
 System::MsgUpgradeSend MessageSystemHandler::Handle(System::MsgUpgradeRecv&& data,

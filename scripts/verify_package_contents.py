@@ -500,7 +500,9 @@ def verify_source_preset_cohort(
 
 
 def verify_inventory(
-    inventory: Mapping[str, ArchiveEntry], build_profile: str
+    inventory: Mapping[str, ArchiveEntry],
+    build_profile: str,
+    legacy_migration: bool = False,
 ) -> str:
     if build_profile not in PROFILES:
         raise PackageAuditError(f"unsupported build profile: {build_profile}")
@@ -524,6 +526,12 @@ def verify_inventory(
         source_build_identity(inventory)
         verify_source_preset_cohort(inventory)
         for path in sorted(inventory):
+            if legacy_migration and path in {
+                "scripts/install.sh",
+                "scripts/start.sh",
+                "scripts/inte_run_start.sh",
+            }:
+                continue
             if _source_path_is_forbidden(path):
                 raise PackageAuditError(
                     f"SOURCE package contains controlled release material: {path}"
@@ -545,15 +553,19 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", required=True)
     parser.add_argument("--build-profile", choices=PROFILES, required=True)
+    parser.add_argument("--legacy-migration", action="store_true")
     arguments = parser.parse_args()
     try:
         archive = pathlib.Path(arguments.archive)
         inventory = read_inventory(archive)
-        variant = verify_inventory(inventory, arguments.build_profile)
+        variant = verify_inventory(
+            inventory, arguments.build_profile, arguments.legacy_migration
+        )
         archive_sha256 = file_sha256(archive)
         if arguments.build_profile == PROFILE_SOURCE:
             identity = source_build_identity(inventory)
-            verify_source_archive_name(archive, identity, archive_sha256)
+            if not arguments.legacy_migration:
+                verify_source_archive_name(archive, identity, archive_sha256)
     except PackageAuditError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

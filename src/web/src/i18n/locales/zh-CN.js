@@ -1137,6 +1137,16 @@ export default {
     clear: '清空'
   },
   systemManage: {
+    modelAuthorization: '模型授权',
+    authorizationStatus: '授权状态',
+    authorized: '已授权',
+    notAuthorized: '未授权',
+    downloadAuthorizationRequest: '下载设备请求文件',
+    uploadAuthorizationFile: '上传授权文件',
+    authorizationRequestFailed: '生成设备请求文件失败',
+    invalidAuthorizationFile: '授权文件无效',
+    authorizationInstalled: '授权安装成功',
+    authorizationInstallFailed: '授权安装失败',
     // 网口设置
     networkPortSettings: '网口设置',
     dnsSettings: 'DNS设置',

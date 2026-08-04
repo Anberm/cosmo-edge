@@ -26,6 +26,7 @@
 #include "service/media/ILiveStreamService.h"
 #include "service/media/IVideoFrameCodec.h"
 #include "service/model/IModelService.h"
+#include "service/modelguard/IModelAuthorizationService.h"
 #include "service/network/IAuthService.h"
 #include "service/network/INetworkService.h"
 #include "service/onboarding/IOnboardingService.h"
@@ -79,7 +80,8 @@ ApiRouter::ApiRouter(MessageFromType from)
           service::ServiceRegistry::Instance().Get<service::IConfigNetworkService>(),
           service::ServiceRegistry::Instance().Get<service::IDeviceInfoService>(),
           service::ServiceRegistry::Instance().Get<service::ISystemOperationService>(),
-          service::ServiceRegistry::Instance().Get<service::ITimeService>())),
+          service::ServiceRegistry::Instance().Get<service::ITimeService>(),
+          service::ServiceRegistry::Instance().Get<service::IModelAuthorizationService>())),
       live_stream_handler_(std::make_unique<MessageLiveStreamHandler>(
           service::ServiceRegistry::Instance().Get<service::ILiveStreamService>())),
       lib_handler_(std::make_unique<MessageFaceLibHandler>(

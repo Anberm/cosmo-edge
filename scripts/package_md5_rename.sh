@@ -9,8 +9,8 @@
 # be accepted by the updater.
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-    echo "Usage: $0 <packages-dir> <package-name> <build-profile> <build-epoch>" >&2
+if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
+    echo "Usage: $0 <packages-dir> <package-name> <build-profile> <build-epoch> [legacy-migration]" >&2
     exit 2
 fi
 
@@ -18,6 +18,7 @@ packages_dir="$1"
 package_name="$2"
 build_profile="$3"
 build_epoch="$4"
+legacy_migration="${5:-OFF}"
 original="${packages_dir}/${package_name}.tar.gz"
 
 if [ ! -f "$original" ] || [ -L "$original" ]; then
@@ -95,6 +96,16 @@ case "$digest" in
         ;;
     *) ;;
 esac
+
+if [ "$legacy_migration" = "ON" ]; then
+    md5_digest="$(md5sum -- "$original")"
+    md5_digest="${md5_digest%% *}"
+    labeled="${packages_dir}/${package_name}-${md5_digest}.tar.gz"
+    mv -- "$original" "$labeled"
+    echo "Legacy migration package: $(basename "$labeled")"
+    echo "Archive SHA-256: ${digest}"
+    exit 0
+fi
 
 case "$build_profile" in
     public-runtime)

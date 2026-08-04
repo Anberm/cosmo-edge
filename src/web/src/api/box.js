@@ -215,6 +215,12 @@ const system = {
       method: 'post',
     })
   },
+  queryModelAuthorization() {
+    return request({ url: '/gtw/cwai/System/QueryModelAuthorization', method: 'post', data: {} })
+  },
+  installModelAuthorization(data) {
+    return request({ url: '/gtw/cwai/System/InstallModelAuthorization', method: 'post', data })
+  },
 
   // 网络设置
   // 网卡查询
