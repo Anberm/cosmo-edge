@@ -1,7 +1,8 @@
-#!/bin/bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-IFS=$' \t\n'
+IFS="$(printf ' \t\n_')"
+IFS="${IFS%_}"
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export IFS PATH
 
@@ -13,7 +14,7 @@ fail() {
 [ "$#" -le 1 ] || fail "legacy entry accepts only the optional log file"
 log_file="${1:-/dev/null}"
 
-script_path="$(readlink -f -- "$0")"
+script_path="$(readlink -f "$0")"
 [ -n "$script_path" ] || fail "cannot resolve installer path"
 payload_root="${script_path%/scripts/install.sh}"
 [ "$payload_root" != "$script_path" ] || fail "installer is outside the package scripts directory"

@@ -14,7 +14,7 @@ printf 'old\n' >"$active/bin/cosmo-engine"
 printf 'existing-model\n' >"$active/resource/models/model.nn"
 
 COSMO_MIGRATION_TEST_ROOT="$root" \
-    "$payload/scripts/install.sh" "$root/install.log"
+    sh "$payload/scripts/install.sh" "$root/install.log"
 
 grep -Fxq new "$active/bin/cosmo-engine"
 grep -Fxq existing-model "$active/resource/models/model.nn"
@@ -24,7 +24,7 @@ test ! -e "$root/appfs/cosmo_wander/.cosmo-migration-backup"
 # from main; a later package uses the same installer contract.
 printf 'newer\n' >"$payload/bin/cosmo-engine"
 COSMO_MIGRATION_TEST_ROOT="$root" \
-    "$payload/scripts/install.sh" "$root/install-again.log"
+    sh "$payload/scripts/install.sh" "$root/install-again.log"
 grep -Fxq newer "$active/bin/cosmo-engine"
 grep -Fxq existing-model "$active/resource/models/model.nn"
 
@@ -36,7 +36,7 @@ printf 'packaged-model\n' >"$payload/resource/models/model.nn"
 printf 'existing-model\n' >"$active/resource/models/model.nn"
 
 COSMO_MIGRATION_TEST_ROOT="$root" \
-    "$payload/scripts/install.sh" "$root/install.log"
+    sh "$payload/scripts/install.sh" "$root/install.log"
 
 grep -Fxq packaged-model "$active/resource/models/model.nn"
 echo "legacy migration installer tests passed"
