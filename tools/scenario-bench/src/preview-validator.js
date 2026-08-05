@@ -76,13 +76,7 @@ export async function runPreviewValidation(client, options) {
       const rawPixels = report.streams.raw?.capture?.maxOverlayPixels ?? 0;
       const algorithmPixels = report.streams.algorithm.capture.maxOverlayPixels;
       const minimumDelta = nonNegativeInteger(options.minOverlayPixelDelta ?? 0, 'overlay pixel delta');
-      report.osdPixelCheck = {
-        rawMaxOverlayPixels: rawPixels,
-        algorithmMaxOverlayPixels: algorithmPixels,
-        delta: algorithmPixels - rawPixels,
-        minimumDelta,
-        pass: algorithmPixels - rawPixels >= minimumDelta,
-      };
+      report.osdPixelCheck = evaluateOsdPixelCheck(rawPixels, algorithmPixels, minimumDelta);
       if (!report.osdPixelCheck.pass) {
         throw new Error(
           `algorithm preview overlay pixel delta ${report.osdPixelCheck.delta} < ${minimumDelta}`,
@@ -416,6 +410,19 @@ function countOverlayLikePixels(rgb) {
   return count;
 }
 
+function evaluateOsdPixelCheck(rawPixels, algorithmPixels, minimumDelta) {
+  const deltaValue = algorithmPixels - rawPixels;
+  const enabled = minimumDelta > 0;
+  return {
+    rawMaxOverlayPixels: rawPixels,
+    algorithmMaxOverlayPixels: algorithmPixels,
+    delta: deltaValue,
+    minimumDelta,
+    enabled,
+    pass: !enabled || deltaValue >= minimumDelta,
+  };
+}
+
 async function probeStream(ffprobe, url) {
   const output = await runProcess(ffprobe, [
     '-v', 'error', '-rw_timeout', '5000000',
@@ -598,6 +605,7 @@ export const _previewValidatorTest = {
   captureArgs,
   captureTimeoutMs,
   countOverlayLikePixels,
+  evaluateOsdPixelCheck,
   lifecycleMetricsReady,
   streamNameFromFlvUrl,
 };
