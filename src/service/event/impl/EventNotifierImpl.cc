@@ -72,8 +72,12 @@ bool EventNotifierImpl::StartServer(const std::string& ip, int port) {
     http_app_ = std::make_unique<uWS::TemplatedApp<false>>();
     http_app_
         ->any("/*",
-              [](auto* /*res*/, auto* /*req*/) {
-                  // placeholder – receive handler intentionally empty
+              [](auto* res, auto* /*req*/) {
+                  // uWebSockets requires every ordinary HTTP handler to either
+                  // respond or install an abort handler. Leaving this route
+                  // empty terminates the whole engine when a browser or health
+                  // probe reaches the WebSocket port without an Upgrade header.
+                  res->writeStatus("404 Not Found")->end("Not Found");
               })
         .options("/*",
                  [](auto* res, auto* /*req*/) {
