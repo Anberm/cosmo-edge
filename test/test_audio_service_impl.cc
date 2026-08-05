@@ -30,8 +30,8 @@ struct AudioTestFixture {
         fs::create_directories(testDir + "/conf/audioMng");
 
         // Create fake default audio file that AudioServiceImpl tries to copy
-        fs::create_directories(fs::path("./media/audio").parent_path());
-        std::ofstream("./media/audio/beep.ogg");
+        fs::create_directories(testDir + "/files/Audio");
+        std::ofstream(testDir + "/files/Audio/beep.ogg");
     }
 
     ~AudioTestFixture() {

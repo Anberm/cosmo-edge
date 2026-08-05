@@ -623,7 +623,7 @@ Status Graph::LoadWeight(const std::string& model_path) {
     int net_node_num = NodeTypeUtils::TypedNodeCount(nodes, NODE_NET);
 
     std::ifstream stream(model_path, std::ios::in | std::ios::binary);
-#ifdef COSMO_NN_USE_ONNX_BACKEND
+#if defined(COSMO_NN_USE_ONNX_BACKEND) || defined(COSMO_NN_USE_RKNN_BACKEND)
     if (stream.fail() && !std::filesystem::is_directory(model_path))
         return Status(COSMO_NN_ERR_LOAD_MODEL, "open model file failed");
 #else
@@ -687,11 +687,18 @@ Status Graph::LoadWeight(const std::string& model_path) {
     }
 #endif
 
-#ifdef COSMO_NN_USE_ONNX_BACKEND
+#if defined(COSMO_NN_USE_ONNX_BACKEND) || defined(COSMO_NN_USE_RKNN_BACKEND)
     stream.close();
 
     namespace fs = std::filesystem;
     fs::path base_path(model_path);
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+    constexpr const char* model_extension = ".rknn";
+    constexpr const char* backend_name    = "RKNN";
+#else
+    constexpr const char* model_extension = ".onnx";
+    constexpr const char* backend_name    = "ONNX";
+#endif
 
     if (net_node_num == 1 && fs::is_regular_file(base_path)) {
         std::ifstream model_stream(model_path, std::ios::in | std::ios::binary);
@@ -725,37 +732,40 @@ Status Graph::LoadWeight(const std::string& model_path) {
     }
 
     if (!fs::is_directory(base_path)) {
-        return Status(COSMO_NN_ERR_LOAD_MODEL,
-                      "ONNX backend expects a model directory with per-net ONNX files");
+        return Status(COSMO_NN_ERR_LOAD_MODEL, std::string(backend_name) +
+                                                   " backend expects a model directory with per-net files");
     }
 
     if (net_node_num != static_cast<int>(model_infos_.size())) {
-        return Status(COSMO_NN_ERR_LOAD_MODEL, "ONNX graph net nodes (" + std::to_string(net_node_num) +
+        return Status(COSMO_NN_ERR_LOAD_MODEL, std::string(backend_name) + " graph net nodes (" +
+                                                   std::to_string(net_node_num) +
                                                    ") do not match config models (" +
                                                    std::to_string(model_infos_.size()) + ")");
     }
 
-    std::vector<fs::path> onnx_files;
+    std::vector<fs::path> model_files;
     for (const auto& entry : fs::directory_iterator(base_path)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".onnx")
-            onnx_files.push_back(entry.path());
+        if (entry.is_regular_file() && entry.path().extension() == model_extension)
+            model_files.push_back(entry.path());
     }
-    std::sort(onnx_files.begin(), onnx_files.end());
+    std::sort(model_files.begin(), model_files.end());
 
     for (int i = 0; i < net_node_num; i++) {
         fs::path part_path;
         if (!model_infos_.at(i).filename.empty()) {
             part_path = base_path / model_infos_.at(i).filename;
-        } else if (static_cast<size_t>(i) < onnx_files.size()) {
-            part_path = onnx_files.at(i);
+        } else if (static_cast<size_t>(i) < model_files.size()) {
+            part_path = model_files.at(i);
         } else {
-            return Status(COSMO_NN_ERR_LOAD_MODEL,
-                          "Multi-net ONNX model missing file_name for net_" + std::to_string(i));
+            return Status(COSMO_NN_ERR_LOAD_MODEL, "Multi-net " + std::string(backend_name) +
+                                                       " model missing file_name for net_" +
+                                                       std::to_string(i));
         }
 
         std::ifstream model_stream(part_path, std::ios::in | std::ios::binary);
         if (model_stream.fail()) {
-            return Status(COSMO_NN_ERR_LOAD_MODEL, "open ONNX model file failed: " + part_path.string());
+            return Status(COSMO_NN_ERR_LOAD_MODEL, "open " + std::string(backend_name) +
+                                                       " model file failed: " + part_path.string());
         }
 
         model_stream.seekg(0, std::ios::end);
@@ -763,14 +773,16 @@ Status Graph::LoadWeight(const std::string& model_path) {
         model_stream.seekg(0, std::ios::beg);
         if (model_size <= 0) {
             return Status(COSMO_NN_ERR_LOAD_MODEL,
-                          "ONNX model file is empty or unreadable: " + part_path.string());
+                          std::string(backend_name) + " model file is empty or unreadable: " +
+                              part_path.string());
         }
 
         std::unique_ptr<char[]> model_data;
         try {
             model_data.reset(new char[static_cast<size_t>(model_size)]);
         } catch (const std::bad_alloc&) {
-            return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "not enough memory to load ONNX model");
+            return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "not enough memory to load " +
+                                                          std::string(backend_name) + " model");
         }
         model_stream.read(model_data.get(), model_size);
 

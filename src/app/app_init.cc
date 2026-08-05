@@ -103,10 +103,14 @@
 #include "util/Log.h"
 #include "util/NnBackendConstants.h"
 #include "util/PathUtil.h"
+#include "util/EnvUtil.h"
 
 namespace cosmo::app {
 
 void SwDevicePreInit() {
+    cosmo::path::OverrideRootPaths(
+        cosmo::util::GetEnvOrDefault("COSMO_DATA_DIR", "/data/cwaiuserdata"),
+        cosmo::util::GetEnvOrDefault("COSMO_APP_DATA_DIR", "/appfs/cosmo_wander/cwai_data"));
     cosmo::path::Init();
 }
 
@@ -326,12 +330,15 @@ static void InitializeExternalComponents() {
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IStorageCleanService>().Start();
 
     // HTTP Server Init
+    const int http_port = cosmo::util::GetEnvIntOrDefault("COSMO_HTTP_PORT", kDefaultHttpPort);
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::INetworkService>().InitHttpServer(
-        "0.0.0.0", kDefaultHttpPort);
+        "0.0.0.0", static_cast<uint16_t>(http_port));
 
     // uWebSockets Server Init
+    const int websocket_port =
+        cosmo::util::GetEnvIntOrDefault("COSMO_WEBSOCKET_PORT", kDefaultWebSocketPort);
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IEventNotifier>().InitializeWebSocket(
-        "0.0.0.0", kDefaultWebSocketPort);
+        "0.0.0.0", websocket_port);
 
     // Device discovery multicast service (async init with retry).
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IDeviceDiscoveryService>().Start();

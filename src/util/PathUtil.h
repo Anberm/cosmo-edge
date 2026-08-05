@@ -23,6 +23,10 @@ namespace cosmo::path {
 /// CWAI runtime data path. Call once from SwDevicePreInit().
 void Init();
 
+/// Override the application data roots before Init(). Both paths must be
+/// absolute. This supports isolated side-by-side deployments and containers.
+void OverrideRootPaths(const std::string& dataPath, const std::string& appDataPath);
+
 /// Test-only: override the root data paths to isolate unit tests from the
 /// real filesystem.  Must be called before any path accessor.
 /// @param dataPath    Replaces the default /data/cwaiuserdata
@@ -63,6 +67,9 @@ std::string GetDbBackUpPath();
 
 /// Root data directory for the application.
 std::string GetBaseDir();
+
+/// Read-only packaged application root (resource, files, font, and binaries).
+std::string GetAppBaseDir();
 
 /// True iff @p candidate, after canonicalization, is equal to or nested under
 /// @p root (both canonicalized identically). Neither path is required to exist.

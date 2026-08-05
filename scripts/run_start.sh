@@ -26,6 +26,13 @@ if [ -z "${INSTALLPATH}" ]; then
     cosmo_log "$logTag" "INSTALLPATH=${INSTALLPATH}" "$logFile"
 fi
 
+# Keep mutable runtime data separate from packaged, read-only resources.  The
+# application root must follow the actual installation path, including
+# side-by-side validation installs, instead of silently falling back to the
+# production default when INSTALLPATH is overridden.
+export COSMO_DATA_DIR
+export COSMO_APP_DATA_DIR="${COSMO_APP_DATA_DIR:-${INSTALLPATH}}"
+
 if [ "$1" != "start" ]; then
     cosmo_log "$logTag" "Unsupported action: [$1], use 'start'" "$logFile"
     exit 1

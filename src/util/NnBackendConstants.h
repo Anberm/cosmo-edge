@@ -47,6 +47,16 @@ static constexpr const char* kModelFileExt = ".nn";
 /// Add a new chip here to support it across the model pipeline.
 static constexpr const char* kSupportedChips[] = {"BM1688", "CV186X"};
 
+#elif defined(COSMO_NN_USE_RKNN_BACKEND)
+
+/// Directory prefix for RK3576 RKNN model directories.
+static constexpr const char* kPlatformDirPrefix = "prod_RK3576_";
+static constexpr const char* kNewDirPrefix      = "prod_RK3576_";
+static constexpr const char* kPlatformDirRegex  = "prod_[A-Z0-9]+_([0-9]+)_.*";
+static constexpr const char* kEngineType        = "RK3576";
+static constexpr const char* kModelFileExt       = ".rknn";
+static constexpr const char* kSupportedChips[]  = {"RK3576"};
+
 #elif defined(COSMO_NN_USE_CPU_BACKEND)
 
 /// Directory prefix for CPU/x86 backend model directories: "prod_X86_".
@@ -69,7 +79,7 @@ static constexpr const char* kModelFileExt = ".onnx";
 static constexpr const char* kSupportedChips[] = {"X86"};
 
 #else
-#error "Either COSMO_NN_USE_SOPHON_BACKEND or COSMO_NN_USE_CPU_BACKEND must be defined"
+#error "A Sophon, CPU, or RKNN backend must be defined"
 #endif
 
 /// Case-insensitive check whether `chip` is a supported chip/platform type for the

@@ -140,6 +140,11 @@ TEST_CASE("PathUtil: GetBaseDir returns test override path", "[path-util]") {
     REQUIRE(base.find(fix.test_dir) != std::string::npos);
 }
 
+TEST_CASE("PathUtil: runtime root overrides require absolute paths", "[path-util][deployment]") {
+    REQUIRE_THROWS_AS(OverrideRootPaths("relative/data", "/tmp/cosmo-app"), std::invalid_argument);
+    REQUIRE_THROWS_AS(OverrideRootPaths("/tmp/cosmo-data", "relative/app"), std::invalid_argument);
+}
+
 TEST_CASE("PathUtil: GetBackupCfgPath returns non-empty", "[path-util]") {
     TestPathFixture fix;
     auto backup = GetBackupCfgPath();

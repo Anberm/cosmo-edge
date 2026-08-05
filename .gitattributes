@@ -24,6 +24,7 @@ Makefile       text eol=lf
 # 二进制文件不做转换
 *.bmodel binary
 *.onnx   binary
+*.rknn   binary
 *.so     binary
 *.a      binary
 *.png    binary

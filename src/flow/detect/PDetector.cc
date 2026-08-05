@@ -58,6 +58,12 @@ bool PDetector::ActionInit() {
     return true;
 }
 
+void PDetector::ActionDestroy() {
+    std::lock_guard<std::shared_mutex> lock(mtx_);
+    inst_.reset();
+    action_status_ = util::ErrorEnum::ActionStop;
+}
+
 // Parameter key format: aiParam.#{labelCode}.confidence
 bool PDetector::ValidKey(const MsgDynamicKeyValue& param) const {
     if (param.keys.empty()) {
@@ -162,16 +168,25 @@ util::ErrorEnum PDetector::HandPic(AlgDataPtr algData) {
 
     // Confidence thresholds
     std::vector<AiConfidence> confThres;
+    std::shared_ptr<AiDetectorUnify> instance;
     {
         std::shared_lock<std::shared_mutex> lock(mtx_);
         confThres = params_.confidence;
+        instance  = inst_;
     }
+    if (!instance)
+        return util::ErrorEnum::AI_INST_NOTCREATED;
 
     std::vector<std::vector<AiDetectRstEl>> detRsts;
     std::vector<VideoFramePtr> images = {algData->chanDataDec.frame};
     duration_stat_.BeginSample();
-    action_status_ = inst_->Detect(images, confThres, detRsts);
+    const auto result = instance->Detect(images, confThres, detRsts);
     duration_stat_.EndSample();
+    {
+        std::lock_guard<std::shared_mutex> lock(mtx_);
+        if (inst_ == instance)
+            action_status_ = result;
+    }
 
     if (!algData->chanDataDetect.detRet) {
         algData->chanDataDetect.detRet            = std::make_shared<DataDetTrackClassify>();

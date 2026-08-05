@@ -81,6 +81,43 @@ The accepted board evidence uses RKNN Runtime 2.3.2 with RKNPU driver 0.9.8 and 
 
 These timings are P2 model probes, not P4 performance acceptance. Frequency scaling was not controlled and the sample set has no ground-truth labels. P4 must measure the complete CosmoEdge pipeline and run a labeled business-accuracy gate before production release.
 
+## RKNN build and deployment boundary
+
+Build the aarch64 package from the pinned runtime root. The base resource directory supplies common actions/layout/fonts, while the RKNN overlay replaces only RK3576-specific algorithms and models:
+
+```bash
+docker run --rm \
+  -v /home/yuyu/workspace/cosmo-edge-rk3576:/workspace \
+  -v /home/yuyu/workspace/rk3576-offline-bundle/runtime:/opt/rknn:ro \
+  -w /workspace cosmo_dev:latest \
+  bash -lc './scripts/build_rknn.sh \
+    -r /opt/rknn -m data/resource/aiboxresource_x86 -t -T'
+```
+
+The writable and read-only roots must remain distinct at runtime:
+
+```bash
+export COSMO_DATA_DIR=/data/cwaiuserdata
+export COSMO_APP_DATA_DIR=/appfs/cosmo_wander/cwai_data
+export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+```
+
+`COSMO_DATA_DIR` holds configuration, databases, uploads, events and other mutable state. `COSMO_APP_DATA_DIR` is the installed package root containing `resource/`, `files/`, `font/`, `lib/` and `bin/`. Pointing both variables at the writable directory starts the server but hides all packaged preset algorithms and models. `scripts/run_start.sh` therefore exports the actual `INSTALLPATH` as the default application root and preserves an explicit data-root override for side-by-side validation.
+
+The package contains RKNN Runtime 2.3.2 and resolves `librknnrt.so` from its adjacent `lib/` directory. The launcher also sets `LD_LIBRARY_PATH` because other packaged shared libraries have transitive dependencies. Do not invoke the installed engine outside the launcher environment when qualifying a release.
+
+## P3 accepted package
+
+P3 is bound to `cosmo-V1.0.0-b3fc2e6fb7fc446a47379946b020f1ba.tar.gz`, SHA-256 `7b5a55f74345479d33a770c34a9dd8c80d2dcf32ceb73b39aebe993cc930e018`.
+
+- 36 targeted RKNN/deployment tests and 115 assertions pass on the RK3576 box.
+- The packaged Helmet output is byte-identical to the P2 reference.
+- The C++ six-head YOLOv8 adapter matches the Python reference with cosine similarity `0.9999999999999929` and maximum absolute error `0.0001220703125`.
+- The authenticated image journey creates the two-model task, analyzes three 1080p JPEGs, returns annotated JPEGs and 2/1/3 targets, then releases both RKNN contexts without lifecycle warnings.
+- Device identity, NPU/shared-memory metrics, both model records and the `RK3576 Helmet Image Analysis` selector are visible through the management APIs. Chrome validation used a package with an identical web-tree SHA-256; the final package's candidate-bound backend APIs were revalidated separately.
+
+Machine-readable results and the target evidence root are recorded in `docs/evidence/rk3576/p3-backend-validation.json`.
+
 ## Acceptance gates
 
 - P0: source, SDK, models and device baseline are locked and recoverable.

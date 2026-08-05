@@ -30,7 +30,7 @@ if(COSMO_NN_USE_SOPHON_BACKEND)
     list(APPEND NN_ALL_SRC ${NN_SOPHON_SRC})
 endif()
 
-if(COSMO_NN_USE_CPU_BACKEND)
+if(COSMO_NN_USE_CPU_BACKEND OR COSMO_NN_USE_RKNN_BACKEND)
     file(GLOB_RECURSE NN_CPU_SRC
         "${NN_DIR}/device/cpu/*.h" "${NN_DIR}/device/cpu/*.cc"
     )
@@ -38,6 +38,13 @@ if(COSMO_NN_USE_CPU_BACKEND)
         "${NN_DIR}/device/host/*.h" "${NN_DIR}/device/host/*.cc"
     )
     list(APPEND NN_ALL_SRC ${NN_CPU_SRC} ${NN_HOST_SRC})
+endif()
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    file(GLOB_RECURSE NN_RKNN_SRC
+        "${NN_DIR}/device/rknn/*.h" "${NN_DIR}/device/rknn/*.cc"
+    )
+    list(APPEND NN_ALL_SRC ${NN_RKNN_SRC})
 endif()
 
 # ── Build cosmo_nn OBJECT library ──
@@ -67,6 +74,13 @@ if(COSMO_NN_USE_CPU_BACKEND)
     # ORT headers provided by onnxruntime IMPORTED target
 endif()
 
+if(COSMO_NN_USE_RKNN_BACKEND)
+    target_compile_definitions(cosmo_nn PRIVATE
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+endif()
+
 # Symbol hiding + suppress C++11-era warnings
 target_compile_options(cosmo_nn PRIVATE
     -fvisibility=hidden
@@ -82,6 +96,9 @@ if(COSMO_NN_USE_SOPHON_BACKEND)
 endif()
 if(COSMO_NN_USE_CPU_BACKEND)
     target_link_libraries(cosmo_nn PRIVATE onnxruntime)
+endif()
+if(COSMO_NN_USE_RKNN_BACKEND)
+    target_link_libraries(cosmo_nn PRIVATE rknnrt)
 endif()
 
 # Ensure all ExternalProject third-party targets are built before compiling NN

@@ -75,7 +75,7 @@ private:
     std::string audio_relative_path_     = "/audioMng/";
     std::string default_audio_name_      = "默认";                    // Default audio (business label)
     std::string default_audio_id_        = "1234567890";              // Default audio ID
-    std::string default_audio_file_name_ = "./media/audio/beep.ogg";  // Default audio file
+    std::string default_audio_file_name_;                              // Packaged default audio file
     std::string default_audio_web_file_  = "/audioMng/beep.ogg";
 
     // :: AudioDevice state

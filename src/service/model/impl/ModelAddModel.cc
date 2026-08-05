@@ -179,6 +179,13 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
     std::string& resolved_model_code, std::vector<std::string>& bmodel_paths) {
     namespace fs = std::filesystem;
 
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+    if (modelType != "classify" && modelType != "yolov8_det") {
+        LOG_WARN("[AddModel] RKNN P0 scope supports classify and yolov8_det, got {}", modelType);
+        return util::ErrorEnum::InvalidParam;
+    }
+#endif
+
     resolved_model_code = generate_unique_model_code_();
     LOG_INFO("[AddModel] Using resolved model code: {} (request code: {})", resolved_model_code, modelCode);
     if (resolved_model_code.empty())
@@ -326,7 +333,21 @@ util::ErrorEnum ModelImportExporter::WriteNnFile(const std::string& modelType,
                                                  const std::string& model_dir) {
     namespace fs = std::filesystem;
 
-#ifdef COSMO_NN_USE_ONNX_BACKEND
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+    (void)modelType;
+    std::string convert_error;
+    if (bmodel_paths.size() != 1) {
+        convert_error = "RKNN add-model currently supports exactly one model file";
+    } else {
+        const std::string model_file_path = model_dir + "/model.rknn";
+        std::error_code ec;
+        fs::copy_file(bmodel_paths[0], model_file_path, fs::copy_options::overwrite_existing, ec);
+        if (ec)
+            convert_error = "Failed to copy RKNN model to " + model_file_path + ": " + ec.message();
+        else
+            LOG_INFO("[AddModel] RKNN: copied model file to {}", model_file_path);
+    }
+#elif defined(COSMO_NN_USE_ONNX_BACKEND)
     // CPU/x86: copy .onnx file directly; no Sophon wrapper needed.
     std::string convert_error;
     if (modelType == "sam2") {

@@ -16,6 +16,8 @@ void AppProfiler::ReportNodeTime(const char* /*node_name*/, double /*time*/) {}
 cosmo::nn::DeviceType GetDeviceType() {
 #if defined(COSMO_NN_USE_CPU_BACKEND)
     return cosmo::nn::DeviceType::DEVICE_CPU;
+#elif defined(COSMO_NN_USE_RKNN_BACKEND)
+    return cosmo::nn::DeviceType::DEVICE_RKNN;
 #else
     return cosmo::nn::DeviceType::DEVICE_SOPHON_TPU;
 #endif

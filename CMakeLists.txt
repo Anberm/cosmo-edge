@@ -84,12 +84,19 @@ endif()
 #-- Backend selection(mutually exclusive) --
 option(COSMO_NN_USE_SOPHON_BACKEND "Enable Sophon TPU backend" ON)
 option(COSMO_NN_USE_CPU_BACKEND "Enable CPU inference backend (ONNX Runtime)" OFF)
+option(COSMO_NN_USE_RKNN_BACKEND "Enable Rockchip RKNN backend" OFF)
 
-if(COSMO_NN_USE_SOPHON_BACKEND AND COSMO_NN_USE_CPU_BACKEND)
-    message(FATAL_ERROR "COSMO_NN_USE_SOPHON_BACKEND and COSMO_NN_USE_CPU_BACKEND are mutually exclusive")
-endif()
-if(NOT COSMO_NN_USE_SOPHON_BACKEND AND NOT COSMO_NN_USE_CPU_BACKEND)
-    message(FATAL_ERROR "At least one NN backend must be enabled")
+set(_cosmo_nn_backend_count 0)
+foreach(_nn_backend_option
+        COSMO_NN_USE_SOPHON_BACKEND
+        COSMO_NN_USE_CPU_BACKEND
+        COSMO_NN_USE_RKNN_BACKEND)
+    if(${_nn_backend_option})
+        math(EXPR _cosmo_nn_backend_count "${_cosmo_nn_backend_count} + 1")
+    endif()
+endforeach()
+if(NOT _cosmo_nn_backend_count EQUAL 1)
+    message(FATAL_ERROR "Exactly one NN backend must be enabled: Sophon, CPU, or RKNN")
 endif()
 
 # Media acceleration is selected independently from inference. Defaults keep
@@ -129,13 +136,12 @@ else()
     add_compile_definitions(COSMO_MEDIA_USE_CPU_BACKEND)
 endif()
 
-if(COSMO_MEDIA_USE_CPU_BACKEND)
-    set(COSMO_ENABLE_OPENH264 ON)
-    set(COSMO_OPENH264_USE_ASM OFF)
-else()
-    set(COSMO_ENABLE_OPENH264 OFF)
-    set(COSMO_OPENH264_USE_ASM OFF)
+set(_cosmo_openh264_default OFF)
+if(COSMO_MEDIA_USE_CPU_BACKEND AND COSMO_TARGET_ARCH STREQUAL "x86_64")
+    set(_cosmo_openh264_default ON)
 endif()
+option(COSMO_ENABLE_OPENH264 "Require the bundled OpenH264 encoder" ${_cosmo_openh264_default})
+set(COSMO_OPENH264_USE_ASM OFF)
 
 if(COSMO_NN_USE_SOPHON_BACKEND)
     set(COSMO_MODEL_GUARD ON)
@@ -202,6 +208,9 @@ if(COSMO_NN_USE_SOPHON_BACKEND)
 endif()
 if(COSMO_NN_USE_CPU_BACKEND)
     include(cmake/onnxruntime.cmake)
+endif()
+if(COSMO_NN_USE_RKNN_BACKEND)
+    include(cmake/rknn.cmake)
 endif()
 include(cmake/pcap.cmake)
 include(cmake/srs.cmake)
@@ -315,6 +324,9 @@ endif()
 if(COSMO_NN_USE_CPU_BACKEND)
     list(APPEND COMMON_LIBS onnxruntime)
 endif()
+if(COSMO_NN_USE_RKNN_BACKEND)
+    list(APPEND COMMON_LIBS rknnrt)
+endif()
 
 ##########################################################
 #Main Executable
@@ -342,8 +354,32 @@ if(COSMO_NN_USE_CPU_BACKEND)
         COSMO_NN_USE_HOST_BACKEND
         COSMO_NN_USE_ONNX_BACKEND)
 endif()
+if(COSMO_NN_USE_RKNN_BACKEND)
+    target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+        BUILD_RPATH "${COSMO_RKNN_ROOT}/lib"
+        INSTALL_RPATH "$ORIGIN/../lib")
+endif()
 #Build order: OBJECT libs → third_build (explicit, see foreach above)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${COMMON_LIBS})
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    add_executable(cosmo-rknn-backend-smoke
+        tools/rknn/cosmo_rknn_backend_smoke.cc
+        ${ALL_OBJECTS})
+    target_include_directories(cosmo-rknn-backend-smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(cosmo-rknn-backend-smoke PRIVATE
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+    target_link_libraries(cosmo-rknn-backend-smoke PRIVATE
+        nlohmann stb uWebSockets ${COMMON_LIBS})
+    set_target_properties(cosmo-rknn-backend-smoke PROPERTIES
+        BUILD_RPATH "${COSMO_RKNN_ROOT}/lib")
+endif()
 
 ##########################################################
 #Unit Tests(optional, cmake - DBUILD_TESTS = ON)
@@ -379,6 +415,14 @@ if(BUILD_TESTS)
             COSMO_NN_USE_CPU_BACKEND
             COSMO_NN_USE_HOST_BACKEND
             COSMO_NN_USE_ONNX_BACKEND)
+    endif()
+    if(COSMO_NN_USE_RKNN_BACKEND)
+        target_compile_definitions(cosmo-tests PRIVATE
+            COSMO_NN_USE_RKNN_BACKEND
+            COSMO_NN_USE_HOST_BACKEND
+            COSMO_NN_USE_RAW_MODEL_BACKEND)
+        set_target_properties(cosmo-tests PROPERTIES
+            BUILD_RPATH "${COSMO_RKNN_ROOT}/lib")
     endif()
     target_link_libraries(cosmo-tests PRIVATE ${COMMON_LIBS})
     if(COSMO_ENABLE_COVERAGE)
@@ -448,9 +492,40 @@ if(DEFINED RESOURCE_DIR AND IS_DIRECTORY "${RESOURCE_DIR}")
         DESTINATION resource
         FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
         PATTERN ".git" EXCLUDE
+        PATTERN "models" EXCLUDE
     )
+    if(DEFINED RESOURCE_OVERLAY_DIR AND IS_DIRECTORY "${RESOURCE_OVERLAY_DIR}")
+        message(STATUS "Resource overlay directory: ${RESOURCE_OVERLAY_DIR}")
+        install(DIRECTORY ${RESOURCE_OVERLAY_DIR}/
+            DESTINATION resource
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE
+            PATTERN "models" EXCLUDE
+        )
+    endif()
+    if(DEFINED RESOURCE_MODELS_DIR AND IS_DIRECTORY "${RESOURCE_MODELS_DIR}")
+        message(STATUS "Resource model directory: ${RESOURCE_MODELS_DIR}")
+        install(DIRECTORY ${RESOURCE_MODELS_DIR}/
+            DESTINATION resource/models
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE
+        )
+    elseif(IS_DIRECTORY "${RESOURCE_DIR}/models")
+        install(DIRECTORY ${RESOURCE_DIR}/models/
+            DESTINATION resource/models
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE
+        )
+    endif()
 else()
     message(STATUS "No resource directory specified — package will not contain models")
+endif()
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    install(FILES "${RKNN_RUNTIME_LIBRARY}"
+        DESTINATION lib
+        PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+    )
 endif()
 
 # Scripts (exclude dev-only tools from device deployment)

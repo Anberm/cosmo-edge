@@ -3,9 +3,9 @@
 # Sourced by: inte_run_start.sh, start.sh, run_start.sh, install.sh
 
 # ── Path constants ──
-COSMO_DATA_DIR="/data/cwaiuserdata"
+COSMO_DATA_DIR="${COSMO_DATA_DIR:-/data/cwaiuserdata}"
 COSMO_LOG_DIR="${COSMO_DATA_DIR}/log/logs"
-COSMO_INSTALL_DIR="/appfs/cosmo_wander/cwai_data"
+COSMO_INSTALL_DIR="${COSMO_INSTALL_DIR:-/appfs/cosmo_wander/cwai_data}"
 COSMO_UPGRADE_DIR="${COSMO_DATA_DIR}/upgrade"
 COSMO_NGINX_TMP_DIR="${COSMO_DATA_DIR}/tmp"
 
