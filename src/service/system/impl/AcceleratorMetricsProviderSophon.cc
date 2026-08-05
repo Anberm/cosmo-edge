@@ -13,6 +13,7 @@ namespace {
     public:
         cosmo::MsgGpuInfo QueryUtilization() override {
             cosmo::MsgGpuInfo result;
+            result.memoryDomain = "dedicated-accelerator";
             bm_handle_t handle{};
             auto status = bm_dev_request(&handle, 0);
             if (status != BM_SUCCESS) {

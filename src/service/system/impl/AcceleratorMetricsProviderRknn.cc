@@ -121,6 +121,7 @@ namespace {
             const auto memory = ReadSharedMemory();
             cosmo::MsgGpuInfo result;
             result.utilizationMetric = "busy-time-load";
+            result.memoryDomain      = "shared-system";
             if (const auto load = ReadNpuLoad()) {
                 // The dashboard uses the busiest core as the device health
                 // signal while preserving all per-core values in telemetry.

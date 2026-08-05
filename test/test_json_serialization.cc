@@ -153,11 +153,13 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     original.gpuusageAvailable = true;
     original.utilizationMetric = "busy-time-load";
     original.coreUtilizations  = {0.09, 0.42};
+    original.memoryDomain      = "shared-system";
 
     std::string json;
     REQUIRE(cosmo::util::EncodeJson(original, json));
     const auto doc = ParseJson(json);
     CHECK(doc["utilizationMetric"] == "busy-time-load");
+    CHECK(doc["memoryDomain"] == "shared-system");
     REQUIRE(doc["coreUtilizations"].size() == 2);
     CHECK(doc["coreUtilizations"][0].get<double>() == Catch::Approx(0.09));
     CHECK(doc["coreUtilizations"][1].get<double>() == Catch::Approx(0.42));
@@ -166,6 +168,7 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     REQUIRE(cosmo::util::DecodeJson(json, restored));
     CHECK(restored.utilizationMetric == original.utilizationMetric);
     CHECK(restored.coreUtilizations == original.coreUtilizations);
+    CHECK(restored.memoryDomain == original.memoryDomain);
 }
 
 TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {

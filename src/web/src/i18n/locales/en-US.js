@@ -890,6 +890,7 @@ export default {
   resource: {
     cpuUsage: 'CPU Usage',
     memoryUsage: 'Memory Usage',
+    systemMemoryUsage: 'System Memory Usage',
     npuUsage: 'NPU Load',
     emmcUsage: 'eMMC Usage',
     packetLoss: 'Packet Loss',
@@ -908,7 +909,7 @@ export default {
     packetKept: 'Kept: {value}',
     available: 'Avail. {value}',
     usedLabel: 'Used',
-    unusedLabel: 'Unused',
+    unusedLabel: 'Available',
     packetLostCount: 'Lost',
     totalPacketCount: 'Total',
     systemHealthScore: 'System Health',
@@ -919,7 +920,7 @@ export default {
     poor: 'Poor',
     // Backend hardware resource item names (resolved by item.key)
     itemCpuUtilization: 'CPU Usage',
-    itemGeneralMemory: 'App Memory Usage',
+    itemGeneralMemory: 'System Memory Usage',
     itemNpuUtilization: 'NPU Load',
     itemModelMemory: 'Model Memory Usage',
     itemPictureMemory: 'Image Memory Usage',

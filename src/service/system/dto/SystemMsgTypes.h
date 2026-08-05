@@ -37,6 +37,7 @@ struct MsgGpuInfo {
     bool gpuusageAvailable{true};
     std::string utilizationMetric;
     std::vector<double> coreUtilizations;
+    std::string memoryDomain;
     double gpumemusage{0.0};
     int64_t gpumemtotal{0};
     int64_t gpumemavailable{0};

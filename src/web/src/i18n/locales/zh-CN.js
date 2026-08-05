@@ -889,7 +889,8 @@ export default {
   },
   resource: {
     cpuUsage: 'CPU使用率',
-    memoryUsage: '显存使用率',
+    memoryUsage: '内存使用率',
+    systemMemoryUsage: '系统内存使用率',
     npuUsage: 'NPU负载',
     emmcUsage: 'eMMC使用率',
     packetLoss: '丢包率',
@@ -908,7 +909,7 @@ export default {
     packetKept: '未丢 {value}',
     available: '可用 {value}',
     usedLabel: '已使用',
-    unusedLabel: '未使用',
+    unusedLabel: '可用',
     packetLostCount: '丢包数',
     totalPacketCount: '总包数',
     systemHealthScore: '系统健康评分',
@@ -919,7 +920,7 @@ export default {
     poor: '较差',
     // Backend hardware resource item names (resolved by item.key)
     itemCpuUtilization: 'CPU使用率',
-    itemGeneralMemory: '业务内存使用率',
+    itemGeneralMemory: '系统内存使用率',
     itemNpuUtilization: 'NPU负载',
     itemModelMemory: '模型内存使用率',
     itemPictureMemory: '图片内存使用率',

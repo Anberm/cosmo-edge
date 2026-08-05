@@ -44,6 +44,7 @@ TEST_CASE("CPU accelerator metrics provider reports no accelerator", "[system][m
     CHECK(metrics.gpuusage == 0.0);
     CHECK(metrics.gpumemtotal == 0);
     CHECK(metrics.gpudevusage.empty());
+    CHECK(metrics.memoryDomain == "none");
     CHECK(provider->QueryAvailableMemoryMB() == 0);
 }
 #endif
@@ -58,6 +59,7 @@ TEST_CASE("RKNN accelerator metrics provider reports per-core busy-time load", "
     CHECK(metrics.gpuusageAvailable);
     CHECK(metrics.gpuusage == Catch::Approx(0.42));
     CHECK(metrics.utilizationMetric == "busy-time-load");
+    CHECK(metrics.memoryDomain == "shared-system");
     REQUIRE(metrics.coreUtilizations.size() == 2);
     CHECK(metrics.coreUtilizations[0] == Catch::Approx(0.09));
     CHECK(metrics.coreUtilizations[1] == Catch::Approx(0.42));

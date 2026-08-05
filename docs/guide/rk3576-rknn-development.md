@@ -160,6 +160,9 @@ preflights them before mutating device configuration.
   and retains every core in the accelerator payload. The startup script exposes
   only this read-only file at `/run/cosmo-edge/metrics/rknpu-load`; the devfreq
   governor signal is never treated as NPU load.
+- RK3576 NPU and media allocations share system DDR. Accelerator telemetry
+  marks this as `memoryDomain=shared-system`; the dashboard emits one system
+  memory capacity instead of adding the same pool again as dedicated VRAM.
 
 These observations are candidate-bound and must be rerun after source, model,
 runtime or package changes. Before a release claim, additionally require an

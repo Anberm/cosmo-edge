@@ -246,13 +246,14 @@ const displayResourceList = computed(() => {
 })
 
 const getMergedMemoryItem = () => {
-  const memoryItems = resourceList.value.filter(item => MEMORY_KEYS.includes(item?.key))
+  const memoryItems = dedupeMemoryItems(resourceList.value.filter(item => MEMORY_KEYS.includes(item?.key)))
   if (!memoryItems.length) return null
 
   const capacityItems = memoryItems
     .map(item => ({
-      used: parseSizeToMB(item.usedSize),
-      unused: parseSizeToMB(item.unusedSize)
+      used: parseSizeToMiB(item.usedSize),
+      unused: parseSizeToMiB(item.unusedSize),
+      memoryDomain: item.memoryDomain || item.key
     }))
     .filter(item => item.used !== null && item.unused !== null)
 
@@ -260,10 +261,11 @@ const getMergedMemoryItem = () => {
     const used = capacityItems.reduce((sum, item) => sum + item.used, 0)
     const unused = capacityItems.reduce((sum, item) => sum + item.unused, 0)
     const total = used + unused
+    const memoryDomains = new Set(capacityItems.map(item => item.memoryDomain))
 
     return {
       key: 'mergedMemoryUtilization',
-      name: t('resource.memoryUsage'),
+      memoryDomain: memoryDomains.size === 1 ? capacityItems[0].memoryDomain : 'combined',
       usedPercent: total ? Math.round((used / total) * 100) : 0,
       usedSize: formatCapacity(used),
       unusedSize: formatCapacity(unused)
@@ -273,11 +275,21 @@ const getMergedMemoryItem = () => {
   const percentSum = memoryItems.reduce((sum, item) => sum + toPercentNumber(item.usedPercent), 0)
   return {
     key: 'mergedMemoryUtilization',
-    name: t('resource.memoryUsage'),
+    memoryDomain: memoryItems.length === 1 ? (memoryItems[0].memoryDomain || memoryItems[0].key) : 'combined',
     usedPercent: Math.round(percentSum / memoryItems.length),
     usedSize: t('resource.usedLabel'),
     unusedSize: t('resource.unusedLabel')
   }
+}
+
+const dedupeMemoryItems = (items) => {
+  const seenDomains = new Set()
+  return items.filter(item => {
+    if (!item?.memoryDomain) return true
+    if (seenDomains.has(item.memoryDomain)) return false
+    seenDomains.add(item.memoryDomain)
+    return true
+  })
 }
 
 const normalizeResourceItem = (item) => {
@@ -315,7 +327,9 @@ const normalizeResourceItem = (item) => {
 const getResourceName = (item) => {
   const nameMap = {
     cpuUtilization: t('resource.cpuUsage'),
-    mergedMemoryUtilization: t('resource.memoryUsage'),
+    mergedMemoryUtilization: item.memoryDomain === 'system'
+      ? t('resource.systemMemoryUsage')
+      : t('resource.memoryUsage'),
     npuUtilization: t('resource.npuUsage'),
     eMMCUtilization: t('resource.emmcUsage'),
     packetDiscardUtilization: t('resource.packetLoss')
@@ -358,16 +372,19 @@ const toPercentNumber = (value) => {
   return Number.isNaN(number) ? 0 : Math.round(number)
 }
 
-const parseSizeToMB = (value) => {
+const parseSizeToMiB = (value) => {
   if (!value || typeof value !== 'string') return null
-  const match = value.trim().match(/^([\d.]+)\s*(GB|MB|KB|B)$/i)
+  const match = value.trim().match(/^([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB|B)$/i)
   if (!match) return null
 
   const number = Number(match[1])
   const unit = match[2].toUpperCase()
   const rateMap = {
+    GIB: 1024,
     GB: 1024,
+    MIB: 1,
     MB: 1,
+    KIB: 1 / 1024,
     KB: 1 / 1024,
     B: 1 / 1024 / 1024
   }
@@ -375,9 +392,9 @@ const parseSizeToMB = (value) => {
   return Number.isNaN(number) ? null : number * rateMap[unit]
 }
 
-const formatCapacity = (valueInMB) => {
-  if (valueInMB >= 1024) return `${(valueInMB / 1024).toFixed(2)} GB`
-  return `${valueInMB.toFixed(2)} MB`
+const formatCapacity = (valueInMiB) => {
+  if (valueInMiB >= 1024) return `${(valueInMiB / 1024).toFixed(2)} GiB`
+  return `${valueInMiB.toFixed(2)} MiB`
 }
 
 const formatResourceTime = (date) => {

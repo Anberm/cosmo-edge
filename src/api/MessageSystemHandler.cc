@@ -75,12 +75,13 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     auto items         = device_info_.GetHardwareResource(customScore);
     for (auto& item : items) {
         System::MsgQueryHardwareResourceSend::Item it{};
-        it.key         = item.key;
-        it.name        = item.name;
-        it.usedPercent = item.usedPercent;
-        it.usedSize    = item.usedSize;
-        it.unusedSize  = item.unusedSize;
-        it.available   = item.available;
+        it.key          = item.key;
+        it.name         = item.name;
+        it.usedPercent  = item.usedPercent;
+        it.usedSize     = item.usedSize;
+        it.unusedSize   = item.unusedSize;
+        it.available    = item.available;
+        it.memoryDomain = item.memoryDomain;
         retData.resData.itemList.push_back(std::move(it));
     }
     retData.resData.customScore               = COSMO_FORMAT("{:.4f}", customScore);

@@ -8,7 +8,9 @@ namespace {
     class CpuAcceleratorMetricsProvider final : public AcceleratorMetricsProvider {
     public:
         cosmo::MsgGpuInfo QueryUtilization() override {
-            return {};
+            cosmo::MsgGpuInfo result;
+            result.memoryDomain = "none";
+            return result;
         }
 
         int64_t QueryAvailableMemoryMB() override {

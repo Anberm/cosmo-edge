@@ -29,9 +29,10 @@ struct HwResourceItem {
     std::string key;         ///< Resource key identifier.
     std::string name;        ///< Human-readable resource name.
     int usedPercent{0};      ///< Usage percentage (0–100).
-    std::string usedSize;    ///< Used capacity string (e.g. "2.1 GB").
+    std::string usedSize;    ///< Used capacity string (e.g. "2.1 GiB").
     std::string unusedSize;  ///< Free capacity string.
     int available{0};        ///< Available units.
+    std::string memoryDomain;  ///< Physical memory pool identity; empty for non-memory resources.
 };
 
 /// Aggregate device info service providing device identity

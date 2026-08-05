@@ -50,7 +50,10 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     MockServiceRegistry mocks;
     auto handler = MakeHandler(mocks);
 
-    REQUIRE_CALL(mocks.deviceInfoSvc, GetHardwareResource(_)).RETURN(std::vector<service::HwResourceItem>{});
+    service::HwResourceItem system_memory{"generalMemoryUtilization", "系统内存使用率", 18,
+                                           "1.37 GiB", "6.36 GiB", 1, "system"};
+    REQUIRE_CALL(mocks.deviceInfoSvc, GetHardwareResource(_))
+        .RETURN(std::vector<service::HwResourceItem>{system_memory});
     MsgGpuInfo gpu;
     gpu.gpuusage          = 0.5;
     gpu.gpuusageAvailable = false;
@@ -77,6 +80,9 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     CHECK(ret.resData.accelerator.mppEarlyDroppedFrames == preview.mpp_early_dropped_frames);
     CHECK(ret.resData.accelerator.colorConvertFrames == inference.color_convert_frames);
     CHECK(ret.resData.accelerator.rknnForwards == inference.rknn_forwards);
+    REQUIRE(ret.resData.itemList.size() == 1);
+    CHECK(ret.resData.itemList.front().memoryDomain == "system");
+    CHECK(ret.resData.itemList.front().usedSize == "1.37 GiB");
 }
 
 TEST_CASE("SystemHandler: QueryPictureQuality", "[system-handler]") {
