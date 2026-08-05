@@ -406,6 +406,19 @@ if(COSMO_NN_USE_RKNN_BACKEND)
     if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
         set_property(TARGET cosmo-rknn-backend-smoke APPEND PROPERTY
             BUILD_RPATH "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
+
+        add_executable(cosmo-rknn-fastpath-qualify
+            tools/rknn/cosmo_rknn_fastpath_qualify.cc
+            ${ALL_OBJECTS})
+        target_include_directories(cosmo-rknn-fastpath-qualify PRIVATE ${CMAKE_SOURCE_DIR}/src)
+        target_compile_definitions(cosmo-rknn-fastpath-qualify PRIVATE
+            COSMO_NN_USE_RKNN_BACKEND
+            COSMO_NN_USE_HOST_BACKEND
+            COSMO_NN_USE_RAW_MODEL_BACKEND)
+        target_link_libraries(cosmo-rknn-fastpath-qualify PRIVATE
+            nlohmann stb uWebSockets ${COMMON_LIBS})
+        set_target_properties(cosmo-rknn-fastpath-qualify PROPERTIES
+            BUILD_RPATH "${COSMO_RKNN_ROOT}/lib;${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
     endif()
 endif()
 

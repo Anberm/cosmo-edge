@@ -40,7 +40,12 @@ def decode(
     scores = values[4 + class_ids, np.arange(values.shape[1])]
     selected = np.flatnonzero(scores >= confidence)
     if class_filter is not None:
-        selected = selected[np.asarray([int(class_ids[index]) in class_filter for index in selected])]
+        class_mask = np.fromiter(
+            (int(class_ids[index]) in class_filter for index in selected),
+            dtype=np.bool_,
+            count=selected.size,
+        )
+        selected = selected[class_mask]
     if selected.size == 0:
         return []
     centers = values[:4, selected].T

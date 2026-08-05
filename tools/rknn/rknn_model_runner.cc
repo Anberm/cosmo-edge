@@ -121,19 +121,29 @@ std::vector<float> NchwToNhwc(const std::vector<float>& source, const rknn_tenso
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 4 || argc > 7) {
+    if (argc < 4 || argc > 8) {
         std::cerr << "Usage: " << argv[0]
-                  << " <model.rknn> <input-f32-nchw.bin> <output-dir> [iterations=1] [warmup=1] [auto|0|1|01]\n";
+                  << " <model.rknn> <input.bin> <output-dir> [iterations=1] [warmup=1]"
+                     " [auto|0|1|01] [float32|uint8|int8]\n";
         return 2;
     }
 
     try {
         const auto model = ReadFile<std::uint8_t>(argv[1]);
-        const auto input_values = ReadFile<float>(argv[2]);
         const std::filesystem::path output_dir(argv[3]);
         const int iterations = argc >= 5 ? std::stoi(argv[4]) : 1;
         const int warmup = argc >= 6 ? std::stoi(argv[5]) : 1;
         const auto core_mask = ParseCoreMask(argc >= 7 ? argv[6] : "auto");
+        const std::string source_type = argc >= 8 ? argv[7] : "float32";
+        if (source_type != "float32" && source_type != "uint8" && source_type != "int8") {
+            throw std::runtime_error("input source type must be float32, uint8, or int8");
+        }
+        const auto input_f32 = source_type == "float32" ? ReadFile<float>(argv[2])
+                                                         : std::vector<float>{};
+        const auto input_u8 = source_type == "uint8" ? ReadFile<std::uint8_t>(argv[2])
+                                                       : std::vector<std::uint8_t>{};
+        const auto input_i8 = source_type == "int8" ? ReadFile<std::int8_t>(argv[2])
+                                                     : std::vector<std::int8_t>{};
         if (iterations <= 0 || warmup < 0) {
             throw std::runtime_error("iterations must be positive and warmup must be non-negative");
         }
@@ -161,19 +171,39 @@ int main(int argc, char** argv) {
         input_attr.index = 0;
         Check(rknn_query(context.Get(), RKNN_QUERY_INPUT_ATTR, &input_attr, sizeof(input_attr)),
               "RKNN_QUERY_INPUT_ATTR");
-        if (input_values.size() != ElementCount(input_attr)) {
-            throw std::runtime_error("input float count " + std::to_string(input_values.size()) +
-                                     " does not match model element count " +
-                                     std::to_string(ElementCount(input_attr)));
+        const auto element_count = ElementCount(input_attr);
+        std::vector<float> input_nhwc;
+        if (source_type == "float32") {
+            if (input_f32.size() != element_count) {
+                throw std::runtime_error("input float count " + std::to_string(input_f32.size()) +
+                                         " does not match model element count " +
+                                         std::to_string(element_count));
+            }
+            input_nhwc = NchwToNhwc(input_f32, input_attr);
+        } else {
+            const auto input_count = source_type == "uint8" ? input_u8.size() : input_i8.size();
+            if (input_count != element_count) {
+                throw std::runtime_error("input " + source_type + " count " +
+                                         std::to_string(input_count) +
+                                         " does not match model element count " +
+                                         std::to_string(element_count));
+            }
         }
-        const auto input_nhwc = NchwToNhwc(input_values, input_attr);
 
         rknn_input input{};
         input.index = 0;
-        input.buf = const_cast<float*>(input_nhwc.data());
-        input.size = static_cast<std::uint32_t>(input_nhwc.size() * sizeof(float));
-        input.pass_through = 0;
-        input.type = RKNN_TENSOR_FLOAT32;
+        input.buf = source_type == "float32"
+                        ? static_cast<void*>(input_nhwc.data())
+                        : (source_type == "uint8"
+                               ? static_cast<void*>(const_cast<std::uint8_t*>(input_u8.data()))
+                               : static_cast<void*>(const_cast<std::int8_t*>(input_i8.data())));
+        input.size = static_cast<std::uint32_t>(source_type == "float32"
+                                                    ? input_nhwc.size() * sizeof(float)
+                                                    : element_count);
+        input.pass_through = source_type == "int8" ? 1 : 0;
+        input.type = source_type == "float32"
+                         ? RKNN_TENSOR_FLOAT32
+                         : (source_type == "uint8" ? RKNN_TENSOR_UINT8 : RKNN_TENSOR_INT8);
         // RKNN Runtime 2.3.2 only accepts NHWC source layout on its input
         // conversion path. CosmoEdge supplies NCHW, so make the boundary copy
         // explicit rather than relying on a silently rejected NCHW request.
@@ -215,6 +245,7 @@ int main(int argc, char** argv) {
         std::cout << "driver_version=" << version.drv_version << '\n';
         std::cout << "input_native_type=" << get_type_string(input_attr.type) << '\n';
         std::cout << "input_native_format=" << get_format_string(input_attr.fmt) << '\n';
+        std::cout << "input_source_type=" << source_type << '\n';
         std::cout << "input_source_format=NHWC\n";
         std::cout << "iterations=" << iterations << '\n';
         std::cout << "latency_mean_ms=" << sum / elapsed_ms.size() << '\n';

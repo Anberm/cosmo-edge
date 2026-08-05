@@ -1,0 +1,49 @@
+name: rk3576-detector-fastpath-1-2-4-8
+displayName: RK3576 Detect 快路径 1/2/4/8 路（5 FPS）
+sampleIntervalSec: 3
+
+channels:
+  mode: local
+  repeatCount: 0
+  sources:
+    - name: safety-helmet
+      file: ../../../../data/test-video/Safety Helmet.mp4
+
+tasks:
+  - id: no-helmet
+    displayName: 未戴安全帽检测
+    type: cv
+    algorithmId: "7463"
+    scheduleId: "e89c6c6385e5454b35cde0d1653vg"
+    template: ../../../../data/resource/aiboxresource_x86/algorithm/7463_No Safety Helmet_20260629094147.json
+    targetFps: 5
+    taskConfig:
+      params:
+        - key: param.targetAlarmInterval
+          value: "36000"
+        - key: param.targetAlarmCount
+          value: "1"
+        - key: param.restrainSwitch
+          value: "1"
+        - key: param.sensitivity
+          value: "1"
+        - key: param.detectionDuration
+          value: "3600"
+
+loadProfile:
+  - channels: 1
+    holdSec: 90
+  - channels: 2
+    holdSec: 90
+  - channels: 4
+    holdSec: 90
+  - channels: 8
+    holdSec: 90
+
+thresholds:
+  pass:
+    maxCriticalPathLatencyMs: 500
+    maxDetectorLatencyMs: 400
+    avgDiscardRate: 0.1
+    maxPacketDiscardRate: 0.01
+    maxDiskUsedPercent: 90

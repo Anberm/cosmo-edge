@@ -73,6 +73,7 @@ run options:
   --skip-import        Skip algorithm/layout/save when the template already exists
   --no-reuse           Always create new bench channels
   --profile <mode>     capacity (default) expands to every channel count; configured keeps scenario.yml steps
+  --only-channels <n>  Run only one exact channel-count step from the effective profile
   --ramp-batch-size <n>
   --ramp-batch-delay-sec <n>
   --preview <mode>      none (default) | raw | algorithm
@@ -454,6 +455,17 @@ async function runBenchmark(args) {
     pkg = new ScenarioPackage(args.scenario).load();
     log.info(`Scenario "${pkg.scenario.name}" | tasks=${pkg.tasks.map((t) => `${t.id}:${t.algorithmId}`).join(', ')} | mode=${pkg.videoMode}`);
     effectiveLoadProfile = buildEffectiveLoadProfile(pkg.loadProfile, args.profile ?? 'capacity');
+    if (args['only-channels'] != null) {
+      const onlyChannels = Number(args['only-channels']);
+      if (!Number.isInteger(onlyChannels) || onlyChannels <= 0) {
+        throw new Error('--only-channels must be a positive integer');
+      }
+      const exactStep = effectiveLoadProfile.find((step) => step.channels === onlyChannels);
+      if (!exactStep) {
+        throw new Error(`--only-channels ${onlyChannels} is not present in the effective load profile`);
+      }
+      effectiveLoadProfile = [exactStep];
+    }
     const maxChannels = Math.max(...effectiveLoadProfile.map((s) => s.channels));
     log.info(`Profile mode: ${args.profile ?? 'capacity'} | configured=${pkg.loadProfile.map((s) => s.channels).join(',')} | effective=${effectiveLoadProfile.map((s) => s.channels).join(',')}`);
 
