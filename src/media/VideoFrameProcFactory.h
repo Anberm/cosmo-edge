@@ -1,9 +1,8 @@
 /// @file VideoFrameProcFactory.h
 /// @brief Factory function for creating the correct backend VideoFrameProc.
 ///
-/// The concrete implementation (Sophon or CPU) is selected at CMake time —
-/// only one of VideoFrameProcFactorySophon.cc or VideoFrameProcFactoryCpu.cc
-/// is compiled into the binary.
+/// The concrete implementation (Sophon, CPU, or Rockchip) is selected at
+/// CMake time; exactly one factory implementation is compiled into the binary.
 #pragma once
 
 #include <memory>
@@ -17,7 +16,7 @@ namespace mem {
 namespace media {
     class IOsdTextRenderer;
 
-    /// Creates the correct backend VideoFrameProc (Sophon or CPU).
+    /// Creates the configured backend VideoFrameProc.
     /// @param ctx  Device context providing hardware handles
     /// @param osd  OSD text rendering service
     std::unique_ptr<IVideoFrameProc> CreateVideoFrameProc(mem::IDeviceContext& ctx, IOsdTextRenderer& osd);

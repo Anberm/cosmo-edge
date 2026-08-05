@@ -70,8 +70,9 @@ void AlgChannel::RemoveViewerPacketQueue(std::shared_ptr<AsyncQueue<VideoPacketP
 }
 
 void AlgChannel::AddViewerFrameQueue(const std::string& alg_id,
-                                     AsyncQueue<VideoFramePtr>& async_frame_queue) {
-    decoder_.AddViewerFrameQueue(alg_id, async_frame_queue);
+                                     AsyncQueue<VideoFramePtr>& async_frame_queue,
+                                     std::function<bool()> prepare_frame) {
+    decoder_.AddViewerFrameQueue(alg_id, async_frame_queue, std::move(prepare_frame));
 }
 
 void AlgChannel::RemoveViewerFrameQueue(const std::string& alg_id) {

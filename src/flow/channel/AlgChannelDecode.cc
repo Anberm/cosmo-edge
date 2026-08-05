@@ -221,12 +221,13 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
     duration_stat_.BeginSample();
     bool is_decode_ret = false;
     FrameInfoSave(video_frame);
-    VideoFramePtr frame_data = nullptr;
+    media::DecodedVideoFrame decoded_frame;
 #ifdef TEST_NO_DECODER
-    frame_data = std::make_shared<media::VideoFrame>(1920, 1080);
+    decoded_frame = media::DecodedVideoFrame(std::make_shared<media::VideoFrame>(1920, 1080));
+    is_decode_ret = decoded_frame.HasFrame();
 #else
     if (video_frame->codec_type == media::VideoCodecType::kMjpeg) {
-        frame_data = service::ServiceRegistry::Instance().Get<service::IVideoFrameCodec>().DecodeJpeg(
+        auto frame_data = service::ServiceRegistry::Instance().Get<service::IVideoFrameCodec>().DecodeJpeg(
             std::vector<u_int8_t>(video_frame->data.begin(), video_frame->data.end()));
         if (frame_data) {
             // MJPEG hardware decode returns frames without business-side frame
@@ -236,10 +237,11 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
             frame_data->SetTimestamp(video_frame->timestamp);
         }
         is_decode_ret = (frame_data != nullptr);
+        decoded_frame = media::DecodedVideoFrame(std::move(frame_data));
     } else {
         try {
-            frame_data = decoder_->Decode(video_frame->data.data(), video_frame->data.size(),
-                                          video_frame->index, is_decode_ret);
+            decoded_frame = decoder_->DecodeFrame(video_frame->data.data(), video_frame->data.size(),
+                                                  video_frame->index, is_decode_ret);
         } catch (const std::exception& e) {
             codec_reset_sign_ = true;
             LOG_ERRO("{} Last Frame is {} Have Decord Errors: {}", name_, frame_index_, e.what());
@@ -247,17 +249,9 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
         }
     }
 #endif
-    duration_stat_.EndSample();
 
-    if (frame_data) {
-        auto frame_info = FrameInfoGet(static_cast<int64_t>(frame_data->GetFrameIndex()));
-        if (static_cast<uint64_t>(frame_info.index) == frame_data->GetFrameIndex()) {
-            frame_data->SetTimestamp(frame_info.timestamp);
-            frame_data->SetStreamIndex(frame_info.streamIndex);
-        } else {
-            frame_data->SetTimestamp(util::GetMilliseconds());
-        }
-    } else {
+    if (!decoded_frame.HasFrame()) {
+        duration_stat_.EndSample();
         if (is_decode_ret) {
             frame_index_ = video_frame->index;
             // SendPacket succeeded but GetFrame returned no output (VPU internal buffering); not a failure.
@@ -275,6 +269,54 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
         }
         return;
     }
+
+    const auto decoded_frame_index = decoded_frame.GetFrameIndex();
+    const auto frame_info = FrameInfoGet(static_cast<int64_t>(decoded_frame_index));
+    const bool matched_frame_info =
+        frame_info.index >= 0 && static_cast<uint64_t>(frame_info.index) == decoded_frame_index;
+    const int64_t output_timestamp =
+        matched_frame_info ? frame_info.timestamp : util::GetMilliseconds();
+    const int64_t output_stream_index =
+        matched_frame_info ? frame_info.streamIndex : video_frame->stream_idx;
+
+    AlgFrameDistributionPlan task_plan;
+    const bool prepared_task_distribution = decoded_frame.IsDeferred();
+    if (prepared_task_distribution) {
+        task_plan = PrepareFrameDistribution(demux_data);
+    }
+
+    ViewerDistributionPlan viewer_plan;
+#ifdef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
+    // Rockchip viewers move their existing FPS filter ahead of Copy-out. The
+    // callback also rejects a saturated preview queue before host allocation.
+    viewer_plan = PrepareViewerDistribution();
+    constexpr bool prepared_viewer_distribution = true;
+#else
+    constexpr bool prepared_viewer_distribution = false;
+#endif
+
+    const bool host_frame_required = !decoded_frame.IsDeferred() || !task_plan.Empty() ||
+                                     !viewer_plan.empty() || NeedsHostFrame(output_stream_index);
+    if (!host_frame_required) {
+        decoded_frame.Discard();
+        duration_stat_.EndSample();
+        frame_index_                 = video_frame->index;
+        decode_count_ += 1;
+        consecutive_decode_failures_ = 0;
+        action_status_               = util::ErrorEnum::Success;
+        return;
+    }
+
+    auto frame_data = decoded_frame.Materialize();
+    duration_stat_.EndSample();
+    if (!frame_data || !frame_data->Active()) {
+        action_status_ = util::ErrorEnum::DecoderFrameFailed;
+        LOG_WARN("{} decoded frame materialization failed at frame:{} stream:{}", name_,
+                 video_frame->index, video_frame->stream_idx);
+        return;
+    }
+    frame_data->SetTimestamp(output_timestamp);
+    frame_data->SetStreamIndex(output_stream_index);
 
     frame_index_ = video_frame->index;
     decode_count_++;
@@ -296,6 +338,8 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
                      media::kVideoDefaultHeight);
             return;
         }
+        output_frame->SetFrameIndex(frame_data->GetFrameIndex());
+        output_frame->SetTimestamp(frame_data->GetTimestamp());
         output_frame->SetStreamIndex(frame_data->GetStreamIndex());
     }
 
@@ -309,11 +353,20 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
         return;
     }
 
-    DistributeViewer(output_frame);
+    if constexpr (prepared_viewer_distribution) {
+        DistributePreparedViewer(viewer_plan, output_frame);
+    } else {
+        DistributeViewer(output_frame);
+    }
     DoCaptureImage(output_frame);
     CaptureJpeg(output_frame);
-    DistributorData(demux_data, output_frame,
-                    [this](AlgDataPtr frame, VideoFramePtr in_data) { return ColorConvert(frame, in_data); });
+    const auto color_convert =
+        [this](AlgDataPtr frame, VideoFramePtr in_data) { return ColorConvert(frame, in_data); };
+    if (prepared_task_distribution) {
+        DistributorPreparedFrame(task_plan, demux_data, output_frame, color_convert);
+    } else {
+        DistributorData(demux_data, output_frame, color_convert);
+    }
 }
 
 void AlgChannelDecode::FrameInfoSave(VideoPacketPtr packet) {

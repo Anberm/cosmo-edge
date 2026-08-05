@@ -156,6 +156,60 @@ loadProfile:
   assert.deepEqual(pkg.loadProfile.map((step) => step.holdSec), [30, 30]);
 });
 
+test('explicit target FPS overrides every detector node in the saved layout', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenario-bench-cv-fps-override-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  fs.writeFileSync(path.join(dir, 'scenario.yml'), `name: cv-fps-override
+sampleIntervalSec: 5
+channels:
+  mode: local
+  repeatCount: 0
+  sources:
+    - name: cv
+      file: /device/cv.mp4
+tasks:
+  - id: cv
+    displayName: CV
+    type: cv
+    algorithmId: "7463"
+    scheduleId: schedule
+    template: algorithm-template.json
+    targetFps: 5
+loadProfile:
+  - channels: 1
+    holdSec: 30
+`, 'utf8');
+  fs.writeFileSync(path.join(dir, 'algorithm-template.json'), JSON.stringify({
+    algorithmId: '7463',
+    algorithmCode: '7463',
+    algorithmName: 'CV',
+    taskConfig: { params: [], areas: [] },
+    algorithmProcessdata: JSON.stringify([
+      {
+        actionId: 'AA_00001',
+        configObject: { params: [{ key: 'fps', value: '7' }] },
+      },
+      {
+        actionId: 'AA_00001',
+        configObject: JSON.stringify({ params: [{ key: 'fps', value: '7' }] }),
+      },
+    ]),
+  }), 'utf8');
+
+  const pkg = new ScenarioPackage(dir).load();
+  const nodes = JSON.parse(pkg.layoutSavePayload.algorithmProcessdata);
+  const fpsValues = nodes.map((node) => {
+    const config = typeof node.configObject === 'string'
+      ? JSON.parse(node.configObject)
+      : node.configObject;
+    return config.params.find((param) => param.key === 'fps')?.value;
+  });
+
+  assert.equal(pkg.targetFps, 5);
+  assert.deepEqual(fpsValues, ['5', '5']);
+});
+
 function writeTemplate(file, processNode) {
   fs.writeFileSync(file, JSON.stringify({
     algorithmId: '55009',

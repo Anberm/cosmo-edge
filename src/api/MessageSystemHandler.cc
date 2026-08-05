@@ -6,6 +6,7 @@
 
 #include "api/HttpUploadClaim.h"
 #include "media/PreviewPipelineMetrics.h"
+#include "media/VideoDecoder.h"
 #include "media/VideoEncoder.h"
 #include "nn/core/inference_pipeline_metrics.h"
 #include "service/detail/ServiceRegistry.h"
@@ -105,6 +106,25 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.videoEncoderBackend           = encoder_capability.backend;
     accelerator.videoEncoderImplementation    = encoder_capability.implementation;
     accelerator.videoEncoderDetail            = encoder_capability.detail;
+    const auto decoder_capability             = media::VideoDecoder::Probe(media::VideoCodecType::kH264);
+    accelerator.videoDecoderAvailable         = decoder_capability.available;
+    accelerator.videoDecoderBackend           = decoder_capability.backend;
+    accelerator.videoDecoderImplementation    = decoder_capability.implementation;
+    accelerator.videoDecoderDetail            = decoder_capability.detail;
+    accelerator.rgaFrames                     = preview.rga_frames;
+    accelerator.rgaMs                         = preview.rga_nanoseconds / 1000000.0;
+    accelerator.rgaFailures                   = preview.rga_failures;
+    accelerator.mppEncodedFrames              = preview.mpp_encoded_frames;
+    accelerator.mppEncodeMs                   = preview.mpp_encode_nanoseconds / 1000000.0;
+    accelerator.mppEncodeFailures             = preview.mpp_encode_failures;
+    accelerator.mppDecodedFrames              = preview.mpp_decoded_frames;
+    accelerator.mppDecodeMs                   = preview.mpp_decode_nanoseconds / 1000000.0;
+    accelerator.mppDecodeFailures             = preview.mpp_decode_failures;
+    accelerator.mppDecodeFallbacks             = preview.mpp_decode_fallbacks;
+    accelerator.mppCopyOutFrames              = preview.mpp_copy_out_frames;
+    accelerator.mppCopyOutMs                  = preview.mpp_copy_out_nanoseconds / 1000000.0;
+    accelerator.mppCopyOutFailures            = preview.mpp_copy_out_failures;
+    accelerator.mppEarlyDroppedFrames         = preview.mpp_early_dropped_frames;
     const auto inference                      = nn::GetInferencePipelineMetrics().Snapshot();
     accelerator.colorConvertFrames            = inference.color_convert_frames;
     accelerator.colorConvertMs                = inference.color_convert_nanoseconds / 1000000.0;

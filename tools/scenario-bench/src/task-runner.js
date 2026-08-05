@@ -180,7 +180,10 @@ export class TaskRunner {
           try {
             if (hooks?.onSample) await hooks.onSample();
           } catch (err) {
-            this.log?.warn(`sample tick failed: ${err.message}`);
+            // Missing the remainder of a hold window can otherwise turn an
+            // outage into a false PASS based only on pre-failure samples.
+            // Abort and let the caller write a clearly marked partial report.
+            throw new Error(`sample tick failed: ${err.message}`, { cause: err });
           }
         }
 

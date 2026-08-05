@@ -66,6 +66,13 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     CHECK(ret.resData.accelerator.activeAlgorithmPreviewStreams == preview.active_algorithm_preview_streams);
     CHECK_FALSE(ret.resData.accelerator.videoEncoderBackend.empty());
     CHECK_FALSE(ret.resData.accelerator.videoEncoderDetail.empty());
+    CHECK_FALSE(ret.resData.accelerator.videoDecoderBackend.empty());
+    CHECK_FALSE(ret.resData.accelerator.videoDecoderDetail.empty());
+    CHECK(ret.resData.accelerator.rgaFrames == preview.rga_frames);
+    CHECK(ret.resData.accelerator.mppEncodedFrames == preview.mpp_encoded_frames);
+    CHECK(ret.resData.accelerator.mppDecodedFrames == preview.mpp_decoded_frames);
+    CHECK(ret.resData.accelerator.mppCopyOutFrames == preview.mpp_copy_out_frames);
+    CHECK(ret.resData.accelerator.mppEarlyDroppedFrames == preview.mpp_early_dropped_frames);
     CHECK(ret.resData.accelerator.colorConvertFrames == inference.color_convert_frames);
     CHECK(ret.resData.accelerator.rknnForwards == inference.rknn_forwards);
 }

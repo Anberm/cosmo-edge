@@ -18,6 +18,11 @@ test('hardware sampler preserves platform-neutral accelerator metrics', async ()
         osdFrames: 12,
       },
     }),
+    queryDeviceMemoryPool: async () => ({
+      totalMalloc: 1024,
+      totalInUsing: 256,
+      status: [{ poolSize: 128, mallocCnt: 2, freeCnt: 6 }],
+    }),
   });
 
   const sample = await sampler.sample([]);
@@ -28,6 +33,12 @@ test('hardware sampler preserves platform-neutral accelerator metrics', async ()
   assert.equal(sample.hardware.accelerator.activePreviewStreams, 1);
   assert.equal(sample.hardware.accelerator.activePreviewPublishers, 1);
   assert.equal(sample.hardware.accelerator.osdFrames, 12);
+  assert.equal(sample.hardware.memoryPool.totalAllocatedBytes, 1024);
+  assert.equal(sample.hardware.memoryPool.totalInUseBytes, 256);
+  assert.equal(sample.hardware.memoryPool.utilizationPercent, 25);
+  assert.deepEqual(sample.hardware.memoryPool.pools, [
+    { blockSize: 128, usedBlocks: 2, freeBlocks: 6 },
+  ]);
 });
 
 test('step summary derives platform-neutral preview timings and lifecycle deltas', () => {
@@ -52,6 +63,11 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
       ],
     }],
     hardware: {
+      memoryPool: {
+        totalAllocatedBytes: index * 1024,
+        totalInUseBytes: index * 256,
+        utilizationPercent: index * 5,
+      },
       accelerator: {
         osdFrames: index * 10,
         osdMs: index * 40,
@@ -83,6 +99,20 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         rknnForwards: index * 10,
         rknnForwardMs: index * 420,
         rknnForwardFailures: 0,
+        rgaFrames: index * 10,
+        rgaMs: index * 15,
+        rgaFailures: 0,
+        mppEncodedFrames: index * 10,
+        mppEncodeMs: index * 25,
+        mppEncodeFailures: 0,
+        mppDecodedFrames: index * 10,
+        mppDecodeMs: index * 18,
+        mppDecodeFailures: 0,
+        mppDecodeFallbacks: 0,
+        mppCopyOutFrames: index * 6,
+        mppCopyOutMs: index * 24,
+        mppCopyOutFailures: 0,
+        mppEarlyDroppedFrames: index * 4,
         activePreviewStreams: 1,
         activePreviewPublishers: 1,
         activeRawPreviewStreams: 0,
@@ -111,10 +141,25 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
   assert.equal(summary.mediaStages.rknnOutputTransformAvgMs, 5);
   assert.equal(summary.mediaStages.rknnForwardAvgMs, 42);
   assert.equal(summary.mediaStages.rknnForwardFailures, 0);
+  assert.equal(summary.mediaStages.rgaAvgMs, 1.5);
+  assert.equal(summary.mediaStages.rgaFailures, 0);
+  assert.equal(summary.mediaStages.mppEncodeAvgMs, 2.5);
+  assert.equal(summary.mediaStages.mppEncodeFailures, 0);
+  assert.equal(summary.mediaStages.mppDecodeAvgMs, 1.8);
+  assert.equal(summary.mediaStages.mppDecodedFrames, 10);
+  assert.equal(summary.mediaStages.mppDecodeFailures, 0);
+  assert.equal(summary.mediaStages.mppDecodeFallbacks, 0);
+  assert.equal(summary.mediaStages.mppCopyOutAvgMs, 4);
+  assert.equal(summary.mediaStages.mppCopyOutFrames, 6);
+  assert.equal(summary.mediaStages.mppCopyOutFailures, 0);
+  assert.equal(summary.mediaStages.mppEarlyDroppedFrames, 4);
   assert.equal(summary.mediaStages.osdAvgMs, 4);
   assert.equal(summary.mediaStages.publishAvgMs, 5);
   assert.equal(summary.mediaStages.firstFrameAvgMs, 100);
   assert.equal(summary.mediaStages.firstFrameMaxMs, 270);
+  assert.equal(summary.maxPoolAllocatedBytes, 3072);
+  assert.equal(summary.maxPoolInUseBytes, 768);
+  assert.equal(summary.maxPoolUtilizationPercent, 15);
   assert.equal(summary.mediaStages.activePreviewStreamsPeak, 1);
   assert.equal(summary.mediaStages.activePreviewPublishersPeak, 1);
   assert.equal(summary.mediaStages.activeAlgorithmPreviewStreamsPeak, 1);

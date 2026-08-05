@@ -13,6 +13,72 @@ static constexpr const char* kTag = "[DECODER] ";
 namespace cosmo {
 namespace media {
 
+    DecodedVideoFrame::DecodedVideoFrame(VideoFramePtr frame) : frame_(std::move(frame)) {
+        if (frame_) {
+            frame_index_ = frame_->GetFrameIndex();
+            width_       = frame_->GetWidth();
+            height_      = frame_->GetHeight();
+            format_      = frame_->GetPixelFormat();
+        }
+    }
+
+    DecodedVideoFrame::DecodedVideoFrame(uint64_t frame_index, size_t width, size_t height,
+                                         PixelFormat format, Materializer materializer,
+                                         DiscardHandler discard_handler)
+        : frame_index_(frame_index),
+          width_(width),
+          height_(height),
+          format_(format),
+          materializer_(std::move(materializer)),
+          discard_handler_(std::move(discard_handler)) {}
+
+    bool DecodedVideoFrame::HasFrame() const {
+        return frame_ != nullptr || static_cast<bool>(materializer_);
+    }
+
+    bool DecodedVideoFrame::IsDeferred() const {
+        return frame_ == nullptr && static_cast<bool>(materializer_);
+    }
+
+    uint64_t DecodedVideoFrame::GetFrameIndex() const {
+        return frame_ ? frame_->GetFrameIndex() : frame_index_;
+    }
+
+    size_t DecodedVideoFrame::GetWidth() const {
+        return frame_ ? frame_->GetWidth() : width_;
+    }
+
+    size_t DecodedVideoFrame::GetHeight() const {
+        return frame_ ? frame_->GetHeight() : height_;
+    }
+
+    PixelFormat DecodedVideoFrame::GetPixelFormat() const {
+        return frame_ ? frame_->GetPixelFormat() : format_;
+    }
+
+    VideoFramePtr DecodedVideoFrame::Materialize() {
+        if (frame_) {
+            return frame_;
+        }
+        if (!materializer_) {
+            return nullptr;
+        }
+
+        auto materializer = std::move(materializer_);
+        discard_handler_  = nullptr;
+        frame_             = materializer();
+        return frame_;
+    }
+
+    void DecodedVideoFrame::Discard() {
+        if (IsDeferred() && discard_handler_) {
+            discard_handler_();
+        }
+        frame_.reset();
+        materializer_    = nullptr;
+        discard_handler_ = nullptr;
+    }
+
     VideoDecoder::VideoDecoder(size_t name) : idx_name_("atomicDecoder_" + std::to_string(name)) {
         LOG_INFO("{} Construction", idx_name_);
     }
@@ -33,7 +99,8 @@ namespace media {
         return height_;
     }
 
-    VideoFramePtr VideoDecoder::Decode(const uint8_t* pkt, size_t len, int64_t frame_idx, bool& result) {
+    DecodedVideoFrame VideoDecoder::DecodeFrame(const uint8_t* pkt, size_t len, int64_t frame_idx,
+                                                bool& result) {
         auto send_result = SendPacket(pkt, len, frame_idx);
         send_pkt_cnt_ += 1;
         if (frame_idx % (25 * 60) == 0) {
@@ -53,17 +120,26 @@ namespace media {
             }
             LOG_WARN("{}{} Frame Size:{} Decode Failed. frameIndex:{} data:{}", kTag, idx_name_, len,
                      frame_idx, prefix.str());
-            return nullptr;
+            return {};
         }
 
         result = true;
 
-        auto frame = GetFrame();
-        if (frame) {
+        auto frame = GetDecodedFrame();
+        if (frame.HasFrame()) {
             recv_frame_cnt_ += 1;
         }
 
         return frame;
+    }
+
+    VideoFramePtr VideoDecoder::Decode(const uint8_t* pkt, size_t len, int64_t frame_idx, bool& result) {
+        auto frame = DecodeFrame(pkt, len, frame_idx, result);
+        return frame.Materialize();
+    }
+
+    DecodedVideoFrame VideoDecoder::GetDecodedFrame() {
+        return DecodedVideoFrame(GetFrame());
     }
 
 }  // namespace media

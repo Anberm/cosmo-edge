@@ -43,6 +43,11 @@ public:
 
     bool IsRunning() const;
 
+    /// Snapshot whether an immediate non-forced insert can succeed. This is
+    /// used by Rockchip delayed Copy-out to avoid allocating a host frame that
+    /// a saturated downstream queue would discard immediately.
+    bool CanAccept() const;
+
     const std::string& Name() const;
 
     size_t RestSize() const;

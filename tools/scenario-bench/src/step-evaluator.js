@@ -125,6 +125,9 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
   });
   const maxCpu = peak((tick) => tick.hardware?.cpuUtilization?.usedPercent);
   const maxMem = peak((tick) => tick.hardware?.generalMemoryUtilization?.usedPercent);
+  const maxPoolAllocatedBytes = peak((tick) => tick.hardware?.memoryPool?.totalAllocatedBytes);
+  const maxPoolInUseBytes = peak((tick) => tick.hardware?.memoryPool?.totalInUseBytes);
+  const maxPoolUtilizationPercent = peak((tick) => tick.hardware?.memoryPool?.utilizationPercent);
   const taskStats = summarizeTasks(channelStats);
   const mediaStages = summarizeMediaStages(ticks, maxPrimaryLat);
 
@@ -173,6 +176,9 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     maxAcceleratorMem,
     maxCpu,
     maxMem,
+    maxPoolAllocatedBytes,
+    maxPoolInUseBytes,
+    maxPoolUtilizationPercent,
     mediaStages,
     channelStats,
     taskStats,
@@ -227,6 +233,18 @@ function summarizeMediaStages(ticks, inferMs) {
     ),
     rknnForwardAvgMs: counterAverage('rknnForwardMs', 'rknnForwards'),
     rknnForwardFailures: counterDelta('rknnForwardFailures'),
+    rgaAvgMs: counterAverage('rgaMs', 'rgaFrames'),
+    rgaFailures: counterDelta('rgaFailures'),
+    mppEncodeAvgMs: counterAverage('mppEncodeMs', 'mppEncodedFrames'),
+    mppEncodeFailures: counterDelta('mppEncodeFailures'),
+    mppDecodeAvgMs: counterAverage('mppDecodeMs', 'mppDecodedFrames'),
+    mppDecodedFrames: counterDelta('mppDecodedFrames'),
+    mppDecodeFailures: counterDelta('mppDecodeFailures'),
+    mppDecodeFallbacks: counterDelta('mppDecodeFallbacks'),
+    mppCopyOutAvgMs: counterAverage('mppCopyOutMs', 'mppCopyOutFrames'),
+    mppCopyOutFrames: counterDelta('mppCopyOutFrames'),
+    mppCopyOutFailures: counterDelta('mppCopyOutFailures'),
+    mppEarlyDroppedFrames: counterDelta('mppEarlyDroppedFrames'),
     osdAvgMs: counterAverage('osdMs', 'osdFrames'),
     publishAvgMs: counterAverage('publishMs', 'publishedFrames'),
     firstFrameAvgMs: counterAverage('firstFrameMs', 'firstFrames'),

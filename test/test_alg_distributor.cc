@@ -3,6 +3,7 @@
  * test_alg_distributor.cc - AlgDataQueueDistributor 单元测试
  */
 #include "flow/common/AlgDataQueueDistributor.h"
+#include "util/dto/ActionCodes.h"
 
 using namespace cosmo;
 
@@ -81,4 +82,42 @@ TEST_CASE("AlgDataQueueDistributor sign changes", "[Distributor]") {
     dist.RemoveProcQueue(task1);
     int sign2 = dist.GetSign();
     REQUIRE(sign2 > sign1);
+}
+
+TEST_CASE("AlgDataQueueDistributor plans before host frame materialization", "[Distributor]") {
+    AlgDataQueueDistributor dist("deferred_dist");
+    auto task = makeTask("ch1", "deferred", "a1", -1.0f);
+    REQUIRE(dist.RegistProcQueue(task));
+
+    auto input            = std::make_shared<AlgData>();
+    input->firstTimePoint = std::chrono::steady_clock::now();
+    auto ready_plan       = dist.PrepareFrameDistribution(input);
+    REQUIRE_FALSE(ready_plan.Empty());
+    REQUIRE(ready_plan.queues.size() == 1);
+
+    for (size_t index = 0; index < task.que->GetMaxSize(); ++index) {
+        REQUIRE(task.que->Insert(std::make_shared<AlgData>()));
+    }
+    input->firstTimePoint = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    const auto saturated_plan = dist.PrepareFrameDistribution(input);
+    CHECK(saturated_plan.Empty());
+
+    AlgDataQueueInfo status;
+    REQUIRE(task.que->Status(status));
+    CHECK(status.status.discardCount >= 1);
+}
+
+TEST_CASE("Channel lifecycle queues do not force host frame materialization", "[Distributor]") {
+    AlgDataQueueDistributor dist("channel_metadata_dist");
+    auto channel_task = makeTask("ch1", "ch1-ChannelTask", std::string(BAStreamChannel_Code), -1.0f);
+    REQUIRE(dist.RegistProcQueue(channel_task));
+
+    auto input            = std::make_shared<AlgData>();
+    input->dataType       = AlgDataType::ChannelDataOrig;
+    input->firstTimePoint = std::chrono::steady_clock::now();
+    const auto plan       = dist.PrepareFrameDistribution(input);
+
+    CHECK(plan.Empty());
+    CHECK(channel_task.que->RestSize() == 1);
+    CHECK(channel_task.que->Pop() == input);
 }

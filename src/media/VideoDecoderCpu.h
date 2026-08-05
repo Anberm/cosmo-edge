@@ -33,6 +33,8 @@ namespace media {
 
         VideoFramePtr GetFrame() override;
 
+        static VideoDecoderCapability Probe(VideoCodecType type);
+
     private:
         /// Copy decoded AVFrame (YUV420P) data into a VideoFrame's host-memory Block.
         bool CopyAVFrameToVideoFrame(AVFrame* src, VideoFramePtr dst);

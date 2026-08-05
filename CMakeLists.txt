@@ -104,8 +104,12 @@ endif()
 # paired with another inference backend.
 set(_cosmo_media_sophon_default OFF)
 set(_cosmo_media_cpu_default OFF)
+set(_cosmo_media_rockchip_default OFF)
 if(COSMO_NN_USE_SOPHON_BACKEND)
     set(_cosmo_media_sophon_default ON)
+elseif(COSMO_NN_USE_RKNN_BACKEND AND
+       (COSMO_ROCKCHIP_MEDIA_ROOT OR DEFINED ENV{ROCKCHIP_MEDIA_ROOT}))
+    set(_cosmo_media_rockchip_default ON)
 else()
     set(_cosmo_media_cpu_default ON)
 endif()
@@ -114,24 +118,32 @@ option(COSMO_MEDIA_USE_SOPHON_BACKEND "Enable Sophon hardware media backend"
        ${_cosmo_media_sophon_default})
 option(COSMO_MEDIA_USE_CPU_BACKEND "Enable FFmpeg software media backend"
        ${_cosmo_media_cpu_default})
+option(COSMO_MEDIA_USE_ROCKCHIP_BACKEND "Enable Rockchip MPP/RGA Copy-first media backend"
+       ${_cosmo_media_rockchip_default})
 
 set(_cosmo_media_backend_count 0)
 foreach(_media_backend_option
         COSMO_MEDIA_USE_SOPHON_BACKEND
-        COSMO_MEDIA_USE_CPU_BACKEND)
+        COSMO_MEDIA_USE_CPU_BACKEND
+        COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
     if(${_media_backend_option})
         math(EXPR _cosmo_media_backend_count "${_cosmo_media_backend_count} + 1")
     endif()
 endforeach()
 if(NOT _cosmo_media_backend_count EQUAL 1)
-    message(FATAL_ERROR "Exactly one media backend must be enabled: Sophon or CPU")
+    message(FATAL_ERROR "Exactly one media backend must be enabled: Sophon, CPU, or Rockchip")
 endif()
 if(COSMO_MEDIA_USE_SOPHON_BACKEND AND NOT COSMO_NN_USE_SOPHON_BACKEND)
     message(FATAL_ERROR "Sophon media requires the Sophon device runtime")
 endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND AND NOT COSMO_TARGET_ARCH STREQUAL "aarch64")
+    message(FATAL_ERROR "Rockchip media requires an aarch64 target")
+endif()
 
 if(COSMO_MEDIA_USE_SOPHON_BACKEND)
     add_compile_definitions(COSMO_MEDIA_USE_SOPHON_BACKEND)
+elseif(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    add_compile_definitions(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
 else()
     add_compile_definitions(COSMO_MEDIA_USE_CPU_BACKEND)
 endif()
@@ -211,6 +223,9 @@ if(COSMO_NN_USE_CPU_BACKEND)
 endif()
 if(COSMO_NN_USE_RKNN_BACKEND)
     include(cmake/rknn.cmake)
+endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    include(cmake/rockchip_media.cmake)
 endif()
 include(cmake/pcap.cmake)
 include(cmake/srs.cmake)
@@ -327,6 +342,9 @@ endif()
 if(COSMO_NN_USE_RKNN_BACKEND)
     list(APPEND COMMON_LIBS rknnrt)
 endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    list(APPEND COMMON_LIBS rockchip_mpp rockchip_rga)
+endif()
 
 ##########################################################
 #Main Executable
@@ -363,6 +381,12 @@ if(COSMO_NN_USE_RKNN_BACKEND)
         BUILD_RPATH "${COSMO_RKNN_ROOT}/lib"
         INSTALL_RPATH "$ORIGIN/../lib")
 endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    set_property(TARGET ${EXECUTABLE_NAME} APPEND PROPERTY
+        BUILD_RPATH "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib")
+endif()
 #Build order: OBJECT libs → third_build (explicit, see foreach above)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${COMMON_LIBS})
 
@@ -379,6 +403,10 @@ if(COSMO_NN_USE_RKNN_BACKEND)
         nlohmann stb uWebSockets ${COMMON_LIBS})
     set_target_properties(cosmo-rknn-backend-smoke PROPERTIES
         BUILD_RPATH "${COSMO_RKNN_ROOT}/lib")
+    if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+        set_property(TARGET cosmo-rknn-backend-smoke APPEND PROPERTY
+            BUILD_RPATH "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
+    endif()
 endif()
 
 ##########################################################
@@ -423,6 +451,10 @@ if(BUILD_TESTS)
             COSMO_NN_USE_RAW_MODEL_BACKEND)
         set_target_properties(cosmo-tests PROPERTIES
             BUILD_RPATH "${COSMO_RKNN_ROOT}/lib")
+    endif()
+    if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+        set_property(TARGET cosmo-tests APPEND PROPERTY
+            BUILD_RPATH "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
     endif()
     target_link_libraries(cosmo-tests PRIVATE ${COMMON_LIBS})
     if(COSMO_ENABLE_COVERAGE)

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <shared_mutex>
 #include <string>
 #include <vector>
@@ -34,7 +35,8 @@ public:
 
     void AddViewerPacketQueue(std::shared_ptr<AsyncQueue<VideoPacketPtr>> async_packet_queue);
     void RemoveViewerPacketQueue(std::shared_ptr<AsyncQueue<VideoPacketPtr>> async_packet_queue);
-    void AddViewerFrameQueue(const std::string& alg_id, AsyncQueue<VideoFramePtr>& async_frame_queue);
+    void AddViewerFrameQueue(const std::string& alg_id, AsyncQueue<VideoFramePtr>& async_frame_queue,
+                             std::function<bool()> prepare_frame = {});
     void RemoveViewerFrameQueue(const std::string& alg_id);
 
     // Modify parameters incrementally on top of existing values.

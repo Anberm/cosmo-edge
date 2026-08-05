@@ -21,6 +21,13 @@ TEST_CASE("Video encoder capability uses a deterministic backend", "[media][enco
         cosmo::media::VideoCodecType::kH264, "h264_v4l2m2m"));
     CHECK_FALSE(cosmo::media::VideoEncoderCpu::IsAllowedEncoderName(
         cosmo::media::VideoCodecType::kH264, "h264_nvenc"));
+#elif defined(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    CHECK(capability.available);
+    CHECK(capability.backend == "rockchip-copy-first");
+    CHECK(capability.implementation == "rockchip-mpp");
+    const auto h265 = cosmo::media::VideoEncoder::Probe(cosmo::media::VideoCodecType::kH265);
+    CHECK(h265.implementation != "rockchip-mpp");
+    CHECK(h265.detail.find("H264-only") != std::string::npos);
 #else
     CHECK(capability.available);
 #endif

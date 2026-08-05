@@ -15,6 +15,7 @@ import { normalizeTaskType } from './task-strategies.js';
 
 const FPS_ACTION_ID = 'AA_00001';
 const VLM_ACTION_IDS = new Set(['DA_00003', 'PDA_00003']);
+const FPS_ACTION_IDS = new Set([FPS_ACTION_ID, ...VLM_ACTION_IDS]);
 const SUPPORTED_VIDEO_MODES = new Set(['local', 'rtsp-fidelity', 'rtsp-deterministic']);
 export const DEFAULT_HOLD_SEC = 30;
 export const DEFAULT_VLM_HOLD_SEC = 60;
@@ -159,7 +160,8 @@ export class ScenarioPackage {
     const scheduleId = spec.scheduleId ?? '';
     const vlm = detectVlmMode(template);
     const type = vlm.direct ? 'vlm' : (spec.type ?? 'cv');
-    const targetFps = spec.targetFps != null ? Number(spec.targetFps) : extractTargetFpsFromTemplate(template);
+    const explicitTargetFps = spec.targetFps != null ? Number(spec.targetFps) : null;
+    const targetFps = explicitTargetFps ?? extractTargetFpsFromTemplate(template);
     const normalizedType = normalizeTaskType(type);
     const videoReadFps = this.videoMode === 'local' && normalizedType === 'vlm' ? targetFps : null;
     const taskConfig = buildTaskConfig(template, this.videoRepeatCount, videoReadFps);
@@ -176,7 +178,7 @@ export class ScenarioPackage {
       template,
       targetFps: Number.isFinite(targetFps) && targetFps > 0 ? targetFps : null,
       taskConfig,
-      layoutSavePayload: buildLayoutSavePayload(template),
+      layoutSavePayload: buildLayoutSavePayload(template, explicitTargetFps),
     };
   }
 
@@ -303,7 +305,7 @@ export function defaultHoldSecForTasks(tasks) {
   return hasVlm ? DEFAULT_VLM_HOLD_SEC : DEFAULT_HOLD_SEC;
 }
 
-function buildLayoutSavePayload(template) {
+function buildLayoutSavePayload(template, targetFpsOverride = null) {
   const algorithmId = String(template.algorithmId ?? template.id ?? template.algorithmCode ?? '');
   if (!algorithmId) throw new Error('template: cannot derive algorithmId for layout save');
   const str = (v) => (v == null ? undefined : String(v));
@@ -315,10 +317,51 @@ function buildLayoutSavePayload(template) {
     algorithmUsage: str(template.algorithmUsage),
     remark: str(template.remark),
     atomicList: str(template.atomicList),
-    algorithmProcessdata: str(template.algorithmProcessdata),
+    algorithmProcessdata: str(overrideProcessTargetFps(template.algorithmProcessdata, targetFpsOverride)),
     algorithmMetadata: str(template.algorithmMetadata),
     filePath: str(template.filePath),
   };
+}
+
+function overrideProcessTargetFps(raw, targetFps) {
+  if (!Number.isFinite(targetFps) || targetFps <= 0 || raw == null) return raw;
+
+  let nodes;
+  try {
+    nodes = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    return raw;
+  }
+  if (!Array.isArray(nodes)) return raw;
+
+  let updated = false;
+  const nextNodes = nodes.map((node) => {
+    if (!FPS_ACTION_IDS.has(String(node?.actionId ?? ''))) return node;
+
+    const configWasString = typeof node.configObject === 'string';
+    let configObject = node.configObject;
+    if (configWasString) {
+      try { configObject = JSON.parse(configObject); } catch { return node; }
+    }
+    if (!Array.isArray(configObject?.params)) return node;
+
+    let nodeUpdated = false;
+    const params = configObject.params.map((param) => {
+      if (param?.key !== 'fps') return param;
+      nodeUpdated = true;
+      return { ...param, value: String(targetFps) };
+    });
+    if (!nodeUpdated) return node;
+
+    updated = true;
+    const nextConfig = { ...configObject, params };
+    return {
+      ...node,
+      configObject: configWasString ? JSON.stringify(nextConfig) : nextConfig,
+    };
+  });
+
+  return updated ? JSON.stringify(nextNodes) : raw;
 }
 
 function parseProcessData(template) {

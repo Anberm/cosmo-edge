@@ -238,6 +238,71 @@ int AlgDataQueueDistributor::DistributorData(AlgDataPtr Frame, VideoFramePtr Dat
     return msgCount;
 }
 
+AlgFrameDistributionPlan AlgDataQueueDistributor::PrepareFrameDistribution(AlgDataPtr frame) {
+    AlgFrameDistributionPlan plan;
+    in_fps_ = input_fps_calc_.Fps();
+    data_index_++;
+    UpdateCtrlFps();
+    if (!frame) {
+        return plan;
+    }
+
+    std::shared_lock<std::shared_mutex> lock(task_mtx_);
+    for (auto& task_group : tasks_) {
+        const bool metadata_only_group =
+            !task_group.tasks.empty() &&
+            std::all_of(task_group.tasks.begin(), task_group.tasks.end(), [](const AlgTaskUnit& task) {
+                return task.actionId == BAStreamChannel_Code.data();
+            });
+        if (metadata_only_group) {
+            // The camera-owned BA_00001 ChannelTask inherits an empty
+            // AlgActionBase::HandFrame. It keeps channel lifecycle/FPS status
+            // alive but never reads decoded pixels, so forwarding the original
+            // packet metadata preserves that behavior without forcing an MPP
+            // frame to be copied to Host I420.
+            if (task_group.que && task_group.que->CanAccept()) {
+                task_group.que->Insert(frame);
+            } else if (task_group.que) {
+                task_group.que->RecordDiscard();
+            }
+            continue;
+        }
+        if (out_fps_ctl_.IsFilter(data_index_, task_group.max_task_fps, frame->firstTimePoint)) {
+            continue;
+        }
+        if (!task_group.que) {
+            continue;
+        }
+        if (!task_group.que->CanAccept()) {
+            task_group.que->RecordDiscard();
+            continue;
+        }
+        plan.queues.push_back(task_group.que);
+    }
+    return plan;
+}
+
+int AlgDataQueueDistributor::DistributorPreparedFrame(
+    const AlgFrameDistributionPlan& plan, AlgDataPtr frame, VideoFramePtr data,
+    std::function<AlgDataPtr(AlgDataPtr, VideoFramePtr)> func) {
+    if (!frame || !data || plan.Empty()) {
+        return 0;
+    }
+
+    auto converted = func(frame, data);
+    if (!converted) {
+        return 0;
+    }
+
+    int message_count = 0;
+    for (const auto& queue : plan.queues) {
+        if (queue && queue->Insert(converted)) {
+            message_count += 1;
+        }
+    }
+    return message_count;
+}
+
 // Only send to the channel registered by the task. Used for detection data distribution.
 // When the detector is multiplexed to multiple channels, those of the same channel are distributed through
 // channelId.

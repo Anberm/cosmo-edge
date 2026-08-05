@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <list>
 #include <memory>
 #include <shared_mutex>
@@ -36,7 +37,9 @@ struct AlgFrameInfo {
 struct ChannelTaskViewerQueue {
     std::string alg_id;
     AsyncQueue<VideoFramePtr>* async_frame_queue{nullptr};
+    std::function<bool()> prepare_frame;
 };
+using ViewerDistributionPlan = std::vector<std::string>;
 class AlgChannelDecode : public AlgDataQueueDistributor, public util::Thread {
 public:
     AlgChannelDecode(AlgChannel& channelInst, const std::string& channelId);
@@ -72,7 +75,8 @@ public:
     // Public interface for image capture.
     VideoFramePtr CaptureImage(int timeoutMs = 3000);
 
-    void AddViewerFrameQueue(const std::string& algId, AsyncQueue<VideoFramePtr>& asyncFrameQueue);
+    void AddViewerFrameQueue(const std::string& algId, AsyncQueue<VideoFramePtr>& asyncFrameQueue,
+                             std::function<bool()> prepareFrame = {});
     void RemoveViewerFrameQueue(const std::string& algId);
 
 protected:
@@ -95,6 +99,9 @@ private:
 
     // Distribute frames to display viewers.
     void DistributeViewer(VideoFramePtr inData);
+    ViewerDistributionPlan PrepareViewerDistribution();
+    void DistributePreparedViewer(const ViewerDistributionPlan& plan, VideoFramePtr inData);
+    bool NeedsHostFrame(int64_t streamIndex);
 
 private:
     mutable std::mutex mtx_;

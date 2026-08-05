@@ -418,11 +418,6 @@ cosmo::util::ErrorEnum LiveStreamServiceImpl::ViewerHeartBeat(const std::string&
     if (!channel_inst) {
         return cosmo::util::ErrorEnum::CameraNotExist;
     }
-    cosmo::util::ErrorEnum channelState = channel_inst->GetUrlStatus();
-    if (cosmo::util::ErrorEnum::Success != channelState) {
-        LOG_WARN("Channel Stream State {}", channelState);
-        return channelState;
-    }
     std::shared_lock<std::shared_mutex> lock(mtx_);
     LOG_DEBUG("alive channel size {} {}", viewers_.size(), channelId);
     auto it = FindViewer(channelId, algCode);
@@ -438,7 +433,15 @@ cosmo::util::ErrorEnum LiveStreamServiceImpl::ViewerHeartBeat(const std::string&
 
     // A successful keepalive for a missing viewer leaves the browser believing
     // that a stream removed by the watchdog (or a service restart) is still
-    // healthy. Return a normal stream error so the client can recreate it.
+    // healthy. Return the source error when one exists, otherwise a normal
+    // no-data error so the client can recreate it. An existing publisher is
+    // deliberately checked before source state: a short RTSP outage must not
+    // tear down a healthy viewer that can resume as soon as demux reconnects.
+    const cosmo::util::ErrorEnum channelState = channel_inst->GetUrlStatus();
+    if (cosmo::util::ErrorEnum::Success != channelState) {
+        LOG_WARN("Channel Stream State {}", channelState);
+        return channelState;
+    }
     return cosmo::util::ErrorEnum::DemuxNoData;
 }
 

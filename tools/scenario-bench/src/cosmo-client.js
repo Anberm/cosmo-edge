@@ -110,6 +110,7 @@ export class CosmoClient {
     if (!this.mtk) {
       throw new Error('Login succeeded but no mtk returned');
     }
+    this.password = null;
     return res.resData;
   }
 
@@ -119,6 +120,13 @@ export class CosmoClient {
 
   async queryHardwareResource() {
     return (await this._post('/System/QueryHardwareResource', {})).resData;
+  }
+
+  async queryDeviceMemoryPool() {
+    const response = await this._post('/v1/cwai/aihost/QueryDeviceMemStatus', {});
+    // Legacy /v1 core routes serialize their payload at the response root,
+    // while /gtw/cwai routes place it under resData.
+    return response.resData ?? response;
   }
 
   /** Save or update an algorithm orchestration layout. payload = parsed export JSON. */
@@ -397,13 +405,16 @@ export class CosmoClient {
   }
 
   /**
-   * Core POST. Prepends the /gtw/cwai prefix, injects auth headers, normalizes errors.
-   * @param {string} path route path after /gtw/cwai, e.g. /System/QueryHardwareResource
+   * Core POST. Prepends /gtw/cwai unless the caller supplies an absolute API
+   * path such as /v1/cwai/aihost/QueryDeviceMemStatus.
+   * @param {string} path route path after /gtw/cwai, or an absolute /v1 path
    * @param {object} body JSON body
    * @returns {Promise<object>} full wire response (with resCode/resData/resMsg)
    */
   async _post(path, body) {
-    const url = `${this.base}${API_PREFIX}${path}`;
+    const url = path.startsWith('/v1/')
+      ? `${this.base}${path}`
+      : `${this.base}${API_PREFIX}${path}`;
     const headers = {
       'Content-Type': 'application/json',
       'Accept-Language': this.lang,

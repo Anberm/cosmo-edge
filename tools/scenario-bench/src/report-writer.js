@@ -220,6 +220,7 @@ export class ReportWriter {
         <td class="${s.maxAcceleratorMem >= 90 ? 'fail' : ''}">${s.maxAcceleratorMem != null ? s.maxAcceleratorMem + '%' : '-'}</td>
         <td class="${s.maxCpu >= 90 ? 'fail' : ''}">${s.maxCpu != null ? s.maxCpu + '%' : '-'}</td>
         <td class="${s.maxMem >= 90 ? 'fail' : ''}">${s.maxMem != null ? s.maxMem + '%' : '-'}</td>
+        <td>${formatMib(s.maxPoolInUseBytes)}/${formatMib(s.maxPoolAllocatedBytes)}/${s.maxPoolUtilizationPercent != null ? s.maxPoolUtilizationPercent + '%' : '-'}</td>
         <td class="${status.className}">${status.label}</td>
         <td>${esc((s.reasons ?? []).join('; '))}</td>
       </tr>`;
@@ -267,6 +268,10 @@ export class ReportWriter {
         <td>${metric(m.rknnPrepareAvgMs)}/${metric(m.rknnInputsSetAvgMs)}</td>
         <td>${metric(m.rknnRunAvgMs)}/${metric(m.rknnOutputsGetAvgMs)}/${metric(m.rknnOutputTransformAvgMs)}</td>
         <td>${metric(m.rknnForwardAvgMs)}/${m.rknnForwardFailures ?? '-'}</td>
+        <td>${metric(m.rgaAvgMs)}/${m.rgaFailures ?? '-'}</td>
+        <td>${metric(m.mppEncodeAvgMs)}/${m.mppEncodeFailures ?? '-'}</td>
+        <td>${metric(m.mppDecodeAvgMs)}/${m.mppDecodeFailures ?? '-'}/${m.mppDecodeFallbacks ?? '-'}</td>
+        <td>${metric(m.mppCopyOutAvgMs)}/${m.mppDecodedFrames ?? '-'}/${m.mppCopyOutFrames ?? '-'}/${m.mppEarlyDroppedFrames ?? '-'}/${m.mppCopyOutFailures ?? '-'}</td>
         <td>${metric(m.osdAvgMs)}</td>
         <td>${metric(m.publishAvgMs)}</td>
         <td>${metric(m.firstFrameAvgMs)}/${metric(m.firstFrameMaxMs)}</td>
@@ -305,12 +310,12 @@ ${bottleneckBanner}
 <table>${baseRows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>路数结果</h2>
 <table>
-  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>结果</th><th>失败原因</th></tr>
+  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>内存池在用/分配MiB/占用率</th><th>结果</th><th>失败原因</th></tr>
   ${stepRows}
 </table>
 <h2>媒体与预览分阶段指标</h2>
 <table>
-  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/转换 ms</th><th>RKNN总计/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
+  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/转换 ms</th><th>RKNN总计/失败</th><th>RGA/失败</th><th>MPP编码/失败</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
   ${mediaRows}
 </table>
 <h2>分任务汇总</h2>
@@ -453,6 +458,10 @@ function reportBaselineFps(runResult, stepSummaries) {
 
 function formatPercent(v) {
   return `${round(Number(v) * 100, 2)}%`;
+}
+
+function formatMib(bytes) {
+  return typeof bytes === 'number' ? round(bytes / (1024 * 1024), 1) : '-';
 }
 
 function round(v, digits) {

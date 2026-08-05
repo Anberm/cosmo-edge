@@ -57,6 +57,50 @@ void PreviewPipelineMetrics::RecordPublishedFrame(uint64_t nanoseconds) {
     publish_nanoseconds_.fetch_add(nanoseconds, std::memory_order_relaxed);
 }
 
+void PreviewPipelineMetrics::RecordRgaOperation(bool success, uint64_t nanoseconds) {
+    if (success) {
+        rga_frames_.fetch_add(1, std::memory_order_relaxed);
+        rga_nanoseconds_.fetch_add(nanoseconds, std::memory_order_relaxed);
+    } else {
+        rga_failures_.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void PreviewPipelineMetrics::RecordMppEncode(bool success, uint64_t nanoseconds) {
+    if (success) {
+        mpp_encoded_frames_.fetch_add(1, std::memory_order_relaxed);
+        mpp_encode_nanoseconds_.fetch_add(nanoseconds, std::memory_order_relaxed);
+    } else {
+        mpp_encode_failures_.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void PreviewPipelineMetrics::RecordMppDecode(bool success, uint64_t nanoseconds) {
+    if (success) {
+        mpp_decoded_frames_.fetch_add(1, std::memory_order_relaxed);
+        mpp_decode_nanoseconds_.fetch_add(nanoseconds, std::memory_order_relaxed);
+    } else {
+        mpp_decode_failures_.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void PreviewPipelineMetrics::RecordMppDecodeFallback() {
+    mpp_decode_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void PreviewPipelineMetrics::RecordMppCopyOut(bool success, uint64_t nanoseconds) {
+    if (success) {
+        mpp_copy_out_frames_.fetch_add(1, std::memory_order_relaxed);
+        mpp_copy_out_nanoseconds_.fetch_add(nanoseconds, std::memory_order_relaxed);
+    } else {
+        mpp_copy_out_failures_.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void PreviewPipelineMetrics::RecordMppEarlyDrop() {
+    mpp_early_dropped_frames_.fetch_add(1, std::memory_order_relaxed);
+}
+
 PreviewPipelineMetricsSnapshot PreviewPipelineMetrics::Snapshot() const {
     return {
         active_publishers_.load(std::memory_order_relaxed),
@@ -73,6 +117,20 @@ PreviewPipelineMetricsSnapshot PreviewPipelineMetrics::Snapshot() const {
         first_frames_.load(std::memory_order_relaxed),
         first_frame_nanoseconds_.load(std::memory_order_relaxed),
         first_frame_max_nanoseconds_.load(std::memory_order_relaxed),
+        rga_frames_.load(std::memory_order_relaxed),
+        rga_nanoseconds_.load(std::memory_order_relaxed),
+        rga_failures_.load(std::memory_order_relaxed),
+        mpp_encoded_frames_.load(std::memory_order_relaxed),
+        mpp_encode_nanoseconds_.load(std::memory_order_relaxed),
+        mpp_encode_failures_.load(std::memory_order_relaxed),
+        mpp_decoded_frames_.load(std::memory_order_relaxed),
+        mpp_decode_nanoseconds_.load(std::memory_order_relaxed),
+        mpp_decode_failures_.load(std::memory_order_relaxed),
+        mpp_decode_fallbacks_.load(std::memory_order_relaxed),
+        mpp_copy_out_frames_.load(std::memory_order_relaxed),
+        mpp_copy_out_nanoseconds_.load(std::memory_order_relaxed),
+        mpp_copy_out_failures_.load(std::memory_order_relaxed),
+        mpp_early_dropped_frames_.load(std::memory_order_relaxed),
     };
 }
 

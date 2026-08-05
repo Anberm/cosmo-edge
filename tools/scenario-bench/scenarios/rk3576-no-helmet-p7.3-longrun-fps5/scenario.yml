@@ -1,0 +1,30 @@
+name: rk3576-no-helmet-p7.3-longrun-fps5
+displayName: RK3576 P7.3 延迟 Copy-out 72 小时长稳（4 路 5 FPS）
+sampleIntervalSec: 60
+
+channels:
+  mode: local
+  repeatCount: 0
+  sources:
+    - name: safety-helmet
+      file: ../../../../data/test-video/Safety Helmet.mp4
+
+tasks:
+  - id: no-helmet
+    displayName: 未戴安全帽检测
+    type: cv
+    algorithmId: "7463"
+    scheduleId: "e89c6c6385e5454b35cde0d1653vg"
+    template: ../../../../data/resource/aiboxresource_x86/algorithm/7463_No Safety Helmet_20260629094147.json
+    targetFps: 5
+
+loadProfile:
+  - channels: 4
+    holdSec: 259200
+
+thresholds:
+  pass:
+    maxCriticalPathLatencyMs: 300
+    maxDetectorLatencyMs: 200
+    avgDiscardRate: 0.05
+    maxPacketDiscardRate: 0.01

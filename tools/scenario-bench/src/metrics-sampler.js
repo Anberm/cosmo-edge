@@ -53,14 +53,19 @@ export class MetricsSampler {
     const activeChannelIds = [...new Set(expected.map((entry) => entry.channelId))];
     const activeTaskIds = [...new Set(expected.map((entry) => entry.taskId))];
 
-    // Sample both endpoints in parallel; either may fail independently.
-    const [taskDetail, hwRes] = await Promise.allSettled([
+    // Sample all endpoints in parallel; each may fail independently.
+    const [taskDetail, hwRes, memoryPoolRes] = await Promise.allSettled([
       activeTaskIds.length ? this.client.taskRunningDetail(activeTaskIds) : Promise.resolve({ status: [] }),
       this.client.queryHardwareResource(),
+      typeof this.client.queryDeviceMemoryPool === 'function'
+        ? this.client.queryDeviceMemoryPool()
+        : Promise.resolve(null),
     ]);
 
     const perBinding = this._parseRunningDetail(taskDetail, expected, ts);
     const hw = this._parseHardware(hwRes);
+    const memoryPool = this._parseMemoryPool(memoryPoolRes);
+    if (memoryPool) hw.memoryPool = memoryPool;
 
     return {
       ts,
@@ -236,6 +241,30 @@ export class MetricsSampler {
     hw.customScore = hwResult.value?.customScore ?? null;
     hw.accelerator = normalizeAccelerator(hwResult.value?.accelerator);
     return hw;
+  }
+
+  _parseMemoryPool(poolResult) {
+    if (poolResult.status !== 'fulfilled') {
+      return { _error: String(poolResult.reason?.message ?? poolResult.reason) };
+    }
+    if (!poolResult.value || typeof poolResult.value !== 'object') return null;
+
+    const totalAllocatedBytes = num(poolResult.value.totalMalloc);
+    const totalInUseBytes = num(poolResult.value.totalInUsing);
+    return {
+      totalAllocatedBytes,
+      totalInUseBytes,
+      utilizationPercent: totalAllocatedBytes > 0
+        ? round((totalInUseBytes / totalAllocatedBytes) * 100, 2)
+        : 0,
+      pools: Array.isArray(poolResult.value.status)
+        ? poolResult.value.status.map((pool) => ({
+            blockSize: num(pool.poolSize),
+            usedBlocks: num(pool.mallocCnt),
+            freeBlocks: num(pool.freeCnt),
+          }))
+        : [],
+    };
   }
 }
 

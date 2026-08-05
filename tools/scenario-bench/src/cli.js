@@ -28,7 +28,7 @@ function parseArgs(argv) {
       args.command = 'help';
     } else if (a.startsWith('--')) {
       const key = a.slice(2);
-      if (['verbose', 'no-reuse', 'cleanup', 'skip-import'].includes(key)) {
+      if (['verbose', 'no-reuse', 'cleanup', 'skip-import', 'password-stdin'].includes(key)) {
         args[key] = true;
       } else {
         args[key] = argv[++i];
@@ -53,6 +53,7 @@ run required:
   --device <url>       Device base URL, e.g. http://192.168.1.10:8080
   --user <account>     Login account (use together with --password)
   --password <plain>   Login password
+  --password-stdin     Read the login password from stdin instead of process arguments
   --token-env <name>   Read an existing device token from this environment variable
   --scenario <dir>     Scenario package directory
   --output <dir>       Report output directory
@@ -124,13 +125,16 @@ function ensureWritableDir(dir) {
 function deviceAuth(args) {
   const tokenEnv = args['token-env'];
   const token = tokenEnv ? process.env[tokenEnv] : null;
+  const stdinPassword = args['password-stdin']
+    ? fs.readFileSync(0, 'utf8').split(/\r?\n/, 1)[0]
+    : null;
   if (tokenEnv && !token) {
     throw new Error(`environment variable ${tokenEnv} is empty or unset`);
   }
-  if (!token && (!args.user || !args.password)) {
-    throw new Error('provide --user and --password together, or use --token-env');
+  if (!token && (!args.user || !(args.password || stdinPassword))) {
+    throw new Error('provide --user with --password/--password-stdin, or use --token-env');
   }
-  return { user: args.user, password: args.password, token };
+  return { user: args.user, password: args.password || stdinPassword, token };
 }
 
 async function runDoctor(args) {
