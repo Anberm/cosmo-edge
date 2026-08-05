@@ -62,6 +62,7 @@ const route = useRoute()
 const router = useRouter()
 const { proxy } = getCurrentInstance()
 const $API = proxy.$API
+const ALGORITHM_TEMPLATE_ROOT = 'algorithm_template'
 
 // Refs
 const flowRef = ref(null)
@@ -166,8 +167,7 @@ const updateCanvasSize = () => {
 
 const getDetail = (algorithmId, isChooseModel) => {
   const params = {
-    id: algorithmId,
-    filePath: '/appfs/cosmo_wander/cwai_data/resource/algorithm'
+    id: algorithmId
     // id: '110020'
   }
   $API.algorithmLayoutDetail(params).then((res) => {
@@ -229,7 +229,7 @@ const initMetadata = () => {
 const getTemplateList = () => {
   const params = {
     algorithmUsage: algorithmUsage.value ? parseInt(algorithmUsage.value) : -1,
-    filePath: '/appfs/cosmo_wander/cwai_data/resource/algorithm_template',
+    filePath: ALGORITHM_TEMPLATE_ROOT
   }
   $API.algorithmLayoutList(params).then((res) => {
     const { resData } = res
@@ -255,7 +255,7 @@ const handleTemplateChange = (val) => {
 const getTemplateDetail = (algorithmId) => {
   const params = {
     id: algorithmId,
-    filePath: '/appfs/cosmo_wander/cwai_data/resource/algorithm_template'
+    filePath: ALGORITHM_TEMPLATE_ROOT
   }
   $API.algorithmLayoutDetail(params).then((res) => {
     const { resData } = res
@@ -314,7 +314,6 @@ const saveClick = (type) => {
   params.algorithmUsage =
     algorithmData.value.algorithmUsage || params.algorithmUsage
   params.remark = algorithmData.value.remark || params.remark
-  params.filePath = '/appfs/cosmo_wander/cwai_data/resource/algorithm'
   params.confVersionId = algorithmData.value.confVersionId
   params.configVersionName = algorithmData.value.configVersionName || t('common.default')
   if (!showArrangeFlow.value) {
