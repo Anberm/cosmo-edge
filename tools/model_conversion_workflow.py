@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -22,6 +23,27 @@ import agent_workflow as core
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 TOLERANCE_PATTERN = re.compile(r"^(?:0(?:\.\d+)?|1(?:\.0+)?),(?:0(?:\.\d+)?|1(?:\.0+)?)$")
+EXAMPLE_STATUS_CANDIDATE = "candidate"
+EXAMPLE_STATUS_CONVERSION_VERIFIED = "conversion-verified"
+LEGACY_EXAMPLE_STATUS_VERIFIED = "verified"
+EXAMPLE_LIFECYCLE_ACTIVE = "active"
+EXAMPLE_LIFECYCLE_REVOKED = "revoked"
+CONVERSION_COVERAGE = [
+    "onnx-preflight",
+    "transform",
+    "deploy",
+    "model-info",
+    "tensor-compare",
+]
+CONVERSION_KNOWN_LIMITS = [
+    "device import and runtime are not covered",
+    "business accuracy acceptance is not covered",
+]
+DEVICE_VALIDATION_NONE = {
+    "status": "none",
+    "knownLimits": ["device import and runtime are not covered by this example"],
+}
+SEAL_VERSION = "1.0"
 
 
 class ExecutionFailure(RuntimeError):
@@ -758,6 +780,329 @@ def execute_conversion(
         raise
 
 
+def _normalize_example_record(record: Any) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        raise core.WorkflowError("example record must be an object")
+    normalized = json.loads(json.dumps(record))
+    status = normalized.get("status")
+    if status == LEGACY_EXAMPLE_STATUS_VERIFIED:
+        normalized["status"] = EXAMPLE_STATUS_CONVERSION_VERIFIED
+    elif status not in {EXAMPLE_STATUS_CANDIDATE, EXAMPLE_STATUS_CONVERSION_VERIFIED}:
+        raise core.WorkflowError(f"example record has an unsupported status: {status}")
+    lifecycle = normalized.get("lifecycle")
+    if lifecycle is None:
+        lifecycle = {"status": EXAMPLE_LIFECYCLE_ACTIVE}
+        normalized["lifecycle"] = lifecycle
+    if not isinstance(lifecycle, dict):
+        raise core.WorkflowError("example lifecycle must be an object")
+    lifecycle_status = lifecycle.get("status")
+    if lifecycle_status not in {EXAMPLE_LIFECYCLE_ACTIVE, EXAMPLE_LIFECYCLE_REVOKED}:
+        raise core.WorkflowError("example lifecycle.status must be active or revoked")
+    if lifecycle_status == EXAMPLE_LIFECYCLE_REVOKED:
+        for field in ("reason", "changedAt"):
+            if not isinstance(lifecycle.get(field), str) or not lifecycle[field].strip():
+                raise core.WorkflowError(f"revoked example lifecycle requires {field}")
+        try:
+            changed_at = datetime.fromisoformat(
+                lifecycle["changedAt"].replace("Z", "+00:00")
+            )
+        except ValueError as error:
+            raise core.WorkflowError(
+                "example lifecycle.changedAt must be an ISO-8601 timestamp"
+            ) from error
+        if changed_at.tzinfo is None:
+            raise core.WorkflowError("example lifecycle.changedAt must include a timezone")
+    for field in ("reference", "supersededBy"):
+        if field in lifecycle and (
+            not isinstance(lifecycle[field], str) or not lifecycle[field].strip()
+        ):
+            raise core.WorkflowError(f"example lifecycle.{field} must be a non-empty string")
+    superseded_by = lifecycle.get("supersededBy")
+    if superseded_by and not re.fullmatch(
+        r"model-conversion/[A-Za-z0-9][A-Za-z0-9._-]+", superseded_by
+    ):
+        raise core.WorkflowError("example lifecycle.supersededBy must be an example id")
+    normalized.setdefault("knownLimits", list(CONVERSION_KNOWN_LIMITS))
+    device_validation = normalized.get("deviceValidation")
+    if device_validation is None:
+        normalized["deviceValidation"] = {
+            "status": DEVICE_VALIDATION_NONE["status"],
+            "knownLimits": list(DEVICE_VALIDATION_NONE["knownLimits"]),
+        }
+    elif not isinstance(device_validation, dict):
+        raise core.WorkflowError("example deviceValidation must be an object")
+    else:
+        device_status = device_validation.get("status")
+        if device_status not in {"none", "referenced"}:
+            raise core.WorkflowError("example deviceValidation.status must be none or referenced")
+        if device_status == "referenced" and not isinstance(
+            device_validation.get("reference"), str
+        ):
+            raise core.WorkflowError("referenced device validation requires a reference")
+        limits = device_validation.get("knownLimits", [])
+        if not isinstance(limits, list) or any(not isinstance(item, str) for item in limits):
+            raise core.WorkflowError("example deviceValidation.knownLimits must be a string array")
+    return normalized
+
+
+def _example_is_active(record: dict[str, Any]) -> bool:
+    return record.get("lifecycle", {}).get("status") == EXAMPLE_LIFECYCLE_ACTIVE
+
+
+def _scope_summary_lines(
+    *,
+    status: str,
+    validated_stages: list[str] | None = None,
+    known_limits: list[str] | None = None,
+    device_validation: dict[str, Any] | None = None,
+    seal_code: str | None = None,
+    lifecycle_status: str = "not-applicable",
+) -> list[str]:
+    stage_labels = {
+        "onnx-preflight": "ONNX preflight",
+        "transform": "transform",
+        "deploy": "deploy",
+        "model-info": "model-info",
+        "tensor-compare": "tensor-compare",
+    }
+    covered = [stage_labels.get(item, item) for item in (validated_stages or [])]
+    limits = known_limits or list(CONVERSION_KNOWN_LIMITS)
+    normalized_limits = [
+        re.sub(r"\s+(?:is|are) not covered$", "", item.strip(), flags=re.IGNORECASE)
+        for item in limits
+    ]
+    device_status = str((device_validation or DEVICE_VALIDATION_NONE).get("status", "none"))
+    return [
+        f"STATUS: {status}",
+        f"LIFECYCLE: {lifecycle_status}",
+        "COVERS: " + (", ".join(covered) if covered else "none"),
+        "NOT COVERED: " + "; ".join(normalized_limits),
+        f"DEVICE VALIDATION: {device_status}",
+        f"SEAL: {seal_code or 'none'}",
+    ]
+
+
+def _validated_conversion_stages(manifest: dict[str, Any]) -> list[str]:
+    manifest_stages = manifest.get("stages", {})
+    stage_keys = {
+        "onnx-preflight": "onnxPreflight",
+        "transform": "transform",
+        "deploy": "deploy",
+        "model-info": "modelInfo",
+        "tensor-compare": "tensorCompare",
+    }
+    return [
+        stage
+        for stage in CONVERSION_COVERAGE
+        if manifest_stages.get(stage_keys[stage], {}).get("status") == "PASS"
+    ]
+
+
+def _print_scope_summary(**kwargs: Any) -> None:
+    for line in _scope_summary_lines(**kwargs):
+        print(line)
+
+
+def _device_evidence_record(raw_path: str, project_root: Path) -> dict[str, Any]:
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    try:
+        path = candidate.resolve(strict=True)
+    except FileNotFoundError as error:
+        raise core.WorkflowError(f"device evidence does not exist: {candidate}") from error
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise core.WorkflowError("device evidence must be a non-empty file")
+    sample = path.read_bytes()[:65536]
+    try:
+        text_sample = sample.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        text_sample = ""
+    if text_sample and re.fullmatch(
+        r"(?:<[^>]+>|(?:TODO|TBD|placeholder)(?:[\s:._-].*)?)",
+        text_sample,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        raise core.WorkflowError("device evidence cannot be a placeholder")
+
+    digest = core.sha256_file(path)
+    reference = f"external:sha256:{digest}"
+    if shutil.which("git") and core._is_relative_to(path, project_root.resolve()):
+        relative = path.relative_to(project_root.resolve()).as_posix()
+        tracked = subprocess.run(
+            ["git", "-C", str(project_root), "ls-files", "--error-unmatch", "--", relative],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        commit = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        commit_value = commit.stdout.strip()
+        if tracked.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", commit_value):
+            reference = f"git:{commit_value}:sha256:{digest}"
+    return {
+        "status": "referenced",
+        "reference": reference,
+        "knownLimits": [
+            "the referenced device evidence is not embedded in this public example",
+            "the conversion workflow does not independently revalidate device or business results",
+        ],
+    }
+
+
+def _seal_chain_context(run_dir: Path) -> dict[str, Any]:
+    contract_path = run_dir / "task-contract.json"
+    route_path = run_dir / "route-assessment.json"
+    environment_path = run_dir / "environment-report.json"
+    manifest_path = run_dir / "execution-manifest.json"
+    contract = core.validate_contract(core.load_json(contract_path))
+    route = core.read_route_assessment(contract_path, run_dir, contract)
+    environment = core.load_json(environment_path)
+    if not isinstance(environment, dict):
+        raise core.WorkflowError("environment-report.json must be an object")
+    if (
+        environment.get("runId") != contract["runId"]
+        or environment.get("task") != contract["task"]
+    ):
+        raise core.WorkflowError("seal environment report does not belong to the task contract")
+    if environment.get("contractSha256") != core.sha256_file(contract_path):
+        raise core.WorkflowError("seal task contract and environment report do not match")
+    if environment.get("routeAssessmentSha256") != core.sha256_file(route_path):
+        raise core.WorkflowError("seal route assessment and environment report do not match")
+    if environment.get("environmentVerdict") != "READY":
+        raise core.WorkflowError("seal requires a READY doctor report")
+    manifest = core.load_json(manifest_path)
+    if not isinstance(manifest, dict) or manifest.get("status") != "COMPLETE":
+        raise core.WorkflowError("seal requires a COMPLETE execution manifest")
+    required_conversion_stages = (
+        "onnxPreflight",
+        "transform",
+        "deploy",
+        "modelInfo",
+        "tensorCompare",
+    )
+    incomplete_stages = [
+        stage
+        for stage in required_conversion_stages
+        if manifest.get("stages", {}).get(stage, {}).get("status") != "PASS"
+    ]
+    if incomplete_stages:
+        raise core.WorkflowError(
+            "seal requires PASS for conversion stages: " + ", ".join(incomplete_stages)
+        )
+    if manifest.get("contractSha256") != core.sha256_file(contract_path):
+        raise core.WorkflowError("seal contract and execution manifest do not match")
+    if manifest.get("routeAssessmentSha256") != core.sha256_file(route_path):
+        raise core.WorkflowError("seal route assessment and execution manifest do not match")
+    compatibility = next(
+        (
+            item
+            for item in environment.get("checks", [])
+            if isinstance(item, dict) and item.get("id") == "compatibility-matrix"
+        ),
+        None,
+    )
+    if not compatibility or compatibility.get("status") != "PASS":
+        raise core.WorkflowError("doctor compatibility-matrix must PASS before a seal is issued")
+    toolchain_id = str(environment.get("toolchain", {}).get("id", ""))
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", toolchain_id):
+        raise core.WorkflowError("seal requires a frozen compiler toolchain digest")
+    if manifest.get("toolchain", {}).get("id") != toolchain_id:
+        raise core.WorkflowError("seal toolchain differs from the execution manifest")
+    commit = str(environment.get("commit", ""))
+    tree = str(environment.get("tree", ""))
+    if not re.fullmatch(r"[0-9a-f]{40}", commit) or not re.fullmatch(r"[0-9a-f]{40}", tree):
+        raise core.WorkflowError("seal requires frozen commit and tree identities")
+    if manifest.get("commit") != commit or manifest.get("tree") != tree:
+        raise core.WorkflowError("seal repository identity differs from the execution manifest")
+    admitted_repository = environment.get("repository", {})
+    repository = manifest.get("repository", {})
+    if any(
+        admitted_repository.get(field) != expected
+        for field, expected in (("commit", commit), ("tree", tree))
+    ):
+        raise core.WorkflowError("seal repository snapshot differs from doctor commit or tree")
+    if any(
+        repository.get(field) != admitted_repository.get(field)
+        for field in ("commit", "tree", "worktreeFingerprint")
+    ):
+        raise core.WorkflowError("seal execution repository differs from doctor admission")
+    if any(
+        snapshot.get("trackedChanges") != 0 or snapshot.get("untrackedFiles") != 0
+        for snapshot in (admitted_repository, repository)
+    ):
+        raise core.WorkflowError("seal requires a clean recorded repository state")
+    return {
+        "runId": contract["runId"],
+        "chainStatus": {
+            "contract": "PASS",
+            "assessment": "PASS" if route.get("routeVerdict") == "READY" else "FAIL",
+            "doctor": "PASS",
+            "conversion": "PASS",
+        },
+        "chainDigests": {
+            "contract": core.sha256_file(contract_path),
+            "assessment": core.sha256_file(route_path),
+            "doctor": core.sha256_file(environment_path),
+            "conversion": core.sha256_file(manifest_path),
+        },
+        "toolchainDigest": toolchain_id.removeprefix("sha256:")[:12],
+        "commit": commit,
+        "tree": tree,
+    }
+
+
+def _seal_code(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "CE1-" + hashlib.sha256(canonical).hexdigest()[:12]
+
+
+def issue_verification_seal(
+    run_dir: Path, evidence: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str]:
+    if evidence.get("developmentVerdict") != "COMPLETE":
+        return None, "conversion verification is not COMPLETE"
+    try:
+        context = _seal_chain_context(run_dir)
+    except core.WorkflowError as error:
+        return None, str(error)
+    identity = {"sealVersion": SEAL_VERSION, **context}
+    seal = {
+        **identity,
+        "issuedAt": utc_now(),
+        "sealCode": _seal_code(identity),
+    }
+    core.atomic_write_json(run_dir / "seal.json", seal)
+    return seal, ""
+
+
+def validate_verification_seal(
+    run_dir: Path,
+) -> tuple[bool, str, dict[str, Any] | None]:
+    seal_path = run_dir / "seal.json"
+    if not seal_path.is_file():
+        return False, "seal.json is missing", None
+    try:
+        seal = core.load_json(seal_path)
+        if not isinstance(seal, dict):
+            raise core.WorkflowError("seal.json must be an object")
+        context = _seal_chain_context(run_dir)
+    except core.WorkflowError as error:
+        return False, str(error), None
+    expected_identity = {"sealVersion": SEAL_VERSION, **context}
+    if any(seal.get(key) != value for key, value in expected_identity.items()):
+        return False, "seal identity no longer matches the current evidence chain", seal
+    if not isinstance(seal.get("issuedAt"), str) or not seal["issuedAt"]:
+        return False, "seal issuedAt is missing", seal
+    if seal.get("sealCode") != _seal_code(expected_identity):
+        return False, "seal short code is invalid", seal
+    return True, "", seal
+
+
 def _example_path(raw_path: str, project_root: Path = PROJECT_ROOT) -> Path:
     root = (project_root / "test" / "agent" / "examples" / "model-conversion").resolve()
     candidate = Path(raw_path).expanduser()
@@ -811,6 +1156,7 @@ def _recording_is_promotion_ready(
     )
 
 
+# Beta: promotion remains opt-in until the first sealed conversion-verified example is published.
 def record_example(
     raw_path: str,
     manifest: dict[str, Any],
@@ -818,6 +1164,8 @@ def record_example(
     *,
     run_dir: Path,
     project_root: Path = PROJECT_ROOT,
+    device_evidence: str | None = None,
+    emit_summary: bool = True,
 ) -> dict[str, Any]:
     path = _example_path(raw_path, project_root)
     if not parameters["recordedBy"] or not parameters["sourceUrl"]:
@@ -827,6 +1175,7 @@ def record_example(
     if core.redact_text(parameters["sourceUrl"]) != parameters["sourceUrl"]:
         raise core.WorkflowError("example sourceUrl must not contain credentials")
     bmodel = manifest["artifacts"][0]
+    seal_valid, _, seal = validate_verification_seal(run_dir)
     recording = {
         "recordedBy": parameters["recordedBy"],
         "recordedAt": manifest["completedAt"],
@@ -840,6 +1189,8 @@ def record_example(
             "tolerancePolicy", "contract-override"
         ),
     }
+    if seal_valid and seal:
+        recording["seal"] = seal["sealCode"]
     applicability = {
         "modelFamily": parameters["modelFamily"],
         "sourceFormat": "onnx",
@@ -874,7 +1225,11 @@ def record_example(
             for key in ("reference", "id", "repoDigests")
         }
     if path.exists():
-        record = core.load_json(path)
+        record = _normalize_example_record(core.load_json(path))
+        if not _example_is_active(record):
+            raise core.WorkflowError(
+                "revoked examples cannot receive new recordings; use a new example id"
+            )
         for field, expected in (
             ("applicability", applicability),
             ("source", source),
@@ -892,35 +1247,45 @@ def record_example(
             "schemaVersion": "1.0",
             "exampleId": f"model-conversion/{path.stem}",
             "task": "model-conversion",
-            "status": "candidate",
+            "status": EXAMPLE_STATUS_CANDIDATE,
+            "lifecycle": {"status": EXAMPLE_LIFECYCLE_ACTIVE},
             "applicability": applicability,
             "source": source,
             "toolchain": toolchain,
-            "validatedStages": [
-                name
-                for name, stage in (
-                    ("onnx-preflight", manifest["stages"].get("onnxPreflight", {})),
-                    ("transform", manifest["stages"].get("transform", {})),
-                    ("deploy", manifest["stages"].get("deploy", {})),
-                    ("model-info", manifest["stages"].get("modelInfo", {})),
-                    ("tensor-compare", manifest["stages"].get("tensorCompare", {})),
-                )
-                if stage.get("status") == "PASS"
-            ],
+            "validatedStages": _validated_conversion_stages(manifest),
             "recordings": [recording],
-            "knownLimits": [
-                "device import and runtime are not covered",
-                "business accuracy acceptance is not covered",
-            ],
+            "knownLimits": list(CONVERSION_KNOWN_LIMITS),
+            "deviceValidation": {
+                "status": DEVICE_VALIDATION_NONE["status"],
+                "knownLimits": list(DEVICE_VALIDATION_NONE["knownLimits"]),
+            },
         }
+    if device_evidence:
+        record["deviceValidation"] = _device_evidence_record(device_evidence, project_root)
+    promotion_ready = _recording_is_promotion_ready(record, manifest, parameters)
     record["status"] = (
-        "verified" if _recording_is_promotion_ready(record, manifest, parameters) else "candidate"
+        EXAMPLE_STATUS_CONVERSION_VERIFIED
+        if promotion_ready and seal_valid
+        else EXAMPLE_STATUS_CANDIDATE
     )
+    if record["status"] == EXAMPLE_STATUS_CONVERSION_VERIFIED and seal:
+        record["seal"] = seal["sealCode"]
+    else:
+        record.pop("seal", None)
     serialized = json.dumps(record, ensure_ascii=False)
     if re.search(r"<[^>]+>|\b(?:TODO|TBD|placeholder)\b", serialized, flags=re.IGNORECASE):
         raise core.WorkflowError("example records cannot contain placeholders")
     core.atomic_write_json(path, record)
     path.chmod(0o644)
+    if emit_summary:
+        _print_scope_summary(
+            status=record["status"],
+            validated_stages=record.get("validatedStages", []),
+            known_limits=record.get("knownLimits", []),
+            device_validation=record.get("deviceValidation"),
+            seal_code=seal.get("sealCode") if seal_valid and seal else None,
+            lifecycle_status=record["lifecycle"]["status"],
+        )
     return record
 
 
@@ -1172,15 +1537,22 @@ def verify_conversion(
     promotion_requested = bool(contract["acceptance"].get("promoteExample", False) or example_path)
     promotion_verdict = "NOT_REQUESTED"
     selected_example = None
+    selected_example_lifecycle = None
     if promotion_requested:
         promotion_verdict = "NOT_READY"
         if example_path:
             path = _example_path(example_path, project_root)
             if not path.is_file():
                 raise core.WorkflowError(f"example record does not exist: {path}")
-            selected_example = core.load_json(path)
+            selected_example = _normalize_example_record(core.load_json(path))
+            selected_example_lifecycle = selected_example["lifecycle"]["status"]
+            seal_valid, _, seal = validate_verification_seal(run_dir)
             if (
-                selected_example.get("status") == "verified"
+                selected_example.get("status") == EXAMPLE_STATUS_CONVERSION_VERIFIED
+                and _example_is_active(selected_example)
+                and seal_valid
+                and seal is not None
+                and selected_example.get("seal") == seal.get("sealCode")
                 and _example_applicable(selected_example, parameters)
                 and all(by_id[item]["status"] == "PASS" for item in ("S1", "S2", "S3"))
                 and any(
@@ -1206,6 +1578,7 @@ def verify_conversion(
         "selectedAssets": core.redact_data(selection["selectedAssets"]),
         "assetDifferences": core.redact_data(selection["differences"]),
         "selectedExample": selected_example.get("exampleId") if selected_example else None,
+        "selectedExampleLifecycle": selected_example_lifecycle,
         "attempts": [*previous_attempts, _attempt_summary(manifest)],
         "dataFlow": core.redact_data(manifest.get("dataFlow", {"status": "UNVERIFIED"})),
         "waivers": [tensor_waiver] if tensor_waiver else [],
@@ -1233,6 +1606,11 @@ def verify_conversion(
         "## Layered verification",
         "",
     ]
+    if selected_example_lifecycle:
+        lines.insert(
+            5,
+            f"- Selected-example lifecycle: **{selected_example_lifecycle.upper()}**",
+        )
     lines.extend(f"- {stage['id']} {stage['status']}: {stage['detail']}" for stage in stages)
     lines.extend(
         [
@@ -1262,7 +1640,10 @@ def convert_main(arguments: list[str]) -> int:
     parser.add_argument("--contract", required=True)
     parser.add_argument("--test-input")
     parser.add_argument("--record-example")
+    parser.add_argument("--device-evidence")
     options = parser.parse_args(arguments)
+    if options.device_evidence and not options.record_example:
+        raise core.WorkflowError("--device-evidence requires --record-example")
     contract_path, run_dir, contract = core.resolve_contract_context(options.contract)
     try:
         manifest, parameters = execute_conversion(
@@ -1277,6 +1658,7 @@ def convert_main(arguments: list[str]) -> int:
                 manifest,
                 parameters,
                 run_dir=run_dir,
+                device_evidence=options.device_evidence,
             )
             print(f"Example recording status: {record['status']}")
         print(f"Conversion artifact: {manifest['artifacts'][0]['path']}")
@@ -1291,7 +1673,13 @@ def verify_main(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="verify.sh")
     parser.add_argument("--contract", required=True)
     parser.add_argument("--example")
+    parser.add_argument("--record-example")
+    parser.add_argument("--device-evidence")
     options = parser.parse_args(arguments)
+    if options.device_evidence and not options.record_example:
+        raise core.WorkflowError("--device-evidence requires --record-example")
+    if options.example and options.record_example:
+        raise core.WorkflowError("use either --example or --record-example, not both")
     contract_path, run_dir, contract = core.resolve_contract_context(options.contract)
     evidence = verify_conversion(
         contract_path,
@@ -1299,6 +1687,71 @@ def verify_main(arguments: list[str]) -> int:
         contract,
         example_path=options.example,
     )
+    manifest = core.load_json(run_dir / "execution-manifest.json")
+    seal, seal_reason = issue_verification_seal(run_dir, evidence)
+    record = None
+    if options.record_example:
+        parameters = conversion_parameters(contract, run_dir)
+        record = record_example(
+            options.record_example,
+            manifest,
+            parameters,
+            run_dir=run_dir,
+            device_evidence=options.device_evidence,
+            emit_summary=False,
+        )
+        previous_promotion = evidence["promotionVerdict"]
+        evidence["selectedExample"] = record["exampleId"]
+        evidence["selectedExampleLifecycle"] = record["lifecycle"]["status"]
+        evidence["promotionVerdict"] = (
+            "READY"
+            if record["status"] == EXAMPLE_STATUS_CONVERSION_VERIFIED
+            and _example_is_active(record)
+            else "NOT_READY"
+        )
+        core.atomic_write_json(run_dir / "evidence.json", evidence)
+        evidence_markdown = run_dir / "evidence.md"
+        rendered = evidence_markdown.read_text(encoding="utf-8").replace(
+            f"- Official-example promotion: **{previous_promotion}**",
+            f"- Official-example promotion: **{evidence['promotionVerdict']}**",
+            1,
+        )
+        rendered = rendered.replace(
+            "- Device result: **NOT_RUN**",
+            (
+                "- Selected-example lifecycle: "
+                f"**{record['lifecycle']['status'].upper()}**\n"
+                "- Device result: **NOT_RUN**"
+            ),
+            1,
+        )
+        _write_private_text(evidence_markdown, rendered)
+
+    summary_status = (
+        record["status"]
+        if record
+        else (
+            EXAMPLE_STATUS_CONVERSION_VERIFIED
+            if evidence["developmentVerdict"] == "COMPLETE"
+            else EXAMPLE_STATUS_CANDIDATE
+        )
+    )
+    _print_scope_summary(
+        status=summary_status,
+        validated_stages=_validated_conversion_stages(manifest),
+        known_limits=list(CONVERSION_KNOWN_LIMITS),
+        device_validation=(record or {}).get("deviceValidation", DEVICE_VALIDATION_NONE),
+        seal_code=seal.get("sealCode") if seal else None,
+        lifecycle_status=(
+            record["lifecycle"]["status"]
+            if record
+            else evidence.get("selectedExampleLifecycle") or "not-applicable"
+        ),
+    )
+    if seal:
+        print("Seal file: seal.json")
+    else:
+        print(f"Seal issuance: NOT_ISSUED ({seal_reason})")
     print(f"Development verdict: {evidence['developmentVerdict']}")
     print(f"Promotion verdict: {evidence['promotionVerdict']}")
     print("Evidence: evidence.md")

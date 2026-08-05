@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/cosmo-wander-ai/cosmo-edge/test/agent/examples/model-conversion/schema.json",
+  "$comment": "Beta: the measured example promotion contract remains opt-in until the first sealed conversion-verified example is published.",
   "title": "CosmoEdge measured model-conversion example",
   "type": "object",
   "required": [
@@ -29,8 +30,63 @@
     "status": {
       "enum": [
         "candidate",
-        "verified"
+        "conversion-verified"
       ]
+    },
+    "lifecycle": {
+      "type": "object",
+      "default": {
+        "status": "active"
+      },
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "active",
+            "revoked"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "changedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supersededBy": {
+          "type": "string",
+          "pattern": "^model-conversion/[A-Za-z0-9][A-Za-z0-9._-]+$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "revoked"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason",
+              "changedAt"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "seal": {
+      "type": "string",
+      "pattern": "^CE1-[0-9a-f]{12}$"
     },
     "applicability": {
       "type": "object",
@@ -99,7 +155,71 @@
       "items": {
         "type": "string"
       }
+    },
+    "deviceValidation": {
+      "type": "object",
+      "default": {
+        "status": "none",
+        "knownLimits": [
+          "device import and runtime are not covered by this example"
+        ]
+      },
+      "required": [
+        "status",
+        "knownLimits"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "none",
+            "referenced"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^(?:git:[0-9a-f]{40}:|external:)sha256:[0-9a-f]{64}$"
+        },
+        "knownLimits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "referenced"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reference"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "conversion-verified"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "seal"
+        ]
+      }
+    }
+  ],
   "additionalProperties": true
 }

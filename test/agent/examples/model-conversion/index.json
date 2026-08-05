@@ -1,5 +1,6 @@
 {
   "schemaVersion": "1.0",
+  "lifecycle": "beta",
   "task": "model-conversion",
   "selectionOrder": [
     "same task, model family, chip/backend, and input layout",
@@ -8,5 +9,5 @@
     "new path from current code and toolchain facts"
   ],
   "examples": [],
-  "note": "An example is listed only after two measured recordings satisfy schema.json. An empty index is not evidence that conversion is unsupported."
+  "note": "An example is eligible for selection only when it is conversion-verified, its lifecycle is active, and its verification seal is valid. Revocation preserves historical recordings and seals but removes current eligibility. An empty index is not evidence that conversion is unsupported."
 }

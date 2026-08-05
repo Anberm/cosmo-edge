@@ -105,17 +105,22 @@ repository development that needs none of these task-specific capabilities.
   inside `model.nn` (CENN) and cannot be turned into one by renaming.
 - BM1688 and CV186X artifacts are not interchangeable. A chip name, compiler
   argument, runtime identifier, and artifact mapping must come from current
-  repository facts or independent measured evidence.
+  repository facts or independent measured evidence. Doctor enforces this
+  boundary through the `compatibility-matrix` check: an explicit mismatch fails,
+  while missing facts remain `UNVERIFIED`.
 - ONNX-to-bmodel conversion depends on an external, locally admitted TPU-MLIR
   package. Follow a route supported by current upstream instructions, but do not
   confuse route eligibility with local readiness. An optional `sophgo/tpuc_dev`
   image is only a base environment and is not the compiler. Accept compatible
   official layouts, then freeze the complete resolved package and command
   identity for the run.
-  BM1688/F16 is the first preferred measured path. An entry appears in the
-  example index only after two real recordings pass its promotion rules; an
-  empty index is not a success claim and does not make unrelated development
-  unsupported.
+  BM1688/F16 is the first preferred measured path. The example promotion
+  mechanism is **Beta**. An entry is eligible for official selection only when
+  its status is `conversion-verified`, its lifecycle is `active`, two real
+  recordings pass the promotion rules, and its verification seal remains valid.
+  Revocation changes lifecycle eligibility without deleting historical
+  recordings or seals. An empty index is not a success claim and does not make
+  unrelated development unsupported.
 - `.pt` and `.pth` training artifacts are accepted as task materials, but this
   release does not claim an automatic training-framework-to-ONNX executor.
   Assess that export as a separate stage or request a suitable ONNX; do not
@@ -172,3 +177,9 @@ repository development that needs none of these task-specific capabilities.
   user's acceptance. Official examples and release claims additionally require
   a frozen commit/tree, input and toolchain identities, artifact hashes,
   applicability, and repeat recordings.
+- Documentation or pull requests that cite an official example or make a
+  compatibility claim must include its verification-seal short code and refer
+  to an `active` example. The short code locates a deterministic evidence-chain
+  fingerprint; its presence alone does not prove that the seal is still valid.
+  Treat revoked, missing, or invalidly sealed claims as unverified. A seal is not
+  a cryptographic signature or device-acceptance claim.

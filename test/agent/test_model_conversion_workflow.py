@@ -1,8 +1,10 @@
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -121,7 +123,17 @@ class ModelConversionWorkflowTest(unittest.TestCase):
         index = json.loads((example_dir / "index.json").read_text(encoding="utf-8"))
         schema = json.loads((example_dir / "schema.json").read_text(encoding="utf-8"))
         self.assertEqual(index["examples"], [])
+        self.assertEqual(index["lifecycle"], "beta")
         self.assertIn("recordings", schema["required"])
+        self.assertEqual(
+            schema["properties"]["status"]["enum"],
+            ["candidate", "conversion-verified"],
+        )
+        self.assertEqual(
+            schema["properties"]["lifecycle"]["properties"]["status"]["enum"],
+            ["active", "revoked"],
+        )
+        self.assertIn("deviceValidation", schema["properties"])
 
     def test_candidate_shapes_and_chip_come_from_contract(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -345,19 +357,28 @@ class ModelConversionWorkflowTest(unittest.TestCase):
         (run_dir / "artifacts").mkdir()
         artifact_path = run_dir / "artifacts" / "candidate_320_bm1688_f16.bmodel"
         artifact_path.write_bytes(b"synthetic-bmodel-fixture")
+        repository = core._git_snapshot()
+        repository.update({"trackedChanges": 0, "untrackedFiles": 0})
         environment = {
             "schemaVersion": "1.0",
             "runId": contract["runId"],
             "task": contract["task"],
-            "commit": "1" * 40,
-            "tree": "2" * 40,
+            "commit": repository["commit"],
+            "tree": repository["tree"],
             "contractSha256": core.sha256_file(contract_path),
             "routeAssessmentSha256": core.sha256_file(
                 run_dir / "route-assessment.json"
             ),
             "environmentVerdict": "READY",
-            "repository": core._git_snapshot(),
+            "repository": repository,
             "toolchain": make_toolchain_identity(),
+            "checks": [
+                {
+                    "id": "compatibility-matrix",
+                    "status": "PASS",
+                    "detail": "synthetic repository-backed mapping",
+                }
+            ],
         }
         (run_dir / "environment-report.json").write_text(json.dumps(environment), encoding="utf-8")
         selection = {
@@ -369,7 +390,13 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             "schemaVersion": "1.0",
             "status": "COMPLETE",
             "runId": contract["runId"],
+            "commit": environment["commit"],
+            "tree": environment["tree"],
+            "repository": dict(environment["repository"]),
             "contractSha256": core.sha256_file(contract_path),
+            "routeAssessmentSha256": core.sha256_file(
+                run_dir / "route-assessment.json"
+            ),
             "source": {
                 "path": "inputs/candidate.onnx",
                 "sha256": core.sha256_file(source_path),
@@ -381,6 +408,8 @@ class ModelConversionWorkflowTest(unittest.TestCase):
                     "report": "verification/onnx-check.json",
                     "reportSha256": core.sha256_file(preflight_path),
                 },
+                "transform": {"status": "PASS"},
+                "deploy": {"status": "PASS"},
                 "modelInfo": {
                     "status": "PASS",
                     "contractMatches": True,
@@ -466,33 +495,33 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             tensor = next(stage for stage in superseded["stages"] if stage["id"] == "S3")
             self.assertEqual(tensor["status"], "PASS")
 
-    def test_example_needs_two_distinct_same_candidate_recordings(self):
+    def _recordable_manifest(self, run_dir: Path, recorded_at: str, attempt: int) -> dict:
+        manifest_path = run_dir / "execution-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.update(
+            {
+                "attempt": attempt,
+                "completedAt": recorded_at,
+                "source": {
+                    "path": "inputs/candidate.onnx",
+                    "sha256": core.sha256_file(run_dir / "inputs" / "candidate.onnx"),
+                },
+                "target": {},
+            }
+        )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return manifest
+
+    def test_two_recordings_without_seal_remain_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             example_dir = root / "test" / "agent" / "examples" / "model-conversion"
             example_dir.mkdir(parents=True)
             run_dir, _, contract = self._make_verifiable_run(root, "PASS")
             parameters = conversion.conversion_parameters(contract, run_dir)
-            manifest_path = run_dir / "execution-manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest.update(
-                {
-                    "completedAt": "2026-01-01T00:00:00Z",
-                    "commit": "1" * 40,
-                    "tree": "2" * 40,
-                    "repository": {
-                        "trackedChanges": 0,
-                        "untrackedFiles": 0,
-                    },
-                    "source": {
-                        "path": "inputs/candidate.onnx",
-                        "sha256": core.sha256_file(run_dir / "inputs" / "candidate.onnx"),
-                    },
-                    "target": {},
-                }
+            manifest = self._recordable_manifest(
+                run_dir, "2026-01-01T00:00:00Z", 1
             )
-            manifest["toolchain"] = make_toolchain_identity()
-            manifest_path.write_text(json.dumps({"recording": 1}), encoding="utf-8")
             example_path = example_dir / "candidate-bm1688-f16.json"
             first = conversion.record_example(
                 str(example_path),
@@ -500,21 +529,32 @@ class ModelConversionWorkflowTest(unittest.TestCase):
                 parameters,
                 run_dir=run_dir,
                 project_root=root,
+                emit_summary=False,
             )
             self.assertEqual(first["status"], "candidate")
+            self.assertEqual(first["lifecycle"]["status"], "active")
             self.assertEqual(len(first["recordings"]), 1)
+            self.assertEqual(first["deviceValidation"]["status"], "none")
 
-            manifest["completedAt"] = "2026-01-01T00:10:00Z"
-            manifest_path.write_text(json.dumps({"recording": 2}), encoding="utf-8")
+            manifest = self._recordable_manifest(
+                run_dir, "2026-01-01T00:10:00Z", 2
+            )
+            device_evidence = root / "device-smoke.txt"
+            device_evidence.write_text("Device runtime smoke: PASS\n", encoding="utf-8")
             second = conversion.record_example(
                 str(example_path),
                 manifest,
                 parameters,
                 run_dir=run_dir,
                 project_root=root,
+                device_evidence=str(device_evidence),
+                emit_summary=False,
             )
-            self.assertEqual(second["status"], "verified")
+            self.assertEqual(second["status"], "candidate")
             self.assertEqual(len(second["recordings"]), 2)
+            self.assertNotIn("seal", second)
+            self.assertEqual(second["deviceValidation"]["status"], "referenced")
+            self.assertNotIn(str(root), second["deviceValidation"]["reference"])
 
             outside = root / "candidate-outside.json"
             with self.assertRaisesRegex(core.WorkflowError, "must stay under"):
@@ -524,7 +564,187 @@ class ModelConversionWorkflowTest(unittest.TestCase):
                     parameters,
                     run_dir=run_dir,
                     project_root=root,
+                    emit_summary=False,
                 )
+
+    def test_sealed_second_recording_promotes_conversion_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            example_dir = root / "test" / "agent" / "examples" / "model-conversion"
+            example_dir.mkdir(parents=True)
+            run_dir, contract_path, contract = self._make_verifiable_run(root, "PASS")
+            parameters = conversion.conversion_parameters(contract, run_dir)
+            example_path = example_dir / "candidate-bm1688-f16.json"
+
+            manifest = self._recordable_manifest(run_dir, "2026-01-01T00:00:00Z", 1)
+            evidence = conversion.verify_conversion(contract_path, run_dir, contract)
+            first_seal, reason = conversion.issue_verification_seal(run_dir, evidence)
+            self.assertEqual(reason, "")
+            self.assertIsNotNone(first_seal)
+            first = conversion.record_example(
+                str(example_path),
+                manifest,
+                parameters,
+                run_dir=run_dir,
+                project_root=root,
+                emit_summary=False,
+            )
+            self.assertEqual(first["status"], "candidate")
+            self.assertRegex(first["recordings"][0]["seal"], r"^CE1-[0-9a-f]{12}$")
+
+            manifest = self._recordable_manifest(run_dir, "2026-01-01T00:10:00Z", 2)
+            evidence = conversion.verify_conversion(contract_path, run_dir, contract)
+            second_seal, reason = conversion.issue_verification_seal(run_dir, evidence)
+            self.assertEqual(reason, "")
+            second = conversion.record_example(
+                str(example_path),
+                manifest,
+                parameters,
+                run_dir=run_dir,
+                project_root=root,
+                emit_summary=False,
+            )
+            self.assertEqual(second["status"], "conversion-verified")
+            self.assertEqual(second["lifecycle"]["status"], "active")
+            self.assertEqual(second["seal"], second_seal["sealCode"])
+            self.assertEqual(second_seal["chainStatus"]["conversion"], "PASS")
+            self.assertEqual(second_seal["toolchainDigest"], "a" * 12)
+            valid, reason, _ = conversion.validate_verification_seal(run_dir)
+            self.assertTrue(valid, reason)
+
+            second["lifecycle"] = {
+                "status": "revoked",
+                "reason": "The recorded compiler route was later found to be defective.",
+                "changedAt": "2026-01-02T00:00:00Z",
+                "reference": "issue:fixture-toolchain-defect",
+            }
+            example_path.write_text(json.dumps(second), encoding="utf-8")
+            revoked = conversion.verify_conversion(
+                contract_path,
+                run_dir,
+                contract,
+                example_path=str(example_path),
+                project_root=root,
+            )
+            self.assertEqual(revoked["promotionVerdict"], "NOT_READY")
+            self.assertEqual(revoked["selectedExampleLifecycle"], "revoked")
+            valid, reason, _ = conversion.validate_verification_seal(run_dir)
+            self.assertTrue(valid, reason)
+            with self.assertRaisesRegex(core.WorkflowError, "revoked examples"):
+                conversion.record_example(
+                    str(example_path),
+                    manifest,
+                    parameters,
+                    run_dir=run_dir,
+                    project_root=root,
+                    emit_summary=False,
+                )
+
+            manifest["completedAt"] = "changed-after-seal"
+            (run_dir / "execution-manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            valid, reason, _ = conversion.validate_verification_seal(run_dir)
+            self.assertFalse(valid)
+            self.assertIn("identity", reason)
+
+    def test_legacy_verified_record_is_normalized_without_error(self):
+        normalized = conversion._normalize_example_record(
+            {
+                "status": "verified",
+                "knownLimits": list(conversion.CONVERSION_KNOWN_LIMITS),
+            }
+        )
+        self.assertEqual(normalized["status"], "conversion-verified")
+        self.assertEqual(normalized["lifecycle"]["status"], "active")
+        self.assertEqual(normalized["deviceValidation"]["status"], "none")
+
+        with self.assertRaisesRegex(core.WorkflowError, "requires reason"):
+            conversion._normalize_example_record(
+                {
+                    "status": "candidate",
+                    "lifecycle": {
+                        "status": "revoked",
+                        "changedAt": "2026-01-02T00:00:00Z",
+                    },
+                }
+            )
+
+    def test_verify_reads_candidate_and_legacy_verified_examples_without_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            example_dir = root / "test" / "agent" / "examples" / "model-conversion"
+            example_dir.mkdir(parents=True)
+            run_dir, contract_path, contract = self._make_verifiable_run(root, "PASS")
+            for status in ("candidate", "verified"):
+                with self.subTest(status=status):
+                    example_path = example_dir / f"{status}.json"
+                    example_path.write_text(
+                        json.dumps(
+                            {
+                                "status": status,
+                                "exampleId": f"model-conversion/{status}",
+                                "applicability": {},
+                                "recordings": [],
+                                "knownLimits": list(conversion.CONVERSION_KNOWN_LIMITS),
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    evidence = conversion.verify_conversion(
+                        contract_path,
+                        run_dir,
+                        contract,
+                        example_path=str(example_path),
+                        project_root=root,
+                    )
+                    self.assertEqual(evidence["promotionVerdict"], "NOT_READY")
+
+    def test_device_evidence_is_an_opaque_reference_not_a_customer_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence_path = root / "customer-device-report.txt"
+            evidence_path.write_text("Device runtime smoke: PASS\n", encoding="utf-8")
+            reference = conversion._device_evidence_record(str(evidence_path), root)
+            self.assertEqual(reference["status"], "referenced")
+            self.assertRegex(reference["reference"], r"^external:sha256:[0-9a-f]{64}$")
+            self.assertNotIn(str(root), json.dumps(reference))
+            self.assertNotIn(evidence_path.name, json.dumps(reference))
+
+            placeholder = root / "placeholder.txt"
+            placeholder.write_text("TODO", encoding="utf-8")
+            with self.assertRaisesRegex(core.WorkflowError, "placeholder"):
+                conversion._device_evidence_record(str(placeholder), root)
+
+    def test_scope_summary_leads_with_limits_and_device_boundary(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            conversion._print_scope_summary(
+                status="conversion-verified",
+                validated_stages=[
+                    "onnx-preflight",
+                    "transform",
+                    "deploy",
+                    "model-info",
+                    "tensor-compare",
+                ],
+                known_limits=list(conversion.CONVERSION_KNOWN_LIMITS),
+                device_validation={"status": "none"},
+                seal_code="CE1-0123456789ab",
+                lifecycle_status="active",
+            )
+        lines = output.getvalue().splitlines()
+        self.assertEqual(lines[0], "STATUS: conversion-verified")
+        self.assertEqual(lines[1], "LIFECYCLE: active")
+        self.assertEqual(
+            lines[2],
+            "COVERS: ONNX preflight, transform, deploy, model-info, tensor-compare",
+        )
+        self.assertEqual(
+            lines[3],
+            "NOT COVERED: device import and runtime; business accuracy acceptance",
+        )
+        self.assertEqual(lines[4], "DEVICE VALIDATION: none")
 
 
 if __name__ == "__main__":
