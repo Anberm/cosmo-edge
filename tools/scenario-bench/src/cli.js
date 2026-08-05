@@ -20,6 +20,11 @@ import { strategyForTaskType } from './task-strategies.js';
 import { PreviewLoad } from './preview-load.js';
 import { runPreviewValidation } from './preview-validator.js';
 import { auditLongRunFile, writeLongRunAudit } from './longrun-auditor.js';
+import {
+  installShutdownSignalHandlers,
+  sleepWithSignal,
+  throwIfAborted,
+} from './shutdown-signal.js';
 
 function parseArgs(argv) {
   const args = {};
@@ -361,6 +366,7 @@ async function runBenchmark(args) {
   const startedAt = new Date().toISOString();
   let pkg = null;
   let deviceInfo = {};
+  let client = null;
   let channelMgr = null;
   let previewLoad = null;
   const samples = [];
@@ -375,6 +381,14 @@ async function runBenchmark(args) {
   let currentStepIndex = -1;
   const writer = new ReportWriter(args.output);
   let effectiveLoadProfile = [];
+  const abortController = new AbortController();
+  const signal = abortController.signal;
+  const disposeSignalHandlers = installShutdownSignalHandlers(abortController, {
+    onSignal: (error) => {
+      process.exitCode = error.exitCode;
+      log.warn(`${error.message}; active tasks and preview clients will be cleaned up.`);
+    },
+  });
 
   const buildResult = (status = runError ? 'aborted' : 'completed') => ({
     scenarioName: pkg?.scenario?.displayName ?? pkg?.scenario?.name,
@@ -435,6 +449,7 @@ async function runBenchmark(args) {
   };
 
   try {
+    throwIfAborted(signal);
     log.info(`Loading scenario package: ${args.scenario}`);
     pkg = new ScenarioPackage(args.scenario).load();
     log.info(`Scenario "${pkg.scenario.name}" | tasks=${pkg.tasks.map((t) => `${t.id}:${t.algorithmId}`).join(', ')} | mode=${pkg.videoMode}`);
@@ -442,10 +457,11 @@ async function runBenchmark(args) {
     const maxChannels = Math.max(...effectiveLoadProfile.map((s) => s.channels));
     log.info(`Profile mode: ${args.profile ?? 'capacity'} | configured=${pkg.loadProfile.map((s) => s.channels).join(',')} | effective=${effectiveLoadProfile.map((s) => s.channels).join(',')}`);
 
-    const client = new CosmoClient({
+    client = new CosmoClient({
       base: args.device,
       ...auth,
       lang: args.lang ?? 'zh-CN',
+      signal,
     });
     previewLoad = new PreviewLoad(client, {
       mode: args.preview ?? 'none',
@@ -457,8 +473,10 @@ async function runBenchmark(args) {
       logger: log,
     });
     await previewLoad.preflight();
+    throwIfAborted(signal);
     log.info(`Connecting to device ${args.device}...`);
     await client.login();
+    throwIfAborted(signal);
     log.info('Login OK.');
 
     const deviceInfoRaw = await client.queryDeviceInfo().catch((e) => {
@@ -468,6 +486,7 @@ async function runBenchmark(args) {
     for (const it of deviceInfoRaw?.devInfoList ?? []) {
       if (it?.key) deviceInfo[it.key] = it.value;
     }
+    throwIfAborted(signal);
 
     if (args['skip-import']) {
       log.info('Skipping layout save (--skip-import).');
@@ -475,6 +494,7 @@ async function runBenchmark(args) {
       for (const item of pkg.layoutSavePayloads) {
         log.info(`Saving orchestration template for task "${item.taskId}" via /algorithm/layout/save...`);
         await client.layoutSave(item.payload);
+        throwIfAborted(signal);
       }
       log.info(`Layout saved for ${pkg.layoutSavePayloads.length} task(s).`);
     }
@@ -487,6 +507,7 @@ async function runBenchmark(args) {
     });
     log.info(`Ensuring ${maxChannels} channels (mode=${pkg.videoMode})...`);
     const videoChannelIds = await channelMgr.ensureChannels(pkg.videos, maxChannels);
+    throwIfAborted(signal);
     log.info(`Channels ready: ${videoChannelIds.join(', ')}`);
 
     const runner = new TaskRunner(client, {
@@ -494,6 +515,7 @@ async function runBenchmark(args) {
       bindings: pkg.bindings,
       rampBatchSize: Number(args['ramp-batch-size'] ?? 1),
       rampBatchDelaySec: Number(args['ramp-batch-delay-sec'] ?? 15),
+      signal,
     }, log);
     runner.setChannels(videoChannelIds);
 
@@ -503,6 +525,7 @@ async function runBenchmark(args) {
     const DISCARD_BOTTLENECK = 0.05;
 
     const captureSample = async (phase = 'hold', targetChannels = currentChannels) => {
+      throwIfAborted(signal);
       previewLoad.assertHealthy();
       const sample = await sampler.sample(activeEntries());
       sample.preview = await previewLoad.snapshot();
@@ -511,6 +534,7 @@ async function runBenchmark(args) {
       sample.targetChannels = targetChannels;
       samples.push(sample);
       await writePartial();
+      throwIfAborted(signal);
       const ch0 = sample.channels[0];
       log.debug(`sample step=${currentStepIndex} ch=${sample.activeChannels} bindings=${sample.activeTaskBindings ?? sample.channels.length} first=${ch0?.taskKey ?? '-'} fps=${ch0?.measuredFps ?? '-'} discard=${ch0?.discardRate ?? '-'} cpu=${sample.hardware?.cpuUtilization?.usedPercent ?? '-'}%`);
       return sample;
@@ -578,9 +602,10 @@ async function runBenchmark(args) {
         const hasVLM = activeEntries().some((e) => e.taskType === 'vlm');
         if (hasVLM && step.index === 0) {
           log.info(`[warmup] VLM detected in first step, waiting 30 seconds for model loading before sampling...`);
-          await new Promise((resolve) => setTimeout(resolve, 30000));
+          await sleepWithSignal(30_000, signal);
         }
         await previewLoad.sync(entries);
+        throwIfAborted(signal);
       },
       onSample: async () => {
         return quickFuse(await captureSample('hold', currentChannels));
@@ -623,6 +648,9 @@ async function runBenchmark(args) {
     runError = err;
     log.error(`Benchmark aborted; a partial report will be written: ${err.message}`);
   } finally {
+    // The run signal cancels long in-flight work. Cleanup requests use their
+    // own bounded timeouts so an already-aborted signal cannot suppress them.
+    client?.beginCleanup();
     if (previewLoad) {
       try {
         await previewLoad.stop();
@@ -637,12 +665,17 @@ async function runBenchmark(args) {
         log.warn(`Channel cleanup failed: ${e.message}`);
       }
     }
+    if (!runError && signal.aborted) {
+      runError = signal.reason instanceof Error ? signal.reason : new Error('benchmark aborted');
+    }
+    disposeSignalHandlers();
   }
 
   if (!pkg) {
     console.error(`\nBenchmark failed: ${runError?.message ?? 'unknown error'}`);
     if (runError?.stack && process.env.BENCH_DEBUG) console.error(runError.stack);
-    process.exit(1);
+    process.exitCode = runError?.exitCode ?? 1;
+    return;
   }
 
   const result = buildResult();
@@ -651,7 +684,8 @@ async function runBenchmark(args) {
     log.warn(`Partial report written:\n  ${jsonPath}\n  ${htmlPath}`);
     console.error(`\nBenchmark aborted: ${runError.message}`);
     if (runError.stack && process.env.BENCH_DEBUG) console.error(runError.stack);
-    process.exit(1);
+    process.exitCode = runError.exitCode ?? 1;
+    return;
   }
   log.info(`Report written:\n  ${jsonPath}\n  ${htmlPath}`);
 }
@@ -744,5 +778,5 @@ async function main() {
 main().catch((err) => {
   console.error(`\nscenario-bench failed: ${err.message}`);
   if (err.stack && process.env.BENCH_DEBUG) console.error(err.stack);
-  process.exit(1);
+  process.exitCode = err.exitCode ?? 1;
 });

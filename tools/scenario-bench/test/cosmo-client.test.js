@@ -18,6 +18,57 @@ test('login rejects missing credentials when no token is supplied', async () => 
   await assert.rejects(client.login(), /requires user\/password or an existing token/);
 });
 
+test('external shutdown aborts an in-flight device request without rewriting the reason', async () => {
+  const controller = new AbortController();
+  const reason = Object.assign(new Error('received SIGTERM; shutting down'), { exitCode: 143 });
+  let requestSignal = null;
+  const client = new CosmoClient({
+    base: 'http://device',
+    token: 'token',
+    signal: controller.signal,
+    fetchImpl: async (_url, options) => {
+      requestSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      });
+    },
+  });
+
+  const request = client.queryHardwareResource();
+  controller.abort(reason);
+
+  await assert.rejects(request, (error) => error === reason && error.exitCode === 143);
+  assert.equal(requestSignal.aborted, true);
+});
+
+test('cleanup requests remain available after the run signal is aborted', async () => {
+  const controller = new AbortController();
+  controller.abort(Object.assign(new Error('received SIGTERM; shutting down'), { exitCode: 143 }));
+  let requestSignal = null;
+  const client = new CosmoClient({
+    base: 'http://device',
+    token: 'token',
+    signal: controller.signal,
+    fetchImpl: async (_url, options) => {
+      requestSignal = options.signal;
+      return {
+        ok: true,
+        async json() {
+          return { resCode: 1, resData: { failedList: [] } };
+        },
+      };
+    },
+  });
+
+  client.beginCleanup();
+  const result = await client.taskBatchSwitch([
+    { id: 'task-1', channelId: 'channel-1', algorithmId: '7463', enable: 0 },
+  ]);
+
+  assert.deepEqual(result, { failedList: [] });
+  assert.equal(requestSignal.aborted, false);
+});
+
 test('batch task switch uses the wire-level switch field', async () => {
   const client = new CosmoClient({ base: 'http://device', token: 'token' });
   let request = null;

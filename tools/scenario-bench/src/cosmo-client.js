@@ -28,6 +28,35 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function throwIfSignalAborted(signal) {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new Error('request aborted');
+}
+
+function requestAbortContext(timeout, externalSignal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onExternalAbort = () => controller.abort(externalSignal.reason);
+  if (externalSignal?.aborted) {
+    onExternalAbort();
+  } else {
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeout);
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    cleanup: () => {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
+    },
+  };
+}
+
 /** MD5-hashed + uppercased password, matching the backend's ToUpper(passwdMd5) comparison. */
 export function hashPassword(plain) {
   return crypto.createHash('md5').update(String(plain), 'utf8').digest('hex').toUpperCase();
@@ -41,6 +70,7 @@ export class CosmoClient {
    * @param {string} [opts.password] Plain-text password (hashed internally).
    * @param {string} [opts.token] Existing short-lived device token.
    * @param {string} [opts.lang] Accept-Language header value, default zh-CN.
+   * @param {AbortSignal} [opts.signal] Cancels in-flight benchmark requests.
    */
   constructor({
     base,
@@ -53,6 +83,7 @@ export class CosmoClient {
     uploadBackoffMs = DEFAULT_UPLOAD_BACKOFF_MS,
     fetchImpl = globalThis.fetch,
     sleepImpl = sleep,
+    signal = null,
   }) {
     if (!Number.isInteger(uploadConcurrency) || uploadConcurrency < 1) {
       throw new Error('uploadConcurrency must be a positive integer');
@@ -76,6 +107,7 @@ export class CosmoClient {
     this.uploadBackoffMs = uploadBackoffMs;
     this.fetchImpl = fetchImpl;
     this.sleepImpl = sleepImpl;
+    this.signal = signal;
     this.uploadActive = 0;
     this.uploadWaiters = [];
     this.uploadStats = {
@@ -96,6 +128,15 @@ export class CosmoClient {
       concurrencyLimit: this.uploadConcurrency,
       attemptLimit: this.uploadAttempts,
     };
+  }
+
+  /**
+   * Detach subsequent bounded cleanup requests from the benchmark shutdown
+   * signal. Requests that are already in flight keep their own linked abort
+   * controller; task/preview/channel cleanup can then run with normal timeouts.
+   */
+  beginCleanup() {
+    this.signal = null;
   }
 
   /** Log in and store the mtk token. Returns the login response resData. */
@@ -340,21 +381,22 @@ export class CosmoClient {
   async _sendMultipartWithRetry(path, url, headers, body) {
     const timeout = LONG_TIMEOUT_ROUTES.has(path) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
     for (let attempt = 1; attempt <= this.uploadAttempts; attempt += 1) {
+      throwIfSignalAborted(this.signal);
       this.uploadStats.attempts += 1;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeout);
+      const abortContext = requestAbortContext(timeout, this.signal);
       let resp;
       try {
         resp = await this.fetchImpl(url, {
-          method: 'POST', headers, body, signal: controller.signal, duplex: 'half',
+          method: 'POST', headers, body, signal: abortContext.signal, duplex: 'half',
         });
       } catch (err) {
-        if (err.name === 'AbortError') {
+        throwIfSignalAborted(this.signal);
+        if (abortContext.timedOut()) {
           throw new Error(`Request timed out after ${timeout}ms: POST ${path}`);
         }
         throw new Error(`Network error on POST ${path}: ${err.message}`);
       } finally {
-        clearTimeout(timer);
+        abortContext.cleanup();
       }
 
       let responseText;
@@ -362,7 +404,8 @@ export class CosmoClient {
       try {
         responseText = await resp.text();
         data = JSON.parse(responseText);
-      } catch {
+      } catch (error) {
+        throwIfSignalAborted(this.signal);
         data = null;
       }
 
@@ -426,23 +469,24 @@ export class CosmoClient {
       }
     }
     const timeout = LONG_TIMEOUT_ROUTES.has(path) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    throwIfSignalAborted(this.signal);
+    const abortContext = requestAbortContext(timeout, this.signal);
     let resp;
     try {
       resp = await this.fetchImpl(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body ?? {}),
-        signal: controller.signal,
+        signal: abortContext.signal,
       });
     } catch (err) {
-      if (err.name === 'AbortError') {
+      throwIfSignalAborted(this.signal);
+      if (abortContext.timedOut()) {
         throw new Error(`Request timed out after ${timeout}ms: POST ${path}`);
       }
       throw new Error(`Network error on POST ${path}: ${err.message}`);
     } finally {
-      clearTimeout(timer);
+      abortContext.cleanup();
     }
 
     if (!resp.ok) {
@@ -451,7 +495,8 @@ export class CosmoClient {
     let data;
     try {
       data = await resp.json();
-    } catch {
+    } catch (error) {
+      throwIfSignalAborted(this.signal);
       throw new Error(`Non-JSON response on POST ${path}`);
     }
     // Wire contract: resCode === 1 means success.

@@ -3,6 +3,8 @@
 // A workload can contain one or many tasks. The single-task case is represented
 // as one task bound to all active channels, so the run path stays unified.
 
+import { sleepWithSignal, throwIfAborted } from './shutdown-signal.js';
+
 export class TaskRunner {
   /**
    * @param {import('./cosmo-client.js').CosmoClient} client
@@ -15,6 +17,7 @@ export class TaskRunner {
    * @param {object} [ctx.taskConfig] legacy single-task config
    * @param {number} [ctx.rampBatchSize]
    * @param {number} [ctx.rampBatchDelaySec]
+   * @param {AbortSignal} [ctx.signal]
    * @param {import('./logger.js').Logger} [logger]
    */
   constructor(client, ctx, logger) {
@@ -24,6 +27,7 @@ export class TaskRunner {
     this.bindings = normalizeBindings(ctx.bindings, this.tasks);
     this.rampBatchSize = Math.max(1, Number(ctx.rampBatchSize ?? 1));
     this.rampBatchDelaySec = Math.max(0, Number(ctx.rampBatchDelaySec ?? 15));
+    this.signal = ctx.signal;
     this.log = logger;
     /** @type {string[]} videoChannelIds in bind order */
     this.allChannelIds = [];
@@ -71,8 +75,10 @@ export class TaskRunner {
 
   async _bind(videoChannelIds) {
     if (!videoChannelIds.length) return [];
+    throwIfAborted(this.signal);
     const failures = [];
     for (const task of this.tasks) {
+      throwIfAborted(this.signal);
       const targetChannelIds = this._channelsForTask(task.id, videoChannelIds);
       if (!targetChannelIds.length) continue;
       this.log?.info(
@@ -123,7 +129,9 @@ export class TaskRunner {
     let bottleneck = null;
 
     try {
+      throwIfAborted(this.signal);
       for (let i = 0; i < loadProfile.length; i++) {
+        throwIfAborted(this.signal);
         const step = { ...loadProfile[i], index: i };
         const target = this.allChannelIds.slice(0, step.channels);
         const toAdd = target.slice(active.length);
@@ -134,11 +142,16 @@ export class TaskRunner {
         );
 
         for (let offset = 0; offset < toAdd.length; offset += this.rampBatchSize) {
+          throwIfAborted(this.signal);
           const batch = toAdd.slice(offset, offset + this.rampBatchSize);
+          // Treat attempted bindings as active for cleanup purposes. If the
+          // request succeeds remotely but the connection or signal interrupts
+          // the response, the final OFF remains safe and prevents task leaks.
+          active = [...new Set([...active, ...batch])];
           const failedList = await this._bind(batch);
+          throwIfAborted(this.signal);
           if (failedList.length > 0) {
             const failedIds = failedList.map((f) => f.id ?? f.channelId ?? '?').join(', ');
-            active = [...new Set([...active, ...batch])];
             this.log?.warn(`[step ${i + 1}] bottleneck detected - task bind failed on: ${failedIds}`);
             bottleneck = {
               bottleneckStep: i,
@@ -148,11 +161,11 @@ export class TaskRunner {
             };
             return bottleneck;
           }
-          active = this.allChannelIds.slice(0, active.length + batch.length);
           const entries = this.expectedTaskEntries(active);
 
           if (hooks?.onRampBatch) {
             const decision = await hooks.onRampBatch(step, active, batch, entries);
+            throwIfAborted(this.signal);
             if (decision?.stop) {
               this.log?.warn(`[step ${i + 1}] ramp fuse tripped: ${decision.reason ?? 'threshold breached'}`);
               bottleneck = {
@@ -167,19 +180,23 @@ export class TaskRunner {
 
           const hasMoreBatches = offset + this.rampBatchSize < toAdd.length;
           if (hasMoreBatches && this.rampBatchDelaySec > 0) {
-            await sleep(this.rampBatchDelaySec * 1000);
+            await sleepWithSignal(this.rampBatchDelaySec * 1000, this.signal);
           }
         }
 
         active = target;
-        if (hooks?.onStepStart) await hooks.onStepStart(step, active, this.expectedTaskEntries(active));
+        if (hooks?.onStepStart) {
+          await hooks.onStepStart(step, active, this.expectedTaskEntries(active));
+          throwIfAborted(this.signal);
+        }
 
         const ticks = Math.max(1, Math.floor(step.holdSec / sampleIntervalSec));
         for (let t = 0; t < ticks; t++) {
-          await sleep(sampleIntervalSec * 1000);
+          await sleepWithSignal(sampleIntervalSec * 1000, this.signal);
           try {
             if (hooks?.onSample) {
               const decision = await hooks.onSample();
+              throwIfAborted(this.signal);
               if (decision?.stop) {
                 this.log?.warn(
                   `[step ${i + 1}] hold fuse tripped: ${decision.reason ?? 'threshold breached'}`,
@@ -194,6 +211,7 @@ export class TaskRunner {
               }
             }
           } catch (err) {
+            throwIfAborted(this.signal);
             // Missing the remainder of a hold window can otherwise turn an
             // outage into a false PASS based only on pre-failure samples.
             // Abort and let the caller write a clearly marked partial report.
@@ -203,6 +221,7 @@ export class TaskRunner {
 
         if (hooks?.onStepEnd) {
           const decision = await hooks.onStepEnd(step, active, this.expectedTaskEntries(active));
+          throwIfAborted(this.signal);
           if (decision?.stop) {
             this.log?.warn(`[step ${i + 1}] bottleneck detected - stopping staircase: ${decision.reason ?? 'threshold breached'}`);
             bottleneck = {
@@ -219,6 +238,7 @@ export class TaskRunner {
       return bottleneck ?? {};
     } finally {
       if (active.length) {
+        this.client.beginCleanup?.();
         const entries = this.expectedTaskEntries(active);
         this.log?.info(`Switching ${entries.length} active task binding(s) OFF.`);
         try {
@@ -309,8 +329,4 @@ function matchesChannelSelector(selector, channelId, oneBasedIndex) {
   }
 
   return false;
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
