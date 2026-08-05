@@ -1,5 +1,5 @@
-name: rk3576-no-helmet-p7.3-longrun-fps5
-displayName: RK3576 P7.3 延迟 Copy-out 72 小时长稳（4 路 5 FPS）
+name: rk3576-no-helmet-longrun-4x5fps
+displayName: RK3576 延迟 Copy-out 12 小时长稳（4 路 5 FPS）
 sampleIntervalSec: 60
 
 channels:
@@ -34,7 +34,7 @@ tasks:
 
 loadProfile:
   - channels: 4
-    holdSec: 259200
+    holdSec: 43200
 
 thresholds:
   pass:

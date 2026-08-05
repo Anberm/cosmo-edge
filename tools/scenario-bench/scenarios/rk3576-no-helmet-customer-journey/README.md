@@ -1,6 +1,6 @@
-# RK3576 P8 customer journey
+# RK3576 customer journey
 
-This one-channel, 5 FPS workload provides a bounded window for the P8 customer
+This one-channel, 5 FPS workload provides a bounded window for the customer
 journey: web login, video-channel visibility, task binding, real raw and
 algorithm HTTP-FLV playback, event visibility, task stop/start recovery and
 final cleanup.

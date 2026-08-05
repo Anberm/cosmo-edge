@@ -1,52 +1,86 @@
-# RK3576 / RKNN development and acceptance guide
+# RK3576 / RKNN integration guide
 
 ## Scope
 
-The first release adds RK3576 inference for the existing static-batch CV path. It keeps CPU/FFmpeg media processing and the existing host preprocessing/postprocessing. MPP, RGA, DMA-BUF and zero-copy are explicitly outside P0-P4 and require a separate measured optimization gate.
+This integration adds the RK3576 CV backend without changing the behavior of
+the CPU, CUDA or Sophon backends:
 
-## Frozen identities
+- RKNN Runtime 2.3.2 executes the static-batch detector and classifier models.
+- Rockchip MPP performs H.264/H.265 decode and encode.
+- The decoder uses delayed Copy-out: frames are sampled or discarded before a
+  host I420 copy is requested.
+- RGA performs the Rockchip frame-processing operations required by preview and
+  OSD paths.
+- Full DMA-BUF zero-copy is not part of this engineering integration.
 
-- CosmoEdge base: `2eaf5fd7b096f98a9dca1ef298e03440484e15bc`
-- TensorRT architecture reference: `57c578616ba826f01921bb4e43d7a695549b6b9e`
-- RKNN-Toolkit2: `v2.3.2`, tag `42aa1d426c0a9e0869b6374edba009f7208a1926`
-- RKNN Model Zoo: `v2.3.2`, tag `bad6c7334531becaf90a561988519b7bec34d0ab`
-- Conversion host: Ubuntu 22.04 x86_64, Python 3.10
-- Target: RK3576 Ubuntu 22.04 aarch64, kernel 6.1.118, RKNPU driver 0.9.8
+The currently validated engineering envelope is four channels at 5 FPS per
+channel. It is not a release-capacity claim.
 
-The machine-readable lock is `config/rknn/toolchain-lock.json`. A candidate is not accepted when any locked identity is missing from its evidence manifest.
+## Repository and evidence boundary
+
+The repository owns product code, build definitions, unit tests, reproducible
+model tooling, deployable RKNN resources and two reusable acceptance scenarios:
+
+- `tools/scenario-bench/scenarios/rk3576-no-helmet-customer-journey`
+- `tools/scenario-bench/scenarios/rk3576-no-helmet-longrun-4x5fps`
+
+Raw device logs, metrics streams, screenshots, exported events and generated
+HTML/XML/JSON reports are external validation artifacts and must not be added to
+the source tree. An external evidence manifest must bind results to the source
+commit and tree, final package SHA-256, device/firmware/runtime versions, model
+and dataset hashes, thresholds, cleanup status and measured values.
+
+Device addresses, account data, local backup paths and reusable credentials do
+not belong in source-controlled configuration or evidence.
+
+## Frozen toolchain identities
+
+The machine-readable toolchain and model-input lock is
+`config/rknn/toolchain-lock.json`. The current integration is based on:
+
+- RKNN-Toolkit2 2.3.2
+- RKNN Model Zoo 2.3.2
+- Ubuntu 22.04 x86_64 conversion host with Python 3.10
+- RK3576 Ubuntu 22.04 aarch64 target with kernel 6.1.118 and RKNPU driver 0.9.8
+
+Changing a locked SDK, runtime, input model or preprocessing contract requires
+new conversion and device evidence.
 
 ## Runtime safety boundary
 
-The target's existing RKNN Runtime 2.1.0 is retained as the rollback baseline. The 2.3.2 runtime is packaged beside CosmoEdge and selected with executable RPATH or a task-local `LD_LIBRARY_PATH`; it must not replace `/usr/lib/librknnrt.so` during P0-P4. Production inference uses the native C API and does not depend on `rknn_server`.
+Keep the board's system RKNN runtime as the rollback baseline. Package RKNN
+Runtime 2.3.2 beside CosmoEdge and select it with executable RPATH or a
+task-local `LD_LIBRARY_PATH`; do not overwrite `/usr/lib/librknnrt.so` during
+development or acceptance. Production inference uses the native C API and does
+not depend on `rknn_server`.
 
-The baseline backup on the current test box is:
+## Model and preprocessing contract
 
-```text
-/home/moons/cosmo-rk3576-baseline-20260804
-```
+The first supported models are:
 
-## Offline conversion host
+1. Helmet classification: `1x3x224x224`, ONNX opset 19.
+2. YOLOv8 detection: `1x3x640x640`, converted to ONNX opset 19 / IR 9.
 
-Copy the verified bundle to the conversion host and run:
+CosmoEdge owns resize, channel order and normalization. Conversion must not
+bake in a second mean/std transform. CosmoEdge supplies float32 NCHW tensors;
+the RKNN boundary performs one explicit NCHW-to-NHWC copy because Runtime 2.3.2
+rejects NCHW on this input-conversion path. Outputs are requested as float32 so
+the existing postprocessors remain authoritative.
+
+The production YOLO candidate exposes three box/class head pairs. The
+`yolov8_dfl_v1` host adapter applies DFL and sigmoid, then reconstructs the
+logical `[1,84,8400]` contract. A single quantized output is not supported
+because its shared scale collapses confidence precision.
+
+## Reproducible conversion
+
+Prepare the verified offline bundle at an operator-selected path:
 
 ```bash
-./scripts/rknn/prepare_offline_env.sh /home/yuyu/workspace/rk3576-offline-bundle
+./scripts/rknn/prepare_offline_env.sh "$RKNN_OFFLINE_BUNDLE"
 ```
 
-The script verifies every artifact before creating `.venv-rknn-2.3.2`. No network index is used.
-
-## Model order and preprocessing ownership
-
-1. Helmet classification (`1x3x224x224`, ONNX opset 19) is the first vertical slice.
-2. YOLOv8 detection (`1x3x640x640`) follows after conversion to ONNX opset 19 / IR 9. The repository copy is opset 22 and is not a direct RKNN conversion input.
-
-For P0-P4, CosmoEdge owns resize, channel order and normalization. RKNN conversion must not bake a second mean/std transform into the model. CosmoEdge produces float32 NCHW tensors; the RKNN boundary performs one explicit NCHW-to-NHWC copy because Runtime 2.3.2 rejects NCHW on its input-conversion path. RKNN then converts the NHWC float values to the model's native FP16 or INT8 input. Outputs are requested as float32 so existing postprocessors remain authoritative.
-
-The direct single-output YOLO graph is not the production candidate. A quantized `[1,84,8400]` output shares one scale between coordinates and probabilities, which collapses confidence values to zero. It also keeps DFL box decoding on the NPU and showed avoidable FP16 box drift. `extract_yolov8_heads.py` therefore exposes the three box/class head pairs. The host-side `yolov8_dfl_v1` adapter applies DFL, sigmoid and concatenation back to the logical `[1,84,8400]` contract. Both FP16 and INT8 candidates use this six-output runtime contract.
-
-## Reproducible model conversion
-
-The locked conversion sequence on the Ubuntu host is:
+The locked YOLO conversion sequence is:
 
 ```bash
 python tools/rknn/convert_onnx_opset.py \
@@ -57,7 +91,7 @@ python tools/rknn/extract_yolov8_heads.py \
   --input yolov8-opset19-ir9.onnx --output yolov8-heads.onnx
 
 python tools/rknn/prepare_validation_data.py \
-  --spec config/rknn/models/yolov8.json --video "Safety Helmet.mp4" \
+  --spec config/rknn/models/yolov8.json --video "$VALIDATION_VIDEO" \
   --output-dir yolov8-calibration --samples 32
 
 python tools/rknn/convert_model.py \
@@ -66,35 +100,25 @@ python tools/rknn/convert_model.py \
   --dataset yolov8-calibration/dataset.txt
 ```
 
-Helmet calibration uses person crops selected by the opset-19 detector. The generated manifests explicitly mark the 32-sample sets as unlabeled and suitable for representative calibration and numerical parity only. They are not accuracy benchmarks.
+Calibration and numerical-parity samples are unlabeled. They do not replace a
+labeled precision/recall/F1 acceptance set.
 
-## P2 accepted candidates
+## Build and deployment
 
-The accepted board evidence uses RKNN Runtime 2.3.2 with RKNPU driver 0.9.8 and three fixed video samples. Exact metrics and hashes are recorded in `docs/evidence/rk3576/p2-model-validation.json`.
-
-| Candidate | SHA-256 | Result | Mean of per-sample NPU means |
-| --- | --- | --- | ---: |
-| Helmet FP16 | `3207c64c848d0c249e8f37b47bdfe28325242a99dc2abf30edeca2647dda7205` | 3/3 top-1 match | 4.98 ms |
-| Helmet INT8 | `471d1de315fd142d696066093eaf13e9657b61789c802cfe880606e209cd67ea` | 3/3 top-1 match | 4.09 ms |
-| YOLOv8 heads FP16 | `68ddafae738e37791a5e65481deaa4a5902ceffad1cebc28b64907c87268045b` | 3/3 Pedestrian detection parity, F1 1.0 | 37.09 ms |
-| YOLOv8 heads INT8 | `26ed82e076b06bf0bd757286cafd2bff7ae957366640d96559bf3215a6d541e0` | 3/3 Pedestrian detection parity, F1 1.0 | 26.46 ms |
-
-These timings are P2 model probes, not P4 performance acceptance. Frequency scaling was not controlled and the sample set has no ground-truth labels. P4 must measure the complete CosmoEdge pipeline and run a labeled business-accuracy gate before production release.
-
-## RKNN build and deployment boundary
-
-Build the aarch64 package from the pinned runtime root. The base resource directory supplies common actions/layout/fonts, while the RKNN overlay replaces only RK3576-specific algorithms and models:
+Build against a pinned RKNN runtime root. The base resource directory supplies
+common actions, layouts and fonts; the RKNN resource directory supplies the
+RK3576 algorithms and models.
 
 ```bash
 docker run --rm \
-  -v /home/yuyu/workspace/cosmo-edge-rk3576:/workspace \
-  -v /home/yuyu/workspace/rk3576-offline-bundle/runtime:/opt/rknn:ro \
+  -v "$COSMO_EDGE_ROOT:/workspace" \
+  -v "$RKNN_RUNTIME_ROOT:/opt/rknn:ro" \
   -w /workspace cosmo_dev:latest \
   bash -lc './scripts/build_rknn.sh \
     -r /opt/rknn -m data/resource/aiboxresource_x86 -t -T'
 ```
 
-The writable and read-only roots must remain distinct at runtime:
+Keep mutable and packaged roots separate at runtime:
 
 ```bash
 export COSMO_DATA_DIR=/data/cwaiuserdata
@@ -102,59 +126,41 @@ export COSMO_APP_DATA_DIR=/appfs/cosmo_wander/cwai_data
 export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-`COSMO_DATA_DIR` holds configuration, databases, uploads, events and other mutable state. `COSMO_APP_DATA_DIR` is the installed package root containing `resource/`, `files/`, `font/`, `lib/` and `bin/`. Pointing both variables at the writable directory starts the server but hides all packaged preset algorithms and models. `scripts/run_start.sh` therefore exports the actual `INSTALLPATH` as the default application root and preserves an explicit data-root override for side-by-side validation.
+`COSMO_DATA_DIR` contains configuration, databases, uploads and events.
+`COSMO_APP_DATA_DIR` contains packaged resources, models, libraries and
+binaries. Use the packaged launcher so transitive shared-library dependencies
+resolve from the candidate being tested.
 
-The package contains RKNN Runtime 2.3.2 and resolves `librknnrt.so` from its adjacent `lib/` directory. The launcher also sets `LD_LIBRARY_PATH` because other packaged shared libraries have transitive dependencies. Do not invoke the installed engine outside the launcher environment when qualifying a release.
+## Reusable acceptance scenarios
 
-## P3 accepted package
+The customer-journey scenario runs one channel at 5 FPS for a bounded window.
+Acceptance includes login, model/task/channel visibility, real raw and
+algorithm HTTP-FLV playback, OSD difference, events, reconnect, stop/start
+recovery and cleanup.
 
-P3 is bound to `cosmo-V1.0.0-b3fc2e6fb7fc446a47379946b020f1ba.tar.gz`, SHA-256 `7b5a55f74345479d33a770c34a9dd8c80d2dcf32ceb73b39aebe993cc930e018`.
+The long-run scenario holds four channels at 5 FPS for 12 hours. Run it with
+algorithm-preview clients enabled and audit it with `--gate-hours 12`. The
+runner stops when the configured disk fuse is reached. Use `--password-stdin`
+so credentials do not enter process arguments.
 
-- 36 targeted RKNN/deployment tests and 115 assertions pass on the RK3576 box.
-- The packaged Helmet output is byte-identical to the P2 reference.
-- The C++ six-head YOLOv8 adapter matches the Python reference with cosine similarity `0.9999999999999929` and maximum absolute error `0.0001220703125`.
-- The authenticated image journey creates the two-model task, analyzes three 1080p JPEGs, returns annotated JPEGs and 2/1/3 targets, then releases both RKNN contexts without lifecycle warnings.
-- Device identity, NPU/shared-memory metrics, both model records and the `RK3576 Helmet Image Analysis` selector are visible through the management APIs. Chrome validation used a package with an identical web-tree SHA-256; the final package's candidate-bound backend APIs were revalidated separately.
+Preview validation requires real `ffmpeg` and `ffprobe` executables. The tool
+preflights them before mutating device configuration.
 
-Machine-readable results and the target evidence root are recorded in `docs/evidence/rk3576/p3-backend-validation.json`.
+## Current engineering boundary
 
-## P4 qualification result
+- Four channels at 5 FPS completed the 12-hour gate with CPU p95 of 54 percent,
+  zero media failure/fallback deltas and stable memory-pool accounting.
+- Real raw and algorithm playback, hardware decode/encode, OSD, reconnect and
+  task restart recovery passed on the tested candidate.
+- Delayed Copy-out discarded frames before host copies and is the selected
+  optimization for this phase.
+- Eight-channel operation is not an accepted capacity profile.
+- RK3576 NPU utilization is currently unavailable for acceptance: the devfreq
+  value can report 100 percent while the vendor per-core interface reports
+  idle. Use throughput, stage latency, discard and failure counters instead.
 
-The candidate-bound P4 run is complete with a **NOT READY** release verdict. P0-P3 functionality remains valid, but P4 intentionally fails closed because the two-channel video threshold and algorithm-overlay preview do not pass. The authoritative decision record is `docs/evidence/rk3576/p4-release-validation.json`.
-
-| Gate | Result | Candidate-bound observation |
-| --- | --- | --- |
-| Local video, 1 channel | PASS | 7.32 FPS, zero mean discard, 95.1 ms mean detector time |
-| Local video, 2 channels | FAIL | 8.51% mean discard, 389.1 ms critical path, 340.7 ms detector time |
-| Local video, 4 channels | FAIL (probe) | 4.72 FPS, 31.58% mean discard, 887.3 ms critical path |
-| Local video, 8 channels | NOT RUN | The four additional task bindings were rejected at the four-channel authorization or implementation ceiling |
-| Picture lifecycle/inference | PASS | 1,820 detections, 100 create/detect/cancel cycles, concurrency 1/2/4 and cancel races, zero inference errors |
-| Concurrent picture staging | FAIL | Four simultaneous upload sessions returned HTTP 503; the inference probe stages files sequentially to isolate NPU concurrency |
-| Restart recovery | PASS | Camera and task survived process restart; processed count advanced from 1,774 to 2,420 in ten seconds |
-| Alarm journey | PASS | 17 algorithm-7463 events had both full and detected images; the sampled JPEG was served with HTTP 200 |
-| Raw preview | PASS | HTTP-FLV returned 267,879 bytes with a valid `FLV` signature |
-| Algorithm-overlay preview | FAIL | `h264_v4l2m2m` failed to open with `EPERM`; the API returned first-frame timeout code 12801 |
-| CPU regression | PASS | x86_64 build passed; 884 test cases / 65,796 assertions passed |
-| Sophon regression | PASS (compile) | Fresh aarch64 Sophon/Sophon-media `cosmo-tests` target linked successfully; it cannot be executed on the x86 host or RK3576 board |
-| RTSP journey | NOT RUN | No authorized RTSP fixture was available in the isolated validation environment |
-| 24/72-hour soak | NOT RUN | Fail-fast after mandatory video-capacity and preview gates failed; the 647.5-second picture soak is diagnostic only |
-| Labeled business accuracy | NOT RUN | P2 uses unlabeled conversion/parity samples, not a release accuracy dataset |
-
-### P4 operational notes
-
-- Formal video capacity is bounded to `>= 1` and `< 2` channels at the configured 7 FPS and current CPU/FFmpeg media path. The 4/8-channel scenario is failure characterization, not a capacity baseline.
-- The raw stream proves SRS publication and HTTP-FLV delivery. Overlay preview requires either a packaged software H.264 encoder or a validated V4L2 M2M device/permission path, followed by a candidate-bound rerun.
-- The picture stress runner stages inputs before issuing concurrent inference so upload-session capacity and inference capacity are measured separately. Production clients still need bounded upload concurrency/backpressure until the HTTP 503 boundary is resolved.
-- The NPU utilization interface reported 100% even during idle observations, so that value is not used alone as proof of saturation. Queue discard and measured stage latency remain the release criteria.
-- The final cleanup check found no validation channels or staged uploads. The candidate engine remained healthy on its isolated HTTP/WebSocket ports, and the temporary SRS ports were released.
-- Do not start 24/72-hour qualification for this package. Fix the blocking capacity and overlay paths, add an RTSP fixture and labeled dataset, rebuild a new immutable package, then restart P4 from the one-channel baseline.
-
-## Acceptance gates
-
-- P0: source, SDK, models and device baseline are locked and recoverable.
-- P1: the offline environment imports RKNN-Toolkit2 and a 2.3.2 C API probe loads on the board without changing system libraries.
-- P2: FP16 and INT8 artifacts include converter logs, hashes, preprocessing contract and CPU/RKNN comparison evidence.
-- P3: the RKNN backend, model import, device identity, metrics and side-by-side package are integrated and unit-tested.
-- P4: file/video and RTSP journeys, task persistence, alarms, 1/2/4/8-channel measurements, restart recovery and 24/72-hour soak evidence pass the candidate-specific thresholds. The current candidate does not satisfy this gate; see the P4 qualification result above.
-
-Vendor model-only FPS is not an end-to-end CosmoEdge acceptance metric. Report decode, preprocessing, NPU run, postprocessing, queue/discard, memory, temperature and NPU utilization separately.
+These observations are candidate-bound and must be rerun after source, model,
+runtime or package changes. Before a release claim, additionally require an
+immutable package, labeled business-accuracy results, credential-safe rotated
+logs, event-retention acceptance and a corrected or disabled NPU utilization
+collector.

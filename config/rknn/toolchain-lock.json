@@ -25,12 +25,10 @@
     "rknn_server_sha256": "eea12fe4270fad8aff015056319705b2eb871563ebd001eff8d8788bdd1c0cfa"
   },
   "device_baseline": {
-    "address": "192.168.0.101",
     "kernel": "6.1.118",
     "rknpu_driver": "0.9.8",
     "system_runtime": "2.1.0",
-    "system_runtime_sha256": "0f1c5db6c649c8705759308aa56ecffc3295c7eb465f9ec9170882f44004aa8d",
-    "backup_path": "/home/moons/cosmo-rk3576-baseline-20260804"
+    "system_runtime_sha256": "0f1c5db6c649c8705759308aa56ecffc3295c7eb465f9ec9170882f44004aa8d"
   },
   "models": {
     "helmet": {

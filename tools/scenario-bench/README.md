@@ -69,10 +69,10 @@ node src/cli.js run \
 
 ```bash
 node src/cli.js checkpoint \
-  --input reports/rk3576-72h/metrics.partial.json \
-  --identity reports/rk3576-72h/identity.txt \
-  --output reports/rk3576-72h/checkpoint-24h.json \
-  --gate-hours 24 \
+  --input reports/rk3576-12h/metrics.partial.json \
+  --identity reports/rk3576-12h/identity.txt \
+  --output reports/rk3576-12h/checkpoint-12h.json \
+  --gate-hours 12 \
   --max-gap-sec 120 \
   --min-fps-ratio 0.9 \
   --expected-preview-streams 4 \

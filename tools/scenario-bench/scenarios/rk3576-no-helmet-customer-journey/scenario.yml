@@ -1,5 +1,5 @@
-name: rk3576-no-helmet-p8-customer-journey
-displayName: RK3576 P8 客户旅程（单路 5 FPS）
+name: rk3576-no-helmet-customer-journey
+displayName: RK3576 客户旅程（单路 5 FPS）
 sampleIntervalSec: 3
 
 channels:

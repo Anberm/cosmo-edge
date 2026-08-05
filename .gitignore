@@ -12,6 +12,8 @@
 /artifacts/
 /output/
 /tmp/
+/docs/evidence/rk3576/
+/tools/scenario-bench/reports/
 
 CLAUDE.md
 AGENTS.md

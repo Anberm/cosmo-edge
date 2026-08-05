@@ -84,7 +84,7 @@ function sample(index, overrides = {}) {
 
 function runResult(count = 5) {
   return {
-    scenarioName: 'RK3576 4ch 5fps 72h',
+    scenarioName: 'RK3576 4ch 5fps 12h',
     status: 'running',
     startedAt: new Date(START).toISOString(),
     endedAt: new Date(START + count * 60_000).toISOString(),

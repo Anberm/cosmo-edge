@@ -49,7 +49,7 @@ Usage:
   scenario-bench preview --device <url> (--user <u> --password <p> | --token-env <name>) --channel <id> --output <dir> [options]
   scenario-bench doctor --scenario <dir> [--device <url> --user <u> --password <p>] [--output <dir>]
   scenario-bench init-scenario --name <name> --template <algorithm-template.json> --video <file> [options]
-  scenario-bench checkpoint --input <metrics.partial.json> --output <checkpoint.json> --gate-hours <24|72> [options]
+  scenario-bench checkpoint --input <metrics.partial.json> --output <checkpoint.json> --gate-hours <hours> [options]
 
 run required:
   --device <url>       Device base URL, e.g. http://192.168.1.10:8080
@@ -103,7 +103,7 @@ init-scenario options:
 checkpoint options:
   --input <file>       Running metrics.partial.json or completed metrics.json
   --output <file>      Atomic JSON checkpoint output path
-  --gate-hours <n>     Required continuous runtime, e.g. 24 or 72
+  --gate-hours <n>     Required continuous runtime, e.g. 12
   --identity <file>    Optional immutable candidate identity key=value file
   --source-label <s>   Canonical remote/source path recorded in evidence
   --identity-label <s> Canonical identity path recorded in evidence
