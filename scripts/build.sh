@@ -49,7 +49,12 @@ fi
 BUILD_DIR="${PROJECT_ROOT_PATH}/build"
 INSTALL_DIR="${BUILD_DIR}/install"
 PACKAGE_DIR="${BUILD_DIR}/packages"
-COSMO_GUARD_SDK_DIR="${COSMO_MODEL_GUARD_SDK_ROOT:-${PROJECT_ROOT_PATH}/prebuild/model-guard-v2}"
+DEFAULT_COSMO_GUARD_SDK_DIR="${PROJECT_ROOT_PATH}/prebuild/model-guard-v2"
+if [ "${COSMO_MODEL_GUARD_BUILD_PROFILE}" = "production-release" ] &&
+   [ -d /build_output/model-guard-sdk-production ]; then
+    DEFAULT_COSMO_GUARD_SDK_DIR=/build_output/model-guard-sdk-production
+fi
+COSMO_GUARD_SDK_DIR="${COSMO_MODEL_GUARD_SDK_ROOT:-${DEFAULT_COSMO_GUARD_SDK_DIR}}"
 MODEL_GUARD_PROFILE_ARGS=(
     -DCOSMO_MODEL_GUARD_BUILD_PROFILE="${COSMO_MODEL_GUARD_BUILD_PROFILE}"
     -DCOSMO_PACKAGE_MODELS="${COSMO_PACKAGE_MODELS:-include}"

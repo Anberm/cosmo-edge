@@ -99,6 +99,9 @@ COSMO_MODEL_GUARD_BUILD_PROFILE=production-release \
 ```
 
 如果受控 SDK 中缺少 `cosmo-model-provision`，Protected 构建会直接失败。
+受控生产 SDK 应放在宿主机的
+`build_output/model-guard-sdk-production/`，该目录通过现有 Compose 挂载进入
+容器且不会提交到 Git。Protected 构建会自动优先使用它；Open 构建不受影响。
 
 Protected 的 CPack 产物本身就是管理页面接受的升级包，不再需要离线应用签名步骤。
 Guard 设备证书和模型加密秘密仍属于受控输入，不得写入公开仓库。

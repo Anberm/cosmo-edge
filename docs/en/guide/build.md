@@ -130,6 +130,10 @@ COSMO_MODEL_GUARD_BUILD_PROFILE=production-release \
 
 The Protected build fails immediately if the controlled SDK does not contain
 `cosmo-model-provision`.
+Stage the controlled production SDK under the host path
+`build_output/model-guard-sdk-production/`. The existing Compose volume exposes
+that ignored directory to the container, and Protected builds select it
+automatically. Open builds remain unchanged.
 
 The Protected CPack artifact is itself the upgrade archive accepted by the web
 management page. No offline application-signing step is required. Guard device
