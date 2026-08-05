@@ -59,7 +59,34 @@ The x86 Compose file publishes:
 - `18088`
 - `8000/udp`
 
-If a port is occupied, you can modify the host port in `docker-compose.x86.yml` (or `docker-compose.x86.windows.yml` on Windows), or stop the service that occupies the port.
+If a port is occupied, you can modify the host port in `docker-compose.x86.yml`, or stop the service that occupies the port.
+
+On Windows, Hyper-V / WSL can reserve a TCP port range. Docker may therefore report a bind failure even when `netstat` shows no listening process. Check the reserved ranges first:
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+`docker-compose.x86.windows.yml` accepts `COSMO_X86_WEB_PORT`, so you can change the web host port without editing a tracked file. For example, use `8280`:
+
+```powershell
+$env:COSMO_X86_WEB_PORT = "8280"
+docker compose -f docker-compose.x86.windows.yml up -d --build
+```
+
+Then open `http://127.0.0.1:8280`. The default remains `8080` when the variable is unset.
+
+## Windows Build Scripts Report `No such file or directory`
+
+If a Docker build reports that an existing `configure`, `config`, or `Configure` file cannot be executed, Git for Windows may have checked out the extensionless script with CRLF endings. The container then cannot parse its shebang.
+
+The root `.gitattributes` pins automatically detected text files, including these extensionless scripts, to LF. After pulling the latest rules, retry from a fresh clone or clean worktree with no uncommitted changes. Confirm the rules with:
+
+```powershell
+git check-attr text eol -- 3rd/mp4v2-2.0.0/configure 3rd/openssl-3.5.3/config 3rd/srs-6.0-r0/trunk/configure
+```
+
+All three files should report `text: auto` and `eol: lf`.
 
 ## No Release Package in `build_output/`
 
