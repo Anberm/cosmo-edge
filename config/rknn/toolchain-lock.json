@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "target_platform": "rk3576",
+  "cosmo_edge_base_sha": "2eaf5fd7b096f98a9dca1ef298e03440484e15bc",
+  "tensorrt_reference_sha": "57c578616ba826f01921bb4e43d7a695549b6b9e",
+  "rknn_toolkit2": {
+    "version": "2.3.2",
+    "tag_sha": "42aa1d426c0a9e0869b6374edba009f7208a1926",
+    "python": "3.10",
+    "wheel_sha256": "6cb783ddf293ac509f39bf9127acf6a5492bbb67e4b4b4ac33a7c6d2cefb4f3c"
+  },
+  "rknn_model_zoo": {
+    "version": "2.3.2",
+    "tag_sha": "bad6c7334531becaf90a561988519b7bec34d0ab"
+  },
+  "offline_bundle": {
+    "file": "rk3576-offline-bundle-v2.3.2-20260804.tar.gz",
+    "sha256": "12960656f854ab8bfe0e2ee2292745245d82d1cd88b7acd0a8cb6c06c080c726",
+    "entry_count": 42
+  },
+  "runtime": {
+    "version": "2.3.2",
+    "librknnrt_sha256": "d31fc19c85b85f6091b2bd0f6af9d962d5264a4e410bfb536402ec92bac738e8",
+    "rknn_api_header_sha256": "c48e11a6f41b451a5fd1e4ad774ea60252d3d94f78bee9b21ea3d21b21deba9a",
+    "rknn_server_sha256": "eea12fe4270fad8aff015056319705b2eb871563ebd001eff8d8788bdd1c0cfa"
+  },
+  "device_baseline": {
+    "address": "192.168.0.101",
+    "kernel": "6.1.118",
+    "rknpu_driver": "0.9.8",
+    "system_runtime": "2.1.0",
+    "system_runtime_sha256": "0f1c5db6c649c8705759308aa56ecffc3295c7eb465f9ec9170882f44004aa8d",
+    "backup_path": "/home/moons/cosmo-rk3576-baseline-20260804"
+  },
+  "models": {
+    "helmet": {
+      "onnx_sha256": "a0ea37d99416371c6ef073d5ac87b486b77bb822b1f8aa29f2f30a8a06c97cdd",
+      "opset": 19,
+      "input": [1, 3, 224, 224],
+      "output": [1, 2]
+    },
+    "yolov8": {
+      "onnx_sha256": "5f8e91cb4507596b66cd5e3b7193bb16f7bd4779ed3b78e3613fcc51b83db8e1",
+      "opset": 22,
+      "required_opset": 19,
+      "input": [1, 3, 640, 640],
+      "output": [1, 84, 8400]
+    }
+  }
+}
