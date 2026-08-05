@@ -99,6 +99,9 @@ if(COSMO_NN_USE_CPU_BACKEND)
 endif()
 if(COSMO_NN_USE_RKNN_BACKEND)
     target_link_libraries(cosmo_nn PRIVATE rknnrt)
+    if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+        target_link_libraries(cosmo_nn PRIVATE rockchip_rga)
+    endif()
 endif()
 
 # Ensure all ExternalProject third-party targets are built before compiling NN

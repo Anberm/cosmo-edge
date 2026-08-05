@@ -1,0 +1,79 @@
+#pragma once
+
+#if defined(COSMO_NN_USE_RKNN_BACKEND) && defined(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+#include "nn/node/node.h"
+
+namespace cosmo::nn {
+
+bool RknnFastPreprocessEnabled();
+bool RknnForceRgaFailure();
+bool IsRknnDetectorResizeContract(int out_height, int out_width, int gravity,
+                                  const std::vector<int>& padding_color);
+bool IsRknnNativeNormalizeContract(const std::vector<float>& mean,
+                                   const std::vector<float>& std_dev, float scale,
+                                   const DimsVector& input_dims);
+void MapPackedU8ToNativeInt8(const uint8_t* source, int8_t* destination, size_t pixels,
+                             bool swap_red_blue);
+
+class RknnResizeNode final : public Node {
+public:
+    RknnResizeNode();
+    ~RknnResizeNode() override = default;
+
+    void LoadParam(Op* op) override;
+    DeviceType GetTopBlobDeviceType() override;
+    Status InferTopShapes() override;
+    size_t GetBottomCount() override;
+    size_t GetTopCount() override;
+    Status Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
+                   std::vector<std::shared_ptr<Blob>>& top_blobs) override;
+
+private:
+    Status ResizeSingle(const std::shared_ptr<Blob>& bottom, const std::shared_ptr<Blob>& top);
+    bool ResizeWithRga(const Blob& bottom, Blob& top);
+    void ResizeWithCpu(const Blob& bottom, Blob& top, bool output_rgb) const;
+
+    int out_height_{0};
+    int out_width_{0};
+    int gravity_{0};
+    std::vector<int> padding_color_{114, 114, 114};
+    bool detector_contract_{false};
+};
+
+class RknnNormalizeNode final : public Node {
+public:
+    RknnNormalizeNode();
+    ~RknnNormalizeNode() override = default;
+
+    void LoadParam(Op* op) override;
+    DeviceType GetTopBlobDeviceType() override;
+    bool NeedBottomShapesInfered() override;
+    Status InferTopShapesWithBottoms(std::vector<DimsVector> dims,
+                                     std::vector<DataType> types) override;
+    size_t GetBottomCount() override;
+    size_t GetTopCount() override;
+    Status Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
+                   std::vector<std::shared_ptr<Blob>>& top_blobs) override;
+
+private:
+    bool NeedSwapRedBlue(ImageFormat format) const;
+    Status ForwardNative(const Blob& bottom, Blob& top);
+    Status ForwardFloat(const Blob& bottom, Blob& top);
+
+    std::vector<float> mean_{};
+    std::vector<float> std_dev_{};
+    std::vector<float> scale_{};
+    float uniform_scale_{1.0f};
+    bool is_bgr_{true};
+    bool native_contract_{false};
+    bool detector_sized_{false};
+};
+
+}  // namespace cosmo::nn
+
+#endif
