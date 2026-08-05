@@ -164,7 +164,13 @@ export class ScenarioPackage {
     const targetFps = explicitTargetFps ?? extractTargetFpsFromTemplate(template);
     const normalizedType = normalizeTaskType(type);
     const videoReadFps = this.videoMode === 'local' && normalizedType === 'vlm' ? targetFps : null;
-    const taskConfig = buildTaskConfig(template, this.videoRepeatCount, videoReadFps);
+    const taskConfig = buildTaskConfig(
+      template,
+      this.videoRepeatCount,
+      videoReadFps,
+      spec.taskConfig,
+      `tasks[${index}]`,
+    );
 
     return {
       id,
@@ -283,9 +289,32 @@ export class ScenarioPackage {
   }
 }
 
-function buildTaskConfig(template, videoRepeatCount, videoReadFps = null) {
+function buildTaskConfig(
+  template,
+  videoRepeatCount,
+  videoReadFps = null,
+  taskConfigOverride = null,
+  taskPath = 'task',
+) {
   const base = template.taskConfig ?? { params: [], areas: [] };
-  const params = Array.isArray(base.params) ? [...base.params] : [];
+  if (taskConfigOverride != null
+      && (typeof taskConfigOverride !== 'object' || Array.isArray(taskConfigOverride))) {
+    throw new Error(`scenario.yml: ${taskPath}.taskConfig must be an object`);
+  }
+
+  const override = taskConfigOverride ?? {};
+  if (override.params != null && !Array.isArray(override.params)) {
+    throw new Error(`scenario.yml: ${taskPath}.taskConfig.params must be an array`);
+  }
+  if (override.areas != null && !Array.isArray(override.areas)) {
+    throw new Error(`scenario.yml: ${taskPath}.taskConfig.areas must be an array`);
+  }
+
+  const params = mergeTaskConfigParams(
+    Array.isArray(base.params) ? base.params : [],
+    override.params ?? [],
+    taskPath,
+  );
   const hasRepeat = params.some((p) => p?.key === 'param.videoRepeatCount');
   if (!hasRepeat) {
     params.push({ key: 'param.videoRepeatCount', value: String(videoRepeatCount) });
@@ -294,7 +323,51 @@ function buildTaskConfig(template, videoRepeatCount, videoReadFps = null) {
   if (!hasReadFps && Number.isFinite(videoReadFps) && videoReadFps > 0) {
     params.push({ key: 'param.videoReadFps', value: String(videoReadFps) });
   }
-  return { ...base, params, areas: base.areas ?? [] };
+  return {
+    ...base,
+    ...override,
+    params,
+    areas: override.areas ?? base.areas ?? [],
+  };
+}
+
+function mergeTaskConfigParams(baseParams, overrideParams, taskPath) {
+  const params = baseParams.map((param) => ({ ...param }));
+  const indexByKey = new Map();
+  for (const [index, param] of params.entries()) {
+    if (param?.key != null && !indexByKey.has(String(param.key))) {
+      indexByKey.set(String(param.key), index);
+    }
+  }
+
+  const overrideKeys = new Set();
+  for (const [index, param] of overrideParams.entries()) {
+    const key = String(param?.key ?? '').trim();
+    if (!key) {
+      throw new Error(
+        `scenario.yml: ${taskPath}.taskConfig.params[${index}].key must be a non-empty string`,
+      );
+    }
+    if (param.value == null) {
+      throw new Error(
+        `scenario.yml: ${taskPath}.taskConfig.params[${index}].value is required`,
+      );
+    }
+    if (overrideKeys.has(key)) {
+      throw new Error(`scenario.yml: ${taskPath}.taskConfig.params has duplicate key "${key}"`);
+    }
+    overrideKeys.add(key);
+
+    const normalized = { ...param, key, value: String(param.value) };
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex == null) {
+      indexByKey.set(key, params.length);
+      params.push(normalized);
+    } else {
+      params[existingIndex] = normalized;
+    }
+  }
+  return params;
 }
 
 export function defaultHoldSecForTasks(tasks) {

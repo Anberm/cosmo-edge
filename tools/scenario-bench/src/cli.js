@@ -19,6 +19,7 @@ import { summarizeStep, runtimeStepDecision } from './step-evaluator.js';
 import { strategyForTaskType } from './task-strategies.js';
 import { PreviewLoad } from './preview-load.js';
 import { runPreviewValidation } from './preview-validator.js';
+import { auditLongRunFile, writeLongRunAudit } from './longrun-auditor.js';
 
 function parseArgs(argv) {
   const args = {};
@@ -33,7 +34,7 @@ function parseArgs(argv) {
       } else {
         args[key] = argv[++i];
       }
-    } else if (!args.command && ['run', 'doctor', 'preview', 'init-scenario'].includes(a)) {
+    } else if (!args.command && ['run', 'doctor', 'preview', 'init-scenario', 'checkpoint'].includes(a)) {
       args.command = a;
     }
   }
@@ -48,6 +49,7 @@ Usage:
   scenario-bench preview --device <url> (--user <u> --password <p> | --token-env <name>) --channel <id> --output <dir> [options]
   scenario-bench doctor --scenario <dir> [--device <url> --user <u> --password <p>] [--output <dir>]
   scenario-bench init-scenario --name <name> --template <algorithm-template.json> --video <file> [options]
+  scenario-bench checkpoint --input <metrics.partial.json> --output <checkpoint.json> --gate-hours <24|72> [options]
 
 run required:
   --device <url>       Device base URL, e.g. http://192.168.1.10:8080
@@ -97,6 +99,20 @@ init-scenario options:
   --algorithm-id <id>  Defaults to algorithmCode/algorithmId from the template
   --schedule-id <id>   Defaults to default-schedule
   --target-fps <n>     Writes tasks[].targetFps when the template cannot expose it
+
+checkpoint options:
+  --input <file>       Running metrics.partial.json or completed metrics.json
+  --output <file>      Atomic JSON checkpoint output path
+  --gate-hours <n>     Required continuous runtime, e.g. 24 or 72
+  --identity <file>    Optional immutable candidate identity key=value file
+  --source-label <s>   Canonical remote/source path recorded in evidence
+  --identity-label <s> Canonical identity path recorded in evidence
+  --max-gap-sec <n>    Maximum sampling gap, default 120
+  --max-freshness-sec <n> Maximum age of last running sample, default 120
+  --min-fps-ratio <n>  Per-binding minimum FPS / target FPS, default 0.9
+  --expected-preview-streams <n> Required preview publishing stream count
+  --expected-decoder-backend <s> Required decoder backend identifier
+  --expected-encoder-backend <s> Required encoder backend identifier
 `);
 }
 
@@ -371,6 +387,7 @@ async function runBenchmark(args) {
       scheduleId: task.scheduleId,
       targetFps: task.targetFps,
       templateFile: task.templateFile,
+      taskConfig: task.taskConfig,
     })) ?? [],
     bindings: pkg?.bindings ?? [],
     algorithmId: pkg?.algorithmId,
@@ -535,11 +552,16 @@ async function runBenchmark(args) {
       const cpu98Count = lastConsecutive((s) => s.hardware?.cpuUtilization?.usedPercent, (v) => v >= 98);
       const npu98Count = lastConsecutive((s) => s.hardware?.npuUtilization?.usedPercent, (v) => v >= 98);
       const discardCount = lastConsecutive(meanChannelDiscard, (v) => v > DISCARD_BOTTLENECK);
+      const diskUsed = sample.hardware?.eMMCUtilization?.usedPercent;
+      const diskLimit = Number(pkg?.thresholds?.pass?.maxDiskUsedPercent ?? 90);
       if (mem98Count >= 3) reasons.push(`memory >= 98% for ${mem98Count} consecutive samples`);
       if (memAvg60s != null && memAvg60s >= 95) reasons.push(`memory 60s average ${memAvg60s.toFixed(1)}% >= 95%`);
       if (cpu98Count >= 3) reasons.push(`CPU >= 98% for ${cpu98Count} consecutive samples`);
       // if (npu98Count >= 3) reasons.push(`NPU >= 98% for ${npu98Count} consecutive samples`);
       if (discardCount >= 2) reasons.push(`discardRate > ${DISCARD_BOTTLENECK} for ${discardCount} consecutive samples`);
+      if (Number.isFinite(diskUsed) && Number.isFinite(diskLimit) && diskUsed >= diskLimit) {
+        reasons.push(`disk ${diskUsed}% >= ${diskLimit}%`);
+      }
       return reasons.length ? { stop: true, reason: reasons.join('; ') } : { stop: false };
     };
 
@@ -561,7 +583,7 @@ async function runBenchmark(args) {
         await previewLoad.sync(entries);
       },
       onSample: async () => {
-        await captureSample('hold', currentChannels);
+        return quickFuse(await captureSample('hold', currentChannels));
       },
       onStepEnd: async (step) => {
         const summary = summarizeStep(step, samples, pkg.thresholds, pkg.videoMode);
@@ -662,6 +684,38 @@ async function runPreviewCommand(args) {
   log.info(`Preview validation ${report.status}: ${path.join(path.resolve(args.output), 'preview-validation.json')}`);
 }
 
+function optionalNumber(args, key) {
+  if (args[key] == null) return undefined;
+  const value = Number(args[key]);
+  if (!Number.isFinite(value)) throw new Error(`--${key} must be a number`);
+  return value;
+}
+
+async function runCheckpoint(args) {
+  requireArgs(args, ['input', 'output', 'gate-hours']);
+  const result = auditLongRunFile(args.input, {
+    gateHours: optionalNumber(args, 'gate-hours'),
+    maxGapSec: optionalNumber(args, 'max-gap-sec'),
+    maxFreshnessSec: optionalNumber(args, 'max-freshness-sec'),
+    minFpsRatio: optionalNumber(args, 'min-fps-ratio'),
+    maxCpuPercent: optionalNumber(args, 'max-cpu-percent'),
+    maxMemoryPercent: optionalNumber(args, 'max-memory-percent'),
+    maxPoolGrowthBytes: optionalNumber(args, 'max-pool-growth-bytes'),
+    expectedPreviewStreams: optionalNumber(args, 'expected-preview-streams'),
+    expectedDecoderBackend: args['expected-decoder-backend'],
+    expectedEncoderBackend: args['expected-encoder-backend'],
+    identityPath: args.identity,
+    sourceLabel: args['source-label'],
+    identityLabel: args['identity-label'],
+  });
+  const output = writeLongRunAudit(args.output, result);
+  console.log(`Long-run ${args['gate-hours']}h checkpoint: ${result.verdict}`);
+  console.log(`  ${output}`);
+  if (result.failures.length) console.log(`  failed: ${result.failures.join(', ')}`);
+  if (result.pending.length) console.log(`  pending: ${result.pending.join(', ')}`);
+  process.exitCode = result.verdict === 'PASS' ? 0 : (result.verdict === 'IN_PROGRESS' ? 3 : 1);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.command || args.command === 'help') {
@@ -678,6 +732,10 @@ async function main() {
   }
   if (args.command === 'preview') {
     await runPreviewCommand(args);
+    return;
+  }
+  if (args.command === 'checkpoint') {
+    await runCheckpoint(args);
     return;
   }
   await runBenchmark(args);

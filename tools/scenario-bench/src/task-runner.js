@@ -113,7 +113,7 @@ export class TaskRunner {
    * @param {object} hooks
    * @param {(step:object, active:string[], added:string[], entries:object[]) => Promise<{stop:boolean, reason?:string}|void>} [hooks.onRampBatch]
    * @param {(step:object, active:string[], entries:object[]) => Promise<void>} [hooks.onStepStart]
-   * @param {() => Promise<void>} [hooks.onSample]
+   * @param {() => Promise<{stop:boolean, reason?:string}|void>} [hooks.onSample]
    * @param {(step:object, active:string[], entries:object[]) => Promise<{stop:boolean, reason?:string}|void>} [hooks.onStepEnd]
    * @param {number} sampleIntervalSec
    * @returns {Promise<{bottleneckStep?:number, bottleneckReason?:string}>}
@@ -178,7 +178,21 @@ export class TaskRunner {
         for (let t = 0; t < ticks; t++) {
           await sleep(sampleIntervalSec * 1000);
           try {
-            if (hooks?.onSample) await hooks.onSample();
+            if (hooks?.onSample) {
+              const decision = await hooks.onSample();
+              if (decision?.stop) {
+                this.log?.warn(
+                  `[step ${i + 1}] hold fuse tripped: ${decision.reason ?? 'threshold breached'}`,
+                );
+                bottleneck = {
+                  bottleneckStep: i,
+                  bottleneckChannels: active.length,
+                  bottleneckPhase: 'hold',
+                  bottleneckReason: decision.reason ?? 'hold fuse tripped',
+                };
+                return bottleneck;
+              }
+            }
           } catch (err) {
             // Missing the remainder of a hold window can otherwise turn an
             // outage into a false PASS based only on pre-failure samples.

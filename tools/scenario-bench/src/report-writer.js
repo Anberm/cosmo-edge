@@ -220,6 +220,7 @@ export class ReportWriter {
         <td class="${s.maxAcceleratorMem >= 90 ? 'fail' : ''}">${s.maxAcceleratorMem != null ? s.maxAcceleratorMem + '%' : '-'}</td>
         <td class="${s.maxCpu >= 90 ? 'fail' : ''}">${s.maxCpu != null ? s.maxCpu + '%' : '-'}</td>
         <td class="${s.maxMem >= 90 ? 'fail' : ''}">${s.maxMem != null ? s.maxMem + '%' : '-'}</td>
+        <td class="${s.maxDiskUsedPercent >= 90 ? 'fail' : ''}">${s.maxDiskUsedPercent != null ? s.maxDiskUsedPercent + '%' : '-'}</td>
         <td>${formatMib(s.maxPoolInUseBytes)}/${formatMib(s.maxPoolAllocatedBytes)}/${s.maxPoolUtilizationPercent != null ? s.maxPoolUtilizationPercent + '%' : '-'}</td>
         <td class="${status.className}">${status.label}</td>
         <td>${esc((s.reasons ?? []).join('; '))}</td>
@@ -310,7 +311,7 @@ ${bottleneckBanner}
 <table>${baseRows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>路数结果</h2>
 <table>
-  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>内存池在用/分配MiB/占用率</th><th>结果</th><th>失败原因</th></tr>
+  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>磁盘峰值</th><th>内存池在用/分配MiB/占用率</th><th>结果</th><th>失败原因</th></tr>
   ${stepRows}
 </table>
 <h2>媒体与预览分阶段指标</h2>

@@ -253,6 +253,7 @@ export function thresholdLabel(name, strategy = null) {
     avgDiscardRate: '平均丢弃率',
     maxDiscardRate: '丢弃率',
     maxPacketDiscardRate: '网络丢包率',
+    maxDiskUsedPercent: '设备磁盘使用率',
     maxPrimaryLatencyMs: s.primaryLatencyLabel,
     maxDetectorLatencyMs: '检测节点延时',
     maxAnalysisLatencyMs: '分析节点延时',

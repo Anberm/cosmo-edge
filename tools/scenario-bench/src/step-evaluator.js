@@ -125,6 +125,7 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
   });
   const maxCpu = peak((tick) => tick.hardware?.cpuUtilization?.usedPercent);
   const maxMem = peak((tick) => tick.hardware?.generalMemoryUtilization?.usedPercent);
+  const maxDiskUsedPercent = peak((tick) => tick.hardware?.eMMCUtilization?.usedPercent);
   const maxPoolAllocatedBytes = peak((tick) => tick.hardware?.memoryPool?.totalAllocatedBytes);
   const maxPoolInUseBytes = peak((tick) => tick.hardware?.memoryPool?.totalInUseBytes);
   const maxPoolUtilizationPercent = peak((tick) => tick.hardware?.memoryPool?.utilizationPercent);
@@ -139,6 +140,24 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     if (!verdict.pass) {
       overall.pass = false;
       overall.reasons.push(...verdict.reasons);
+    }
+  }
+  const diskLimit = thresholds.pass?.maxDiskUsedPercent;
+  if (diskLimit != null) {
+    const ok = maxDiskUsedPercent == null || maxDiskUsedPercent <= diskLimit;
+    perThreshold.push({
+      taskKey: '*',
+      taskDisplayName: 'device',
+      taskType: 'system',
+      strategy: 'system',
+      name: 'maxDiskUsedPercent',
+      threshold: diskLimit,
+      actual: maxDiskUsedPercent,
+      result: maxDiskUsedPercent == null ? 'N/A' : (ok ? 'PASS' : 'FAIL'),
+    });
+    if (!ok) {
+      overall.pass = false;
+      overall.reasons.push(`设备磁盘使用率 ${maxDiskUsedPercent}%，阈值 ${diskLimit}%`);
     }
   }
   if (videoMode !== 'local') {
@@ -176,6 +195,7 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     maxAcceleratorMem,
     maxCpu,
     maxMem,
+    maxDiskUsedPercent,
     maxPoolAllocatedBytes,
     maxPoolInUseBytes,
     maxPoolUtilizationPercent,
