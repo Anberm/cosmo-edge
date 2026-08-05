@@ -12,6 +12,7 @@ class MockTaskService;
 class MockCameraService;
 class MockAlgorithmService;
 class MockModelService;
+class MockModelAuthorizationService;
 class MockScheduleService;
 class MockAuthService;
 class MockAppInfoService;
@@ -48,6 +49,7 @@ struct MockServiceRegistry {
     MockCameraService& cameraSvc;
     MockAlgorithmService& algSvc;
     MockModelService& modelSvc;
+    MockModelAuthorizationService& modelAuthorizationSvc;
     MockScheduleService& scheduleSvc;
     MockAuthService& authSvc;
     MockAppInfoService& appInfoSvc;

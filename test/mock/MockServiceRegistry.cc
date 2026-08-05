@@ -20,6 +20,7 @@
 #include "mock/MockFaceLibService.h"
 #include "mock/MockLinkageService.h"
 #include "mock/MockLiveStreamService.h"
+#include "mock/MockModelAuthorizationService.h"
 #include "mock/MockModelService.h"
 #include "mock/MockNetworkService.h"
 #include "mock/MockOnboardingService.h"
@@ -40,6 +41,7 @@ struct MockServiceRegistryImpl {
     MockCameraService cameraSvc;
     MockAlgorithmService algSvc;
     MockModelService modelSvc;
+    MockModelAuthorizationService modelAuthorizationSvc;
     MockScheduleService scheduleSvc;
     MockAuthService authSvc;
     MockAppInfoService appInfoSvc;
@@ -75,6 +77,7 @@ MockServiceRegistry::MockServiceRegistry()
       cameraSvc(impl->cameraSvc),
       algSvc(impl->algSvc),
       modelSvc(impl->modelSvc),
+      modelAuthorizationSvc(impl->modelAuthorizationSvc),
       scheduleSvc(impl->scheduleSvc),
       authSvc(impl->authSvc),
       appInfoSvc(impl->appInfoSvc),
@@ -128,6 +131,7 @@ MockServiceRegistry::MockServiceRegistry()
     service::ServiceRegistry::Instance().Set<service::IAlgorithmLayout>(
         static_cast<service::IAlgorithmLayout*>(&algSvc));
     service::ServiceRegistry::Instance().Set<service::IModelService>(&modelSvc);
+    service::ServiceRegistry::Instance().Set<service::IModelAuthorizationService>(&modelAuthorizationSvc);
     service::ServiceRegistry::Instance().Set<service::IScheduleService>(&scheduleSvc);
     service::ServiceRegistry::Instance().Set<service::IAuthService>(&authSvc);
 
@@ -212,6 +216,7 @@ MockServiceRegistry::~MockServiceRegistry() {
     service::ServiceRegistry::Instance().Set<service::IAlgorithmCrud>(nullptr);
     service::ServiceRegistry::Instance().Set<service::IAlgorithmLayout>(nullptr);
     service::ServiceRegistry::Instance().Set<service::IModelService>(nullptr);
+    service::ServiceRegistry::Instance().Set<service::IModelAuthorizationService>(nullptr);
     service::ServiceRegistry::Instance().Set<service::IScheduleService>(nullptr);
     service::ServiceRegistry::Instance().Set<service::IAuthService>(nullptr);
 
