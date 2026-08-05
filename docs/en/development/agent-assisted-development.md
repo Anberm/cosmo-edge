@@ -213,11 +213,14 @@ rotation control the remaining conversation-retention risk.
 | Frontend development | `src/web/`, existing components, and build commands | Follow the requested UI task; do not route it through model conversion |
 | Core engine | `src/`, build scripts, and Catch2 tests | Upstream core changes still follow issue, review, and hardware-evidence requirements |
 
-Official promotion of a model-conversion example is represented only by an actual `verified` entry in
-`test/agent/examples/model-conversion/index.json`. An empty index means the foundation exists but the
-release candidate has not yet met the “two real recordings + fixed toolchain identity + tensor comparison”
-bar. It must not be described as a verified example. Normal candidates can still return complete, partial,
-or unverified results against their own acceptance.
+Model-conversion example promotion is currently **Beta**. Official promotion is represented only by an
+actual entry in `test/agent/examples/model-conversion/index.json` whose status is `conversion-verified`,
+whose lifecycle is `active`, and whose verification seal remains valid. A short code is only an evidence-
+chain reference; its presence in a file does not by itself prove that the seal is still valid. Revocation
+changes lifecycle to `revoked` and preserves historical recordings and seals, but removes the example from
+official selection and compatibility claims. An empty index means no official example currently meets
+these conditions. Normal candidates can still return complete, partial, or unverified results against
+their own acceptance.
 
 ## When the Deliverable Lives in Another Project
 
@@ -249,15 +252,18 @@ and return an importable artifact and verification conclusion,” the agent shou
 4. Consolidate unresolved business, environment, and authority questions. After user confirmation, record
    coarse authority and rerun `assess`; the user writes no Schema, authority JSON, or toolchain release.
 5. Run `scripts/agent/doctor.sh` in the Linux environment that will execute the conversion. It discovers
-   compatible capabilities and freezes actual releases, paths, and hashes after admission. It never pulls
-   an image or installs a dependency.
+   compatible capabilities and uses `compatibility-matrix` to compare the target chip, artifact, and
+   repository facts. Explicit conflicts fail; missing facts remain unverified. It freezes actual releases,
+   paths, and hashes after admission and never pulls an image or installs a dependency.
 6. Run `scripts/agent/convert_model.sh`. It calls `tools/check_onnx_model.py`, then invokes
    `model_transform` and `model_deploy` through the admitted TPU-MLIR package, Python, and command identity.
    Docker participates only when the task selects a complete-toolchain image. Generated files do not
    overwrite existing model resources.
 7. Run `scripts/agent/verify.sh` to recheck source and artifact hashes and produce machine-readable
-   `evidence.json` plus readable `evidence.md`. Reruns preserve earlier failures; only a new measured pass
-   or an explicit user waiver explains the later state.
+   `evidence.json` plus readable `evidence.md`. A complete evidence chain also produces `seal.json` and a
+   short code. The summary always distinguishes conversion and tensor coverage from device runtime and
+   business-accuracy acceptance. Reruns preserve earlier failures; only a new measured pass or an explicit
+   user waiver explains the later state.
 
 Candidate parameters come from this task, not a YOLOv8n example's fixed shape, class count, or hash. An
 explicit request for another chip must not be rewritten as BM1688. Without independent evidence mapping

@@ -379,9 +379,11 @@ The agent path writes these results to the current run's `execution-manifest.jso
 Each rerun archives the prior manifest in the private run. A new `UNVERIFIED` result cannot erase a prior
 failure; only a new measured `PASS` or an explicitly user-confirmed waiver with a reason explains the later
 conclusion. Remote execution also records sanitized data-flow status without storing transfer credentials.
-An entry can join the verified-example index only after two real recordings with a fixed toolchain and
-passing tensor comparison. A normal candidate can still be delivered against its own task acceptance,
-but it must not borrow another example's fixed shapes or hashes as proof.
+An entry is eligible as an official example only after two real recordings with a fixed toolchain, passing
+tensor comparison, `conversion-verified` status, `active` lifecycle, and a still-valid verification seal.
+The short code is only a seal reference. A `revoked` example keeps its historical recordings and seal but
+cannot be selected or cited for compatibility. A normal candidate can still be delivered against its own
+task acceptance, but it must not borrow another example's fixed shapes or hashes as proof.
 
 The Sophon Add Model page requires a `.bmodel` file.
 
