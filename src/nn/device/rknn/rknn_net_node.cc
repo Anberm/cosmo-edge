@@ -182,6 +182,9 @@ void RknnNetNode::DestroyContext() {
     }
     input_attrs_.clear();
     output_attrs_.clear();
+    std::vector<rknn_output>().swap(runtime_outputs_);
+    std::vector<RknnYolov8Head>().swap(float_yolov8_heads_);
+    std::vector<RknnYolov8QuantizedHead>().swap(quantized_yolov8_heads_);
     model_data_.clear();
     std::vector<float>().swap(input_nhwc_);
     io_count_              = {};
@@ -249,6 +252,9 @@ Status RknnNetNode::QueryTensorAttributes() {
             return Status(COSMO_NN_ERR_UNSUPPORT_NET, "RKNN model contains an invalid output shape");
         output_shapes.push_back(std::move(shape));
     }
+    runtime_outputs_.resize(output_attrs_.size());
+    float_yolov8_heads_.reserve(output_attrs_.size());
+    quantized_yolov8_heads_.reserve(output_attrs_.size());
 
     RknnYolov8Layout yolo_layout;
     std::string adapter_error;
@@ -516,7 +522,10 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         return finish(RknnError("rknn_run", result));
 
     const bool native_yolov8_output = native_yolov8_outputs_ && RknnFastOutputEnabled();
-    std::vector<rknn_output> outputs(output_attrs_.size());
+    if (shared_resource)
+        shared_resource->prefer_yolov8_class_major_scan = native_yolov8_output;
+    auto& outputs = runtime_outputs_;
+    std::fill(outputs.begin(), outputs.end(), rknn_output{});
     for (uint32_t index = 0; index < outputs.size(); ++index) {
         outputs[index].index       = index;
         outputs[index].want_float  = native_yolov8_output ? 0 : 1;
@@ -558,8 +567,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                 Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN YOLOv8 top blob is invalid"));
         std::string adapter_error;
         if (native_yolov8_output) {
-            std::vector<RknnYolov8QuantizedHead> heads;
-            heads.reserve(outputs.size());
+            auto& heads = quantized_yolov8_heads_;
+            heads.clear();
             for (size_t index = 0; index < outputs.size(); ++index) {
                 if (!outputs[index].buf || outputs[index].size != output_attrs_[index].size) {
                     return finish_output_error(Status(
@@ -579,8 +588,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             if (!reconstructed)
                 return finish_output_error(Status(COSMO_NN_ERR_NET, adapter_error));
         } else {
-            std::vector<RknnYolov8Head> heads;
-            heads.reserve(outputs.size());
+            auto& heads = float_yolov8_heads_;
+            heads.clear();
             for (size_t index = 0; index < outputs.size(); ++index) {
                 if (!outputs[index].buf || outputs[index].size % sizeof(float) != 0) {
                     return finish_output_error(Status(

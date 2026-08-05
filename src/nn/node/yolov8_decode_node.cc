@@ -133,52 +133,63 @@ Status YoloV8DecodeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob
         auto top_ptr_i    = top_ptr + i * top_row * top_col;
 
         std::vector<std::tuple<int, float, int, bool>> conf_list;
+        conf_list.reserve(static_cast<size_t>(num_boxes));
         float global_max_conf = -1.0f;
-        for (int j = 0; j < num_boxes; j++) {
-            float* box_data;
-            float* conf_start;
-
-            if (is_format1) {
-                // Format 1: [batch, num_boxes, num_features]
-                // Data layout: box0_features, box1_features, ...
-                box_data   = bottom_ptr_i + j * num_features;
-                conf_start = box_data + 4;
-            } else {
-                // Format 2: [batch, num_features, num_boxes]
-                // Data layout: feature0_all_boxes, feature1_all_boxes, ...
-                // For box j: x=bottom_ptr_i[0*num_boxes+j], y=bottom_ptr_i[1*num_boxes+j], ...
-                box_data   = nullptr;                           // Will access per-feature
-                conf_start = bottom_ptr_i + 4 * num_boxes + j;  // Start of class scores for box j
+        const bool class_major_scan = !is_format1 && shared_resource &&
+                                      shared_resource->prefer_yolov8_class_major_scan;
+        if (class_major_scan) {
+            class_max_scratch_.assign(static_cast<size_t>(num_boxes), -1.0f);
+            class_id_scratch_.assign(static_cast<size_t>(num_boxes), -1);
+            for (int c = 0; c < class_num; ++c) {
+                const float* scores = bottom_ptr_i + (4 + c) * num_boxes;
+                for (int j = 0; j < num_boxes; ++j) {
+                    if (scores[j] > class_max_scratch_[j]) {
+                        class_max_scratch_[j] = scores[j];
+                        class_id_scratch_[j]  = c;
+                    }
+                }
             }
-
-            // Find max confidence and class_id
-            float max_conf = -1.0f;
-            int class_id   = -1;
-            for (int c = 0; c < class_num; c++) {
-                float conf;
+            for (int j = 0; j < num_boxes; ++j) {
+                const float confidence = class_max_scratch_[j];
+                global_max_conf        = std::max(global_max_conf, confidence);
+                if (!std::isnan(confidence) && confidence >= base_conf) {
+                    conf_list.emplace_back(j, confidence, class_id_scratch_[j], true);
+                }
+            }
+        } else {
+            for (int j = 0; j < num_boxes; j++) {
                 if (is_format1) {
-                    conf = conf_start[c];
+                    // Format 1: [batch, num_boxes, num_features]
+                    // Data layout: box0_features, box1_features, ...
+                    float* box_data  = bottom_ptr_i + j * num_features;
+                    float* conf_start = box_data + 4;
+                    float max_conf    = -1.0f;
+                    int class_id      = -1;
+                    for (int c = 0; c < class_num; c++) {
+                        if (conf_start[c] > max_conf) {
+                            max_conf = conf_start[c];
+                            class_id = c;
+                        }
+                    }
+                    global_max_conf = std::max(global_max_conf, max_conf);
+                    if (!std::isnan(max_conf) && max_conf >= base_conf)
+                        conf_list.emplace_back(j, max_conf, class_id, true);
                 } else {
-                    conf = bottom_ptr_i[(4 + c) * num_boxes + j];
-                }
-                if (conf > max_conf) {
-                    max_conf = conf;
-                    class_id = c;
+                    // Established format-2 path, retained for non-capable producers.
+                    float max_conf = -1.0f;
+                    int class_id   = -1;
+                    for (int c = 0; c < class_num; c++) {
+                        const float conf = bottom_ptr_i[(4 + c) * num_boxes + j];
+                        if (conf > max_conf) {
+                            max_conf = conf;
+                            class_id = c;
+                        }
+                    }
+                    global_max_conf = std::max(global_max_conf, max_conf);
+                    if (!std::isnan(max_conf) && max_conf >= base_conf)
+                        conf_list.emplace_back(j, max_conf, class_id, true);
                 }
             }
-
-            float confidence = max_conf;
-            if (confidence > global_max_conf) {
-                global_max_conf = confidence;
-            }
-
-            if (std::isnan(confidence))
-                continue;
-
-            if (confidence < base_conf)
-                continue;
-
-            conf_list.push_back(std::make_tuple(j, confidence, class_id, true));
         }
 
         LOG_DEBUG(

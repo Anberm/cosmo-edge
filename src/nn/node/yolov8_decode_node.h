@@ -54,6 +54,8 @@ private:
     // Net input dimensions for denormalizing coordinates
     int input_width_  = 0;
     int input_height_ = 0;
+    std::vector<float> class_max_scratch_;
+    std::vector<int> class_id_scratch_;
 };
 
 }  // namespace cosmo::nn

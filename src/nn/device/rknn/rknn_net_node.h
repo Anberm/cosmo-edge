@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "nn/device/rknn/rknn_yolov8_adapter.h"
 #include "nn/node/net_node.h"
 #include "rknn_api.h"
 
@@ -43,6 +44,9 @@ private:
     rknn_input_output_num io_count_{};
     std::vector<rknn_tensor_attr> input_attrs_;
     std::vector<rknn_tensor_attr> output_attrs_;
+    std::vector<rknn_output> runtime_outputs_;
+    std::vector<RknnYolov8Head> float_yolov8_heads_;
+    std::vector<RknnYolov8QuantizedHead> quantized_yolov8_heads_;
     std::vector<unsigned char> model_data_;
     std::vector<float> input_nhwc_;
     bool yolov8_heads_{false};

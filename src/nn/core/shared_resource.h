@@ -36,6 +36,10 @@ public:
     int net_input_w         = 0;
     int net_input_h         = 0;
     float model_input_scale = 1.0f;  // for INT8 quantized models
+
+    // Optional producer/consumer hint. Only compatible RKNN YOLOv8 native-output
+    // graphs set this; every other backend keeps the established box-major scan.
+    bool prefer_yolov8_class_major_scan = false;
 };
 
 }  // namespace cosmo::nn

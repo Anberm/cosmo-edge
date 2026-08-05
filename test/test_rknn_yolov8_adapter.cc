@@ -2,11 +2,18 @@
 
 #ifdef COSMO_NN_USE_RKNN_BACKEND
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "nn/core/blob.h"
+#include "nn/core/shared_resource.h"
 #include "nn/device/rknn/rknn_yolov8_adapter.h"
+#include "nn/node/yolov8_decode_node.h"
+#include "nn/utils/op.h"
 
 TEST_CASE("RKNN YOLOv8 adapter reconstructs the logical tensor", "[nn][rknn][yolov8]") {
     using namespace cosmo::nn;
@@ -113,6 +120,65 @@ TEST_CASE("RKNN YOLOv8 quantized adapter rejects invalid quantization",
     std::string error;
     CHECK_FALSE(ReconstructRknnYolov8Quantized(heads, 32, 32, output.data(), output.size(), error));
     CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("RKNN YOLOv8 class-major capability preserves decode results",
+          "[nn][rknn][yolov8][fast-output]") {
+    using namespace cosmo::nn;
+
+    SharedResource resource;
+    YoloV8DecodeNode node;
+    node.SetSharedResource(&resource);
+    node.SetMaxBatch(1);
+    YoloPost post;
+    post.nms_threshold      = 0.7f;
+    post.nms_detection_conf = 0.25f;
+    post.top_k              = 8;
+    post.input_width        = 640;
+    post.input_height       = 640;
+    node.LoadParam(&post);
+    REQUIRE(bool(node.InferTopShapes()));
+
+    BlobDesc input_desc;
+    input_desc.device_type = DEVICE_NAIVE;
+    input_desc.data_type   = DATA_TYPE_FLOAT;
+    input_desc.data_format = DATA_FORMAT_NCHW;
+    input_desc.dims        = {1, 7, 5};
+    auto input             = std::make_shared<Blob>(input_desc, true);
+    auto* values           = static_cast<float*>(input->GetHandle().base);
+    std::fill(values, values + 35, 0.0f);
+    for (int box = 0; box < 5; ++box) {
+        values[box]      = 50.0f + box * 100.0f;
+        values[5 + box]  = 50.0f + box * 100.0f;
+        values[10 + box] = 20.0f;
+        values[15 + box] = 20.0f;
+    }
+    values[20] = 0.9f;
+    values[26] = 0.8f;
+    values[32] = 0.7f;
+    values[23] = 0.6f;
+    values[28] = 0.6f;  // Tie: lower class index must continue to win.
+
+    BlobDesc output_desc;
+    output_desc.device_type = DEVICE_NAIVE;
+    output_desc.data_type   = DATA_TYPE_FLOAT;
+    output_desc.data_format = DATA_FORMAT_NCHW;
+    output_desc.dims        = node.GetTopBlobShapes().front();
+    auto legacy_output      = std::make_shared<Blob>(output_desc, true);
+    auto fast_output        = std::make_shared<Blob>(output_desc, true);
+    std::vector<std::shared_ptr<Blob>> bottoms{input};
+
+    resource.prefer_yolov8_class_major_scan = false;
+    std::vector<std::shared_ptr<Blob>> legacy_tops{legacy_output};
+    REQUIRE(bool(node.Forward(bottoms, legacy_tops)));
+    resource.prefer_yolov8_class_major_scan = true;
+    std::vector<std::shared_ptr<Blob>> fast_tops{fast_output};
+    REQUIRE(bool(node.Forward(bottoms, fast_tops)));
+
+    CHECK(legacy_output->GetBlobDesc().dims == fast_output->GetBlobDesc().dims);
+    const auto count = static_cast<size_t>(post.top_k) * 6;
+    CHECK(std::memcmp(legacy_output->GetHandle().base, fast_output->GetHandle().base,
+                      count * sizeof(float)) == 0);
 }
 
 #endif  // COSMO_NN_USE_RKNN_BACKEND
