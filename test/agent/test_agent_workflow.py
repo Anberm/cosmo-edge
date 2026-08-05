@@ -854,6 +854,94 @@ class AgentWorkflowTest(unittest.TestCase):
             self.assertEqual(check["owner"], "repository")
             self.assertIn("base development environment", check["detail"])
 
+    def test_compatibility_matrix_passes_repository_backed_bm1688_onnx(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "candidate.onnx"
+            source.write_bytes(b"fixture")
+            check = agent_workflow.compatibility_matrix_check(
+                source,
+                "bm1688",
+                {"toolchainChip": "BM1688"},
+                project_root=ROOT,
+            )
+        self.assertEqual(check["status"], "PASS")
+        self.assertIn("chip-neutral ONNX", check["detail"])
+
+    def test_compatibility_matrix_reports_explicit_artifact_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("chip-mismatch")
+            contract["parameters"].update(
+                {
+                    "sourceModel": "package/model.nn",
+                    "targetChip": "bm1688",
+                    "toolchainChip": "bm1688",
+                    "toolchain": {
+                        "kind": "python-package",
+                        "pythonExecutable": sys.executable,
+                        "package": "tpu_mlir",
+                    },
+                }
+            )
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            package_dir = run_dir / "package"
+            package_dir.mkdir(parents=True)
+            (package_dir / "model.nn").write_bytes(b"fixture")
+            (package_dir / "config.json").write_text(
+                json.dumps({"chip_type": "CV186X"}), encoding="utf-8"
+            )
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            self._write_ready_assessment(contract_path, run_dir, contract)
+            identity = {
+                "kind": "python-package",
+                "id": "sha256:" + "a" * 64,
+                "package": {"name": "tpu_mlir", "version": "fixture"},
+            }
+            with (
+                mock.patch.object(
+                    agent_workflow, "host_inventory", return_value=self._model_inventory()
+                ),
+                mock.patch.object(
+                    agent_workflow, "inspect_toolchain", return_value=(identity, "")
+                ),
+                mock.patch.object(
+                    agent_workflow, "_toolchain_tools_respond", return_value=(True, "")
+                ),
+                mock.patch.object(
+                    agent_workflow, "_python_environment_check", return_value=(True, "fixture")
+                ),
+            ):
+                report = agent_workflow.task_environment_report(
+                    "model-conversion",
+                    contract_path,
+                    run_dir,
+                    contract,
+                    project_root=root,
+                )
+            check = next(
+                item for item in report["checks"] if item["id"] == "compatibility-matrix"
+            )
+            self.assertEqual(report["environmentVerdict"], "REPAIRABLE")
+            self.assertEqual(check["status"], "FAIL")
+            self.assertIn("targetChip=BM1688", check["detail"])
+            self.assertIn("artifact chip=CV186X", check["detail"])
+
+    def test_compatibility_matrix_keeps_missing_facts_unverified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "candidate.onnx"
+            source.write_bytes(b"fixture")
+            check = agent_workflow.compatibility_matrix_check(
+                source,
+                "bm1688",
+                {"toolchainChip": "bm1688"},
+                project_root=root,
+            )
+        self.assertEqual(check["status"], "UNVERIFIED")
+        self.assertNotIn("_outcome", check)
+        self.assertIn("facts are missing", check["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1077,6 +1077,159 @@ def _python_environment_check(
     return True, f"{python_version}; {summary}"
 
 
+def _repository_compatibility_facts(project_root: Path) -> dict[str, Any]:
+    header_path = project_root / "src" / "util" / "NnBackendConstants.h"
+    guide_path = project_root / "docs" / "tutorials" / "05-model-porting" / "model-porting.md"
+    resource_root = project_root / "data" / "resource"
+    supported_chips: set[str] = set()
+    resource_chips: set[str] = set()
+    guide_text = ""
+    missing_sources: list[str] = []
+
+    if header_path.is_file():
+        header = header_path.read_text(encoding="utf-8", errors="replace")
+        sophon_section = header.split("#elif", 1)[0]
+        declaration = re.search(
+            r"kSupportedChips\[\]\s*=\s*\{(?P<values>[^}]+)\}", sophon_section
+        )
+        if declaration:
+            supported_chips.update(
+                value.upper()
+                for value in re.findall(r'"([A-Za-z0-9_-]+)"', declaration.group("values"))
+            )
+        else:
+            missing_sources.append("supported-chip constants")
+    else:
+        missing_sources.append("src/util/NnBackendConstants.h")
+
+    if resource_root.is_dir():
+        for config_path in resource_root.rglob("*.json"):
+            try:
+                config = load_json(config_path)
+            except WorkflowError:
+                continue
+            if isinstance(config, dict) and isinstance(config.get("chip_type"), str):
+                resource_chips.add(config["chip_type"].strip().upper())
+    else:
+        missing_sources.append("data/resource")
+
+    if guide_path.is_file():
+        guide_text = guide_path.read_text(encoding="utf-8", errors="replace").upper()
+    else:
+        missing_sources.append("model-porting guide")
+    return {
+        "supportedChips": supported_chips,
+        "resourceChips": resource_chips,
+        "guideText": guide_text,
+        "missingSources": missing_sources,
+    }
+
+
+def _artifact_chip_fact(source_path: Path, params: dict[str, Any]) -> tuple[str | None, str]:
+    declared = params.get("artifactChip")
+    if isinstance(declared, str) and declared.strip():
+        return declared.strip().upper(), "parameters.artifactChip"
+    if source_path.suffix.lower() != ".nn":
+        return None, ""
+    config_path = source_path.parent / "config.json"
+    if not config_path.is_file():
+        return None, "adjacent config.json is missing"
+    try:
+        config = load_json(config_path)
+    except WorkflowError as error:
+        return None, f"adjacent config.json is unreadable ({error})"
+    chip = config.get("chip_type") if isinstance(config, dict) else None
+    if not isinstance(chip, str) or not chip.strip():
+        return None, "adjacent config.json has no chip_type"
+    return chip.strip().upper(), "adjacent config.json chip_type"
+
+
+def compatibility_matrix_check(
+    source_path: Path,
+    target_chip: str,
+    params: dict[str, Any],
+    project_root: Path = PROJECT_ROOT,
+) -> dict[str, Any]:
+    target = target_chip.strip().upper()
+    facts = _repository_compatibility_facts(project_root)
+    suffix = source_path.suffix.lower()
+    artifact_type = "model.nn" if source_path.name.lower() == "model.nn" else suffix or "unknown"
+    artifact_chip, artifact_source = _artifact_chip_fact(source_path, params)
+    declared_toolchain_chip = params.get("toolchainChip")
+    toolchain_chip = (
+        declared_toolchain_chip.strip().upper()
+        if isinstance(declared_toolchain_chip, str) and declared_toolchain_chip.strip()
+        else target
+    )
+
+    mismatches = []
+    if toolchain_chip != target:
+        mismatches.append(f"targetChip={target} conflicts with toolchainChip={toolchain_chip}")
+    if artifact_chip and artifact_chip != target:
+        mismatches.append(
+            f"targetChip={target} conflicts with artifact chip={artifact_chip} from {artifact_source}"
+        )
+    if artifact_chip and artifact_chip != toolchain_chip:
+        mismatches.append(
+            f"artifact chip={artifact_chip} conflicts with toolchainChip={toolchain_chip}"
+        )
+    if mismatches:
+        return _check(
+            "compatibility-matrix",
+            "FAIL",
+            "; ".join(dict.fromkeys(mismatches)) + ".",
+            remediation=(
+                "Correct the task contract or select material and a toolchain that describe the same "
+                "target chip, then rerun doctor."
+            ),
+            outcome="repairable",
+            owner="task-contract",
+        )
+
+    unknown = list(facts["missingSources"])
+    if target not in facts["supportedChips"]:
+        unknown.append(f"code support for targetChip={target}")
+    if target not in facts["resourceChips"]:
+        unknown.append(f"a repository resource example for targetChip={target}")
+    guide_text = facts["guideText"]
+    if target not in guide_text or not all(token in guide_text for token in (".ONNX", ".BMODEL", "MODEL.NN")):
+        unknown.append(f"model-porting documentation for targetChip={target} and artifact types")
+    if suffix == ".bmodel" and not artifact_chip:
+        unknown.append("inspected chip metadata for the .bmodel artifact")
+    elif suffix == ".nn" and not artifact_chip:
+        unknown.append(artifact_source or "chip_type for the model.nn artifact")
+    elif suffix not in {".onnx", ".bmodel", ".nn"}:
+        unknown.append(f"repository mapping for artifact type {artifact_type}")
+    if unknown:
+        return _check(
+            "compatibility-matrix",
+            "UNVERIFIED",
+            (
+                f"No mismatch was inferred for targetChip={target}, artifact={artifact_type}, and "
+                f"toolchainChip={toolchain_chip}, but these facts are missing: "
+                + "; ".join(dict.fromkeys(unknown))
+                + "."
+            ),
+            remediation=(
+                "Continue only as an exploratory path and obtain repository-backed or measured chip "
+                "metadata before publishing a compatibility claim."
+            ),
+        )
+    artifact_detail = (
+        "chip-neutral ONNX source"
+        if suffix == ".onnx"
+        else f"{artifact_type} artifactChip={artifact_chip}"
+    )
+    return _check(
+        "compatibility-matrix",
+        "PASS",
+        (
+            f"targetChip={target} matches the {artifact_detail}, toolchainChip={toolchain_chip}, "
+            "and repository code, resource, and model-porting facts."
+        ),
+    )
+
+
 def task_environment_report(
     task: str,
     contract_path: Path,
@@ -1186,8 +1339,9 @@ def task_environment_report(
         _require_nonempty_string(source_model, "parameters.sourceModel")
         _require_nonempty_string(target_chip, "parameters.targetChip")
         source_path = resolve_run_input(run_dir, source_model)
-        if source_path.suffix.lower() != ".onnx":
-            raise WorkflowError("the first model-conversion profile requires an ONNX source model")
+        checks.append(
+            compatibility_matrix_check(source_path, target_chip, params, project_root)
+        )
 
         toolchain_spec, specification_error = _toolchain_spec(params)
         docker_ready = False
@@ -1248,7 +1402,6 @@ def task_environment_report(
                 )
             )
 
-        mapping_supported = target_chip.lower() == "bm1688"
         if host_os != "Linux":
             checks.append(
                 _check(
@@ -1257,19 +1410,7 @@ def task_environment_report(
                     "TPU-MLIR capability admission is deferred to the selected Linux execution environment.",
                 )
             )
-        elif not mapping_supported:
-            mapping_supported = bool(params.get("toolchainChip") and params.get("chipMappingEvidence"))
-        if host_os == "Linux" and not mapping_supported:
-            checks.append(
-                _check(
-                    "C5",
-                    "UNVERIFIED",
-                    f"No independent compiler/runtime mapping is recorded for target chip {target_chip}.",
-                    remediation="Add measured mapping evidence for this chip; do not reuse BM1688 evidence.",
-                    outcome="unsupported",
-                )
-            )
-        elif host_os == "Linux" and not toolchain_spec:
+        elif not toolchain_spec:
             checks.append(
                 _check(
                     "C5",
@@ -1283,7 +1424,7 @@ def task_environment_report(
                     owner="repository",
                 )
             )
-        elif host_os == "Linux":
+        else:
             can_inspect = (
                 toolchain_spec["kind"] in {"auto", "python-package"}
                 or (toolchain_spec["kind"] == "container-image" and docker_ready)
