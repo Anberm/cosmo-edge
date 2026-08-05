@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -58,6 +59,17 @@ namespace {
     }
 
 }  // namespace
+
+bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc) {
+    constexpr float kExpectedScale = 0.00392157f;
+    return desc.data_type == DATA_TYPE_INT8 && desc.data_format == DATA_FORMAT_NHWC &&
+           desc.dims.size() == 4 && desc.dims[0] == 1 && desc.dims[1] > 0 && desc.dims[2] > 0 &&
+           desc.dims[3] == 3 && attr.n_dims == 4 && attr.fmt == RKNN_TENSOR_NHWC &&
+           attr.type == RKNN_TENSOR_INT8 && attr.qnt_type == RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC &&
+           attr.zp == -128 && std::fabs(attr.scale - kExpectedScale) <= 1e-7f && attr.dims[0] == 1 &&
+           attr.dims[1] == static_cast<uint32_t>(desc.dims[1]) &&
+           attr.dims[2] == static_cast<uint32_t>(desc.dims[2]) && attr.dims[3] == 3;
+}
 
 RknnNetNode::RknnNetNode() : NetNode() {
     name = NodeTypeUtils::NodeTypeToStr(NodeType::NODE_NET).append("_0");
@@ -289,6 +301,33 @@ Status RknnNetNode::PrepareInput(const Blob& blob, std::vector<float>& nhwc, int
     return COSMO_NN_OK;
 }
 
+Status RknnNetNode::PrepareNativeCompatibilityInput(const Blob& blob, std::vector<float>& nhwc,
+                                                    int& height, int& width) const {
+    auto& mutable_blob = const_cast<Blob&>(blob);
+    const auto desc    = mutable_blob.GetBlobDesc();
+    const auto handle  = mutable_blob.GetHandle();
+    if (!handle.base || desc.data_type != DATA_TYPE_INT8 || desc.data_format != DATA_FORMAT_NHWC ||
+        desc.dims.size() != 4 || desc.dims[0] != 1 || desc.dims[1] <= 0 || desc.dims[2] <= 0 ||
+        desc.dims[3] != 3 || BlobElementCount(desc) != TensorElementCount(input_attrs_[0])) {
+        return Status(COSMO_NN_ERR_INVALID_INPUT,
+                      "RKNN native compatibility input must be batch-1 NHWC int8");
+    }
+    height = desc.dims[1];
+    width  = desc.dims[2];
+    const auto count = BlobElementCount(desc);
+    try {
+        nhwc.resize(count);
+    } catch (const std::bad_alloc&) {
+        return Status(COSMO_NN_ERR_OUT_OF_MEMORY,
+                      "Not enough memory for RKNN native-input compatibility fallback");
+    }
+    const auto* source = static_cast<const int8_t*>(handle.base);
+    constexpr float kNormalizeScale = 0.00392157f;
+    for (size_t index = 0; index < count; ++index)
+        nhwc[index] = static_cast<float>(static_cast<int>(source[index]) + 128) * kNormalizeScale;
+    return COSMO_NN_OK;
+}
+
 Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                             std::vector<std::shared_ptr<Blob>>& top_blobs) {
     const auto mutex_wait_started = MetricsClock::now();
@@ -312,23 +351,55 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         return status;
     };
     int input_height = 0, input_width = 0;
+    bool native_int8 = false;
+    bool compatibility_fallback = false;
+    rknn_input input{};
+    input.index = 0;
     const auto prepare_started = MetricsClock::now();
-    auto prepare_status = PrepareInput(*bottom_blobs[0], input_nhwc_, input_height, input_width);
+    const auto input_desc = bottom_blobs[0]->GetBlobDesc();
+    Status prepare_status;
+    if (input_desc.data_type == DATA_TYPE_INT8 && input_desc.data_format == DATA_FORMAT_NHWC) {
+        native_int8 = IsRknnNativeInt8InputCompatible(input_attrs_[0], input_desc);
+        if (native_int8) {
+            const auto count = BlobElementCount(input_desc);
+            if (!bottom_blobs[0]->GetHandle().base || count == 0 ||
+                count > std::numeric_limits<uint32_t>::max()) {
+                prepare_status =
+                    Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN native input exceeds runtime size limit");
+            } else {
+                input.buf          = bottom_blobs[0]->GetHandle().base;
+                input.size         = static_cast<uint32_t>(count);
+                input.pass_through = 1;
+                input.type         = RKNN_TENSOR_INT8;
+                input.fmt          = RKNN_TENSOR_NHWC;
+                input_height       = input_desc.dims[1];
+                input_width        = input_desc.dims[2];
+                prepare_status     = COSMO_NN_OK;
+            }
+        } else {
+            compatibility_fallback = true;
+            prepare_status = PrepareNativeCompatibilityInput(*bottom_blobs[0], input_nhwc_,
+                                                              input_height, input_width);
+        }
+    } else {
+        prepare_status = PrepareInput(*bottom_blobs[0], input_nhwc_, input_height, input_width);
+    }
     GetInferencePipelineMetrics().RecordRknnPrepare(ElapsedNanoseconds(prepare_started), scope);
     if (!prepare_status)
         return finish(prepare_status);
-    if (input_nhwc_.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
-        return finish(Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit"));
-
-    rknn_input input{};
-    input.index        = 0;
-    input.buf          = input_nhwc_.data();
-    input.size         = static_cast<uint32_t>(input_nhwc_.size() * sizeof(float));
-    input.pass_through = 0;
-    input.type         = RKNN_TENSOR_FLOAT32;
-    // Runtime 2.3.2 silently rejects source NCHW on this model path while
-    // reporting success. The graph boundary copy above makes NHWC explicit.
-    input.fmt = RKNN_TENSOR_NHWC;
+    if (!native_int8) {
+        if (input_nhwc_.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
+            return finish(
+                Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit"));
+        input.buf          = input_nhwc_.data();
+        input.size         = static_cast<uint32_t>(input_nhwc_.size() * sizeof(float));
+        input.pass_through = 0;
+        input.type         = RKNN_TENSOR_FLOAT32;
+        // Runtime 2.3.2 silently rejects source NCHW on this model path while
+        // reporting success. The graph boundary copy above makes NHWC explicit.
+        input.fmt = RKNN_TENSOR_NHWC;
+    }
+    GetInferencePipelineMetrics().RecordRknnInputFormat(native_int8, compatibility_fallback);
     const auto inputs_set_started = MetricsClock::now();
     int result = rknn_inputs_set(context_, 1, &input);
     GetInferencePipelineMetrics().RecordRknnInputsSet(ElapsedNanoseconds(inputs_set_started), scope);

@@ -11,6 +11,8 @@
 
 namespace cosmo::nn {
 
+bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc);
+
 class RknnNetNode final : public NetNode {
 public:
     RknnNetNode();
@@ -28,6 +30,8 @@ public:
 private:
     Status QueryTensorAttributes();
     Status PrepareInput(const Blob& blob, std::vector<float>& nhwc, int& height, int& width) const;
+    Status PrepareNativeCompatibilityInput(const Blob& blob, std::vector<float>& nhwc,
+                                           int& height, int& width) const;
     std::vector<int> TensorShape(const rknn_tensor_attr& attr) const;
     size_t TensorElementCount(const rknn_tensor_attr& attr) const;
     void DestroyContext();
