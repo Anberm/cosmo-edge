@@ -22,6 +22,13 @@ ExternalProject_Add(
 
     SOURCE_DIR ${MP4V2_SOURCE_DIR}
 
+    # mp4v2 2.0.0 由 automake 1.11 生成, 其 GNUmakefile 中的 GNUmakefile.in
+    # 再生成规则硬编码了 automake-1.11; 而 x86 构建镜像只提供 automake 1.16。
+    # 构建上下文中 aclocal.m4/configure 的 mtime 若新于 GNUmakefile.in,
+    # 该规则就会触发, 导致 "automake-1.11: command not found"。
+    # 此处 touch 生成的 autotools 文件, 使再生成规则永不触发。
+    PATCH_COMMAND touch <SOURCE_DIR>/GNUmakefile.in <SOURCE_DIR>/aclocal.m4 <SOURCE_DIR>/configure
+
     CONFIGURE_COMMAND <SOURCE_DIR>/configure
         ${MP4V2_CONFIGURE_ARGS}
     
