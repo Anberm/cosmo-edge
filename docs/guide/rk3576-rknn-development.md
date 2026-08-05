@@ -118,12 +118,43 @@ P3 is bound to `cosmo-V1.0.0-b3fc2e6fb7fc446a47379946b020f1ba.tar.gz`, SHA-256 `
 
 Machine-readable results and the target evidence root are recorded in `docs/evidence/rk3576/p3-backend-validation.json`.
 
+## P4 qualification result
+
+The candidate-bound P4 run is complete with a **NOT READY** release verdict. P0-P3 functionality remains valid, but P4 intentionally fails closed because the two-channel video threshold and algorithm-overlay preview do not pass. The authoritative decision record is `docs/evidence/rk3576/p4-release-validation.json`.
+
+| Gate | Result | Candidate-bound observation |
+| --- | --- | --- |
+| Local video, 1 channel | PASS | 7.32 FPS, zero mean discard, 95.1 ms mean detector time |
+| Local video, 2 channels | FAIL | 8.51% mean discard, 389.1 ms critical path, 340.7 ms detector time |
+| Local video, 4 channels | FAIL (probe) | 4.72 FPS, 31.58% mean discard, 887.3 ms critical path |
+| Local video, 8 channels | NOT RUN | The four additional task bindings were rejected at the four-channel authorization or implementation ceiling |
+| Picture lifecycle/inference | PASS | 1,820 detections, 100 create/detect/cancel cycles, concurrency 1/2/4 and cancel races, zero inference errors |
+| Concurrent picture staging | FAIL | Four simultaneous upload sessions returned HTTP 503; the inference probe stages files sequentially to isolate NPU concurrency |
+| Restart recovery | PASS | Camera and task survived process restart; processed count advanced from 1,774 to 2,420 in ten seconds |
+| Alarm journey | PASS | 17 algorithm-7463 events had both full and detected images; the sampled JPEG was served with HTTP 200 |
+| Raw preview | PASS | HTTP-FLV returned 267,879 bytes with a valid `FLV` signature |
+| Algorithm-overlay preview | FAIL | `h264_v4l2m2m` failed to open with `EPERM`; the API returned first-frame timeout code 12801 |
+| CPU regression | PASS | x86_64 build passed; 884 test cases / 65,796 assertions passed |
+| Sophon regression | PASS (compile) | Fresh aarch64 Sophon/Sophon-media `cosmo-tests` target linked successfully; it cannot be executed on the x86 host or RK3576 board |
+| RTSP journey | NOT RUN | No authorized RTSP fixture was available in the isolated validation environment |
+| 24/72-hour soak | NOT RUN | Fail-fast after mandatory video-capacity and preview gates failed; the 647.5-second picture soak is diagnostic only |
+| Labeled business accuracy | NOT RUN | P2 uses unlabeled conversion/parity samples, not a release accuracy dataset |
+
+### P4 operational notes
+
+- Formal video capacity is bounded to `>= 1` and `< 2` channels at the configured 7 FPS and current CPU/FFmpeg media path. The 4/8-channel scenario is failure characterization, not a capacity baseline.
+- The raw stream proves SRS publication and HTTP-FLV delivery. Overlay preview requires either a packaged software H.264 encoder or a validated V4L2 M2M device/permission path, followed by a candidate-bound rerun.
+- The picture stress runner stages inputs before issuing concurrent inference so upload-session capacity and inference capacity are measured separately. Production clients still need bounded upload concurrency/backpressure until the HTTP 503 boundary is resolved.
+- The NPU utilization interface reported 100% even during idle observations, so that value is not used alone as proof of saturation. Queue discard and measured stage latency remain the release criteria.
+- The final cleanup check found no validation channels or staged uploads. The candidate engine remained healthy on its isolated HTTP/WebSocket ports, and the temporary SRS ports were released.
+- Do not start 24/72-hour qualification for this package. Fix the blocking capacity and overlay paths, add an RTSP fixture and labeled dataset, rebuild a new immutable package, then restart P4 from the one-channel baseline.
+
 ## Acceptance gates
 
 - P0: source, SDK, models and device baseline are locked and recoverable.
 - P1: the offline environment imports RKNN-Toolkit2 and a 2.3.2 C API probe loads on the board without changing system libraries.
 - P2: FP16 and INT8 artifacts include converter logs, hashes, preprocessing contract and CPU/RKNN comparison evidence.
 - P3: the RKNN backend, model import, device identity, metrics and side-by-side package are integrated and unit-tested.
-- P4: file/video and RTSP journeys, task persistence, alarms, 1/2/4/8-channel measurements, restart recovery and 24/72-hour soak evidence pass the candidate-specific thresholds.
+- P4: file/video and RTSP journeys, task persistence, alarms, 1/2/4/8-channel measurements, restart recovery and 24/72-hour soak evidence pass the candidate-specific thresholds. The current candidate does not satisfy this gate; see the P4 qualification result above.
 
 Vendor model-only FPS is not an end-to-end CosmoEdge acceptance metric. Report decode, preprocessing, NPU run, postprocessing, queue/discard, memory, temperature and NPU utilization separately.

@@ -65,6 +65,14 @@ namespace {
         return std::clamp(parsed, static_cast<size_t>(1), kMaxRuntimeReuseLimit);
     }
 
+    ai_detector_fps::ReuseProfile BackendDefaultReuseProfile() {
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+        return ai_detector_fps::RknnDefaultReuseProfile();
+#else
+        return ai_detector_fps::DefaultReuseProfile();
+#endif
+    }
+
     // Per-algCode fps budget overrides for instance placement. Unlisted algCodes fall back to
     // kDefaultInstanceFpsBudget. Populate from per-model stress-test results.
     float LookupInstanceFpsBudget(const std::string& alg_code) {
@@ -88,14 +96,14 @@ namespace {
     ai_detector_fps::ReuseProfile LookupReuseProfile(const std::string& alg_code) {
         const auto raw_value = LookupPlacementEnv(kEnvReuseProfile, alg_code);
         if (raw_value.empty()) {
-            return ai_detector_fps::DefaultReuseProfile();
+            return BackendDefaultReuseProfile();
         }
 
         auto profile = ai_detector_fps::ParseReuseProfile(raw_value);
         if (profile.empty()) {
             LOG_WARN("{}Invalid {} value:{}, fallback to default reuse profile", kTag, kEnvReuseProfile,
                      raw_value);
-            return ai_detector_fps::DefaultReuseProfile();
+            return BackendDefaultReuseProfile();
         }
         return profile;
     }
@@ -149,7 +157,9 @@ AiDetector::AiDetector(ActionNode& action)
     name_     = action.atomicCode;
     uuid      = util::GenerateUUID();
 
-    batch_count_         = 4;
+    // Admit the first frame immediately. AiSdkInit replaces this with the
+    // loaded model's bounded batch before the next queue drain.
+    batch_count_         = 1;
     max_reuse_count_     = LookupMaxReuseCount(alg_code_);
     instance_fps_budget_ = LookupInstanceFpsBudget(alg_code_);
     reuse_profile_       = LookupReuseProfile(alg_code_);
@@ -216,7 +226,17 @@ bool AiDetector::AiSdkInit() {
     init_retry_count_ = 0;
     action_status     = util::ErrorEnum::AI_INST_CREATED;
     labels_           = detector_->GetLabels();
-    LOG_INFO("{}[{} {}] {} Init Sdk", kTag, name_, uuid, alg_code_);
+    size_t model_max_batch = 1;
+    const auto batch_status = detector_->GetMaxBatchSize(model_max_batch);
+    if (batch_status != util::ErrorEnum::Success || model_max_batch == 0) {
+        LOG_WARN("{}[{} {}] {} invalid model max batch:{}, keep single-frame drain", kTag, name_, uuid,
+                 alg_code_, model_max_batch);
+        model_max_batch = 1;
+    }
+    batch_count_ = ai_detector_fps::EffectiveDetectorDrainBatch(
+        ai_detector_fps::kMaxDetectorDrainBatch, model_max_batch);
+    LOG_INFO("{}[{} {}] {} Init Sdk ModelMaxBatch:{} DrainBatch:{}", kTag, name_, uuid, alg_code_,
+             model_max_batch, batch_count_);
     is_detector_inst_initialized_ = true;
     return true;
 }

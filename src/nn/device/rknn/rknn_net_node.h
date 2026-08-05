@@ -37,6 +37,7 @@ private:
     std::vector<rknn_tensor_attr> input_attrs_;
     std::vector<rknn_tensor_attr> output_attrs_;
     std::vector<unsigned char> model_data_;
+    std::vector<float> input_nhwc_;
     bool yolov8_heads_{false};
     int yolov8_class_count_{0};
     int yolov8_point_count_{0};

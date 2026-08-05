@@ -1,12 +1,20 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "media/VideoFrame.h"
 #include "media/VideoPacket.h"
 
 namespace cosmo {
 namespace media {
+
+    struct VideoEncoderCapability {
+        bool available{false};
+        std::string backend;
+        std::string implementation;
+        std::string detail;
+    };
 
     class VideoEncoder {
     public:
@@ -28,9 +36,14 @@ namespace media {
         size_t GetWidth() const;
         size_t GetHeight() const;
 
-        /// Factory — creates the correct backend encoder (Sophon or CPU).
-        /// @param mediaHandle  Device handle (used by Sophon, ignored by CPU)
+        /// Factory — creates the selected platform backend encoder.
+        /// @param mediaHandle Device handle (used by hardware backends, ignored by CPU)
         static std::shared_ptr<VideoEncoder> Create(void* mediaHandle);
+
+        /// Reports the deterministic implementation that Create/Open will use.
+        /// A missing approved implementation is reported as unavailable instead
+        /// of falling through to an arbitrary FFmpeg hardware encoder.
+        static VideoEncoderCapability Probe(VideoCodecType type);
 
     protected:
         VideoCodecType codec_type_{VideoCodecType::kInvalid};

@@ -68,6 +68,33 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, firstFrames);
     JSON_OPT(j, v, firstFrameMs);
     JSON_OPT(j, v, firstFrameMaxMs);
+    JSON_OPT(j, v, videoEncoderAvailable);
+    JSON_OPT(j, v, videoEncoderBackend);
+    JSON_OPT(j, v, videoEncoderImplementation);
+    JSON_OPT(j, v, videoEncoderDetail);
+    JSON_OPT(j, v, colorConvertFrames);
+    JSON_OPT(j, v, colorConvertMs);
+    JSON_OPT(j, v, blobConvertFrames);
+    JSON_OPT(j, v, blobConvertMs);
+    JSON_OPT(j, v, graphForwardFrames);
+    JSON_OPT(j, v, graphForwardMs);
+    JSON_OPT(j, v, graphForwardFailures);
+    JSON_OPT(j, v, resultParseFrames);
+    JSON_OPT(j, v, resultParseMs);
+    JSON_OPT(j, v, resultParseFailures);
+    JSON_OPT(j, v, rknnForwards);
+    JSON_OPT(j, v, rknnForwardMs);
+    JSON_OPT(j, v, rknnForwardFailures);
+    JSON_OPT(j, v, rknnPrepareCalls);
+    JSON_OPT(j, v, rknnPrepareMs);
+    JSON_OPT(j, v, rknnInputsSetCalls);
+    JSON_OPT(j, v, rknnInputsSetMs);
+    JSON_OPT(j, v, rknnRunCalls);
+    JSON_OPT(j, v, rknnRunMs);
+    JSON_OPT(j, v, rknnOutputsGetCalls);
+    JSON_OPT(j, v, rknnOutputsGetMs);
+    JSON_OPT(j, v, rknnOutputTransformCalls);
+    JSON_OPT(j, v, rknnOutputTransformMs);
 }
 
 void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
@@ -91,6 +118,33 @@ void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["firstFrames"]                   = v.firstFrames;
     j["firstFrameMs"]                  = v.firstFrameMs;
     j["firstFrameMaxMs"]               = v.firstFrameMaxMs;
+    j["videoEncoderAvailable"]         = v.videoEncoderAvailable;
+    j["videoEncoderBackend"]           = v.videoEncoderBackend;
+    j["videoEncoderImplementation"]    = v.videoEncoderImplementation;
+    j["videoEncoderDetail"]            = v.videoEncoderDetail;
+    j["colorConvertFrames"]            = v.colorConvertFrames;
+    j["colorConvertMs"]                = v.colorConvertMs;
+    j["blobConvertFrames"]             = v.blobConvertFrames;
+    j["blobConvertMs"]                 = v.blobConvertMs;
+    j["graphForwardFrames"]            = v.graphForwardFrames;
+    j["graphForwardMs"]                = v.graphForwardMs;
+    j["graphForwardFailures"]          = v.graphForwardFailures;
+    j["resultParseFrames"]             = v.resultParseFrames;
+    j["resultParseMs"]                 = v.resultParseMs;
+    j["resultParseFailures"]           = v.resultParseFailures;
+    j["rknnForwards"]                  = v.rknnForwards;
+    j["rknnForwardMs"]                 = v.rknnForwardMs;
+    j["rknnForwardFailures"]           = v.rknnForwardFailures;
+    j["rknnPrepareCalls"]              = v.rknnPrepareCalls;
+    j["rknnPrepareMs"]                 = v.rknnPrepareMs;
+    j["rknnInputsSetCalls"]            = v.rknnInputsSetCalls;
+    j["rknnInputsSetMs"]               = v.rknnInputsSetMs;
+    j["rknnRunCalls"]                  = v.rknnRunCalls;
+    j["rknnRunMs"]                     = v.rknnRunMs;
+    j["rknnOutputsGetCalls"]           = v.rknnOutputsGetCalls;
+    j["rknnOutputsGetMs"]              = v.rknnOutputsGetMs;
+    j["rknnOutputTransformCalls"]      = v.rknnOutputTransformCalls;
+    j["rknnOutputTransformMs"]         = v.rknnOutputTransformMs;
 }
 
 void from_json(const nlohmann::json& j, MsgDiskInfo& v) {

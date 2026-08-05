@@ -6,6 +6,7 @@
 #include "flow/channel/AlgChannel.h"
 #include "media/VideoFrame.h"
 #include "mem/IDeviceContext.h"
+#include "nn/core/inference_pipeline_metrics.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/media/IVideoFrameCodec.h"
 #include "service/media/IVideoFrameOSD.h"
@@ -353,6 +354,13 @@ AlgDataPtr AlgChannelDecode::ColorConvert(AlgDataPtr demux_data, VideoFramePtr i
         return nullptr;
     }
 
+    const auto convert_started = std::chrono::steady_clock::now();
+    const auto record_duration = [&]() {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::steady_clock::now() - convert_started)
+                                 .count();
+        nn::GetInferencePipelineMetrics().RecordColorConvert(static_cast<uint64_t>(elapsed));
+    };
     auto& transform = service::ServiceRegistry::Instance().Get<service::IVideoFrameTransform>();
     VideoFramePtr ai_frame;
     const auto pixel_format = in_data->GetPixelFormat();
@@ -369,6 +377,7 @@ AlgDataPtr AlgChannelDecode::ColorConvert(AlgDataPtr demux_data, VideoFramePtr i
         LOG_WARN("{} unsupported decoded pixel format {}", name_, static_cast<int>(pixel_format));
     }
     if ((!ai_frame) || (!ai_frame->Active())) {
+        record_duration();
         action_status_ = util::ErrorEnum::DecoderColorConvertFailed;
         return nullptr;
     }
@@ -386,6 +395,7 @@ AlgDataPtr AlgChannelDecode::ColorConvert(AlgDataPtr demux_data, VideoFramePtr i
 
     data->firstTimePoint = demux_data->firstTimePoint;
     action_status_       = util::ErrorEnum::Success;
+    record_duration();
     return data;
 }
 

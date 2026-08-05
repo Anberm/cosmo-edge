@@ -28,6 +28,7 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
       pass: null,
       reasons: ['未执行，瓶颈提前停止'],
       skipped: true,
+      qualified: step.qualified !== false,
     };
   }
 
@@ -178,6 +179,7 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     perThreshold,
     pass: overall.pass,
     reasons: overall.reasons,
+    qualified: step.qualified !== false,
   };
 }
 
@@ -209,6 +211,22 @@ function summarizeMediaStages(ticks, inferMs) {
     preprocessAvgMs: nodeStages.preprocess,
     inferAvgMs: inferMs,
     postprocessAvgMs: nodeStages.postprocess,
+    colorConvertAvgMs: counterAverage('colorConvertMs', 'colorConvertFrames'),
+    blobConvertAvgMs: counterAverage('blobConvertMs', 'blobConvertFrames'),
+    graphForwardAvgMs: counterAverage('graphForwardMs', 'graphForwardFrames'),
+    resultParseAvgMs: counterAverage('resultParseMs', 'resultParseFrames'),
+    graphForwardFailures: counterDelta('graphForwardFailures'),
+    resultParseFailures: counterDelta('resultParseFailures'),
+    rknnPrepareAvgMs: counterAverage('rknnPrepareMs', 'rknnPrepareCalls'),
+    rknnInputsSetAvgMs: counterAverage('rknnInputsSetMs', 'rknnInputsSetCalls'),
+    rknnRunAvgMs: counterAverage('rknnRunMs', 'rknnRunCalls'),
+    rknnOutputsGetAvgMs: counterAverage('rknnOutputsGetMs', 'rknnOutputsGetCalls'),
+    rknnOutputTransformAvgMs: counterAverage(
+      'rknnOutputTransformMs',
+      'rknnOutputTransformCalls',
+    ),
+    rknnForwardAvgMs: counterAverage('rknnForwardMs', 'rknnForwards'),
+    rknnForwardFailures: counterDelta('rknnForwardFailures'),
     osdAvgMs: counterAverage('osdMs', 'osdFrames'),
     publishAvgMs: counterAverage('publishMs', 'publishedFrames'),
     firstFrameAvgMs: counterAverage('firstFrameMs', 'firstFrames'),

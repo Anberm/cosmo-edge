@@ -65,7 +65,8 @@ export class ReportWriter {
 
   _buildSummary(r, stepSummaries) {
     const ran = stepSummaries.filter((s) => !s.skipped);
-    const firstFailed = ran.find((s) => s.pass === false) ?? null;
+    const qualifiedRan = ran.filter((s) => s.qualified !== false);
+    const firstFailed = qualifiedRan.find((s) => s.pass === false) ?? null;
     const bottleneck = normalizeBottleneck(r.bottleneck ?? (firstFailed
       ? {
           stepIndex: firstFailed.step.index,
@@ -75,15 +76,16 @@ export class ReportWriter {
         }
       : null), stepSummaries);
     const hasBottleneck = Boolean(bottleneck);
-    const verifiedPassed = ran.filter((s) =>
+    const verifiedPassed = qualifiedRan.filter((s) =>
       s.pass && (!hasBottleneck || s.step.index < bottleneck.stepIndex),
     );
     const maxVerifiedPassedChannels = verifiedPassed.length
       ? Math.max(...verifiedPassed.map((s) => s.channels))
       : null;
-    const continuousProfile = r.profileMode === 'capacity' || isContinuousChannelProfile(stepSummaries);
+    const continuousProfile = r.profileMode === 'capacity'
+      || isContinuousChannelProfile(qualifiedRan);
     const maxStableChannels = continuousProfile ? maxVerifiedPassedChannels : null;
-    const allRanStepsPass = ran.length > 0 && ran.every((s) => s.pass);
+    const allRanStepsPass = qualifiedRan.length > 0 && qualifiedRan.every((s) => s.pass);
     const capacityMeasured = r.status !== 'aborted'
       && continuousProfile
       && maxVerifiedPassedChannels != null
@@ -143,6 +145,7 @@ export class ReportWriter {
       startedAt: r.startedAt,
       endedAt: r.endedAt,
       sampleCount: (r.samples ?? []).length,
+      rampProbeChannels: ran.filter((s) => s.qualified === false).map((s) => s.channels),
       mediaStages: stepSummaries.map((step) => ({ channels: step.channels, ...step.mediaStages })),
     };
   }
@@ -156,7 +159,7 @@ export class ReportWriter {
       : '阶梯汇总使用该阶梯后半段采样点作为稳定窗口。';
     const profileText = summary.maxStableChannelsExact
       ? '当前按连续路数扫描，可直接给出容量上限。容量上限是最后一个完整执行且通过报告阈值的路数。'
-      : `当前阶梯不是连续通道数，只能给出已验证通过阶梯；连续最大稳定路数需在相邻区间内补测。${summary.capacityBound ? `本次已知 >= ${summary.capacityBound.lowerInclusive ?? 0} 路且 < ${summary.capacityBound.upperExclusive} 路。` : ''}`;
+      : `当前阶梯不是连续通道数，只能给出已验证通过阶梯；连续最大稳定路数需在相邻区间内补测。爬坡瞬时采样只标记为 PROBE，不计入稳定容量。${summary.capacityBound ? `本次已知 >= ${summary.capacityBound.lowerInclusive ?? 0} 路且 < ${summary.capacityBound.upperExclusive} 路。` : ''}`;
     const interpretationRows = [
       ['容量结论', profileText],
       ['路数 PASS/FAIL', `每个任务按 task type 选择判定策略。CV 默认使用关键链路、检测节点和丢弃率；VLM 默认使用分析 FPS 达标率和采样缺失率，并可配置端到端延时。全局平均丢弃率阈值为 ${pass.avgDiscardRate ?? pass.maxDiscardRate ?? '-'}。`],
@@ -196,6 +199,7 @@ export class ReportWriter {
           && (summary.bottleneck.channels == null || summary.bottleneck.channels === s.channels)) {
         return { className: 'warn', label: 'STOPPED' };
       }
+      if (s.qualified === false) return { className: 'na', label: 'PROBE' };
       return s.pass ? { className: 'pass', label: 'PASS' } : { className: 'fail', label: 'FAIL' };
     };
 
@@ -258,6 +262,11 @@ export class ReportWriter {
         <td>${metric(m.preprocessAvgMs)}</td>
         <td>${metric(m.inferAvgMs)}</td>
         <td>${metric(m.postprocessAvgMs)}</td>
+        <td>${metric(m.colorConvertAvgMs)}/${metric(m.blobConvertAvgMs)}</td>
+        <td>${metric(m.graphForwardAvgMs)}/${metric(m.resultParseAvgMs)}</td>
+        <td>${metric(m.rknnPrepareAvgMs)}/${metric(m.rknnInputsSetAvgMs)}</td>
+        <td>${metric(m.rknnRunAvgMs)}/${metric(m.rknnOutputsGetAvgMs)}/${metric(m.rknnOutputTransformAvgMs)}</td>
+        <td>${metric(m.rknnForwardAvgMs)}/${m.rknnForwardFailures ?? '-'}</td>
         <td>${metric(m.osdAvgMs)}</td>
         <td>${metric(m.publishAvgMs)}</td>
         <td>${metric(m.firstFrameAvgMs)}/${metric(m.firstFrameMaxMs)}</td>
@@ -301,7 +310,7 @@ ${bottleneckBanner}
 </table>
 <h2>媒体与预览分阶段指标</h2>
 <table>
-  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
+  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/转换 ms</th><th>RKNN总计/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
   ${mediaRows}
 </table>
 <h2>分任务汇总</h2>
@@ -369,9 +378,8 @@ function buildReportSteps(runResult) {
   const seenChannels = new Set();
 
   for (const step of steps) {
-    const observedChannels = uniqueObservedChannels(
-      samples.filter((sample) => sample.stepIndex === step.index),
-    );
+    const stepSamples = samples.filter((sample) => sample.stepIndex === step.index);
+    const observedChannels = uniqueObservedChannels(stepSamples);
 
     const shouldExpand = observedChannels.length > 1
       && observedChannels.some((channels) => channels < step.channels);
@@ -380,6 +388,8 @@ function buildReportSteps(runResult) {
     for (const channels of channelsToReport) {
       if (seenChannels.has(channels)) continue;
       seenChannels.add(channels);
+      const qualified = stepSamples.some((sample) =>
+        Number(sample.activeChannels) === channels && sample.phase !== 'ramp');
       reportSteps.push({
         ...step,
         index: channels - 1,
@@ -388,6 +398,7 @@ function buildReportSteps(runResult) {
         targetChannels: step.channels,
         sampleStepIndex: step.index,
         sampleChannels: channels,
+        qualified,
       });
     }
   }

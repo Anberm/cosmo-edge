@@ -16,7 +16,17 @@ const LONG_TIMEOUT_ROUTES = new Set([
   '/Camera/AddVideo',
   '/algorithm/layout/save',
   '/atomic/model/uploadTemp',
+  '/aihost/PTaskCreate',
+  '/aihost/PTaskDetectPic',
 ]);
+
+const DEFAULT_UPLOAD_CONCURRENCY = 2;
+const DEFAULT_UPLOAD_ATTEMPTS = 4;
+const DEFAULT_UPLOAD_BACKOFF_MS = 250;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** MD5-hashed + uppercased password, matching the backend's ToUpper(passwdMd5) comparison. */
 export function hashPassword(plain) {
@@ -32,12 +42,60 @@ export class CosmoClient {
    * @param {string} [opts.token] Existing short-lived device token.
    * @param {string} [opts.lang] Accept-Language header value, default zh-CN.
    */
-  constructor({ base, user, password, token = null, lang = 'zh-CN' }) {
+  constructor({
+    base,
+    user,
+    password,
+    token = null,
+    lang = 'zh-CN',
+    uploadConcurrency = DEFAULT_UPLOAD_CONCURRENCY,
+    uploadAttempts = DEFAULT_UPLOAD_ATTEMPTS,
+    uploadBackoffMs = DEFAULT_UPLOAD_BACKOFF_MS,
+    fetchImpl = globalThis.fetch,
+    sleepImpl = sleep,
+  }) {
+    if (!Number.isInteger(uploadConcurrency) || uploadConcurrency < 1) {
+      throw new Error('uploadConcurrency must be a positive integer');
+    }
+    if (!Number.isInteger(uploadAttempts) || uploadAttempts < 1) {
+      throw new Error('uploadAttempts must be a positive integer');
+    }
+    if (!Number.isFinite(uploadBackoffMs) || uploadBackoffMs < 0) {
+      throw new Error('uploadBackoffMs must be a non-negative number');
+    }
+    if (typeof fetchImpl !== 'function' || typeof sleepImpl !== 'function') {
+      throw new Error('fetchImpl and sleepImpl must be functions');
+    }
     this.base = base.replace(/\/+$/, '');
     this.user = user;
     this.password = password;
     this.lang = lang;
     this.mtk = token;
+    this.uploadConcurrency = uploadConcurrency;
+    this.uploadAttempts = uploadAttempts;
+    this.uploadBackoffMs = uploadBackoffMs;
+    this.fetchImpl = fetchImpl;
+    this.sleepImpl = sleepImpl;
+    this.uploadActive = 0;
+    this.uploadWaiters = [];
+    this.uploadStats = {
+      attempts: 0,
+      retries: 0,
+      busyResponses: 0,
+      maxActive: 0,
+      cleanupAttempts: 0,
+      cleanupFailures: 0,
+    };
+  }
+
+  uploadTelemetry() {
+    return {
+      ...this.uploadStats,
+      active: this.uploadActive,
+      queued: this.uploadWaiters.length,
+      concurrencyLimit: this.uploadConcurrency,
+      attemptLimit: this.uploadAttempts,
+    };
   }
 
   /** Log in and store the mtk token. Returns the login response resData. */
@@ -109,6 +167,20 @@ export class CosmoClient {
     return this._post('/atomic/model/cancelUpload', { uploadId });
   }
 
+  async cancelUploadBestEffort(uploadId) {
+    if (!uploadId) return false;
+    this.uploadStats.cleanupAttempts += 1;
+    try {
+      await this.cancelUpload(uploadId);
+      return true;
+    } catch {
+      // A detect request may already have consumed the one-shot upload. That
+      // makes cancel return "missing" even though no staged payload remains.
+      this.uploadStats.cleanupFailures += 1;
+      return false;
+    }
+  }
+
   /** Add an RTSP camera channel. */
   async cameraAdd(payload) {
     return this._post('/Camera/Add', payload);
@@ -174,6 +246,21 @@ export class CosmoClient {
     return (await this._post('/event/page', payload)).resData;
   }
 
+  /** Create or reuse one picture-analysis task. */
+  async pictureTaskCreate(payload) {
+    return this._post('/aihost/PTaskCreate', payload);
+  }
+
+  /** Run one authenticated, staged-image picture inference request. */
+  async pictureDetect(payload) {
+    return this._post('/aihost/PTaskDetectPic', payload);
+  }
+
+  /** Cancel one picture-analysis task and release its model/action instances. */
+  async pictureTaskCancel(payload) {
+    return this._post('/aihost/PTaskCancle', payload);
+  }
+
   /** Start or join a live preview and wait until its first frame reaches SRS. */
   async requestLiveStream({ channelId, algorithmId = '' }) {
     return (await this._post('/LiveStream/RequestLiveStream', { channelId, algorithmId })).resData?.stream;
@@ -225,39 +312,88 @@ export class CosmoClient {
       headers.mtk = this.mtk;
       headers.token = this.mtk;
     }
-    const timeout = LONG_TIMEOUT_ROUTES.has(path) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    let resp;
+    return this._withUploadSlot(() => this._sendMultipartWithRetry(path, url, headers, body));
+  }
+
+  async _withUploadSlot(operation) {
+    if (this.uploadActive >= this.uploadConcurrency) {
+      await new Promise((resolve) => this.uploadWaiters.push(resolve));
+    }
+    this.uploadActive += 1;
+    this.uploadStats.maxActive = Math.max(this.uploadStats.maxActive, this.uploadActive);
     try {
-      resp = await fetch(url, { method: 'POST', headers, body, signal: controller.signal, duplex: 'half' });
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        throw new Error(`Request timed out after ${timeout}ms: POST ${path}`);
-      }
-      throw new Error(`Network error on POST ${path}: ${err.message}`);
+      return await operation();
     } finally {
-      clearTimeout(timer);
+      this.uploadActive -= 1;
+      this.uploadWaiters.shift()?.();
     }
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} on POST ${path}`);
+  }
+
+  async _sendMultipartWithRetry(path, url, headers, body) {
+    const timeout = LONG_TIMEOUT_ROUTES.has(path) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+    for (let attempt = 1; attempt <= this.uploadAttempts; attempt += 1) {
+      this.uploadStats.attempts += 1;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
+      let resp;
+      try {
+        resp = await this.fetchImpl(url, {
+          method: 'POST', headers, body, signal: controller.signal, duplex: 'half',
+        });
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          throw new Error(`Request timed out after ${timeout}ms: POST ${path}`);
+        }
+        throw new Error(`Network error on POST ${path}: ${err.message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+
+      let responseText;
+      let data;
+      try {
+        responseText = await resp.text();
+        data = JSON.parse(responseText);
+      } catch {
+        data = null;
+      }
+
+      if (resp.status === 503) {
+        this.uploadStats.busyResponses += 1;
+        const firstMsg = Array.isArray(data?.resMsg) ? data.resMsg[0] : null;
+        if (attempt < this.uploadAttempts) {
+          this.uploadStats.retries += 1;
+          const serverDelayMs = Number(firstMsg?.retryAfterSeconds ?? 0) * 1000;
+          const exponentialMs = this.uploadBackoffMs * (2 ** (attempt - 1));
+          await this.sleepImpl(Math.max(serverDelayMs, exponentialMs));
+          continue;
+        }
+        const error = new Error(`HTTP 503 on POST ${path} after ${attempt} attempts`);
+        error.httpStatus = 503;
+        error.retryable = firstMsg?.retryable ?? true;
+        error.msgCode = firstMsg?.msgCode ?? 'HTTP_SERVICE_BUSY';
+        throw error;
+      }
+      if (!resp.ok) {
+        const error = new Error(`HTTP ${resp.status} on POST ${path}`);
+        error.httpStatus = resp.status;
+        throw error;
+      }
+      if (!data) {
+        throw new Error(`Non-JSON response on POST ${path}`);
+      }
+      if (data.resCode !== 1) {
+        const firstMsg = Array.isArray(data.resMsg) ? data.resMsg[0] : null;
+        const text = firstMsg?.msgText || firstMsg?.msgKey || data.msg || 'unknown error';
+        const code = firstMsg?.msgCode || '';
+        const error = new Error(`API error on POST ${path}: ${text}${code ? ` (code ${code})` : ''}`);
+        error.resCode = data.resCode;
+        error.msgCode = code;
+        throw error;
+      }
+      return data;
     }
-    let data;
-    try {
-      data = await resp.json();
-    } catch {
-      throw new Error(`Non-JSON response on POST ${path}`);
-    }
-    if (data.resCode !== 1) {
-      const firstMsg = Array.isArray(data.resMsg) ? data.resMsg[0] : null;
-      const text = firstMsg?.msgText || firstMsg?.msgKey || data.msg || 'unknown error';
-      const code = firstMsg?.msgCode || '';
-      const err = new Error(`API error on POST ${path}: ${text}${code ? ` (code ${code})` : ''}`);
-      err.resCode = data.resCode;
-      err.msgCode = code;
-      throw err;
-    }
-    return data;
+    throw new Error(`Multipart retry loop exhausted on POST ${path}`);
   }
 
   /**
@@ -283,7 +419,7 @@ export class CosmoClient {
     const timer = setTimeout(() => controller.abort(), timeout);
     let resp;
     try {
-      resp = await fetch(url, {
+      resp = await this.fetchImpl(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body ?? {}),

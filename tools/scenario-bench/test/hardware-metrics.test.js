@@ -60,6 +60,29 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         firstFrames: index,
         firstFrameMs: index * 100,
         firstFrameMaxMs: index * 90,
+        colorConvertFrames: index * 10,
+        colorConvertMs: index * 20,
+        blobConvertFrames: index * 10,
+        blobConvertMs: index * 30,
+        graphForwardFrames: index * 10,
+        graphForwardMs: index * 80,
+        graphForwardFailures: index,
+        resultParseFrames: index * 10,
+        resultParseMs: index * 10,
+        resultParseFailures: 0,
+        rknnPrepareCalls: index * 10,
+        rknnPrepareMs: index * 10,
+        rknnInputsSetCalls: index * 10,
+        rknnInputsSetMs: index * 20,
+        rknnRunCalls: index * 10,
+        rknnRunMs: index * 300,
+        rknnOutputsGetCalls: index * 10,
+        rknnOutputsGetMs: index * 40,
+        rknnOutputTransformCalls: index * 10,
+        rknnOutputTransformMs: index * 50,
+        rknnForwards: index * 10,
+        rknnForwardMs: index * 420,
+        rknnForwardFailures: 0,
         activePreviewStreams: 1,
         activePreviewPublishers: 1,
         activeRawPreviewStreams: 0,
@@ -75,6 +98,19 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
   const summary = summarizeStep({ index: 0, channels: 1, holdSec: 12 }, samples);
   assert.equal(summary.mediaStages.preprocessAvgMs, 2);
   assert.equal(summary.mediaStages.postprocessAvgMs, 3);
+  assert.equal(summary.mediaStages.colorConvertAvgMs, 2);
+  assert.equal(summary.mediaStages.blobConvertAvgMs, 3);
+  assert.equal(summary.mediaStages.graphForwardAvgMs, 8);
+  assert.equal(summary.mediaStages.resultParseAvgMs, 1);
+  assert.equal(summary.mediaStages.graphForwardFailures, 1);
+  assert.equal(summary.mediaStages.resultParseFailures, 0);
+  assert.equal(summary.mediaStages.rknnPrepareAvgMs, 1);
+  assert.equal(summary.mediaStages.rknnInputsSetAvgMs, 2);
+  assert.equal(summary.mediaStages.rknnRunAvgMs, 30);
+  assert.equal(summary.mediaStages.rknnOutputsGetAvgMs, 4);
+  assert.equal(summary.mediaStages.rknnOutputTransformAvgMs, 5);
+  assert.equal(summary.mediaStages.rknnForwardAvgMs, 42);
+  assert.equal(summary.mediaStages.rknnForwardFailures, 0);
   assert.equal(summary.mediaStages.osdAvgMs, 4);
   assert.equal(summary.mediaStages.publishAvgMs, 5);
   assert.equal(summary.mediaStages.firstFrameAvgMs, 100);

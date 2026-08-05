@@ -6,6 +6,8 @@
 
 #include "api/HttpUploadClaim.h"
 #include "media/PreviewPipelineMetrics.h"
+#include "media/VideoEncoder.h"
+#include "nn/core/inference_pipeline_metrics.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/path/IUploadStagingService.h"
 #include "service/system/IConfigReadService.h"
@@ -98,6 +100,36 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.firstFrames                   = preview.first_frames;
     accelerator.firstFrameMs                  = preview.first_frame_nanoseconds / 1000000.0;
     accelerator.firstFrameMaxMs               = preview.first_frame_max_nanoseconds / 1000000.0;
+    const auto encoder_capability             = media::VideoEncoder::Probe(media::VideoCodecType::kH264);
+    accelerator.videoEncoderAvailable         = encoder_capability.available;
+    accelerator.videoEncoderBackend           = encoder_capability.backend;
+    accelerator.videoEncoderImplementation    = encoder_capability.implementation;
+    accelerator.videoEncoderDetail            = encoder_capability.detail;
+    const auto inference                      = nn::GetInferencePipelineMetrics().Snapshot();
+    accelerator.colorConvertFrames            = inference.color_convert_frames;
+    accelerator.colorConvertMs                = inference.color_convert_nanoseconds / 1000000.0;
+    accelerator.blobConvertFrames             = inference.blob_convert_frames;
+    accelerator.blobConvertMs                 = inference.blob_convert_nanoseconds / 1000000.0;
+    accelerator.graphForwardFrames            = inference.graph_forward_frames;
+    accelerator.graphForwardMs                = inference.graph_forward_nanoseconds / 1000000.0;
+    accelerator.graphForwardFailures          = inference.graph_forward_failures;
+    accelerator.resultParseFrames             = inference.result_parse_frames;
+    accelerator.resultParseMs                 = inference.result_parse_nanoseconds / 1000000.0;
+    accelerator.resultParseFailures           = inference.result_parse_failures;
+    accelerator.rknnForwards                  = inference.rknn_forwards;
+    accelerator.rknnForwardMs                 = inference.rknn_forward_nanoseconds / 1000000.0;
+    accelerator.rknnForwardFailures           = inference.rknn_forward_failures;
+    accelerator.rknnPrepareCalls              = inference.rknn_prepare_calls;
+    accelerator.rknnPrepareMs                 = inference.rknn_prepare_nanoseconds / 1000000.0;
+    accelerator.rknnInputsSetCalls            = inference.rknn_inputs_set_calls;
+    accelerator.rknnInputsSetMs               = inference.rknn_inputs_set_nanoseconds / 1000000.0;
+    accelerator.rknnRunCalls                  = inference.rknn_run_calls;
+    accelerator.rknnRunMs                     = inference.rknn_run_nanoseconds / 1000000.0;
+    accelerator.rknnOutputsGetCalls           = inference.rknn_outputs_get_calls;
+    accelerator.rknnOutputsGetMs              = inference.rknn_outputs_get_nanoseconds / 1000000.0;
+    accelerator.rknnOutputTransformCalls      = inference.rknn_output_transform_calls;
+    accelerator.rknnOutputTransformMs         =
+        inference.rknn_output_transform_nanoseconds / 1000000.0;
     return retData;
 }
 

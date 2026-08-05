@@ -3,17 +3,27 @@
 #include "nn/device/rknn/rknn_net_node.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <numeric>
 
+#include "nn/core/inference_pipeline_metrics.h"
 #include "nn/device/rknn/rknn_yolov8_adapter.h"
 #include "nn/node/node_type_utils.h"
 #include "util/Log.h"
 
 namespace cosmo::nn {
 namespace {
+
+    using MetricsClock = std::chrono::steady_clock;
+
+    uint64_t ElapsedNanoseconds(MetricsClock::time_point started_at) {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         MetricsClock::now() - started_at)
+                                         .count());
+    }
 
     Status RknnError(const std::string& operation, int code) {
         return Status(COSMO_NN_ERR_NET, operation + " failed with RKNN code " + std::to_string(code));
@@ -66,6 +76,7 @@ void RknnNetNode::DestroyContext() {
     input_attrs_.clear();
     output_attrs_.clear();
     model_data_.clear();
+    std::vector<float>().swap(input_nhwc_);
     io_count_          = {};
     yolov8_heads_      = false;
     yolov8_class_count_ = 0;
@@ -285,27 +296,41 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN output blob count mismatch");
 
     timer.Start();
-    std::vector<float> input_nhwc;
+    const auto forward_started = MetricsClock::now();
+    const auto finish = [&](Status status) -> Status {
+        timer.Stop();
+        GetInferencePipelineMetrics().RecordRknnForward(ElapsedNanoseconds(forward_started),
+                                                        bool(status));
+        return status;
+    };
     int input_height = 0, input_width = 0;
-    RETURN_ON_FAIL(PrepareInput(*bottom_blobs[0], input_nhwc, input_height, input_width));
-    if (input_nhwc.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
-        return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit");
+    const auto prepare_started = MetricsClock::now();
+    auto prepare_status = PrepareInput(*bottom_blobs[0], input_nhwc_, input_height, input_width);
+    GetInferencePipelineMetrics().RecordRknnPrepare(ElapsedNanoseconds(prepare_started));
+    if (!prepare_status)
+        return finish(prepare_status);
+    if (input_nhwc_.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
+        return finish(Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit"));
 
     rknn_input input{};
     input.index        = 0;
-    input.buf          = input_nhwc.data();
-    input.size         = static_cast<uint32_t>(input_nhwc.size() * sizeof(float));
+    input.buf          = input_nhwc_.data();
+    input.size         = static_cast<uint32_t>(input_nhwc_.size() * sizeof(float));
     input.pass_through = 0;
     input.type         = RKNN_TENSOR_FLOAT32;
     // Runtime 2.3.2 silently rejects source NCHW on this model path while
     // reporting success. The graph boundary copy above makes NHWC explicit.
     input.fmt = RKNN_TENSOR_NHWC;
+    const auto inputs_set_started = MetricsClock::now();
     int result = rknn_inputs_set(context_, 1, &input);
+    GetInferencePipelineMetrics().RecordRknnInputsSet(ElapsedNanoseconds(inputs_set_started));
     if (result != RKNN_SUCC)
-        return RknnError("rknn_inputs_set", result);
+        return finish(RknnError("rknn_inputs_set", result));
+    const auto run_started = MetricsClock::now();
     result = rknn_run(context_, nullptr);
+    GetInferencePipelineMetrics().RecordRknnRun(ElapsedNanoseconds(run_started));
     if (result != RKNN_SUCC)
-        return RknnError("rknn_run", result);
+        return finish(RknnError("rknn_run", result));
 
     std::vector<rknn_output> outputs(output_attrs_.size());
     for (uint32_t index = 0; index < outputs.size(); ++index) {
@@ -314,21 +339,31 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         outputs[index].is_prealloc = 0;
     }
     OutputGuard output_guard(context_, outputs);
+    const auto outputs_get_started = MetricsClock::now();
     result = rknn_outputs_get(context_, static_cast<uint32_t>(outputs.size()), outputs.data(), nullptr);
+    GetInferencePipelineMetrics().RecordRknnOutputsGet(ElapsedNanoseconds(outputs_get_started));
     if (result != RKNN_SUCC)
-        return RknnError("rknn_outputs_get", result);
+        return finish(RknnError("rknn_outputs_get", result));
     output_guard.Activate();
 
+    const auto output_transform_started = MetricsClock::now();
+    const auto finish_output_error = [&](Status status) -> Status {
+        GetInferencePipelineMetrics().RecordRknnOutputTransform(
+            ElapsedNanoseconds(output_transform_started));
+        return finish(status);
+    };
     if (yolov8_heads_) {
         auto top_desc = top_blobs[0]->GetBlobDesc();
         const size_t top_count = BlobElementCount(top_desc);
         if (!top_blobs[0]->GetHandle().base || top_desc.data_type != DATA_TYPE_FLOAT)
-            return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN YOLOv8 top blob is invalid");
+            return finish_output_error(
+                Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN YOLOv8 top blob is invalid"));
         std::vector<RknnYolov8Head> heads;
         heads.reserve(outputs.size());
         for (size_t index = 0; index < outputs.size(); ++index) {
             if (!outputs[index].buf || outputs[index].size % sizeof(float) != 0)
-                return Status(COSMO_NN_ERR_NET, "RKNN returned an invalid YOLOv8 output buffer");
+                return finish_output_error(
+                    Status(COSMO_NN_ERR_NET, "RKNN returned an invalid YOLOv8 output buffer"));
             heads.push_back({static_cast<const float*>(outputs[index].buf),
                              outputs[index].size / sizeof(float), TensorShape(output_attrs_[index])});
         }
@@ -336,7 +371,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         if (!ReconstructRknnYolov8(heads, input_height, input_width,
                                    static_cast<float*>(top_blobs[0]->GetHandle().base), top_count,
                                    adapter_error)) {
-            return Status(COSMO_NN_ERR_NET, adapter_error);
+            return finish_output_error(Status(COSMO_NN_ERR_NET, adapter_error));
         }
     } else {
         for (size_t index = 0; index < outputs.size(); ++index) {
@@ -344,13 +379,15 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             const size_t count = BlobElementCount(desc);
             if (!top_blobs[index]->GetHandle().base || desc.data_type != DATA_TYPE_FLOAT ||
                 !outputs[index].buf || outputs[index].size != count * sizeof(float)) {
-                return Status(COSMO_NN_ERR_NET, "RKNN output size does not match the graph blob");
+                return finish_output_error(
+                    Status(COSMO_NN_ERR_NET, "RKNN output size does not match the graph blob"));
             }
             std::memcpy(top_blobs[index]->GetHandle().base, outputs[index].buf, outputs[index].size);
         }
     }
-    timer.Stop();
-    return COSMO_NN_OK;
+    GetInferencePipelineMetrics().RecordRknnOutputTransform(
+        ElapsedNanoseconds(output_transform_started));
+    return finish(COSMO_NN_OK);
 }
 
 }  // namespace cosmo::nn

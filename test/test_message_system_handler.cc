@@ -7,6 +7,7 @@
 
 #include "api/MessageSystemHandler.h"
 #include "media/PreviewPipelineMetrics.h"
+#include "nn/core/inference_pipeline_metrics.h"
 #include "mock/MockConfigNetworkService.h"
 #include "mock/MockConfigReadService.h"
 #include "mock/MockConfigWriteService.h"
@@ -54,6 +55,7 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     gpu.gpuusage = 0.5;
     REQUIRE_CALL(mocks.deviceInfoSvc, GetGpuUtilization()).RETURN(gpu);
     const auto preview = media::GetPreviewPipelineMetrics().Snapshot();
+    const auto inference = nn::GetInferencePipelineMetrics().Snapshot();
 
     System::MsgQueryHardwareResourceRecv data{};
     std::error_condition errc;
@@ -62,6 +64,10 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     CHECK(ret.resData.accelerator.gpuusage == 0.5);
     CHECK(ret.resData.accelerator.activePreviewStreams == preview.active_preview_streams);
     CHECK(ret.resData.accelerator.activeAlgorithmPreviewStreams == preview.active_algorithm_preview_streams);
+    CHECK_FALSE(ret.resData.accelerator.videoEncoderBackend.empty());
+    CHECK_FALSE(ret.resData.accelerator.videoEncoderDetail.empty());
+    CHECK(ret.resData.accelerator.colorConvertFrames == inference.color_convert_frames);
+    CHECK(ret.resData.accelerator.rknnForwards == inference.rknn_forwards);
 }
 
 TEST_CASE("SystemHandler: QueryPictureQuality", "[system-handler]") {
