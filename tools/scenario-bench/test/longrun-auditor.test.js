@@ -35,6 +35,7 @@ function accelerator(index) {
     rgaFailures: 0,
     rgaFrames: frames,
     rknnForwardFailures: 0,
+    rknnRgaFailures: 0,
     rknnForwards: frames * 3,
     videoDecoderBackend: 'rockchip-copy-out',
     videoEncoderBackend: 'rockchip-copy-first',

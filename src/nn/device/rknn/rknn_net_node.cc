@@ -79,6 +79,7 @@ void RknnNetNode::DestroyContext() {
     std::vector<float>().swap(input_nhwc_);
     io_count_          = {};
     yolov8_heads_      = false;
+    detector_model_    = false;
     yolov8_class_count_ = 0;
     yolov8_point_count_ = 0;
 }
@@ -148,6 +149,10 @@ Status RknnNetNode::QueryTensorAttributes() {
         yolov8_class_count_ = yolo_layout.class_count;
         yolov8_point_count_ = yolo_layout.point_count;
     }
+    const auto& input = input_attrs_.front();
+    detector_model_ = yolov8_heads_ && input.n_dims == 4 && input.fmt == RKNN_TENSOR_NHWC &&
+                      input.dims[0] == 1 && input.dims[1] == 640 && input.dims[2] == 640 &&
+                      input.dims[3] == 3;
     return COSMO_NN_OK;
 }
 
@@ -286,7 +291,10 @@ Status RknnNetNode::PrepareInput(const Blob& blob, std::vector<float>& nhwc, int
 
 Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                             std::vector<std::shared_ptr<Blob>>& top_blobs) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const auto mutex_wait_started = MetricsClock::now();
+    std::unique_lock<std::mutex> lock(mutex_);
+    const auto scope = detector_model_ ? RknnModelScope::Detector : RknnModelScope::Other;
+    GetInferencePipelineMetrics().RecordRknnMutexWait(ElapsedNanoseconds(mutex_wait_started), scope);
     if (context_ == 0)
         return Status(COSMO_NN_ERR_GRAPH_NOT_INIT, "RKNN context is not initialized");
     if (bottom_blobs.size() != 1 || !bottom_blobs[0])
@@ -300,13 +308,13 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     const auto finish = [&](Status status) -> Status {
         timer.Stop();
         GetInferencePipelineMetrics().RecordRknnForward(ElapsedNanoseconds(forward_started),
-                                                        bool(status));
+                                                        bool(status), scope);
         return status;
     };
     int input_height = 0, input_width = 0;
     const auto prepare_started = MetricsClock::now();
     auto prepare_status = PrepareInput(*bottom_blobs[0], input_nhwc_, input_height, input_width);
-    GetInferencePipelineMetrics().RecordRknnPrepare(ElapsedNanoseconds(prepare_started));
+    GetInferencePipelineMetrics().RecordRknnPrepare(ElapsedNanoseconds(prepare_started), scope);
     if (!prepare_status)
         return finish(prepare_status);
     if (input_nhwc_.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
@@ -323,12 +331,12 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     input.fmt = RKNN_TENSOR_NHWC;
     const auto inputs_set_started = MetricsClock::now();
     int result = rknn_inputs_set(context_, 1, &input);
-    GetInferencePipelineMetrics().RecordRknnInputsSet(ElapsedNanoseconds(inputs_set_started));
+    GetInferencePipelineMetrics().RecordRknnInputsSet(ElapsedNanoseconds(inputs_set_started), scope);
     if (result != RKNN_SUCC)
         return finish(RknnError("rknn_inputs_set", result));
     const auto run_started = MetricsClock::now();
     result = rknn_run(context_, nullptr);
-    GetInferencePipelineMetrics().RecordRknnRun(ElapsedNanoseconds(run_started));
+    GetInferencePipelineMetrics().RecordRknnRun(ElapsedNanoseconds(run_started), scope);
     if (result != RKNN_SUCC)
         return finish(RknnError("rknn_run", result));
 
@@ -341,7 +349,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     OutputGuard output_guard(context_, outputs);
     const auto outputs_get_started = MetricsClock::now();
     result = rknn_outputs_get(context_, static_cast<uint32_t>(outputs.size()), outputs.data(), nullptr);
-    GetInferencePipelineMetrics().RecordRknnOutputsGet(ElapsedNanoseconds(outputs_get_started));
+    GetInferencePipelineMetrics().RecordRknnOutputsGet(ElapsedNanoseconds(outputs_get_started), scope);
     if (result != RKNN_SUCC)
         return finish(RknnError("rknn_outputs_get", result));
     output_guard.Activate();
@@ -349,7 +357,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     const auto output_transform_started = MetricsClock::now();
     const auto finish_output_error = [&](Status status) -> Status {
         GetInferencePipelineMetrics().RecordRknnOutputTransform(
-            ElapsedNanoseconds(output_transform_started));
+            ElapsedNanoseconds(output_transform_started), scope);
         return finish(status);
     };
     if (yolov8_heads_) {
@@ -386,7 +394,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         }
     }
     GetInferencePipelineMetrics().RecordRknnOutputTransform(
-        ElapsedNanoseconds(output_transform_started));
+        ElapsedNanoseconds(output_transform_started), scope);
     return finish(COSMO_NN_OK);
 }
 

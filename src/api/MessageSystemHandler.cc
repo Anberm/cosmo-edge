@@ -151,6 +151,55 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnOutputTransformCalls      = inference.rknn_output_transform_calls;
     accelerator.rknnOutputTransformMs         =
         inference.rknn_output_transform_nanoseconds / 1000000.0;
+    accelerator.rknnMutexWaitCalls            = inference.rknn_mutex_wait_calls;
+    accelerator.rknnMutexWaitMs               = inference.rknn_mutex_wait_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorForwards          = inference.rknn_detector_forwards;
+    accelerator.rknnDetectorForwardMs         =
+        inference.rknn_detector_forward_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorForwardFailures   = inference.rknn_detector_forward_failures;
+    accelerator.rknnDetectorPrepareCalls      = inference.rknn_detector_prepare_calls;
+    accelerator.rknnDetectorPrepareMs         =
+        inference.rknn_detector_prepare_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorInputsSetCalls    = inference.rknn_detector_inputs_set_calls;
+    accelerator.rknnDetectorInputsSetMs       =
+        inference.rknn_detector_inputs_set_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorRunCalls          = inference.rknn_detector_run_calls;
+    accelerator.rknnDetectorRunMs             =
+        inference.rknn_detector_run_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorOutputsGetCalls   = inference.rknn_detector_outputs_get_calls;
+    accelerator.rknnDetectorOutputsGetMs      =
+        inference.rknn_detector_outputs_get_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorOutputTransformCalls =
+        inference.rknn_detector_output_transform_calls;
+    accelerator.rknnDetectorOutputTransformMs =
+        inference.rknn_detector_output_transform_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorMutexWaitCalls    = inference.rknn_detector_mutex_wait_calls;
+    accelerator.rknnDetectorMutexWaitMs       =
+        inference.rknn_detector_mutex_wait_nanoseconds / 1000000.0;
+    accelerator.rknnPreprocessFastHits        = inference.rknn_preprocess_fast_hits;
+    accelerator.rknnRgaFillCalls              = inference.rknn_rga_fill_calls;
+    accelerator.rknnRgaFillMs                 = inference.rknn_rga_fill_nanoseconds / 1000000.0;
+    accelerator.rknnRgaResizeColorCalls       = inference.rknn_rga_resize_color_calls;
+    accelerator.rknnRgaResizeColorMs          =
+        inference.rknn_rga_resize_color_nanoseconds / 1000000.0;
+    accelerator.rknnRgaFailures               = inference.rknn_rga_failures;
+    accelerator.rknnCpuResizeFallbackCalls    = inference.rknn_cpu_resize_fallback_calls;
+    accelerator.rknnCpuResizeFallbackMs       =
+        inference.rknn_cpu_resize_fallback_nanoseconds / 1000000.0;
+    accelerator.rknnCpuNormalizeFallbackCalls = inference.rknn_cpu_normalize_fallback_calls;
+    accelerator.rknnCpuNormalizeFallbackMs    =
+        inference.rknn_cpu_normalize_fallback_nanoseconds / 1000000.0;
+    accelerator.rknnNativeInputMapCalls       = inference.rknn_native_input_map_calls;
+    accelerator.rknnNativeInputMapMs          =
+        inference.rknn_native_input_map_nanoseconds / 1000000.0;
+    accelerator.rknnNativeInt8Inputs          = inference.rknn_native_int8_inputs;
+    accelerator.rknnFloatInputs               = inference.rknn_float_inputs;
+    accelerator.rknnInputCompatibilityFallbacks = inference.rknn_input_compatibility_fallbacks;
+    accelerator.yolov8PostprocessCalls        = inference.yolov8_postprocess_calls;
+    accelerator.yolov8PostprocessMs           =
+        inference.yolov8_postprocess_nanoseconds / 1000000.0;
+    accelerator.yolov8NmsCalls                = inference.yolov8_nms_calls;
+    accelerator.yolov8NmsMs                   = inference.yolov8_nms_nanoseconds / 1000000.0;
     return retData;
 }
 

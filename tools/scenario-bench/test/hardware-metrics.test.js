@@ -115,6 +115,42 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         rknnForwards: index * 10,
         rknnForwardMs: index * 420,
         rknnForwardFailures: 0,
+        rknnMutexWaitCalls: index * 10,
+        rknnMutexWaitMs: index * 6,
+        rknnDetectorPrepareCalls: index * 4,
+        rknnDetectorPrepareMs: index * 4,
+        rknnDetectorInputsSetCalls: index * 4,
+        rknnDetectorInputsSetMs: index * 8,
+        rknnDetectorRunCalls: index * 4,
+        rknnDetectorRunMs: index * 120,
+        rknnDetectorOutputsGetCalls: index * 4,
+        rknnDetectorOutputsGetMs: index * 16,
+        rknnDetectorOutputTransformCalls: index * 4,
+        rknnDetectorOutputTransformMs: index * 20,
+        rknnDetectorForwards: index * 4,
+        rknnDetectorForwardMs: index * 168,
+        rknnDetectorForwardFailures: 0,
+        rknnDetectorMutexWaitCalls: index * 4,
+        rknnDetectorMutexWaitMs: index * 2,
+        rknnPreprocessFastHits: index * 4,
+        rknnRgaFillCalls: index * 4,
+        rknnRgaFillMs: index * 2,
+        rknnRgaResizeColorCalls: index * 4,
+        rknnRgaResizeColorMs: index * 8,
+        rknnRgaFailures: 0,
+        rknnCpuResizeFallbackCalls: 0,
+        rknnCpuResizeFallbackMs: 0,
+        rknnCpuNormalizeFallbackCalls: 0,
+        rknnCpuNormalizeFallbackMs: 0,
+        rknnNativeInputMapCalls: index * 4,
+        rknnNativeInputMapMs: index,
+        rknnNativeInt8Inputs: index * 4,
+        rknnFloatInputs: index * 6,
+        rknnInputCompatibilityFallbacks: 0,
+        yolov8PostprocessCalls: index * 4,
+        yolov8PostprocessMs: index * 12,
+        yolov8NmsCalls: index * 4,
+        yolov8NmsMs: index * 4,
         rgaFrames: index * 10,
         rgaMs: index * 15,
         rgaFailures: 0,
@@ -157,6 +193,18 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
   assert.equal(summary.mediaStages.rknnOutputTransformAvgMs, 5);
   assert.equal(summary.mediaStages.rknnForwardAvgMs, 42);
   assert.equal(summary.mediaStages.rknnForwardFailures, 0);
+  assert.equal(summary.mediaStages.rknnMutexWaitAvgMs, 0.6);
+  assert.equal(summary.mediaStages.rknnDetectorForwardAvgMs, 42);
+  assert.equal(summary.mediaStages.rknnDetectorMutexWaitAvgMs, 0.5);
+  assert.equal(summary.mediaStages.rknnPreprocessFastHits, 4);
+  assert.equal(summary.mediaStages.rknnRgaFillAvgMs, 0.5);
+  assert.equal(summary.mediaStages.rknnRgaResizeColorAvgMs, 2);
+  assert.equal(summary.mediaStages.rknnNativeInputMapAvgMs, 0.25);
+  assert.equal(summary.mediaStages.rknnNativeInt8Inputs, 4);
+  assert.equal(summary.mediaStages.rknnFloatInputs, 6);
+  assert.equal(summary.mediaStages.rknnInputCompatibilityFallbacks, 0);
+  assert.equal(summary.mediaStages.yolov8PostprocessAvgMs, 3);
+  assert.equal(summary.mediaStages.yolov8NmsAvgMs, 1);
   assert.equal(summary.mediaStages.rgaAvgMs, 1.5);
   assert.equal(summary.mediaStages.rgaFailures, 0);
   assert.equal(summary.mediaStages.mppEncodeAvgMs, 2.5);

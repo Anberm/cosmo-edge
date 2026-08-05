@@ -14,6 +14,7 @@ const REQUIRED_FAILURE_COUNTERS = [
   'resultParseFailures',
   'rgaFailures',
   'rknnForwardFailures',
+  'rknnRgaFailures',
 ];
 
 const MONOTONIC_COUNTERS = [

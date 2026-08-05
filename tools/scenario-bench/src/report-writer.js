@@ -269,6 +269,10 @@ export class ReportWriter {
         <td>${metric(m.rknnPrepareAvgMs)}/${metric(m.rknnInputsSetAvgMs)}</td>
         <td>${metric(m.rknnRunAvgMs)}/${metric(m.rknnOutputsGetAvgMs)}/${metric(m.rknnOutputTransformAvgMs)}</td>
         <td>${metric(m.rknnForwardAvgMs)}/${m.rknnForwardFailures ?? '-'}</td>
+        <td>${metric(m.rknnDetectorForwardAvgMs)}/${metric(m.rknnDetectorMutexWaitAvgMs)}/${m.rknnDetectorForwardFailures ?? '-'}</td>
+        <td>${metric(m.rknnRgaFillAvgMs)}/${metric(m.rknnRgaResizeColorAvgMs)}/${metric(m.rknnNativeInputMapAvgMs)}/${m.rknnPreprocessFastHits ?? '-'}/${m.rknnRgaFailures ?? '-'}</td>
+        <td>${m.rknnCpuResizeFallbacks ?? '-'}/${m.rknnCpuNormalizeFallbacks ?? '-'}/${m.rknnInputCompatibilityFallbacks ?? '-'}</td>
+        <td>${metric(m.yolov8PostprocessAvgMs)}/${metric(m.yolov8NmsAvgMs)}</td>
         <td>${metric(m.rgaAvgMs)}/${m.rgaFailures ?? '-'}</td>
         <td>${metric(m.mppEncodeAvgMs)}/${m.mppEncodeFailures ?? '-'}</td>
         <td>${metric(m.mppDecodeAvgMs)}/${m.mppDecodeFailures ?? '-'}/${m.mppDecodeFallbacks ?? '-'}</td>
@@ -316,7 +320,7 @@ ${bottleneckBanner}
 </table>
 <h2>媒体与预览分阶段指标</h2>
 <table>
-  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/转换 ms</th><th>RKNN总计/失败</th><th>RGA/失败</th><th>MPP编码/失败</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
+  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/转换 ms</th><th>RKNN总计/失败</th><th>Detector总计/等待/失败</th><th>Fast Fill/Resize/Map/命中/失败</th><th>Fallback Resize/Normalize/Compat</th><th>YOLO Post/NMS</th><th>RGA/失败</th><th>MPP编码/失败</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
   ${mediaRows}
 </table>
 <h2>分任务汇总</h2>

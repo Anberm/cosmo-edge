@@ -80,6 +80,9 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     CHECK(ret.resData.accelerator.mppEarlyDroppedFrames == preview.mpp_early_dropped_frames);
     CHECK(ret.resData.accelerator.colorConvertFrames == inference.color_convert_frames);
     CHECK(ret.resData.accelerator.rknnForwards == inference.rknn_forwards);
+    CHECK(ret.resData.accelerator.rknnDetectorForwards == inference.rknn_detector_forwards);
+    CHECK(ret.resData.accelerator.rknnPreprocessFastHits == inference.rknn_preprocess_fast_hits);
+    CHECK(ret.resData.accelerator.yolov8PostprocessCalls == inference.yolov8_postprocess_calls);
     REQUIRE(ret.resData.itemList.size() == 1);
     CHECK(ret.resData.itemList.front().memoryDomain == "system");
     CHECK(ret.resData.itemList.front().usedSize == "1.37 GiB");

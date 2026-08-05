@@ -1,14 +1,38 @@
 #include "nn/node/yolov8_decode_node.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
+#include "nn/core/inference_pipeline_metrics.h"
 #include "nn/node/node_type_utils.h"
 #include "nn/utils/dims_vector_utils.h"
 #include "nn/utils/op.h"
 #include "util/Log.h"
 
 namespace cosmo::nn {
+namespace {
+
+using MetricsClock = std::chrono::steady_clock;
+
+uint64_t ElapsedNanoseconds(MetricsClock::time_point started_at) {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     MetricsClock::now() - started_at)
+                                     .count());
+}
+
+class ScopedPostprocessMetric {
+public:
+    ScopedPostprocessMetric() : started_at_(MetricsClock::now()) {}
+    ~ScopedPostprocessMetric() {
+        GetInferencePipelineMetrics().RecordYolov8Postprocess(ElapsedNanoseconds(started_at_));
+    }
+
+private:
+    MetricsClock::time_point started_at_;
+};
+
+}  // namespace
 
 YoloV8DecodeNode::YoloV8DecodeNode() : Node() {
     node_type     = NodeType::NODE_YOLOV8_DECODE;
@@ -49,6 +73,7 @@ size_t YoloV8DecodeNode::GetTopCount() {
 
 Status YoloV8DecodeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                                  std::vector<std::shared_ptr<Blob>>& top_blobs) {
+    ScopedPostprocessMetric postprocess_metric;
     timer.Start();
 
     auto bottom_blob = bottom_blobs.at(0);
@@ -190,7 +215,9 @@ Status YoloV8DecodeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob
                 p, idx, conf, cid, x, y, w, h);
         }
 
+        const auto nms_started = MetricsClock::now();
         NMS(conf_list, bottom_ptr_i, num_features, num_boxes, is_format1);
+        GetInferencePipelineMetrics().RecordYolov8Nms(ElapsedNanoseconds(nms_started));
 
         // Auto-detect normalized coordinates: if all box values are in [0, 1],
         // the model outputs normalized coords and we need to scale by input_size.
