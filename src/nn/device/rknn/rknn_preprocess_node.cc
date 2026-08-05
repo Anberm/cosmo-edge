@@ -470,9 +470,8 @@ Status RknnNormalizeNode::ForwardFloat(const Blob& bottom, Blob& top) {
     auto& mutable_bottom = const_cast<Blob&>(bottom);
     const auto bottom_desc = mutable_bottom.GetBlobDesc();
     const auto top_desc    = top.GetBlobDesc();
-    if (bottom_desc.data_type != DATA_TYPE_UINT8 || bottom_desc.data_format != DATA_FORMAT_NHWC ||
-        top_desc.data_type != DATA_TYPE_FLOAT || top_desc.data_format != DATA_FORMAT_NCHW ||
-        mean_.size() < 3 || scale_.size() < 3) {
+    if (bottom_desc.data_type != DATA_TYPE_UINT8 || top_desc.data_type != DATA_TYPE_FLOAT ||
+        top_desc.data_format != DATA_FORMAT_NCHW || mean_.size() < 3 || scale_.size() < 3) {
         return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN float normalize blob contract mismatch");
     }
     const int batch    = bottom_desc.dims[0];

@@ -89,6 +89,44 @@ TEST_CASE("RKNN native input contract requires the model quantization identity",
     CHECK_FALSE(IsRknnNativeInt8InputCompatible(attr, desc));
 }
 
+TEST_CASE("RKNN classifier-sized normalization keeps the legacy float layout",
+          "[nn][rknn][fast-preprocess]") {
+    using namespace cosmo::nn;
+    Normalize normalize;
+    normalize.mean   = {0.0f, 0.0f, 0.0f};
+    normalize.scale  = 0.00392157f;
+    normalize.is_bgr = false;
+    SharedResource resource;
+    RknnNormalizeNode node;
+    node.SetSharedResource(&resource);
+    node.LoadParam(&normalize);
+    REQUIRE(bool(node.InferTopShapesWithBottoms({{1, 224, 224, 3}}, {DATA_TYPE_UINT8})));
+    CHECK(node.GetTopBlobDataTypes().front() == DATA_TYPE_FLOAT);
+    CHECK((node.GetTopBlobShapes().front() == DimsVector{1, 3, 224, 224}));
+
+    auto bottom_desc        = PackedImageDesc(224, 224, IMAGE_BGR);
+    bottom_desc.data_format = DATA_FORMAT_NCHW;  // Legacy crop/resize nodes leave this metadata unset.
+    auto bottom             = std::make_shared<Blob>(bottom_desc, true);
+    BlobDesc top_desc;
+    top_desc.device_type = DEVICE_NAIVE;
+    top_desc.data_type   = DATA_TYPE_FLOAT;
+    top_desc.dims        = {1, 3, 224, 224};
+    auto top             = std::make_shared<Blob>(top_desc, true);
+    auto* input          = static_cast<uint8_t*>(bottom->GetHandle().base);
+    for (size_t pixel = 0; pixel < static_cast<size_t>(224) * 224; ++pixel) {
+        input[pixel * 3]     = 10;
+        input[pixel * 3 + 1] = 20;
+        input[pixel * 3 + 2] = 30;
+    }
+    std::vector<std::shared_ptr<Blob>> bottoms{bottom};
+    std::vector<std::shared_ptr<Blob>> tops{top};
+    REQUIRE(bool(node.Forward(bottoms, tops)));
+    const auto* output = static_cast<const float*>(top->GetHandle().base);
+    CHECK(output[0] == Catch::Approx(30.0f * 0.00392157f));
+    CHECK(output[224 * 224] == Catch::Approx(20.0f * 0.00392157f));
+    CHECK(output[2 * 224 * 224] == Catch::Approx(10.0f * 0.00392157f));
+}
+
 TEST_CASE("RKNN RGA preprocessing performs centered RGB letterbox on host buffers",
           "[nn][rknn][rga][fast-preprocess]") {
     using namespace cosmo::nn;
