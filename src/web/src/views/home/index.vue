@@ -27,7 +27,7 @@
           </div>
           <div class="resource-value-row">
             <span class="resource-value">{{ item.usedPercent }}</span>
-            <span class="resource-unit">%</span>
+            <span v-if="item.isAvailable" class="resource-unit">%</span>
           </div>
           <div class="resource-progress">
             <div
@@ -281,12 +281,28 @@ const getMergedMemoryItem = () => {
 }
 
 const normalizeResourceItem = (item) => {
+  const isAvailable = item.available !== 0
+  if (!isAvailable) {
+    return {
+      ...item,
+      name: getResourceName(item),
+      isAvailable: false,
+      usedPercent: '--',
+      safePercent: 0,
+      level: 'unavailable',
+      statusText: t('resource.unavailable'),
+      usedLabel: t('resource.unavailable'),
+      unusedLabel: ''
+    }
+  }
+
   const usedPercent = toPercentNumber(item.usedPercent)
   const levelInfo = getResourceLevelInfo(item.key, usedPercent)
 
   return {
     ...item,
     name: getResourceName(item),
+    isAvailable: true,
     usedPercent,
     safePercent: Math.min(Math.max(usedPercent, 0), 100),
     level: levelInfo.level,
@@ -810,6 +826,11 @@ onBeforeUnmount(() => {
   background: rgba(59, 130, 246, 0.1);
 }
 
+.state-unavailable {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.12);
+}
+
 .state-low {
   color: #15803d;
   background: rgba(34, 197, 94, 0.1);
@@ -832,6 +853,10 @@ onBeforeUnmount(() => {
 
 .fill-idle {
   background: #3b82f6;
+}
+
+.fill-unavailable {
+  background: #94a3b8;
 }
 
 .fill-low {

@@ -902,6 +902,7 @@ export default {
     mediumLoad: '中负载',
     highUsage: '高占用',
     nearLimit: '接近上限',
+    unavailable: '不可用',
     packetLost: '丢包 {value}',
     used: '已用 {value}',
     packetKept: '未丢 {value}',

@@ -213,9 +213,14 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
     const auto raw_gpu_usage = gpu_utl.gpuusage;
     const auto gpu_usage     = ClampRatio(raw_gpu_usage);
     gpu_utl.gpuusage         = gpu_usage;
-    items.push_back({"npuUtilization", "NPU使用率", static_cast<int>(std::lround(gpu_usage * 100)),
-                     COSMO_FORMAT("{:.0f}%", gpu_usage * 100), COSMO_FORMAT("{:.0f}%", (1 - gpu_usage) * 100),
-                     std::isfinite(raw_gpu_usage) && raw_gpu_usage >= 0.0 ? 1 : 0});
+    if (gpu_utl.gpuusageAvailable) {
+        items.push_back({"npuUtilization", "NPU使用率", static_cast<int>(std::lround(gpu_usage * 100)),
+                         COSMO_FORMAT("{:.0f}%", gpu_usage * 100),
+                         COSMO_FORMAT("{:.0f}%", (1 - gpu_usage) * 100),
+                         std::isfinite(raw_gpu_usage) && raw_gpu_usage >= 0.0 ? 1 : 0});
+    } else {
+        items.push_back({"npuUtilization", "NPU使用率", 0, "--", "--", 0});
+    }
 
     // GPU memory details
     auto add_gpu_mem_item = [&](const std::string& key, const std::string& name, const auto& dev) {
@@ -262,7 +267,7 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
     items.push_back({"packetDiscardUtilization", "丢包率", static_cast<int>(std::lround(used_percent * 100)),
                      COSMO_FORMAT("{}个", packet_discard),
                      COSMO_FORMAT("{}个", packet_total - packet_discard), 1});
-    LOG_INFO("continuesDiscardSec:{} packetDiscard:{}", continues_discard_sec, packet_discard);
+    LOG_DEBUG("continuesDiscardSec:{} packetDiscard:{}", continues_discard_sec, packet_discard);
 
     std::vector<cosmo::GpuMemSnapshot> devs;
     devs.reserve(gpu_utl.gpudevusage.size());

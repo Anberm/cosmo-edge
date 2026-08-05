@@ -7,7 +7,6 @@
 #include <string>
 
 #include "service/system/impl/AcceleratorMetricsProvider.h"
-#include "util/Log.h"
 
 namespace cosmo::service::detail {
 namespace {
@@ -36,22 +35,6 @@ namespace {
         return result;
     }
 
-    double ReadNpuLoad() {
-        std::ifstream stream("/sys/class/devfreq/27700000.npu/load");
-        std::string value;
-        if (!(stream >> value))
-            return 0.0;
-        const auto delimiter = value.find('@');
-        if (delimiter != std::string::npos)
-            value.resize(delimiter);
-        try {
-            return std::clamp(std::stod(value) / 100.0, 0.0, 1.0);
-        } catch (const std::exception&) {
-            LOG_WARN("Unable to parse RK3576 NPU load: {}", value);
-            return 0.0;
-        }
-    }
-
     std::string ReadNpuFrequency() {
         std::ifstream stream("/sys/class/devfreq/27700000.npu/cur_freq");
         uint64_t hz = 0;
@@ -67,17 +50,22 @@ namespace {
         cosmo::MsgGpuInfo QueryUtilization() override {
             const auto memory = ReadSharedMemory();
             cosmo::MsgGpuInfo result;
-            result.gpuusage        = ReadNpuLoad();
-            result.gpumemtotal     = memory.total_mb;
-            result.gpumemavailable = memory.available_mb;
-            result.gpumemusage = memory.total_mb > 0
-                                     ? static_cast<double>(memory.total_mb - memory.available_mb) /
+            // RK3576's devfreq `load` value is a governor/frequency signal and
+            // has been observed pinned at 100 while debugfs reports no NPU
+            // work. Do not expose it as utilization until a trustworthy busy
+            // time counter is available.
+            result.gpuusage          = 0.0;
+            result.gpuusageAvailable = false;
+            result.gpumemtotal       = memory.total_mb;
+            result.gpumemavailable   = memory.available_mb;
+            result.gpumemusage       = memory.total_mb > 0
+                                           ? static_cast<double>(memory.total_mb - memory.available_mb) /
                                            static_cast<double>(memory.total_mb)
-                                     : 0.0;
-            result.gpuCapacity = ReadNpuFrequency();
+                                           : 0.0;
+            result.gpuCapacity       = ReadNpuFrequency();
 
             cosmo::MsgGpuDevUsage shared;
-            shared.gpuusage        = result.gpuusage;
+            shared.gpuusage        = 0.0;
             shared.gpumemtotal     = result.gpumemtotal;
             shared.gpumemavailable = result.gpumemavailable;
             shared.gpumemusage     = result.gpumemusage;

@@ -234,7 +234,7 @@ export class MetricsSampler {
     const byKey = new Map(itemList.map((it) => [it.key, it]));
     for (const key of HW_KEYS) {
       const it = byKey.get(key);
-      if (it) {
+      if (it && it.available !== 0) {
         hw[key] = { usedPercent: num(it.usedPercent), usedSize: it.usedSize, unusedSize: it.unusedSize };
       }
     }

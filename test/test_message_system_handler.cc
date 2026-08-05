@@ -52,9 +52,10 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
 
     REQUIRE_CALL(mocks.deviceInfoSvc, GetHardwareResource(_)).RETURN(std::vector<service::HwResourceItem>{});
     MsgGpuInfo gpu;
-    gpu.gpuusage = 0.5;
+    gpu.gpuusage          = 0.5;
+    gpu.gpuusageAvailable = false;
     REQUIRE_CALL(mocks.deviceInfoSvc, GetGpuUtilization()).RETURN(gpu);
-    const auto preview = media::GetPreviewPipelineMetrics().Snapshot();
+    const auto preview   = media::GetPreviewPipelineMetrics().Snapshot();
     const auto inference = nn::GetInferencePipelineMetrics().Snapshot();
 
     System::MsgQueryHardwareResourceRecv data{};
@@ -62,6 +63,7 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     auto ret = handler.Handle(std::move(data), errc);
 
     CHECK(ret.resData.accelerator.gpuusage == 0.5);
+    CHECK_FALSE(ret.resData.accelerator.gpuusageAvailable);
     CHECK(ret.resData.accelerator.activePreviewStreams == preview.active_preview_streams);
     CHECK(ret.resData.accelerator.activeAlgorithmPreviewStreams == preview.active_algorithm_preview_streams);
     CHECK_FALSE(ret.resData.accelerator.videoEncoderBackend.empty());

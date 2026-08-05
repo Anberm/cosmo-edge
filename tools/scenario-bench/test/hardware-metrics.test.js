@@ -41,6 +41,22 @@ test('hardware sampler preserves platform-neutral accelerator metrics', async ()
   ]);
 });
 
+test('hardware sampler omits explicitly unavailable NPU utilization', async () => {
+  const sampler = new MetricsSampler({
+    queryHardwareResource: async () => ({
+      itemList: [
+        { key: 'cpuUtilization', usedPercent: 12, available: 1 },
+        { key: 'npuUtilization', usedPercent: 100, available: 0 },
+      ],
+    }),
+  });
+
+  const sample = await sampler.sample([]);
+
+  assert.equal(sample.hardware.cpuUtilization.usedPercent, 12);
+  assert.equal(sample.hardware.npuUtilization, undefined);
+});
+
 test('step summary derives platform-neutral preview timings and lifecycle deltas', () => {
   const samples = [0, 1, 2, 3].map((index) => ({
     stepIndex: 0,

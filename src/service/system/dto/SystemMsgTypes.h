@@ -34,6 +34,7 @@ struct MsgGpuDevUsage {
 
 struct MsgGpuInfo {
     double gpuusage{0.0};
+    bool gpuusageAvailable{true};
     double gpumemusage{0.0};
     int64_t gpumemtotal{0};
     int64_t gpumemavailable{0};

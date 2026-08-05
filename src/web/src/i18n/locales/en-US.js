@@ -902,6 +902,7 @@ export default {
     mediumLoad: 'Medium',
     highUsage: 'High',
     nearLimit: 'Near limit',
+    unavailable: 'Unavailable',
     packetLost: 'Lost: {value}',
     used: 'Used {value}',
     packetKept: 'Kept: {value}',
