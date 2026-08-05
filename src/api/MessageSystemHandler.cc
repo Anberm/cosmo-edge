@@ -148,6 +148,9 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnRunMs                     = inference.rknn_run_nanoseconds / 1000000.0;
     accelerator.rknnOutputsGetCalls           = inference.rknn_outputs_get_calls;
     accelerator.rknnOutputsGetMs              = inference.rknn_outputs_get_nanoseconds / 1000000.0;
+    accelerator.rknnOutputsReleaseCalls       = inference.rknn_outputs_release_calls;
+    accelerator.rknnOutputsReleaseMs          =
+        inference.rknn_outputs_release_nanoseconds / 1000000.0;
     accelerator.rknnOutputTransformCalls      = inference.rknn_output_transform_calls;
     accelerator.rknnOutputTransformMs         =
         inference.rknn_output_transform_nanoseconds / 1000000.0;
@@ -169,6 +172,10 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnDetectorOutputsGetCalls   = inference.rknn_detector_outputs_get_calls;
     accelerator.rknnDetectorOutputsGetMs      =
         inference.rknn_detector_outputs_get_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorOutputsReleaseCalls =
+        inference.rknn_detector_outputs_release_calls;
+    accelerator.rknnDetectorOutputsReleaseMs =
+        inference.rknn_detector_outputs_release_nanoseconds / 1000000.0;
     accelerator.rknnDetectorOutputTransformCalls =
         inference.rknn_detector_output_transform_calls;
     accelerator.rknnDetectorOutputTransformMs =
@@ -195,6 +202,18 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnNativeInt8Inputs          = inference.rknn_native_int8_inputs;
     accelerator.rknnFloatInputs               = inference.rknn_float_inputs;
     accelerator.rknnInputCompatibilityFallbacks = inference.rknn_input_compatibility_fallbacks;
+    accelerator.rknnNativeInt8Outputs         = inference.rknn_native_int8_outputs;
+    accelerator.rknnFloatOutputs              = inference.rknn_float_outputs;
+    accelerator.rknnOutputCompatibilityFallbacks =
+        inference.rknn_output_compatibility_fallbacks;
+    accelerator.rknnNativeOutputBytes         = inference.rknn_native_output_bytes;
+    accelerator.rknnFloatOutputBytes          = inference.rknn_float_output_bytes;
+    accelerator.rknnYolov8DflCalls            = inference.rknn_yolov8_dfl_calls;
+    accelerator.rknnYolov8DflMs               =
+        inference.rknn_yolov8_dfl_nanoseconds / 1000000.0;
+    accelerator.rknnYolov8ClassCalls          = inference.rknn_yolov8_class_calls;
+    accelerator.rknnYolov8ClassMs             =
+        inference.rknn_yolov8_class_nanoseconds / 1000000.0;
     accelerator.yolov8PostprocessCalls        = inference.yolov8_postprocess_calls;
     accelerator.yolov8PostprocessMs           =
         inference.yolov8_postprocess_nanoseconds / 1000000.0;

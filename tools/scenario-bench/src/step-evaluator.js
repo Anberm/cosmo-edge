@@ -247,6 +247,10 @@ function summarizeMediaStages(ticks, inferMs) {
     rknnInputsSetAvgMs: counterAverage('rknnInputsSetMs', 'rknnInputsSetCalls'),
     rknnRunAvgMs: counterAverage('rknnRunMs', 'rknnRunCalls'),
     rknnOutputsGetAvgMs: counterAverage('rknnOutputsGetMs', 'rknnOutputsGetCalls'),
+    rknnOutputsReleaseAvgMs: counterAverage(
+      'rknnOutputsReleaseMs',
+      'rknnOutputsReleaseCalls',
+    ),
     rknnOutputTransformAvgMs: counterAverage(
       'rknnOutputTransformMs',
       'rknnOutputTransformCalls',
@@ -266,6 +270,10 @@ function summarizeMediaStages(ticks, inferMs) {
     rknnDetectorOutputsGetAvgMs: counterAverage(
       'rknnDetectorOutputsGetMs',
       'rknnDetectorOutputsGetCalls',
+    ),
+    rknnDetectorOutputsReleaseAvgMs: counterAverage(
+      'rknnDetectorOutputsReleaseMs',
+      'rknnDetectorOutputsReleaseCalls',
     ),
     rknnDetectorOutputTransformAvgMs: counterAverage(
       'rknnDetectorOutputTransformMs',
@@ -304,6 +312,16 @@ function summarizeMediaStages(ticks, inferMs) {
     rknnNativeInt8Inputs: counterDelta('rknnNativeInt8Inputs'),
     rknnFloatInputs: counterDelta('rknnFloatInputs'),
     rknnInputCompatibilityFallbacks: counterDelta('rknnInputCompatibilityFallbacks'),
+    rknnNativeInt8Outputs: counterDelta('rknnNativeInt8Outputs'),
+    rknnFloatOutputs: counterDelta('rknnFloatOutputs'),
+    rknnOutputCompatibilityFallbacks: counterDelta('rknnOutputCompatibilityFallbacks'),
+    rknnNativeOutputAvgBytes: counterAverage(
+      'rknnNativeOutputBytes',
+      'rknnNativeInt8Outputs',
+    ),
+    rknnFloatOutputAvgBytes: counterAverage('rknnFloatOutputBytes', 'rknnFloatOutputs'),
+    rknnYolov8DflAvgMs: counterAverage('rknnYolov8DflMs', 'rknnYolov8DflCalls'),
+    rknnYolov8ClassAvgMs: counterAverage('rknnYolov8ClassMs', 'rknnYolov8ClassCalls'),
     yolov8PostprocessAvgMs: counterAverage('yolov8PostprocessMs', 'yolov8PostprocessCalls'),
     yolov8NmsAvgMs: counterAverage('yolov8NmsMs', 'yolov8NmsCalls'),
     rgaAvgMs: counterAverage('rgaMs', 'rgaFrames'),

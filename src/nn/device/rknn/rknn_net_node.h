@@ -12,6 +12,9 @@
 namespace cosmo::nn {
 
 bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc);
+bool IsRknnNativeYolov8OutputCompatible(const std::vector<rknn_tensor_attr>& attrs,
+                                        std::string* reason = nullptr);
+bool RknnFastOutputEnabled();
 
 class RknnNetNode final : public NetNode {
 public:
@@ -43,6 +46,7 @@ private:
     std::vector<unsigned char> model_data_;
     std::vector<float> input_nhwc_;
     bool yolov8_heads_{false};
+    bool native_yolov8_outputs_{false};
     bool detector_model_{false};
     int yolov8_class_count_{0};
     int yolov8_point_count_{0};

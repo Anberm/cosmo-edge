@@ -16,6 +16,7 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     metrics.RecordRknnInputsSet(2'000'000, detector);
     metrics.RecordRknnRun(3'000'000, detector);
     metrics.RecordRknnOutputsGet(4'000'000, detector);
+    metrics.RecordRknnOutputsRelease(400'000, detector);
     metrics.RecordRknnOutputTransform(5'000'000, detector);
     metrics.RecordRknnForward(15'000'000, true, detector);
     metrics.RecordRknnForward(7'000'000, false, detector);
@@ -29,6 +30,9 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     metrics.RecordRknnNativeInputMap(1'100'000);
     metrics.RecordRknnInputFormat(true);
     metrics.RecordRknnInputFormat(false, true);
+    metrics.RecordRknnOutputFormat(true, 1'225'600);
+    metrics.RecordRknnOutputFormat(false, 4'902'400, true);
+    metrics.RecordRknnYolov8Transform(1'400'000, 1'500'000);
     metrics.RecordYolov8Postprocess(1'200'000);
     metrics.RecordYolov8Nms(1'300'000);
 
@@ -48,6 +52,8 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     CHECK(snapshot.rknn_inputs_set_calls == 1);
     CHECK(snapshot.rknn_run_calls == 1);
     CHECK(snapshot.rknn_outputs_get_calls == 1);
+    CHECK(snapshot.rknn_outputs_release_calls == 1);
+    CHECK(snapshot.rknn_outputs_release_nanoseconds == 400'000);
     CHECK(snapshot.rknn_output_transform_calls == 1);
     CHECK(snapshot.rknn_mutex_wait_calls == 1);
     CHECK(snapshot.rknn_mutex_wait_nanoseconds == 600'000);
@@ -58,6 +64,7 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     CHECK(snapshot.rknn_detector_inputs_set_calls == 1);
     CHECK(snapshot.rknn_detector_run_calls == 1);
     CHECK(snapshot.rknn_detector_outputs_get_calls == 1);
+    CHECK(snapshot.rknn_detector_outputs_release_calls == 1);
     CHECK(snapshot.rknn_detector_output_transform_calls == 1);
     CHECK(snapshot.rknn_detector_mutex_wait_calls == 1);
     CHECK(snapshot.rknn_preprocess_fast_hits == 1);
@@ -70,6 +77,15 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     CHECK(snapshot.rknn_native_int8_inputs == 1);
     CHECK(snapshot.rknn_float_inputs == 1);
     CHECK(snapshot.rknn_input_compatibility_fallbacks == 1);
+    CHECK(snapshot.rknn_native_int8_outputs == 1);
+    CHECK(snapshot.rknn_float_outputs == 1);
+    CHECK(snapshot.rknn_output_compatibility_fallbacks == 1);
+    CHECK(snapshot.rknn_native_output_bytes == 1'225'600);
+    CHECK(snapshot.rknn_float_output_bytes == 4'902'400);
+    CHECK(snapshot.rknn_yolov8_dfl_calls == 1);
+    CHECK(snapshot.rknn_yolov8_dfl_nanoseconds == 1'400'000);
+    CHECK(snapshot.rknn_yolov8_class_calls == 1);
+    CHECK(snapshot.rknn_yolov8_class_nanoseconds == 1'500'000);
     CHECK(snapshot.yolov8_postprocess_calls == 1);
     CHECK(snapshot.yolov8_nms_calls == 1);
 }

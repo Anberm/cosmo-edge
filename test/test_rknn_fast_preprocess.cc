@@ -89,6 +89,66 @@ TEST_CASE("RKNN native input contract requires the model quantization identity",
     CHECK_FALSE(IsRknnNativeInt8InputCompatible(attr, desc));
 }
 
+TEST_CASE("RKNN native output capability excludes FP16 and malformed YOLOv8 heads",
+          "[nn][rknn][fast-output][fp16]") {
+    using namespace cosmo::nn;
+    const std::array<std::array<uint32_t, 4>, 6> shapes{{
+        {{1, 64, 80, 80}}, {{1, 80, 80, 80}}, {{1, 64, 40, 40}},
+        {{1, 80, 40, 40}}, {{1, 64, 20, 20}}, {{1, 80, 20, 20}},
+    }};
+    std::vector<rknn_tensor_attr> attrs(shapes.size());
+    for (size_t index = 0; index < attrs.size(); ++index) {
+        auto& attr    = attrs[index];
+        attr.index    = static_cast<uint32_t>(index);
+        attr.n_dims   = 4;
+        attr.fmt      = RKNN_TENSOR_NCHW;
+        attr.type     = RKNN_TENSOR_INT8;
+        attr.qnt_type = RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC;
+        attr.zp       = index % 2 == 0 ? -61 : 114;
+        attr.scale    = index % 2 == 0 ? 0.11488f : 0.113557f;
+        size_t count  = 1;
+        for (size_t dim = 0; dim < shapes[index].size(); ++dim) {
+            attr.dims[dim] = shapes[index][dim];
+            count *= shapes[index][dim];
+        }
+        attr.n_elems = static_cast<uint32_t>(count);
+        attr.size    = static_cast<uint32_t>(count);
+    }
+
+    std::string reason;
+    CHECK(IsRknnNativeYolov8OutputCompatible(attrs, &reason));
+    CHECK(reason.empty());
+
+    auto fp16       = attrs;
+    fp16[0].type    = RKNN_TENSOR_FLOAT16;
+    fp16[0].size   *= 2;
+    CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(fp16, &reason));
+    CHECK(reason.find("FP16") != std::string::npos);
+
+    auto wrong_format    = attrs;
+    wrong_format[0].fmt  = RKNN_TENSOR_NHWC;
+    CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(wrong_format));
+    auto wrong_size      = attrs;
+    wrong_size[0].size  += 1;
+    CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(wrong_size));
+    auto wrong_quantization      = attrs;
+    wrong_quantization[0].scale  = 0.0f;
+    CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(wrong_quantization));
+}
+
+TEST_CASE("RKNN native output switch defaults on and supports explicit rollback",
+          "[nn][rknn][fast-output]") {
+    using namespace cosmo::nn;
+    {
+        ScopedEnvironment enabled("COSMO_RKNN_FAST_OUTPUT", "1");
+        CHECK(RknnFastOutputEnabled());
+    }
+    {
+        ScopedEnvironment disabled("COSMO_RKNN_FAST_OUTPUT", "0");
+        CHECK_FALSE(RknnFastOutputEnabled());
+    }
+}
+
 TEST_CASE("RKNN classifier-sized normalization keeps the legacy float layout",
           "[nn][rknn][fast-preprocess]") {
     using namespace cosmo::nn;

@@ -69,6 +69,15 @@ void InferencePipelineMetrics::RecordRknnOutputsGet(uint64_t nanoseconds, RknnMo
                     nanoseconds);
 }
 
+void InferencePipelineMetrics::RecordRknnOutputsRelease(uint64_t nanoseconds,
+                                                         RknnModelScope scope) {
+    RecordStage(rknn_outputs_release_calls_, rknn_outputs_release_nanoseconds_, 1, nanoseconds);
+    if (scope == RknnModelScope::Detector) {
+        RecordStage(rknn_detector_outputs_release_calls_,
+                    rknn_detector_outputs_release_nanoseconds_, 1, nanoseconds);
+    }
+}
+
 void InferencePipelineMetrics::RecordRknnOutputTransform(uint64_t nanoseconds,
                                                          RknnModelScope scope) {
     RecordStage(rknn_output_transform_calls_, rknn_output_transform_nanoseconds_, 1, nanoseconds);
@@ -122,6 +131,23 @@ void InferencePipelineMetrics::RecordRknnInputFormat(bool native_int8,
         rknn_input_compatibility_fallbacks_.fetch_add(1, std::memory_order_relaxed);
 }
 
+void InferencePipelineMetrics::RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
+                                                      bool compatibility_fallback) {
+    (native_int8 ? rknn_native_int8_outputs_ : rknn_float_outputs_)
+        .fetch_add(1, std::memory_order_relaxed);
+    (native_int8 ? rknn_native_output_bytes_ : rknn_float_output_bytes_)
+        .fetch_add(bytes, std::memory_order_relaxed);
+    if (compatibility_fallback)
+        rknn_output_compatibility_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnYolov8Transform(uint64_t dfl_nanoseconds,
+                                                         uint64_t class_nanoseconds) {
+    RecordStage(rknn_yolov8_dfl_calls_, rknn_yolov8_dfl_nanoseconds_, 1, dfl_nanoseconds);
+    RecordStage(rknn_yolov8_class_calls_, rknn_yolov8_class_nanoseconds_, 1,
+                class_nanoseconds);
+}
+
 void InferencePipelineMetrics::RecordYolov8Postprocess(uint64_t nanoseconds) {
     RecordStage(yolov8_postprocess_calls_, yolov8_postprocess_nanoseconds_, 1, nanoseconds);
 }
@@ -154,6 +180,8 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_run_nanoseconds);
     SNAPSHOT_FIELD(rknn_outputs_get_calls);
     SNAPSHOT_FIELD(rknn_outputs_get_nanoseconds);
+    SNAPSHOT_FIELD(rknn_outputs_release_calls);
+    SNAPSHOT_FIELD(rknn_outputs_release_nanoseconds);
     SNAPSHOT_FIELD(rknn_output_transform_calls);
     SNAPSHOT_FIELD(rknn_output_transform_nanoseconds);
     SNAPSHOT_FIELD(rknn_mutex_wait_calls);
@@ -169,6 +197,8 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_detector_run_nanoseconds);
     SNAPSHOT_FIELD(rknn_detector_outputs_get_calls);
     SNAPSHOT_FIELD(rknn_detector_outputs_get_nanoseconds);
+    SNAPSHOT_FIELD(rknn_detector_outputs_release_calls);
+    SNAPSHOT_FIELD(rknn_detector_outputs_release_nanoseconds);
     SNAPSHOT_FIELD(rknn_detector_output_transform_calls);
     SNAPSHOT_FIELD(rknn_detector_output_transform_nanoseconds);
     SNAPSHOT_FIELD(rknn_detector_mutex_wait_calls);
@@ -188,6 +218,15 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_native_int8_inputs);
     SNAPSHOT_FIELD(rknn_float_inputs);
     SNAPSHOT_FIELD(rknn_input_compatibility_fallbacks);
+    SNAPSHOT_FIELD(rknn_native_int8_outputs);
+    SNAPSHOT_FIELD(rknn_float_outputs);
+    SNAPSHOT_FIELD(rknn_output_compatibility_fallbacks);
+    SNAPSHOT_FIELD(rknn_native_output_bytes);
+    SNAPSHOT_FIELD(rknn_float_output_bytes);
+    SNAPSHOT_FIELD(rknn_yolov8_dfl_calls);
+    SNAPSHOT_FIELD(rknn_yolov8_dfl_nanoseconds);
+    SNAPSHOT_FIELD(rknn_yolov8_class_calls);
+    SNAPSHOT_FIELD(rknn_yolov8_class_nanoseconds);
     SNAPSHOT_FIELD(yolov8_postprocess_calls);
     SNAPSHOT_FIELD(yolov8_postprocess_nanoseconds);
     SNAPSHOT_FIELD(yolov8_nms_calls);

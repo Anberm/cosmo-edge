@@ -100,6 +100,8 @@ struct MsgGpuInfo {
     double rknnRunMs{0.0};
     uint64_t rknnOutputsGetCalls{0};
     double rknnOutputsGetMs{0.0};
+    uint64_t rknnOutputsReleaseCalls{0};
+    double rknnOutputsReleaseMs{0.0};
     uint64_t rknnOutputTransformCalls{0};
     double rknnOutputTransformMs{0.0};
     uint64_t rknnMutexWaitCalls{0};
@@ -115,6 +117,8 @@ struct MsgGpuInfo {
     double rknnDetectorRunMs{0.0};
     uint64_t rknnDetectorOutputsGetCalls{0};
     double rknnDetectorOutputsGetMs{0.0};
+    uint64_t rknnDetectorOutputsReleaseCalls{0};
+    double rknnDetectorOutputsReleaseMs{0.0};
     uint64_t rknnDetectorOutputTransformCalls{0};
     double rknnDetectorOutputTransformMs{0.0};
     uint64_t rknnDetectorMutexWaitCalls{0};
@@ -134,6 +138,15 @@ struct MsgGpuInfo {
     uint64_t rknnNativeInt8Inputs{0};
     uint64_t rknnFloatInputs{0};
     uint64_t rknnInputCompatibilityFallbacks{0};
+    uint64_t rknnNativeInt8Outputs{0};
+    uint64_t rknnFloatOutputs{0};
+    uint64_t rknnOutputCompatibilityFallbacks{0};
+    uint64_t rknnNativeOutputBytes{0};
+    uint64_t rknnFloatOutputBytes{0};
+    uint64_t rknnYolov8DflCalls{0};
+    double rknnYolov8DflMs{0.0};
+    uint64_t rknnYolov8ClassCalls{0};
+    double rknnYolov8ClassMs{0.0};
     uint64_t yolov8PostprocessCalls{0};
     double yolov8PostprocessMs{0.0};
     uint64_t yolov8NmsCalls{0};

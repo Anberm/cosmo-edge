@@ -32,6 +32,8 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_run_nanoseconds{0};
     uint64_t rknn_outputs_get_calls{0};
     uint64_t rknn_outputs_get_nanoseconds{0};
+    uint64_t rknn_outputs_release_calls{0};
+    uint64_t rknn_outputs_release_nanoseconds{0};
     uint64_t rknn_output_transform_calls{0};
     uint64_t rknn_output_transform_nanoseconds{0};
     uint64_t rknn_mutex_wait_calls{0};
@@ -47,6 +49,8 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_detector_run_nanoseconds{0};
     uint64_t rknn_detector_outputs_get_calls{0};
     uint64_t rknn_detector_outputs_get_nanoseconds{0};
+    uint64_t rknn_detector_outputs_release_calls{0};
+    uint64_t rknn_detector_outputs_release_nanoseconds{0};
     uint64_t rknn_detector_output_transform_calls{0};
     uint64_t rknn_detector_output_transform_nanoseconds{0};
     uint64_t rknn_detector_mutex_wait_calls{0};
@@ -66,6 +70,15 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_native_int8_inputs{0};
     uint64_t rknn_float_inputs{0};
     uint64_t rknn_input_compatibility_fallbacks{0};
+    uint64_t rknn_native_int8_outputs{0};
+    uint64_t rknn_float_outputs{0};
+    uint64_t rknn_output_compatibility_fallbacks{0};
+    uint64_t rknn_native_output_bytes{0};
+    uint64_t rknn_float_output_bytes{0};
+    uint64_t rknn_yolov8_dfl_calls{0};
+    uint64_t rknn_yolov8_dfl_nanoseconds{0};
+    uint64_t rknn_yolov8_class_calls{0};
+    uint64_t rknn_yolov8_class_nanoseconds{0};
     uint64_t yolov8_postprocess_calls{0};
     uint64_t yolov8_postprocess_nanoseconds{0};
     uint64_t yolov8_nms_calls{0};
@@ -89,6 +102,8 @@ public:
     void RecordRknnRun(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
     void RecordRknnOutputsGet(uint64_t nanoseconds,
                               RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnOutputsRelease(uint64_t nanoseconds,
+                                  RknnModelScope scope = RknnModelScope::Other);
     void RecordRknnOutputTransform(uint64_t nanoseconds,
                                    RknnModelScope scope = RknnModelScope::Other);
     void RecordRknnMutexWait(uint64_t nanoseconds,
@@ -101,6 +116,9 @@ public:
     void RecordRknnCpuNormalizeFallback(uint64_t nanoseconds);
     void RecordRknnNativeInputMap(uint64_t nanoseconds);
     void RecordRknnInputFormat(bool native_int8, bool compatibility_fallback = false);
+    void RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
+                                bool compatibility_fallback = false);
+    void RecordRknnYolov8Transform(uint64_t dfl_nanoseconds, uint64_t class_nanoseconds);
     void RecordYolov8Postprocess(uint64_t nanoseconds);
     void RecordYolov8Nms(uint64_t nanoseconds);
 
@@ -131,6 +149,8 @@ private:
     std::atomic<uint64_t> rknn_run_nanoseconds_{0};
     std::atomic<uint64_t> rknn_outputs_get_calls_{0};
     std::atomic<uint64_t> rknn_outputs_get_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_outputs_release_calls_{0};
+    std::atomic<uint64_t> rknn_outputs_release_nanoseconds_{0};
     std::atomic<uint64_t> rknn_output_transform_calls_{0};
     std::atomic<uint64_t> rknn_output_transform_nanoseconds_{0};
     std::atomic<uint64_t> rknn_mutex_wait_calls_{0};
@@ -146,6 +166,8 @@ private:
     std::atomic<uint64_t> rknn_detector_run_nanoseconds_{0};
     std::atomic<uint64_t> rknn_detector_outputs_get_calls_{0};
     std::atomic<uint64_t> rknn_detector_outputs_get_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_outputs_release_calls_{0};
+    std::atomic<uint64_t> rknn_detector_outputs_release_nanoseconds_{0};
     std::atomic<uint64_t> rknn_detector_output_transform_calls_{0};
     std::atomic<uint64_t> rknn_detector_output_transform_nanoseconds_{0};
     std::atomic<uint64_t> rknn_detector_mutex_wait_calls_{0};
@@ -165,6 +187,15 @@ private:
     std::atomic<uint64_t> rknn_native_int8_inputs_{0};
     std::atomic<uint64_t> rknn_float_inputs_{0};
     std::atomic<uint64_t> rknn_input_compatibility_fallbacks_{0};
+    std::atomic<uint64_t> rknn_native_int8_outputs_{0};
+    std::atomic<uint64_t> rknn_float_outputs_{0};
+    std::atomic<uint64_t> rknn_output_compatibility_fallbacks_{0};
+    std::atomic<uint64_t> rknn_native_output_bytes_{0};
+    std::atomic<uint64_t> rknn_float_output_bytes_{0};
+    std::atomic<uint64_t> rknn_yolov8_dfl_calls_{0};
+    std::atomic<uint64_t> rknn_yolov8_dfl_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_yolov8_class_calls_{0};
+    std::atomic<uint64_t> rknn_yolov8_class_nanoseconds_{0};
     std::atomic<uint64_t> yolov8_postprocess_calls_{0};
     std::atomic<uint64_t> yolov8_postprocess_nanoseconds_{0};
     std::atomic<uint64_t> yolov8_nms_calls_{0};

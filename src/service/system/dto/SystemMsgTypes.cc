@@ -115,6 +115,8 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, rknnRunMs);
     JSON_OPT(j, v, rknnOutputsGetCalls);
     JSON_OPT(j, v, rknnOutputsGetMs);
+    JSON_OPT(j, v, rknnOutputsReleaseCalls);
+    JSON_OPT(j, v, rknnOutputsReleaseMs);
     JSON_OPT(j, v, rknnOutputTransformCalls);
     JSON_OPT(j, v, rknnOutputTransformMs);
     JSON_OPT(j, v, rknnMutexWaitCalls);
@@ -130,6 +132,8 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, rknnDetectorRunMs);
     JSON_OPT(j, v, rknnDetectorOutputsGetCalls);
     JSON_OPT(j, v, rknnDetectorOutputsGetMs);
+    JSON_OPT(j, v, rknnDetectorOutputsReleaseCalls);
+    JSON_OPT(j, v, rknnDetectorOutputsReleaseMs);
     JSON_OPT(j, v, rknnDetectorOutputTransformCalls);
     JSON_OPT(j, v, rknnDetectorOutputTransformMs);
     JSON_OPT(j, v, rknnDetectorMutexWaitCalls);
@@ -149,6 +153,15 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, rknnNativeInt8Inputs);
     JSON_OPT(j, v, rknnFloatInputs);
     JSON_OPT(j, v, rknnInputCompatibilityFallbacks);
+    JSON_OPT(j, v, rknnNativeInt8Outputs);
+    JSON_OPT(j, v, rknnFloatOutputs);
+    JSON_OPT(j, v, rknnOutputCompatibilityFallbacks);
+    JSON_OPT(j, v, rknnNativeOutputBytes);
+    JSON_OPT(j, v, rknnFloatOutputBytes);
+    JSON_OPT(j, v, rknnYolov8DflCalls);
+    JSON_OPT(j, v, rknnYolov8DflMs);
+    JSON_OPT(j, v, rknnYolov8ClassCalls);
+    JSON_OPT(j, v, rknnYolov8ClassMs);
     JSON_OPT(j, v, yolov8PostprocessCalls);
     JSON_OPT(j, v, yolov8PostprocessMs);
     JSON_OPT(j, v, yolov8NmsCalls);
@@ -223,6 +236,8 @@ void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["rknnRunMs"]                     = v.rknnRunMs;
     j["rknnOutputsGetCalls"]           = v.rknnOutputsGetCalls;
     j["rknnOutputsGetMs"]              = v.rknnOutputsGetMs;
+    j["rknnOutputsReleaseCalls"]       = v.rknnOutputsReleaseCalls;
+    j["rknnOutputsReleaseMs"]          = v.rknnOutputsReleaseMs;
     j["rknnOutputTransformCalls"]      = v.rknnOutputTransformCalls;
     j["rknnOutputTransformMs"]         = v.rknnOutputTransformMs;
     j["rknnMutexWaitCalls"]            = v.rknnMutexWaitCalls;
@@ -238,6 +253,8 @@ void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["rknnDetectorRunMs"]             = v.rknnDetectorRunMs;
     j["rknnDetectorOutputsGetCalls"]   = v.rknnDetectorOutputsGetCalls;
     j["rknnDetectorOutputsGetMs"]      = v.rknnDetectorOutputsGetMs;
+    j["rknnDetectorOutputsReleaseCalls"] = v.rknnDetectorOutputsReleaseCalls;
+    j["rknnDetectorOutputsReleaseMs"]  = v.rknnDetectorOutputsReleaseMs;
     j["rknnDetectorOutputTransformCalls"] = v.rknnDetectorOutputTransformCalls;
     j["rknnDetectorOutputTransformMs"] = v.rknnDetectorOutputTransformMs;
     j["rknnDetectorMutexWaitCalls"]    = v.rknnDetectorMutexWaitCalls;
@@ -257,6 +274,15 @@ void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["rknnNativeInt8Inputs"]          = v.rknnNativeInt8Inputs;
     j["rknnFloatInputs"]               = v.rknnFloatInputs;
     j["rknnInputCompatibilityFallbacks"] = v.rknnInputCompatibilityFallbacks;
+    j["rknnNativeInt8Outputs"]         = v.rknnNativeInt8Outputs;
+    j["rknnFloatOutputs"]              = v.rknnFloatOutputs;
+    j["rknnOutputCompatibilityFallbacks"] = v.rknnOutputCompatibilityFallbacks;
+    j["rknnNativeOutputBytes"]         = v.rknnNativeOutputBytes;
+    j["rknnFloatOutputBytes"]          = v.rknnFloatOutputBytes;
+    j["rknnYolov8DflCalls"]            = v.rknnYolov8DflCalls;
+    j["rknnYolov8DflMs"]               = v.rknnYolov8DflMs;
+    j["rknnYolov8ClassCalls"]          = v.rknnYolov8ClassCalls;
+    j["rknnYolov8ClassMs"]             = v.rknnYolov8ClassMs;
     j["yolov8PostprocessCalls"]        = v.yolov8PostprocessCalls;
     j["yolov8PostprocessMs"]           = v.yolov8PostprocessMs;
     j["yolov8NmsCalls"]                = v.yolov8NmsCalls;

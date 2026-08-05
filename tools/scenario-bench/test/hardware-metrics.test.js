@@ -110,6 +110,8 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         rknnRunMs: index * 300,
         rknnOutputsGetCalls: index * 10,
         rknnOutputsGetMs: index * 40,
+        rknnOutputsReleaseCalls: index * 10,
+        rknnOutputsReleaseMs: index * 5,
         rknnOutputTransformCalls: index * 10,
         rknnOutputTransformMs: index * 50,
         rknnForwards: index * 10,
@@ -125,6 +127,8 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         rknnDetectorRunMs: index * 120,
         rknnDetectorOutputsGetCalls: index * 4,
         rknnDetectorOutputsGetMs: index * 16,
+        rknnDetectorOutputsReleaseCalls: index * 4,
+        rknnDetectorOutputsReleaseMs: index * 2,
         rknnDetectorOutputTransformCalls: index * 4,
         rknnDetectorOutputTransformMs: index * 20,
         rknnDetectorForwards: index * 4,
@@ -147,6 +151,15 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         rknnNativeInt8Inputs: index * 4,
         rknnFloatInputs: index * 6,
         rknnInputCompatibilityFallbacks: 0,
+        rknnNativeInt8Outputs: index * 4,
+        rknnFloatOutputs: index * 6,
+        rknnOutputCompatibilityFallbacks: index,
+        rknnNativeOutputBytes: index * 4 * 1_225_600,
+        rknnFloatOutputBytes: index * 6 * 4_902_400,
+        rknnYolov8DflCalls: index * 4,
+        rknnYolov8DflMs: index * 8,
+        rknnYolov8ClassCalls: index * 4,
+        rknnYolov8ClassMs: index * 4,
         yolov8PostprocessCalls: index * 4,
         yolov8PostprocessMs: index * 12,
         yolov8NmsCalls: index * 4,
@@ -190,11 +203,13 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
   assert.equal(summary.mediaStages.rknnInputsSetAvgMs, 2);
   assert.equal(summary.mediaStages.rknnRunAvgMs, 30);
   assert.equal(summary.mediaStages.rknnOutputsGetAvgMs, 4);
+  assert.equal(summary.mediaStages.rknnOutputsReleaseAvgMs, 0.5);
   assert.equal(summary.mediaStages.rknnOutputTransformAvgMs, 5);
   assert.equal(summary.mediaStages.rknnForwardAvgMs, 42);
   assert.equal(summary.mediaStages.rknnForwardFailures, 0);
   assert.equal(summary.mediaStages.rknnMutexWaitAvgMs, 0.6);
   assert.equal(summary.mediaStages.rknnDetectorForwardAvgMs, 42);
+  assert.equal(summary.mediaStages.rknnDetectorOutputsReleaseAvgMs, 0.5);
   assert.equal(summary.mediaStages.rknnDetectorMutexWaitAvgMs, 0.5);
   assert.equal(summary.mediaStages.rknnPreprocessFastHits, 4);
   assert.equal(summary.mediaStages.rknnRgaFillAvgMs, 0.5);
@@ -203,6 +218,13 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
   assert.equal(summary.mediaStages.rknnNativeInt8Inputs, 4);
   assert.equal(summary.mediaStages.rknnFloatInputs, 6);
   assert.equal(summary.mediaStages.rknnInputCompatibilityFallbacks, 0);
+  assert.equal(summary.mediaStages.rknnNativeInt8Outputs, 4);
+  assert.equal(summary.mediaStages.rknnFloatOutputs, 6);
+  assert.equal(summary.mediaStages.rknnOutputCompatibilityFallbacks, 1);
+  assert.equal(summary.mediaStages.rknnNativeOutputAvgBytes, 1_225_600);
+  assert.equal(summary.mediaStages.rknnFloatOutputAvgBytes, 4_902_400);
+  assert.equal(summary.mediaStages.rknnYolov8DflAvgMs, 2);
+  assert.equal(summary.mediaStages.rknnYolov8ClassAvgMs, 1);
   assert.equal(summary.mediaStages.yolov8PostprocessAvgMs, 3);
   assert.equal(summary.mediaStages.yolov8NmsAvgMs, 1);
   assert.equal(summary.mediaStages.rgaAvgMs, 1.5);
