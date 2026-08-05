@@ -50,6 +50,8 @@ void to_json(nlohmann::json& j, const MsgGpuDevUsage& v) {
 void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, gpuusage);
     JSON_OPT(j, v, gpuusageAvailable);
+    JSON_OPT(j, v, utilizationMetric);
+    JSON_OPT(j, v, coreUtilizations);
     JSON_OPT(j, v, gpumemusage);
     JSON_OPT(j, v, gpumemtotal);
     JSON_OPT(j, v, gpumemavailable);
@@ -119,6 +121,8 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
 void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["gpuusage"]                      = v.gpuusage;
     j["gpuusageAvailable"]             = v.gpuusageAvailable;
+    j["utilizationMetric"]             = v.utilizationMetric;
+    j["coreUtilizations"]              = v.coreUtilizations;
     j["gpumemusage"]                   = v.gpumemusage;
     j["gpumemtotal"]                   = v.gpumemtotal;
     j["gpumemavailable"]               = v.gpumemavailable;

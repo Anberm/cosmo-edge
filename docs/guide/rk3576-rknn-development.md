@@ -155,9 +155,11 @@ preflights them before mutating device configuration.
 - Delayed Copy-out discarded frames before host copies and is the selected
   optimization for this phase.
 - Eight-channel operation is not an accepted capacity profile.
-- RK3576 NPU utilization is currently unavailable for acceptance: the devfreq
-  value can report 100 percent while the vendor per-core interface reports
-  idle. Use throughput, stage latency, discard and failure counters instead.
+- RK3576 NPU telemetry uses the vendor busy-time counter from
+  `/sys/kernel/debug/rknpu/load`, reports the busiest core on the health card,
+  and retains every core in the accelerator payload. The startup script exposes
+  only this read-only file at `/run/cosmo-edge/metrics/rknpu-load`; the devfreq
+  governor signal is never treated as NPU load.
 
 These observations are candidate-bound and must be rerun after source, model,
 runtime or package changes. Before a release claim, additionally require an

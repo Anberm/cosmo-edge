@@ -214,12 +214,12 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
     const auto gpu_usage     = ClampRatio(raw_gpu_usage);
     gpu_utl.gpuusage         = gpu_usage;
     if (gpu_utl.gpuusageAvailable) {
-        items.push_back({"npuUtilization", "NPU使用率", static_cast<int>(std::lround(gpu_usage * 100)),
+        items.push_back({"npuUtilization", "NPU负载", static_cast<int>(std::lround(gpu_usage * 100)),
                          COSMO_FORMAT("{:.0f}%", gpu_usage * 100),
                          COSMO_FORMAT("{:.0f}%", (1 - gpu_usage) * 100),
                          std::isfinite(raw_gpu_usage) && raw_gpu_usage >= 0.0 ? 1 : 0});
     } else {
-        items.push_back({"npuUtilization", "NPU使用率", 0, "--", "--", 0});
+        items.push_back({"npuUtilization", "NPU负载", 0, "--", "--", 0});
     }
 
     // GPU memory details

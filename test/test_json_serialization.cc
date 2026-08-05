@@ -147,6 +147,27 @@ TEST_CASE("device status exposes additive reboot identity", "[json][system][upgr
     CHECK(restored.resData.softwareVersion == original.resData.softwareVersion);
 }
 
+TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][system][metrics]") {
+    cosmo::MsgGpuInfo original;
+    original.gpuusage          = 0.42;
+    original.gpuusageAvailable = true;
+    original.utilizationMetric = "busy-time-load";
+    original.coreUtilizations  = {0.09, 0.42};
+
+    std::string json;
+    REQUIRE(cosmo::util::EncodeJson(original, json));
+    const auto doc = ParseJson(json);
+    CHECK(doc["utilizationMetric"] == "busy-time-load");
+    REQUIRE(doc["coreUtilizations"].size() == 2);
+    CHECK(doc["coreUtilizations"][0].get<double>() == Catch::Approx(0.09));
+    CHECK(doc["coreUtilizations"][1].get<double>() == Catch::Approx(0.42));
+
+    cosmo::MsgGpuInfo restored;
+    REQUIRE(cosmo::util::DecodeJson(json, restored));
+    CHECK(restored.utilizationMetric == original.utilizationMetric);
+    CHECK(restored.coreUtilizations == original.coreUtilizations);
+}
+
 TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {
     cosmo::CMsgOnEventsReq event;
     event.messageId = "event-1";

@@ -890,7 +890,7 @@ export default {
   resource: {
     cpuUsage: 'CPU使用率',
     memoryUsage: '显存使用率',
-    npuUsage: 'NPU使用率',
+    npuUsage: 'NPU负载',
     emmcUsage: 'eMMC使用率',
     packetLoss: '丢包率',
     noPacketLoss: '无丢包',
@@ -920,7 +920,7 @@ export default {
     // Backend hardware resource item names (resolved by item.key)
     itemCpuUtilization: 'CPU使用率',
     itemGeneralMemory: '业务内存使用率',
-    itemNpuUtilization: 'NPU使用率',
+    itemNpuUtilization: 'NPU负载',
     itemModelMemory: '模型内存使用率',
     itemPictureMemory: '图片内存使用率',
     itemSpecialMemory: '芯片内存使用率',

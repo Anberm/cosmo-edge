@@ -890,7 +890,7 @@ export default {
   resource: {
     cpuUsage: 'CPU Usage',
     memoryUsage: 'Memory Usage',
-    npuUsage: 'NPU Usage',
+    npuUsage: 'NPU Load',
     emmcUsage: 'eMMC Usage',
     packetLoss: 'Packet Loss',
     noPacketLoss: 'No loss',
@@ -920,7 +920,7 @@ export default {
     // Backend hardware resource item names (resolved by item.key)
     itemCpuUtilization: 'CPU Usage',
     itemGeneralMemory: 'App Memory Usage',
-    itemNpuUtilization: 'NPU Usage',
+    itemNpuUtilization: 'NPU Load',
     itemModelMemory: 'Model Memory Usage',
     itemPictureMemory: 'Image Memory Usage',
     itemSpecialMemory: 'Chip Memory Usage',

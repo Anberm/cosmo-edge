@@ -49,6 +49,19 @@ case "${PLTFORM_TYPE}" in
 esac
 cosmo_log "$logTag" "Install path=${INSTALLPATH}, platform=${PLTFORM_TYPE}" "$logFile"
 
+# On Rockchip kernels debugfs itself is root-only even though the NPU load file
+# is read-only. Prepare a narrow bind mount when startup has sufficient rights;
+# metric failure must not prevent the inference service from starting.
+if [ -x "${SCRIPT_DIR}/prepare_rknpu_metrics.sh" ]; then
+    if rknpu_metrics_status="$("${SCRIPT_DIR}/prepare_rknpu_metrics.sh" 2>&1)"; then
+        if [ -n "${rknpu_metrics_status}" ]; then
+            cosmo_log "$logTag" "${rknpu_metrics_status}" "$logFile"
+        fi
+    else
+        cosmo_log "$logTag" "WARNING: ${rknpu_metrics_status}" "$logFile"
+    fi
+fi
+
 # Set multicast options
 sysctl -w net.ipv4.igmp_max_memberships=20 2>/dev/null || true
 

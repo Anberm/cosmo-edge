@@ -1,10 +1,17 @@
 #ifdef COSMO_NN_USE_RKNN_BACKEND
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <map>
+#include <optional>
+#include <regex>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "service/system/impl/AcceleratorMetricsProvider.h"
 
@@ -15,6 +22,69 @@ namespace {
         int64_t total_mb{0};
         int64_t available_mb{0};
     };
+
+    struct NpuLoadSnapshot {
+        double aggregate{0.0};
+        std::vector<double> cores;
+    };
+
+    std::optional<unsigned int> ParseUnsigned(const std::ssub_match& match) {
+        const auto text = match.str();
+        unsigned int value{0};
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (error != std::errc{} || end != text.data() + text.size())
+            return std::nullopt;
+        return value;
+    }
+
+    std::optional<NpuLoadSnapshot> ParseNpuLoad(const std::string& text) {
+        static const std::regex core_pattern(R"(Core\s*([0-9]+)\s*:\s*([0-9]+)\s*%)");
+        std::map<unsigned int, double> cores_by_id;
+        for (auto it = std::sregex_iterator(text.begin(), text.end(), core_pattern);
+             it != std::sregex_iterator(); ++it) {
+            const auto core_id = ParseUnsigned((*it)[1]);
+            const auto percent = ParseUnsigned((*it)[2]);
+            if (!core_id || !percent || *percent > 100)
+                return std::nullopt;
+            cores_by_id[*core_id] = static_cast<double>(*percent) / 100.0;
+        }
+        if (cores_by_id.empty())
+            return std::nullopt;
+
+        NpuLoadSnapshot result;
+        result.cores.reserve(cores_by_id.size());
+        for (const auto& [core_id, load] : cores_by_id) {
+            (void)core_id;
+            result.cores.push_back(load);
+            result.aggregate = std::max(result.aggregate, load);
+        }
+        return result;
+    }
+
+    std::optional<NpuLoadSnapshot> ReadNpuLoadFile(const std::string& path) {
+        std::ifstream stream(path);
+        if (!stream)
+            return std::nullopt;
+        const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        return ParseNpuLoad(text);
+    }
+
+    std::optional<NpuLoadSnapshot> ReadNpuLoad() {
+        if (const char* configured_path = std::getenv("COSMO_RKNPU_LOAD_PATH");
+            configured_path && *configured_path) {
+            return ReadNpuLoadFile(configured_path);
+        }
+
+        static const std::array<const char*, 2> load_paths{
+            "/run/cosmo-edge/metrics/rknpu-load",
+            "/sys/kernel/debug/rknpu/load",
+        };
+        for (const auto* path : load_paths) {
+            if (auto load = ReadNpuLoadFile(path))
+                return load;
+        }
+        return std::nullopt;
+    }
 
     MemorySnapshot ReadSharedMemory() {
         MemorySnapshot result;
@@ -50,12 +120,17 @@ namespace {
         cosmo::MsgGpuInfo QueryUtilization() override {
             const auto memory = ReadSharedMemory();
             cosmo::MsgGpuInfo result;
-            // RK3576's devfreq `load` value is a governor/frequency signal and
-            // has been observed pinned at 100 while debugfs reports no NPU
-            // work. Do not expose it as utilization until a trustworthy busy
-            // time counter is available.
-            result.gpuusage          = 0.0;
-            result.gpuusageAvailable = false;
+            result.utilizationMetric = "busy-time-load";
+            if (const auto load = ReadNpuLoad()) {
+                // The dashboard uses the busiest core as the device health
+                // signal while preserving all per-core values in telemetry.
+                result.gpuusage          = load->aggregate;
+                result.gpuusageAvailable = true;
+                result.coreUtilizations  = load->cores;
+            } else {
+                result.gpuusage          = 0.0;
+                result.gpuusageAvailable = false;
+            }
             result.gpumemtotal       = memory.total_mb;
             result.gpumemavailable   = memory.available_mb;
             result.gpumemusage       = memory.total_mb > 0
@@ -65,7 +140,7 @@ namespace {
             result.gpuCapacity       = ReadNpuFrequency();
 
             cosmo::MsgGpuDevUsage shared;
-            shared.gpuusage        = 0.0;
+            shared.gpuusage        = result.gpuusage;
             shared.gpumemtotal     = result.gpumemtotal;
             shared.gpumemavailable = result.gpumemavailable;
             shared.gpumemusage     = result.gpumemusage;
