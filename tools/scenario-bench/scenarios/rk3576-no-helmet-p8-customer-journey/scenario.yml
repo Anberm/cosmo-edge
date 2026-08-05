@@ -1,0 +1,31 @@
+name: rk3576-no-helmet-p8-customer-journey
+displayName: RK3576 P8 客户旅程（单路 5 FPS）
+sampleIntervalSec: 3
+
+channels:
+  mode: local
+  repeatCount: 0
+  sources:
+    - name: safety-helmet
+      file: ../../../../data/test-video/Safety Helmet.mp4
+
+tasks:
+  - id: no-helmet
+    displayName: 未戴安全帽检测
+    type: cv
+    algorithmId: "7463"
+    scheduleId: "e89c6c6385e5454b35cde0d1653vg"
+    template: ../../../../data/resource/aiboxresource_x86/algorithm/7463_No Safety Helmet_20260629094147.json
+    targetFps: 5
+
+loadProfile:
+  - channels: 1
+    holdSec: 180
+
+thresholds:
+  pass:
+    maxCriticalPathLatencyMs: 300
+    maxDetectorLatencyMs: 200
+    avgDiscardRate: 0.05
+    maxPacketDiscardRate: 0.01
+    maxDiskUsedPercent: 90

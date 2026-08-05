@@ -442,12 +442,22 @@ async function runBenchmark(args) {
     const maxChannels = Math.max(...effectiveLoadProfile.map((s) => s.channels));
     log.info(`Profile mode: ${args.profile ?? 'capacity'} | configured=${pkg.loadProfile.map((s) => s.channels).join(',')} | effective=${effectiveLoadProfile.map((s) => s.channels).join(',')}`);
 
-    log.info(`Connecting to device ${args.device}...`);
     const client = new CosmoClient({
       base: args.device,
       ...auth,
       lang: args.lang ?? 'zh-CN',
     });
+    previewLoad = new PreviewLoad(client, {
+      mode: args.preview ?? 'none',
+      streamLimit: args['preview-streams'] ?? 'all',
+      clientsPerStream: Number(args['preview-clients'] ?? 1),
+      mediaBase: args['media-base'],
+      srsApiBase: args['srs-api'],
+      ffmpeg: args.ffmpeg ?? 'ffmpeg',
+      logger: log,
+    });
+    await previewLoad.preflight();
+    log.info(`Connecting to device ${args.device}...`);
     await client.login();
     log.info('Login OK.');
 
@@ -486,16 +496,6 @@ async function runBenchmark(args) {
       rampBatchDelaySec: Number(args['ramp-batch-delay-sec'] ?? 15),
     }, log);
     runner.setChannels(videoChannelIds);
-
-    previewLoad = new PreviewLoad(client, {
-      mode: args.preview ?? 'none',
-      streamLimit: args['preview-streams'] ?? 'all',
-      clientsPerStream: Number(args['preview-clients'] ?? 1),
-      mediaBase: args['media-base'],
-      srsApiBase: args['srs-api'],
-      ffmpeg: args.ffmpeg ?? 'ffmpeg',
-      logger: log,
-    });
 
     const sampler = new MetricsSampler(client, log);
     const activeEntries = () => runner.expectedTaskEntries(runner.allChannelIds.slice(0, currentChannels));

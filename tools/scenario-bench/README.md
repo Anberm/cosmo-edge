@@ -268,6 +268,10 @@ node src/cli.js run --device <url> --user <u> --password <p> --scenario <dir> --
 | `--media-base <url>` | HTTP-FLV 服务基址；启用预览时必填 |
 | `--srs-api <url>` | SRS API 基址，用于采集发布流和客户端数 |
 
+启用真实预览客户端时，工具会在设备登录、编排导入和通道创建之前执行
+`ffmpeg -version` 预检；专项 `preview` 命令还会同时预检 `ffprobe`。缺失或
+不可执行时会直接失败，避免测试环境问题在设备产生临时配置后才暴露。
+
 ### 预览负载矩阵
 
 正式验收应至少覆盖以下四种负载，它们分别隔离算法基线、单路媒体开销、随路数增长的媒体开销和同流多客户端分发开销：

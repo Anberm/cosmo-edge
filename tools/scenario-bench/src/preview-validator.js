@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+import { assertMediaExecutable } from './preview-load.js';
+
 const DEFAULT_SAMPLE_WIDTH = 320;
 const DEFAULT_SAMPLE_HEIGHT = 180;
 const DEFAULT_SAMPLE_FPS = 5;
@@ -47,6 +49,8 @@ export async function runPreviewValidation(client, options) {
   };
 
   try {
+    await assertMediaExecutable(context.ffmpeg, 'ffmpeg');
+    await assertMediaExecutable(context.ffprobe, 'ffprobe');
     const baseline = await client.queryHardwareResource();
     report.acceleratorBaseline = baseline.accelerator ?? null;
 
