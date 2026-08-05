@@ -12,7 +12,7 @@ namespace cosmo {
 
 AlgChannel::~AlgChannel() {
     Quit();
-    LOG_INFO("Channel:{} Url:{} Delete", channel, url_);
+    LOG_INFO("Channel:{} Delete", channel);
 }
 
 AlgChannel::AlgChannel(const std::string& channel_id, const std::string& init_task_id, ActionNode& action,
@@ -22,7 +22,7 @@ AlgChannel::AlgChannel(const std::string& channel_id, const std::string& init_ta
       demuxer_(channel_id, url),
       decoder_(*this, channel_id) {
     AddTask(init_task_id);
-    LOG_INFO("Channel:{}/{} Url:{} Init", channel, init_task_id, url_);
+    LOG_INFO("Channel:{}/{} Init", channel, init_task_id);
 }
 
 bool AlgChannel::RegistTaskQueue(AlgTaskUnit& param) {
@@ -80,7 +80,7 @@ void AlgChannel::RemoveViewerFrameQueue(const std::string& alg_id) {
 }
 
 bool AlgChannel::SetUrl(const std::string& url) {
-    LOG_INFO("Channel {} Set Url:{}.", channel, url);
+    LOG_INFO("Channel {} Set URL.", channel);
     return demuxer_.SetUrl(url);
 }
 
@@ -147,10 +147,7 @@ bool AlgChannel::ModifyParam(const std::string& /*channel_id*/, const std::strin
     for (const auto& param : params) {
         if (key::CHANNEL_URL == param.key.ToString()) {
             if (param.value.ToString() != GetUrl()) {
-                LOG_INFO(
-                    "ModifyParam "
-                    "Channel {} Url Change From :{} To {}.",
-                    channel, GetUrl(), param.value);
+                LOG_INFO("ModifyParam Channel {} URL changed.", channel);
                 failed_count += (false == SetUrl(param.value.ToString()));
             }
         } else if (key::CHANNEL_SOURCE_REPEAT == param.key.ToString()) {
@@ -191,13 +188,13 @@ bool AlgChannel::Start() {
     }
 
     if (was_started) {
-        LOG_INFO("Channel:{} Url:{} Alread Started", channel, url_);
+        LOG_INFO("Channel:{} Already Started", channel);
         // Restart VoD stream from the beginning.
         demuxer_.SetForStartTask();
         return true;
     }
     is_started_ = true;
-    LOG_INFO("Channel:{} Url:{} Start", channel, url_);
+    LOG_INFO("Channel:{} Start", channel);
     regist_task_.channel_id = channel;
     regist_task_.task_id    = decoder_.GetName();
     regist_task_.fps        = decoder_.GetRequiredFps();
@@ -214,7 +211,7 @@ bool AlgChannel::Start() {
 void AlgChannel::Quit() {
     std::lock_guard<std::shared_mutex> lock(mtx_);
     if (is_started_) {
-        LOG_INFO("Channel:{} Url:{} Stop", channel, url_);
+        LOG_INFO("Channel:{} Stop", channel);
         is_started_ = false;
         demuxer_.RemoveProcQueue(regist_task_);
         decoder_.Stop();
@@ -226,7 +223,7 @@ void AlgChannel::Stop() {
     // Stop AlgActionBase consumer thread (if active).
     AlgActionBase::Stop();
     if (is_started_) {
-        LOG_INFO("Channel:{} Url:{} Stop", channel, url_);
+        LOG_INFO("Channel:{} Stop", channel);
     }
 }
 

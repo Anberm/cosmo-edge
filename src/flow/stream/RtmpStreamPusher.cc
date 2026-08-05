@@ -90,7 +90,7 @@ void RtmpStreamPusher::Stop() {
         return;
     }
 
-    LOG_INFO("RTMP publisher stopping: url={}", push_url_);
+    LOG_INFO("{}", "RTMP publisher stopping");
     {
         std::lock_guard<std::mutex> lock(output_mtx_);
         CloseOutput();
@@ -99,7 +99,7 @@ void RtmpStreamPusher::Stop() {
         media::GetPreviewPipelineMetrics().PublisherClosed();
     }
     ready_cv_.notify_all();
-    LOG_INFO("RTMP publisher stopped and released: url={}", push_url_);
+    LOG_INFO("{}", "RTMP publisher stopped and released");
 }
 
 std::string RtmpStreamPusher::LastError() const {
@@ -115,7 +115,7 @@ void RtmpStreamPusher::RecordFailure(const char* stage, int error_no) {
         stream_ready_ = false;
     }
     ready_cv_.notify_all();
-    LOG_ERRO("RTMP publisher failure: stage={} error={} url={}", stage, GetAvErr(error_no), push_url_);
+    LOG_ERRO("RTMP publisher failure: stage={} error={}", stage, GetAvErr(error_no));
 }
 
 int RtmpStreamPusher::InitOutput() {
@@ -143,7 +143,7 @@ int RtmpStreamPusher::InitOutput() {
         return ret;
     }
 
-    LOG_INFO("RTMP output initialized: url={}", push_url_);
+    LOG_INFO("{}", "RTMP output initialized");
     return 0;
 }
 
@@ -177,7 +177,7 @@ bool RtmpStreamPusher::ReopenOutput() {
         return false;
     }
 
-    LOG_INFO("reopen RTMP output success: {}", push_url_);
+    LOG_INFO("{}", "reopen RTMP output success");
     return true;
 }
 

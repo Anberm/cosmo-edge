@@ -18,6 +18,7 @@ INSTALL_SUCCESS_SIGN="${COSMO_UPGRADE_SIGN}"
 
 logFile="${1:-/dev/null}"
 logTag="[INSTALL]"
+rotate_external_log "$logFile"
 
 echo "${logTag} Install Start" >> "$logFile"
 echo "${logTag} script=$0, logFile=$1" >> "$logFile"

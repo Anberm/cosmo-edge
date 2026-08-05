@@ -136,15 +136,16 @@ util::ErrorEnum OpenAiVlmClient::Generate(const OpenAiVlmConfig& config,
         auto response = service::ServiceRegistry::Instance().Get<service::IHttpClient>().Post(
             url, body.dump(), "application/json", 3, timeout_sec, headers);
         if (response.statusCode < 200 || response.statusCode >= 300) {
-            LOG_WARN("{}request failed. status:{} body:{}", kTag, response.statusCode, response.body);
+            LOG_WARN("{}request failed. status:{} response_bytes:{}", kTag, response.statusCode,
+                     response.body.size());
             return util::ErrorEnum::AI_FORWARD_FAILED;
         }
 
         nlohmann::json response_json;
         try {
             response_json = nlohmann::json::parse(response.body);
-        } catch (const std::exception& e) {
-            LOG_WARN("{}response json parse failed: {}", kTag, e.what());
+        } catch (const std::exception&) {
+            LOG_WARN("{}response json parse failed, response_bytes:{}", kTag, response.body.size());
             return util::ErrorEnum::AI_PARSE_OUTPUT_FAILED;
         }
 
@@ -153,7 +154,7 @@ util::ErrorEnum OpenAiVlmClient::Generate(const OpenAiVlmConfig& config,
         result.frame_index = static_cast<int64_t>(images[i]->GetFrameIndex());
         result.timestamp   = images[i]->GetTimestamp();
         if (result.text.empty()) {
-            LOG_WARN("{}empty text in response: {}", kTag, response.body);
+            LOG_WARN("{}empty text in response, response_bytes:{}", kTag, response.body.size());
         }
         results.push_back(std::move(result));
     }

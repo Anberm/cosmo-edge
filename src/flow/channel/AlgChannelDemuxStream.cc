@@ -81,7 +81,7 @@ void AlgChannelDemux::RequestUrl() {
             getVideoReq, getVideoRsp)) {
         LOG_WARN("{}{} GetVideoPlay Failed", kTag, channel_id_);
     } else {
-        LOG_INFO("{}{} GetVideoPlay {}", kTag, channel_id_, getVideoRsp.resData.streamUrl);
+        LOG_INFO("{}{} GetVideoPlay OK", kTag, channel_id_);
         SetUrl(getVideoRsp.resData.streamUrl);
     }
 }

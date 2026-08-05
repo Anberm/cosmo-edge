@@ -128,7 +128,7 @@ void EventNotifierImpl::InitWebSocketServer(const std::function<void(std::string
         {uWS::DISABLED, kMaxPayloadLength, kIdleTimeoutSec, kMaxBackpressure,
          // open
          [this](auto ws, auto req) {
-             LOG_INFO("Recv a websocket request, url: {}, host: {}", req->getUrl(), req->getHeader("host"));
+             LOG_INFO("Recv a websocket request, host: {}", req->getHeader("host"));
              ws_connections_[cosmo::util::ToLower(req->getUrl())].push_back(ws);
              ++ws_connection_count_;
              has_ws_connection_.store(true, std::memory_order_release);
@@ -151,7 +151,7 @@ void EventNotifierImpl::InitWebSocketServer(const std::function<void(std::string
                      it_map.second.erase(it_vec);
                      --ws_connection_count_;
                      has_ws_connection_.store(ws_connection_count_ != 0, std::memory_order_release);
-                     LOG_INFO("Remove a websocket connection, Url: {}", it_map.first);
+                     LOG_INFO("{}", "Remove a websocket connection");
                      break;
                  }
              }

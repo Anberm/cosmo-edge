@@ -117,7 +117,7 @@ StreamViewer::StreamViewer(AlgChannelPtr channelInst, const std::string& channel
         ctrl_fps_ = 10.0;
     }
     url = BuildRtmpPushUrl(channelId, algId);
-    LOG_INFO("{}/{} RTMP push url: {}", channel_id_, alg_id_, url);
+    LOG_INFO("{}/{} RTMP push URL prepared", channel_id_, alg_id_);
 
     out_fps_ctl_.ChangeFps(attr.fps, ctrl_fps_);
     const bool shouldEncodeForPreview = !((algId.empty()) && (attr.codec == "H264"));

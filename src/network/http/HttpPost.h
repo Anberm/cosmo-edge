@@ -85,18 +85,18 @@ public:
         } else {
             http_req.SetData("{}");
         }
-        LOG_INFO("HTTP Post Url[{}], Msg:{}", GetPostUrl(type).c_str(), json_result);
+        LOG_DEBUG("HTTP POST request_bytes:{}", json_result.size());
 
         http_req.SetTimeout(10);
 
         auto ret = http_req.Submit(HttpRequestMethod::kPost);  // Will rename this next
         if (200 != ret) {
-            LOG_ERRO("http poster submit failed, errret[{}]", ret);
+            LOG_ERRO("HTTP POST failed, status:{} response_bytes:{}", ret, http_hnd.GetData().size());
             return false;
         }
-        LOG_INFO("Msg:{} Get Response is:{}", GetPostUrl(type), http_hnd.GetData());
+        LOG_DEBUG("HTTP POST completed, status:{} response_bytes:{}", ret, http_hnd.GetData().size());
         if (!cosmo::util::DecodeJson(http_hnd.GetData(), rgt_out)) {
-            LOG_ERRO("cosmo::util::DecodeJson failed, [{}]", http_hnd.GetData());
+            LOG_ERRO("HTTP POST response DecodeJson failed, response_bytes:{}", http_hnd.GetData().size());
             return false;
         }
         return true;

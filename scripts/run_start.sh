@@ -60,6 +60,19 @@ export LD_LIBRARY_PATH="${IED_LIB}:${LD_LIBRARY_PATH:-}:/usr/lib"
 BINPATH="${INSTALLPATH}/bin"
 NGINX_PREFIX="${BINPATH}/nginx_conf"
 NGINX_CONF="${NGINX_PREFIX}/conf/nginx.conf"
+NGINX_UPSTREAM_CONF="${NGINX_PREFIX}/conf/conf.d/default.conf"
+
+export COSMO_HTTP_PORT="${COSMO_HTTP_PORT:-8000}"
+export COSMO_WEBSOCKET_PORT="${COSMO_WEBSOCKET_PORT:-9000}"
+
+# Validate the reverse-proxy/backend contract before stopping the currently
+# running service. A bad override or stale Nginx config must fail closed.
+if ! port_contract="$(verify_nginx_engine_port_contract "$NGINX_UPSTREAM_CONF" \
+    "$COSMO_HTTP_PORT" "$COSMO_WEBSOCKET_PORT" 2>&1)"; then
+    cosmo_log "$logTag" "Port contract check failed: ${port_contract}" "$logFile"
+    exit 1
+fi
+cosmo_log "$logTag" "Port contract OK: ${port_contract}" "$logFile"
 
 # Stop all running processes before starting (including nginx)
 cosmo_log "$logTag" "Stopping all running processes before start..." "$logFile"
