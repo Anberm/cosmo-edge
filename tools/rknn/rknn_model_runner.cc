@@ -84,6 +84,25 @@ std::size_t ElementCount(const rknn_tensor_attr& attr) {
                            [](std::size_t product, std::uint32_t value) { return product * value; });
 }
 
+std::string Shape(const rknn_tensor_attr& attr) {
+    std::string result;
+    for (std::uint32_t index = 0; index < attr.n_dims; ++index) {
+        if (!result.empty()) {
+            result += 'x';
+        }
+        result += std::to_string(attr.dims[index]);
+    }
+    return result;
+}
+
+void PrintTiming(const char* name, const std::vector<double>& values) {
+    const auto sum = std::accumulate(values.begin(), values.end(), 0.0);
+    const auto minmax = std::minmax_element(values.begin(), values.end());
+    std::cout << name << "_mean_ms=" << sum / values.size() << '\n';
+    std::cout << name << "_min_ms=" << *minmax.first << '\n';
+    std::cout << name << "_max_ms=" << *minmax.second << '\n';
+}
+
 std::vector<float> NchwToNhwc(const std::vector<float>& source, const rknn_tensor_attr& attr) {
     if (attr.n_dims != 4) {
         throw std::runtime_error("validation runner requires a four-dimensional image input");
@@ -121,10 +140,10 @@ std::vector<float> NchwToNhwc(const std::vector<float>& source, const rknn_tenso
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 4 || argc > 8) {
+    if (argc < 4 || argc > 9) {
         std::cerr << "Usage: " << argv[0]
                   << " <model.rknn> <input.bin> <output-dir> [iterations=1] [warmup=1]"
-                     " [auto|0|1|01] [float32|uint8|int8]\n";
+                     " [auto|0|1|01] [float32|uint8|int8] [float32|native]\n";
         return 2;
     }
 
@@ -135,8 +154,12 @@ int main(int argc, char** argv) {
         const int warmup = argc >= 6 ? std::stoi(argv[5]) : 1;
         const auto core_mask = ParseCoreMask(argc >= 7 ? argv[6] : "auto");
         const std::string source_type = argc >= 8 ? argv[7] : "float32";
+        const std::string output_type = argc >= 9 ? argv[8] : "float32";
         if (source_type != "float32" && source_type != "uint8" && source_type != "int8") {
             throw std::runtime_error("input source type must be float32, uint8, or int8");
+        }
+        if (output_type != "float32" && output_type != "native") {
+            throw std::runtime_error("output type must be float32 or native");
         }
         const auto input_f32 = source_type == "float32" ? ReadFile<float>(argv[2])
                                                          : std::vector<float>{};
@@ -171,6 +194,13 @@ int main(int argc, char** argv) {
         input_attr.index = 0;
         Check(rknn_query(context.Get(), RKNN_QUERY_INPUT_ATTR, &input_attr, sizeof(input_attr)),
               "RKNN_QUERY_INPUT_ATTR");
+        std::vector<rknn_tensor_attr> output_attrs(counts.n_output);
+        for (std::uint32_t index = 0; index < counts.n_output; ++index) {
+            output_attrs[index].index = index;
+            Check(rknn_query(context.Get(), RKNN_QUERY_OUTPUT_ATTR, &output_attrs[index],
+                             sizeof(output_attrs[index])),
+                  "RKNN_QUERY_OUTPUT_ATTR[" + std::to_string(index) + ']');
+        }
         const auto element_count = ElementCount(input_attr);
         std::vector<float> input_nhwc;
         if (source_type == "float32") {
@@ -210,36 +240,67 @@ int main(int argc, char** argv) {
         input.fmt = RKNN_TENSOR_NHWC;
         Check(rknn_inputs_set(context.Get(), 1, &input), "rknn_inputs_set");
 
+        const auto collect_outputs = [&](bool write_outputs, double* get_ms,
+                                         double* release_ms) {
+            std::vector<rknn_output> outputs(counts.n_output);
+            for (std::uint32_t index = 0; index < counts.n_output; ++index) {
+                outputs[index].index       = index;
+                outputs[index].want_float  = output_type == "float32" ? 1 : 0;
+                outputs[index].is_prealloc = 0;
+            }
+            const auto get_started = std::chrono::steady_clock::now();
+            Check(rknn_outputs_get(context.Get(), counts.n_output, outputs.data(), nullptr),
+                  "rknn_outputs_get");
+            const auto get_finished = std::chrono::steady_clock::now();
+            if (get_ms) {
+                *get_ms = std::chrono::duration<double, std::milli>(get_finished - get_started)
+                              .count();
+            }
+            if (write_outputs) {
+                const auto suffix = output_type == "float32" ? ".f32.bin" : ".native.bin";
+                for (std::uint32_t index = 0; index < counts.n_output; ++index) {
+                    const auto path =
+                        output_dir / ("output-" + std::to_string(index) + suffix);
+                    WriteFile(path, outputs[index].buf, outputs[index].size);
+                    std::cout << "output_" << index << "_path=" << path << '\n';
+                    std::cout << "output_" << index << "_bytes=" << outputs[index].size << '\n';
+                }
+            }
+            const auto release_started = std::chrono::steady_clock::now();
+            Check(rknn_outputs_release(context.Get(), counts.n_output, outputs.data()),
+                  "rknn_outputs_release");
+            const auto release_finished = std::chrono::steady_clock::now();
+            if (release_ms) {
+                *release_ms =
+                    std::chrono::duration<double, std::milli>(release_finished - release_started)
+                        .count();
+            }
+        };
+
         for (int index = 0; index < warmup; ++index) {
             Check(rknn_run(context.Get(), nullptr), "rknn_run warmup");
+            collect_outputs(false, nullptr, nullptr);
         }
 
-        std::vector<double> elapsed_ms;
-        elapsed_ms.reserve(iterations);
+        std::vector<double> run_ms;
+        std::vector<double> outputs_get_ms;
+        std::vector<double> outputs_release_ms;
+        run_ms.reserve(iterations);
+        outputs_get_ms.reserve(iterations);
+        outputs_release_ms.reserve(iterations);
         for (int index = 0; index < iterations; ++index) {
-            const auto start = std::chrono::steady_clock::now();
+            const auto run_started = std::chrono::steady_clock::now();
             Check(rknn_run(context.Get(), nullptr), "rknn_run");
-            const auto stop = std::chrono::steady_clock::now();
-            elapsed_ms.push_back(std::chrono::duration<double, std::milli>(stop - start).count());
+            const auto run_finished = std::chrono::steady_clock::now();
+            run_ms.push_back(
+                std::chrono::duration<double, std::milli>(run_finished - run_started).count());
+            double get_ms = 0.0;
+            double release_ms = 0.0;
+            collect_outputs(index + 1 == iterations, &get_ms, &release_ms);
+            outputs_get_ms.push_back(get_ms);
+            outputs_release_ms.push_back(release_ms);
         }
 
-        std::vector<rknn_output> outputs(counts.n_output);
-        for (std::uint32_t index = 0; index < counts.n_output; ++index) {
-            outputs[index].index = index;
-            outputs[index].want_float = 1;
-            outputs[index].is_prealloc = 0;
-        }
-        Check(rknn_outputs_get(context.Get(), counts.n_output, outputs.data(), nullptr), "rknn_outputs_get");
-        for (std::uint32_t index = 0; index < counts.n_output; ++index) {
-            const auto path = output_dir / ("output-" + std::to_string(index) + ".f32.bin");
-            WriteFile(path, outputs[index].buf, outputs[index].size);
-            std::cout << "output_" << index << "_path=" << path << '\n';
-            std::cout << "output_" << index << "_bytes=" << outputs[index].size << '\n';
-        }
-        Check(rknn_outputs_release(context.Get(), counts.n_output, outputs.data()), "rknn_outputs_release");
-
-        const auto sum = std::accumulate(elapsed_ms.begin(), elapsed_ms.end(), 0.0);
-        const auto minmax = std::minmax_element(elapsed_ms.begin(), elapsed_ms.end());
         std::cout << std::fixed << std::setprecision(4);
         std::cout << "api_version=" << version.api_version << '\n';
         std::cout << "driver_version=" << version.drv_version << '\n';
@@ -247,10 +308,26 @@ int main(int argc, char** argv) {
         std::cout << "input_native_format=" << get_format_string(input_attr.fmt) << '\n';
         std::cout << "input_source_type=" << source_type << '\n';
         std::cout << "input_source_format=NHWC\n";
+        std::cout << "output_source_type=" << output_type << '\n';
+        for (std::uint32_t index = 0; index < output_attrs.size(); ++index) {
+            const auto& attr = output_attrs[index];
+            std::cout << "output_" << index << "_shape=" << Shape(attr) << '\n';
+            std::cout << "output_" << index << "_native_type=" << get_type_string(attr.type)
+                      << '\n';
+            std::cout << "output_" << index << "_native_format=" << get_format_string(attr.fmt)
+                      << '\n';
+            std::cout << "output_" << index << "_quant="
+                      << get_qnt_type_string(attr.qnt_type) << '\n';
+            std::cout << "output_" << index << "_zero_point=" << attr.zp << '\n';
+            std::cout << "output_" << index << "_scale=" << std::setprecision(9) << attr.scale
+                      << std::setprecision(4) << '\n';
+            std::cout << "output_" << index << "_native_bytes=" << attr.size << '\n';
+            std::cout << "output_" << index << "_stride_bytes=" << attr.size_with_stride << '\n';
+        }
         std::cout << "iterations=" << iterations << '\n';
-        std::cout << "latency_mean_ms=" << sum / elapsed_ms.size() << '\n';
-        std::cout << "latency_min_ms=" << *minmax.first << '\n';
-        std::cout << "latency_max_ms=" << *minmax.second << '\n';
+        PrintTiming("run", run_ms);
+        PrintTiming("outputs_get", outputs_get_ms);
+        PrintTiming("outputs_release", outputs_release_ms);
         std::cout << "runner_status=PASS\n";
         return 0;
     } catch (const std::exception& error) {
