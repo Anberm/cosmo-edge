@@ -10,7 +10,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <numeric>
+#include <unordered_map>
 
 #include "nn/core/inference_pipeline_metrics.h"
 #include "nn/device/rknn/rknn_yolov8_adapter.h"
@@ -109,7 +111,91 @@ namespace {
         return default_value;
     }
 
+    std::string LowercaseTrimmed(std::string value) {
+        const auto begin = value.find_first_not_of(" \t\n\r\f\v");
+        if (begin == std::string::npos)
+            return {};
+        const auto end = value.find_last_not_of(" \t\n\r\f\v");
+        value          = value.substr(begin, end - begin + 1);
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    }
+
+    uint64_t ModelFingerprint(const std::vector<unsigned char>& model) {
+        constexpr uint64_t kFnvOffset = 1469598103934665603ULL;
+        constexpr uint64_t kFnvPrime  = 1099511628211ULL;
+        uint64_t fingerprint          = kFnvOffset;
+        for (const auto byte : model) {
+            fingerprint ^= byte;
+            fingerprint *= kFnvPrime;
+        }
+        return fingerprint;
+    }
+
+    uint64_t NextModelContextSequence(const std::vector<unsigned char>& model) {
+        static std::mutex sequence_mutex;
+        static std::unordered_map<uint64_t, uint64_t> model_sequences;
+        const auto fingerprint = ModelFingerprint(model);
+        std::lock_guard<std::mutex> lock(sequence_mutex);
+        auto& sequence = model_sequences[fingerprint];
+        return sequence++;
+    }
+
 }  // namespace
+
+RknnCoreMode ParseRknnCoreMode(const std::string& value, bool* valid) {
+    const auto normalized = LowercaseTrimmed(value);
+    if (valid)
+        *valid = true;
+    if (normalized.empty() || normalized == "auto")
+        return RknnCoreMode::Auto;
+    if (normalized == "core0" || normalized == "core_0" || normalized == "0")
+        return RknnCoreMode::Core0;
+    if (normalized == "core1" || normalized == "core_1" || normalized == "1")
+        return RknnCoreMode::Core1;
+    if (normalized == "core01" || normalized == "core0_1" || normalized == "core_0_1" ||
+        normalized == "dual") {
+        return RknnCoreMode::Core01;
+    }
+    if (normalized == "split")
+        return RknnCoreMode::Split;
+    if (valid)
+        *valid = false;
+    return RknnCoreMode::Auto;
+}
+
+rknn_core_mask ResolveRknnCoreMask(RknnCoreMode mode, uint64_t context_sequence) {
+    switch (mode) {
+        case RknnCoreMode::Core0:
+            return RKNN_NPU_CORE_0;
+        case RknnCoreMode::Core1:
+            return RKNN_NPU_CORE_1;
+        case RknnCoreMode::Core01:
+            return RKNN_NPU_CORE_0_1;
+        case RknnCoreMode::Split:
+            return (context_sequence % 2 == 0) ? RKNN_NPU_CORE_0 : RKNN_NPU_CORE_1;
+        case RknnCoreMode::Auto:
+        default:
+            return RKNN_NPU_CORE_AUTO;
+    }
+}
+
+const char* RknnCoreModeName(RknnCoreMode mode) {
+    switch (mode) {
+        case RknnCoreMode::Core0:
+            return "core0";
+        case RknnCoreMode::Core1:
+            return "core1";
+        case RknnCoreMode::Core01:
+            return "core0_1";
+        case RknnCoreMode::Split:
+            return "split";
+        case RknnCoreMode::Auto:
+        default:
+            return "auto";
+    }
+}
 
 bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc) {
     constexpr float kExpectedScale = 0.00392157f;
@@ -548,7 +634,17 @@ Status RknnNetNode::LoadWeight(const char* data, size_t size) {
         DestroyContext();
         return RknnError("rknn_init", result);
     }
-    result = rknn_set_core_mask(context_, RKNN_NPU_CORE_AUTO);
+    const uint64_t context_sequence = NextModelContextSequence(model_data_);
+    bool core_mode_valid = true;
+    const char* core_mode_env = std::getenv("COSMO_RKNN_CORE_MODE");
+    const auto core_mode = ParseRknnCoreMode(core_mode_env ? core_mode_env : "auto",
+                                             &core_mode_valid);
+    if (!core_mode_valid) {
+        LOG_WARN("Invalid COSMO_RKNN_CORE_MODE value:{}, fallback:auto",
+                 core_mode_env ? core_mode_env : "");
+    }
+    const auto core_mask = ResolveRknnCoreMask(core_mode, context_sequence);
+    result               = rknn_set_core_mask(context_, core_mask);
     if (result != RKNN_SUCC) {
         DestroyContext();
         return RknnError("rknn_set_core_mask", result);
@@ -579,9 +675,10 @@ Status RknnNetNode::LoadWeight(const char* data, size_t size) {
 
     LOG_INFO(
         "RKNN model loaded: api={} driver={} inputs={} runtime_outputs={} logical_outputs={} "
-        "output_adapter={} native_int8_output={}",
+        "output_adapter={} native_int8_output={} core_mode={} core_mask={} context_sequence={}",
         version.api_version, version.drv_version, io_count_.n_input, io_count_.n_output, logical_outputs,
-        RknnOutputAdapterName(output_adapter_contract_.kind), native_yolov8_outputs_);
+        RknnOutputAdapterName(output_adapter_contract_.kind), native_yolov8_outputs_,
+        RknnCoreModeName(core_mode), static_cast<int>(core_mask), context_sequence);
     return COSMO_NN_OK;
 }
 

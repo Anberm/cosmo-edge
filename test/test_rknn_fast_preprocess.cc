@@ -216,6 +216,33 @@ TEST_CASE("RKNN bound input switch defaults on and supports explicit rollback", 
     }
 }
 
+TEST_CASE("RKNN core scheduling maps explicit and split modes deterministically",
+          "[nn][rknn][core-scheduling]") {
+    using namespace cosmo::nn;
+    bool valid = false;
+    CHECK(ParseRknnCoreMode(" auto ", &valid) == RknnCoreMode::Auto);
+    CHECK(valid);
+    CHECK(ParseRknnCoreMode("CORE0", &valid) == RknnCoreMode::Core0);
+    CHECK(valid);
+    CHECK(ParseRknnCoreMode("core_1", &valid) == RknnCoreMode::Core1);
+    CHECK(valid);
+    CHECK(ParseRknnCoreMode("dual", &valid) == RknnCoreMode::Core01);
+    CHECK(valid);
+    CHECK(ParseRknnCoreMode("split", &valid) == RknnCoreMode::Split);
+    CHECK(valid);
+    CHECK(ParseRknnCoreMode("unsupported", &valid) == RknnCoreMode::Auto);
+    CHECK_FALSE(valid);
+
+    CHECK(ResolveRknnCoreMask(RknnCoreMode::Auto, 7) == RKNN_NPU_CORE_AUTO);
+    CHECK(ResolveRknnCoreMask(RknnCoreMode::Core0, 7) == RKNN_NPU_CORE_0);
+    CHECK(ResolveRknnCoreMask(RknnCoreMode::Core1, 7) == RKNN_NPU_CORE_1);
+    CHECK(ResolveRknnCoreMask(RknnCoreMode::Core01, 7) == RKNN_NPU_CORE_0_1);
+    CHECK(ResolveRknnCoreMask(RknnCoreMode::Split, 0) == RKNN_NPU_CORE_0);
+    CHECK(ResolveRknnCoreMask(RknnCoreMode::Split, 1) == RKNN_NPU_CORE_1);
+    CHECK(ResolveRknnCoreMask(RknnCoreMode::Split, 2) == RKNN_NPU_CORE_0);
+    CHECK(std::string(RknnCoreModeName(RknnCoreMode::Core01)) == "core0_1");
+}
+
 TEST_CASE("RKNN MPP DMA-BUF switch defaults on and supports explicit rollback",
           "[nn][rknn][mpp-dmabuf]") {
     using namespace cosmo::nn;

@@ -2,6 +2,7 @@
 
 #ifdef COSMO_NN_USE_RKNN_BACKEND
 
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -29,6 +30,18 @@ bool RknnFastOutputEnabled();
 bool RknnDirectCandidatesEnabled();
 bool RknnBoundInputEnabled();
 bool RknnRgaBoundInputEnabled();
+
+enum class RknnCoreMode : uint8_t {
+    Auto = 0,
+    Core0,
+    Core1,
+    Core01,
+    Split,
+};
+
+RknnCoreMode ParseRknnCoreMode(const std::string& value, bool* valid = nullptr);
+rknn_core_mask ResolveRknnCoreMask(RknnCoreMode mode, uint64_t context_sequence);
+const char* RknnCoreModeName(RknnCoreMode mode);
 
 class RknnNetNode final : public NetNode, public RknnBoundInputProvider {
 public:
