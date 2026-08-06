@@ -15,6 +15,8 @@ const REQUIRED_FAILURE_COUNTERS = [
   'rgaFailures',
   'rknnForwardFailures',
   'rknnRgaFailures',
+  'rknnRgaBoundInputImportFailures',
+  'rknnRgaBoundRequantizeFailures',
 ];
 
 const MONOTONIC_COUNTERS = [
@@ -30,6 +32,7 @@ const MONOTONIC_COUNTERS = [
   'resultParseFrames',
   'rgaFrames',
   'rknnForwards',
+  'rknnRgaBoundInputFrames',
 ];
 
 const IDENTITY_ALLOWLIST = new Set([

@@ -1,3 +1,8 @@
+// librga 1.10.1 headers use NULL without including a definition.
+// clang-format off
+#include <cstddef>
+// clang-format on
+
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +17,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// clang-format off
+#include <rga/im2d.h>
+// clang-format on
 
 #include "nn/core/blob.h"
 #include "nn/core/inference_pipeline_metrics.h"
@@ -183,33 +192,29 @@ struct PathBuffers {
 
 class QualificationRunner {
 public:
-    QualificationRunner(const std::vector<unsigned char>& model, int source_height, int source_width)
-        : source_height_(source_height), source_width_(source_width) {
+    QualificationRunner(const std::vector<unsigned char>& model, int source_height, int source_width,
+                        bool qualify_rga_bound_input)
+        : source_height_(source_height),
+          source_width_(source_width),
+          qualify_rga_bound_input_(qualify_rga_bound_input) {
         ConfigurePreprocessing();
-        network_.SetNetworkInputNames({"images"});
-        network_.SetNetworkOutputNames({"output0"});
-        CheckStatus(network_.LoadWeight(reinterpret_cast<const char*>(model.data()), model.size()),
-                    "load RKNN model");
-        CheckStatus(network_.InferTopShapes(), "infer RKNN output shapes");
-        const auto output_shapes = network_.GetTopBlobShapes();
-        const auto output_types  = network_.GetTopBlobDataTypes();
-        if (output_shapes.size() != 1 || output_types.size() != 1 ||
-            output_types.front() != cosmo::nn::DATA_TYPE_FLOAT) {
-            throw std::runtime_error("qualification runner requires one logical float output");
+        ConfigureNetwork(network_, model, nullptr, output_);
+        if (qualify_rga_bound_input_) {
+            bound_network_ = std::make_unique<cosmo::nn::RknnNetNode>();
+            ConfigureNetwork(*bound_network_, model, &fast_resource_, bound_output_);
         }
-        output_ = AllocateBlob(MakeDesc(output_types.front(), cosmo::nn::DATA_FORMAT_NCHW,
-                                        cosmo::nn::IMAGE_UNKNOWN, output_shapes.front()));
-        output_bytes_ = ElementCount(output_shapes.front()) * sizeof(float);
     }
 
     StageTimes RunLegacy(const std::vector<uint8_t>& source,
                          const std::filesystem::path& output_path) {
-        return Run(source, legacy_, output_path);
+        return Run(source, legacy_, network_, output_, output_path);
     }
 
     StageTimes RunFast(const std::vector<uint8_t>& source,
                        const std::filesystem::path& output_path) {
-        return Run(source, fast_, output_path);
+        if (bound_network_)
+            return Run(source, fast_, *bound_network_, bound_output_, output_path);
+        return Run(source, fast_, network_, output_, output_path);
     }
 
     void DumpLastResizedInputs(const std::filesystem::path& output_dir) const {
@@ -218,13 +223,41 @@ public:
                   kPackedBytes);
         WriteFile(output_dir / "fast-resized.rgb.u8.bin", fast_.resized->GetHandle().base,
                   kPackedBytes);
+        const auto& target = fast_resource_.rknn_bound_input_target;
+        if (target.Matches(640, 640)) {
+            WriteFile(output_dir / "rga-bound-input.rgb.u8.bin", target.virtual_address, target.bytes);
+        }
     }
 
     const std::shared_ptr<Blob>& FastNormalized() const {
         return fast_.normalized;
     }
 
+    [[nodiscard]] bool UsesRgaBoundInput() const {
+        return qualify_rga_bound_input_;
+    }
+
 private:
+    void ConfigureNetwork(cosmo::nn::RknnNetNode& network, const std::vector<unsigned char>& model,
+                          cosmo::nn::SharedResource* resource, std::shared_ptr<Blob>& output) {
+        if (resource)
+            network.SetSharedResource(resource);
+        network.SetNetworkInputNames({"images"});
+        network.SetNetworkOutputNames({"output0"});
+        CheckStatus(network.LoadWeight(reinterpret_cast<const char*>(model.data()), model.size()),
+                    "load RKNN model");
+        CheckStatus(network.InferTopShapes(), "infer RKNN output shapes");
+        const auto output_shapes = network.GetTopBlobShapes();
+        const auto output_types  = network.GetTopBlobDataTypes();
+        if (output_shapes.size() != 1 || output_types.size() != 1 ||
+            output_types.front() != cosmo::nn::DATA_TYPE_FLOAT) {
+            throw std::runtime_error("qualification runner requires one logical float output");
+        }
+        output        = AllocateBlob(MakeDesc(output_types.front(), cosmo::nn::DATA_FORMAT_NCHW,
+                                              cosmo::nn::IMAGE_UNKNOWN, output_shapes.front()));
+        output_bytes_ = ElementCount(output_shapes.front()) * sizeof(float);
+    }
+
     void ConfigurePreprocessing() {
         cosmo::nn::Resize resize;
         resize.dsize   = {640, 640};
@@ -268,8 +301,8 @@ private:
                      path.normalize->GetTopBlobShapes().front()));
     }
 
-    StageTimes Run(const std::vector<uint8_t>& source, PathBuffers& path,
-                   const std::filesystem::path& output_path) {
+    StageTimes Run(const std::vector<uint8_t>& source, PathBuffers& path, cosmo::nn::RknnNetNode& network,
+                   const std::shared_ptr<Blob>& output, const std::filesystem::path& output_path) {
         const size_t expected_bytes =
             static_cast<size_t>(source_height_) * static_cast<size_t>(source_width_) * 3;
         if (source.size() != expected_bytes)
@@ -297,24 +330,27 @@ private:
         times.normalize_ms = ElapsedMilliseconds(stage_started);
 
         std::vector<std::shared_ptr<Blob>> network_bottoms{path.normalized};
-        std::vector<std::shared_ptr<Blob>> network_tops{output_};
+        std::vector<std::shared_ptr<Blob>> network_tops{output};
         stage_started = Clock::now();
-        CheckStatus(network_.Forward(network_bottoms, network_tops), "run RKNN detector");
+        CheckStatus(network.Forward(network_bottoms, network_tops), "run RKNN detector");
         times.network_ms = ElapsedMilliseconds(stage_started);
         times.total_ms   = ElapsedMilliseconds(total_started);
-        WriteFile(output_path, output_->GetHandle().base, output_bytes_);
+        WriteFile(output_path, output->GetHandle().base, output_bytes_);
         return times;
     }
 
     int source_height_;
     int source_width_;
     size_t output_bytes_{0};
+    bool qualify_rga_bound_input_{false};
     cosmo::nn::SharedResource legacy_resource_;
     cosmo::nn::SharedResource fast_resource_;
+    std::unique_ptr<cosmo::nn::RknnNetNode> bound_network_;
     PathBuffers legacy_;
     PathBuffers fast_;
     cosmo::nn::RknnNetNode network_;
     std::shared_ptr<Blob> output_;
+    std::shared_ptr<Blob> bound_output_;
 };
 
 class DirectOutputQualificationRunner {
@@ -393,7 +429,7 @@ int main(int argc, char** argv) {
     if (argc != 6 && argc != 7) {
         std::cerr << "Usage: " << argv[0]
                   << " <model.rknn> <bgr-input-list.txt> <height> <width> <output-dir> "
-                     "[--direct-output-parity]\n";
+                     "[--direct-output-parity|--rga-bound-input-parity]\n";
         return 2;
     }
 
@@ -404,7 +440,8 @@ int main(int argc, char** argv) {
         const int width        = std::stoi(argv[4]);
         const std::filesystem::path output_dir(argv[5]);
         const bool qualify_direct_output = argc == 7 && std::string(argv[6]) == "--direct-output-parity";
-        if (argc == 7 && !qualify_direct_output)
+        const bool qualify_rga_bound_input = argc == 7 && std::string(argv[6]) == "--rga-bound-input-parity";
+        if (argc == 7 && !qualify_direct_output && !qualify_rga_bound_input)
             throw std::runtime_error("unknown qualification option");
         if (height <= 0 || width <= 0)
             throw std::runtime_error("source dimensions must be positive");
@@ -417,7 +454,7 @@ int main(int argc, char** argv) {
 
         LogGuard log_guard;
         const auto metrics_before = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
-        QualificationRunner runner(model, height, width);
+        QualificationRunner runner(model, height, width, qualify_rga_bound_input);
         std::unique_ptr<DirectOutputQualificationRunner> direct_output_runner;
         if (qualify_direct_output)
             direct_output_runner = std::make_unique<DirectOutputQualificationRunner>(model);
@@ -485,6 +522,9 @@ int main(int argc, char** argv) {
                       << metrics_after.rknn_yolov8_score_sum_points_rejected -
                              metrics_before.rknn_yolov8_score_sum_points_rejected
                       << '\n';
+        }
+        if (qualify_direct_output || qualify_rga_bound_input) {
+            const auto metrics_after = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
             std::cout << "bound_input_bind_attempts="
                       << metrics_after.rknn_bound_input_bind_attempts -
                              metrics_before.rknn_bound_input_bind_attempts
@@ -509,6 +549,47 @@ int main(int argc, char** argv) {
                       << (metrics_after.rknn_bound_input_sync_nanoseconds -
                           metrics_before.rknn_bound_input_sync_nanoseconds) /
                              1000000.0
+                      << '\n';
+            std::cout << "rga_bound_input_bind_attempts="
+                      << metrics_after.rknn_rga_bound_input_bind_attempts -
+                             metrics_before.rknn_rga_bound_input_bind_attempts
+                      << '\n';
+            std::cout << "rga_bound_input_bind_failures="
+                      << metrics_after.rknn_rga_bound_input_bind_failures -
+                             metrics_before.rknn_rga_bound_input_bind_failures
+                      << '\n';
+            std::cout << "rga_bound_input_import_calls="
+                      << metrics_after.rknn_rga_bound_input_import_calls -
+                             metrics_before.rknn_rga_bound_input_import_calls
+                      << '\n';
+            std::cout << "rga_bound_input_import_failures="
+                      << metrics_after.rknn_rga_bound_input_import_failures -
+                             metrics_before.rknn_rga_bound_input_import_failures
+                      << '\n';
+            std::cout << "rga_bound_input_frames="
+                      << metrics_after.rknn_rga_bound_input_frames -
+                             metrics_before.rknn_rga_bound_input_frames
+                      << '\n';
+            std::cout << "rga_bound_native_int8_frames="
+                      << metrics_after.rknn_rga_bound_native_int8_frames -
+                             metrics_before.rknn_rga_bound_native_int8_frames
+                      << '\n';
+            std::cout << "rga_bound_requantize_calls="
+                      << metrics_after.rknn_rga_bound_requantize_calls -
+                             metrics_before.rknn_rga_bound_requantize_calls
+                      << '\n';
+            std::cout << "rga_bound_requantize_ms="
+                      << (metrics_after.rknn_rga_bound_requantize_nanoseconds -
+                          metrics_before.rknn_rga_bound_requantize_nanoseconds) /
+                             1000000.0
+                      << '\n';
+            std::cout << "rga_bound_requantize_failures="
+                      << metrics_after.rknn_rga_bound_requantize_failures -
+                             metrics_before.rknn_rga_bound_requantize_failures
+                      << '\n';
+            std::cout << "rga_bound_input_normalize_bypasses="
+                      << metrics_after.rknn_rga_bound_input_normalize_bypasses -
+                             metrics_before.rknn_rga_bound_input_normalize_bypasses
                       << '\n';
             std::cout << "rknn_inputs_set_calls="
                       << metrics_after.rknn_inputs_set_calls - metrics_before.rknn_inputs_set_calls << '\n';

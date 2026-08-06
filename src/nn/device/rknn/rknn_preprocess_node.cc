@@ -2,6 +2,8 @@
 
 #include "nn/device/rknn/rknn_preprocess_node.h"
 
+#include <rga/im2d.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -14,9 +16,8 @@
 #include <new>
 #include <string>
 
-#include <rga/im2d.h>
-
 #include "nn/core/inference_pipeline_metrics.h"
+#include "nn/device/rknn/rknn_net_node.h"
 #include "nn/node/node_type_utils.h"
 #include "nn/utils/op.h"
 #include "util/Log.h"
@@ -55,9 +56,10 @@ bool RgaSucceeded(IM_STATUS status) {
 
 class ScopedRgaHandle {
 public:
+    ScopedRgaHandle() = default;
+
     ScopedRgaHandle(void* data, size_t size) {
-        if (data && size > 0 && size <= static_cast<size_t>(std::numeric_limits<int>::max()))
-            handle_ = importbuffer_virtualaddr(data, static_cast<int>(size));
+        ImportVirtual(data, size);
     }
 
     ~ScopedRgaHandle() {
@@ -66,6 +68,14 @@ public:
     }
 
     [[nodiscard]] rga_buffer_handle_t Get() const { return handle_; }
+
+    void ImportVirtual(void* data, size_t size) {
+        if (handle_ != 0 || !data || size == 0 ||
+            size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            return;
+        }
+        handle_ = importbuffer_virtualaddr(data, static_cast<int>(size));
+    }
 
 private:
     rga_buffer_handle_t handle_{0};
@@ -76,6 +86,13 @@ void LogRgaFallbackOnce(IM_STATUS status) {
     if (!logged.test_and_set(std::memory_order_relaxed)) {
         LOG_WARN("RKNN detector RGA preprocessing failed with status {} ({}); using CPU fallback",
                  status, imStrError_t(status));
+    }
+}
+
+void LogRgaBoundInputFallbackOnce(const std::string& reason) {
+    static std::atomic_flag logged = ATOMIC_FLAG_INIT;
+    if (!logged.test_and_set(std::memory_order_relaxed)) {
+        LOG_WARN("RKNN RGA bound input unavailable; retaining the host preprocessing path: {}", reason);
     }
 }
 
@@ -172,6 +189,10 @@ RknnResizeNode::RknnResizeNode() : Node() {
     one_blob_only = true;
 }
 
+RknnResizeNode::~RknnResizeNode() {
+    ReleaseRgaBoundTarget();
+}
+
 void RknnResizeNode::LoadParam(Op* op) {
     const auto* resize = dynamic_cast<Resize*>(op);
     if (!resize)
@@ -208,7 +229,56 @@ size_t RknnResizeNode::GetTopCount() {
     return 1;
 }
 
-bool RknnResizeNode::ResizeWithRga(const Blob& bottom, Blob& top) {
+void RknnResizeNode::ReleaseRgaBoundTarget() {
+    if (rga_bound_target_handle_ != 0) {
+        releasebuffer_handle(static_cast<rga_buffer_handle_t>(rga_bound_target_handle_));
+        rga_bound_target_handle_     = 0;
+        rga_bound_target_generation_ = 0;
+    }
+}
+
+bool RknnResizeNode::AcquireRgaBoundTarget(uint32_t& handle) {
+    handle = 0;
+    if (!detector_contract_ || rga_bound_target_unavailable_ || !RknnRgaBoundInputEnabled() ||
+        !shared_resource || !shared_resource->rknn_bound_input_provider) {
+        return false;
+    }
+    std::string reason;
+    auto* provider = shared_resource->rknn_bound_input_provider;
+    if (!provider->EnsureRgaBoundInput(out_height_, out_width_, reason)) {
+        rga_bound_target_unavailable_ = true;
+        LogRgaBoundInputFallbackOnce(reason);
+        return false;
+    }
+    const auto& target = shared_resource->rknn_bound_input_target;
+    if (target.owner != provider || !target.Matches(out_height_, out_width_) ||
+        target.bytes > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        rga_bound_target_unavailable_ = true;
+        LogRgaBoundInputFallbackOnce("provider returned an incompatible target");
+        return false;
+    }
+    if (rga_bound_target_handle_ != 0 && rga_bound_target_generation_ == target.generation) {
+        handle = rga_bound_target_handle_;
+        return true;
+    }
+    ReleaseRgaBoundTarget();
+    const auto import_started = MetricsClock::now();
+    const auto imported       = importbuffer_fd(target.fd, static_cast<int>(target.bytes));
+    GetInferencePipelineMetrics().RecordRknnRgaBoundInputImport(ElapsedNanoseconds(import_started),
+                                                                imported != 0);
+    if (imported == 0) {
+        rga_bound_target_unavailable_ = true;
+        GetInferencePipelineMetrics().RecordRknnRgaFailure();
+        LogRgaBoundInputFallbackOnce("RGA could not import the RKNN DMA-BUF fd");
+        return false;
+    }
+    rga_bound_target_handle_     = static_cast<uint32_t>(imported);
+    rga_bound_target_generation_ = target.generation;
+    handle                       = rga_bound_target_handle_;
+    return true;
+}
+
+bool RknnResizeNode::ResizeWithRga(const Blob& bottom, Blob& top, bool allow_bound_target) {
     if (!detector_contract_ || RknnForceRgaFailure()) {
         if (detector_contract_ && RknnForceRgaFailure())
             GetInferencePipelineMetrics().RecordRknnRgaFailure();
@@ -231,8 +301,14 @@ bool RknnResizeNode::ResizeWithRga(const Blob& bottom, Blob& top) {
     const auto source_size  = PackedByteCount(source_width, source_height);
     const auto target_size  = PackedByteCount(out_width_, out_height_);
     ScopedRgaHandle source_handle(bottom_handle.base, source_size);
-    ScopedRgaHandle target_handle(top_handle.base, target_size);
-    if (source_handle.Get() == 0 || target_handle.Get() == 0) {
+    ScopedRgaHandle host_target_handle;
+    uint32_t target_handle  = 0;
+    const bool bound_target = allow_bound_target && AcquireRgaBoundTarget(target_handle);
+    if (!bound_target) {
+        host_target_handle.ImportVirtual(top_handle.base, target_size);
+        target_handle = host_target_handle.Get();
+    }
+    if (source_handle.Get() == 0 || target_handle == 0) {
         GetInferencePipelineMetrics().RecordRknnRgaFailure();
         LogRgaFallbackOnce(IM_STATUS_OUT_OF_MEMORY);
         return false;
@@ -242,8 +318,11 @@ bool RknnResizeNode::ResizeWithRga(const Blob& bottom, Blob& top) {
         bottom_desc.image_format == IMAGE_RGB ? RK_FORMAT_RGB_888 : RK_FORMAT_BGR_888;
     auto source = wrapbuffer_handle_t(source_handle.Get(), source_width, source_height,
                                       source_width, source_height, source_format);
-    auto target = wrapbuffer_handle_t(target_handle.Get(), out_width_, out_height_, out_width_,
-                                      out_height_, RK_FORMAT_RGB_888);
+    int target_width_stride = out_width_;
+    if (bound_target)
+        target_width_stride = shared_resource->rknn_bound_input_target.width_stride;
+    auto target = wrapbuffer_handle_t(static_cast<rga_buffer_handle_t>(target_handle), out_width_,
+                                      out_height_, target_width_stride, out_height_, RK_FORMAT_RGB_888);
 
     const auto fill_started = MetricsClock::now();
     const im_rect full_target{0, 0, out_width_, out_height_};
@@ -275,6 +354,13 @@ bool RknnResizeNode::ResizeWithRga(const Blob& bottom, Blob& top) {
         GetInferencePipelineMetrics().RecordRknnRgaFailure();
         LogRgaFallbackOnce(status);
         return false;
+    }
+    if (bound_target) {
+        auto& bound_input = shared_resource->rknn_bound_input_target;
+        if (bound_input.owner == shared_resource->rknn_bound_input_provider &&
+            bound_input.generation == rga_bound_target_generation_) {
+            bound_input.frame_ready = true;
+        }
     }
     return true;
 }
@@ -317,8 +403,8 @@ void RknnResizeNode::ResizeWithCpu(const Blob& bottom, Blob& top, bool output_rg
     }
 }
 
-Status RknnResizeNode::ResizeSingle(const std::shared_ptr<Blob>& bottom,
-                                    const std::shared_ptr<Blob>& top) {
+Status RknnResizeNode::ResizeSingle(const std::shared_ptr<Blob>& bottom, const std::shared_ptr<Blob>& top,
+                                    bool allow_bound_target) {
     if (!bottom || !top || !bottom->GetHandle().base || !top->GetHandle().base)
         return Status(COSMO_NN_ERR_NULL_PARAM, "RKNN resize input or output is null");
     const auto bottom_desc = bottom->GetBlobDesc();
@@ -331,7 +417,7 @@ Status RknnResizeNode::ResizeSingle(const std::shared_ptr<Blob>& bottom,
 
     bool rga_success = false;
     if (detector_contract_)
-        rga_success = ResizeWithRga(*bottom, *top);
+        rga_success = ResizeWithRga(*bottom, *top, allow_bound_target);
     if (!rga_success) {
         const auto cpu_started = MetricsClock::now();
         try {
@@ -364,6 +450,10 @@ Status RknnResizeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     top_desc.dims[0] = batch;
     top_blobs[0]->SetBlobDesc(top_desc);
     const size_t slice_size = PackedByteCount(out_width_, out_height_);
+    if (shared_resource &&
+        shared_resource->rknn_bound_input_target.owner == shared_resource->rknn_bound_input_provider) {
+        shared_resource->rknn_bound_input_target.frame_ready = false;
+    }
     for (int index = 0; index < batch; ++index) {
         BlobDesc slice_desc = top_desc;
         slice_desc.dims[0]  = 1;
@@ -371,7 +461,7 @@ Status RknnResizeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         slice_handle.base = static_cast<uint8_t*>(top_blobs[0]->GetHandle().base) +
                             static_cast<size_t>(index) * slice_size;
         auto slice = std::make_shared<Blob>(slice_desc, slice_handle);
-        RETURN_ON_FAIL(ResizeSingle(bottom_blobs[index], slice));
+        RETURN_ON_FAIL(ResizeSingle(bottom_blobs[index], slice, batch == 1));
         top_desc.image_format = slice->GetBlobDesc().image_format;
         top_desc.data_format  = slice->GetBlobDesc().data_format;
     }
@@ -443,6 +533,18 @@ bool RknnNormalizeNode::NeedSwapRedBlue(ImageFormat format) const {
     if (format == IMAGE_RGB || format == IMAGE_RGBA)
         return is_bgr_;
     return false;
+}
+
+bool RknnNormalizeNode::CanBypassBoundInput(const Blob& bottom) const {
+    if (!native_contract_ || !shared_resource || !shared_resource->rknn_bound_input_provider) {
+        return false;
+    }
+    const auto& target = shared_resource->rknn_bound_input_target;
+    const auto desc    = const_cast<Blob&>(bottom).GetBlobDesc();
+    return target.frame_ready && target.owner == shared_resource->rknn_bound_input_provider &&
+           desc.data_type == DATA_TYPE_UINT8 && desc.data_format == DATA_FORMAT_NHWC &&
+           desc.image_format == IMAGE_RGB && desc.dims.size() == 4 && desc.dims[0] == 1 &&
+           target.Matches(desc.dims[1], desc.dims[2]) && !NeedSwapRedBlue(desc.image_format);
 }
 
 Status RknnNormalizeNode::ForwardNative(const Blob& bottom, Blob& top) {
@@ -521,7 +623,15 @@ Status RknnNormalizeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blo
     top_blobs[0]->SetBlobDesc(runtime_top_desc);
     Status status;
     if (native_contract_) {
-        status = ForwardNative(*bottom_blobs[0], *top_blobs[0]);
+        if (CanBypassBoundInput(*bottom_blobs[0])) {
+            runtime_top_desc.image_format = is_bgr_ ? IMAGE_BGR : IMAGE_RGB;
+            top_blobs[0]->SetBlobDesc(runtime_top_desc);
+            GetInferencePipelineMetrics().RecordRknnPreprocessFastHit();
+            GetInferencePipelineMetrics().RecordRknnRgaBoundInputNormalizeBypass();
+            status = COSMO_NN_OK;
+        } else {
+            status = ForwardNative(*bottom_blobs[0], *top_blobs[0]);
+        }
     } else {
         const auto fallback_started = MetricsClock::now();
         status = ForwardFloat(*bottom_blobs[0], *top_blobs[0]);

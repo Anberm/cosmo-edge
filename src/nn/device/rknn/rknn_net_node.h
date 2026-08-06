@@ -17,14 +17,20 @@ bool IsRknnNativeYolov8OutputCompatible(const std::vector<rknn_tensor_attr>& att
                                         std::string* reason = nullptr);
 bool IsRknnBoundInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc,
                                     std::string* reason = nullptr);
+bool IsRknnRgaBoundInputCompatible(const rknn_tensor_attr& attr, int height, int width,
+                                   std::string* reason = nullptr);
 bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
                              size_t destination_bytes, int height, int width, int channels, int width_stride,
                              std::string* reason = nullptr);
+bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height,
+                                            int width, int channels, int width_stride,
+                                            std::string* reason = nullptr);
 bool RknnFastOutputEnabled();
 bool RknnDirectCandidatesEnabled();
 bool RknnBoundInputEnabled();
+bool RknnRgaBoundInputEnabled();
 
-class RknnNetNode final : public NetNode {
+class RknnNetNode final : public NetNode, public RknnBoundInputProvider {
 public:
     RknnNetNode();
     ~RknnNetNode() override;
@@ -37,15 +43,26 @@ public:
     Status LoadWeight(const char* data, size_t size) override;
     Status Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                    std::vector<std::shared_ptr<Blob>>& top_blobs) override;
+    bool EnsureRgaBoundInput(int height, int width, std::string& reason) override;
 
 private:
+    enum class BoundInputMode : uint8_t {
+        None = 0,
+        NativeInt8,
+        RgaNativeInt8,
+    };
+
     Status QueryTensorAttributes();
     Status PrepareInput(const Blob& blob, std::vector<float>& nhwc, int& height, int& width) const;
     Status PrepareNativeCompatibilityInput(const Blob& blob, std::vector<float>& nhwc,
                                            int& height, int& width) const;
     std::vector<int> TensorShape(const rknn_tensor_attr& attr) const;
     size_t TensorElementCount(const rknn_tensor_attr& attr) const;
-    bool TryBindInputMemory(const BlobDesc& desc, std::string& reason);
+    bool TryBindNativeInputMemory(const BlobDesc& desc, std::string& reason);
+    bool TryBindRgaInputMemory(int height, int width, std::string& reason);
+    bool AllocateAndBindInputMemory(rknn_tensor_attr attr, BoundInputMode mode, std::string& reason);
+    void PublishRgaBoundInputTarget();
+    void ClearRgaBoundInputTarget();
     void DestroyContext();
 
     rknn_context context_{0};
@@ -65,6 +82,9 @@ private:
     bool native_yolov8_outputs_{false};
     bool detector_model_{false};
     bool bound_input_eligible_{true};
+    bool rga_bound_input_eligible_{true};
+    BoundInputMode bound_input_mode_{BoundInputMode::None};
+    uint64_t bound_input_generation_{0};
     int yolov8_class_count_{0};
     int yolov8_point_count_{0};
     mutable std::mutex mutex_;

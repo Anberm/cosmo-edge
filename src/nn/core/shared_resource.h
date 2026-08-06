@@ -5,6 +5,8 @@
 #include "bmruntime_interface.h"
 #endif
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -35,6 +37,42 @@ struct Yolov8CandidateBatch {
     void Reset() {
         ready = false;
         candidates.clear();
+    }
+};
+
+class RknnBoundInputProvider {
+public:
+    virtual ~RknnBoundInputProvider()                                            = default;
+    virtual bool EnsureRgaBoundInput(int height, int width, std::string& reason) = 0;
+};
+
+// Optional graph-local sidecar for RKNN/RGA input hand-off. The provider owns
+// the memory; preprocessing only imports the fd and marks the current frame
+// ready. Graph instances are exclusively leased while Forward runs.
+struct RknnBoundInputTarget {
+    RknnBoundInputProvider* owner{nullptr};
+    void* virtual_address{nullptr};
+    int fd{-1};
+    size_t bytes{0};
+    int height{0};
+    int width{0};
+    int channels{0};
+    int width_stride{0};
+    uint64_t generation{0};
+    bool frame_ready{false};
+
+    [[nodiscard]] bool Matches(int expected_height, int expected_width) const {
+        if (!owner || !virtual_address || fd < 0 || height != expected_height || width != expected_width ||
+            height <= 0 || width <= 0 || channels != 3 || width_stride < width) {
+            return false;
+        }
+        const auto required = static_cast<uint64_t>(height) * static_cast<uint64_t>(width_stride) *
+                              static_cast<uint64_t>(channels);
+        return required <= bytes;
+    }
+
+    void Reset() {
+        *this = {};
     }
 };
 
@@ -73,6 +111,9 @@ public:
     // lifetime and concurrency boundary as the graph's ordinary BlobStore.
     Yolov8DirectPostprocessConfig yolov8_direct_postprocess{};
     Yolov8CandidateBatch yolov8_candidate_batch{};
+
+    RknnBoundInputProvider* rknn_bound_input_provider{nullptr};
+    RknnBoundInputTarget rknn_bound_input_target{};
 };
 
 }  // namespace cosmo::nn

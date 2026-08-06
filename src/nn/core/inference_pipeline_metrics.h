@@ -80,6 +80,17 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_bound_input_sync_nanoseconds{0};
     uint64_t rknn_bound_input_sync_failures{0};
     uint64_t rknn_bound_input_frames{0};
+    uint64_t rknn_rga_bound_input_bind_attempts{0};
+    uint64_t rknn_rga_bound_input_bind_failures{0};
+    uint64_t rknn_rga_bound_input_import_calls{0};
+    uint64_t rknn_rga_bound_input_import_nanoseconds{0};
+    uint64_t rknn_rga_bound_input_import_failures{0};
+    uint64_t rknn_rga_bound_input_frames{0};
+    uint64_t rknn_rga_bound_native_int8_frames{0};
+    uint64_t rknn_rga_bound_requantize_calls{0};
+    uint64_t rknn_rga_bound_requantize_nanoseconds{0};
+    uint64_t rknn_rga_bound_requantize_failures{0};
+    uint64_t rknn_rga_bound_input_normalize_bypasses{0};
     uint64_t rknn_native_int8_outputs{0};
     uint64_t rknn_float_outputs{0};
     uint64_t rknn_output_compatibility_fallbacks{0};
@@ -135,6 +146,12 @@ public:
     void RecordRknnBoundInputBind(bool success);
     void RecordRknnBoundInputCopy(uint64_t nanoseconds, uint64_t bytes, bool success);
     void RecordRknnBoundInputSync(uint64_t nanoseconds, bool success);
+    void RecordRknnBoundInputFrame();
+    void RecordRknnRgaBoundInputBind(bool success);
+    void RecordRknnRgaBoundInputImport(uint64_t nanoseconds, bool success);
+    void RecordRknnRgaBoundInputRequantize(uint64_t nanoseconds, bool success);
+    void RecordRknnRgaBoundInputFrame();
+    void RecordRknnRgaBoundInputNormalizeBypass();
     void RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
                                 bool compatibility_fallback = false);
     void RecordRknnYolov8Transform(uint64_t dfl_nanoseconds, uint64_t class_nanoseconds);
@@ -219,6 +236,17 @@ private:
     std::atomic<uint64_t> rknn_bound_input_sync_nanoseconds_{0};
     std::atomic<uint64_t> rknn_bound_input_sync_failures_{0};
     std::atomic<uint64_t> rknn_bound_input_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_bind_attempts_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_bind_failures_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_import_calls_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_import_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_import_failures_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_native_int8_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_requantize_calls_{0};
+    std::atomic<uint64_t> rknn_rga_bound_requantize_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_bound_requantize_failures_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_normalize_bypasses_{0};
     std::atomic<uint64_t> rknn_native_int8_outputs_{0};
     std::atomic<uint64_t> rknn_float_outputs_{0};
     std::atomic<uint64_t> rknn_output_compatibility_fallbacks_{0};

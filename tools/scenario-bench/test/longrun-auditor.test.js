@@ -36,6 +36,9 @@ function accelerator(index) {
     rgaFrames: frames,
     rknnForwardFailures: 0,
     rknnRgaFailures: 0,
+    rknnRgaBoundInputFrames: frames * 3,
+    rknnRgaBoundInputImportFailures: 0,
+    rknnRgaBoundRequantizeFailures: 0,
     rknnForwards: frames * 3,
     videoDecoderBackend: 'rockchip-copy-out',
     videoEncoderBackend: 'rockchip-copy-first',
@@ -158,6 +161,19 @@ test('long-run audit fails native failure increments and unhealthy preview', () 
   assert.equal(result.verdict, 'FAIL');
   assert.ok(result.failures.includes('native.failures'));
   assert.ok(result.failures.includes('preview.health'));
+});
+
+test('long-run audit fails RGA bound-input import and requantize errors', () => {
+  const input = runResult();
+  input.samples.at(-1).hardware.accelerator.rknnRgaBoundInputImportFailures = 1;
+  input.samples.at(-1).hardware.accelerator.rknnRgaBoundRequantizeFailures = 1;
+
+  const result = auditLongRun(input, options);
+  assert.equal(result.verdict, 'FAIL');
+  assert.ok(result.failures.includes('native.failures'));
+  const nativeFailures = result.checks.find((item) => item.id === 'native.failures');
+  assert.equal(nativeFailures.actual.rknnRgaBoundInputImportFailures, 1);
+  assert.equal(nativeFailures.actual.rknnRgaBoundRequantizeFailures, 1);
 });
 
 test('file audit binds source and allowlisted candidate identity by SHA-256', () => {

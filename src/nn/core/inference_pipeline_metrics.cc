@@ -147,10 +147,43 @@ void InferencePipelineMetrics::RecordRknnBoundInputCopy(uint64_t nanoseconds, ui
 
 void InferencePipelineMetrics::RecordRknnBoundInputSync(uint64_t nanoseconds, bool success) {
     RecordStage(rknn_bound_input_sync_calls_, rknn_bound_input_sync_nanoseconds_, 1, nanoseconds);
-    if (success)
-        rknn_bound_input_frames_.fetch_add(1, std::memory_order_relaxed);
-    else
+    if (!success)
         rknn_bound_input_sync_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnBoundInputFrame() {
+    rknn_bound_input_frames_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnRgaBoundInputBind(bool success) {
+    RecordRknnBoundInputBind(success);
+    rknn_rga_bound_input_bind_attempts_.fetch_add(1, std::memory_order_relaxed);
+    if (!success)
+        rknn_rga_bound_input_bind_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnRgaBoundInputImport(uint64_t nanoseconds, bool success) {
+    RecordStage(rknn_rga_bound_input_import_calls_, rknn_rga_bound_input_import_nanoseconds_, 1, nanoseconds);
+    if (!success)
+        rknn_rga_bound_input_import_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnRgaBoundInputRequantize(uint64_t nanoseconds,
+                                                                 bool success) {
+    RecordStage(rknn_rga_bound_requantize_calls_, rknn_rga_bound_requantize_nanoseconds_, 1,
+                nanoseconds);
+    if (!success)
+        rknn_rga_bound_requantize_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnRgaBoundInputFrame() {
+    rknn_rga_bound_input_frames_.fetch_add(1, std::memory_order_relaxed);
+    rknn_rga_bound_native_int8_frames_.fetch_add(1, std::memory_order_relaxed);
+    RecordRknnBoundInputFrame();
+}
+
+void InferencePipelineMetrics::RecordRknnRgaBoundInputNormalizeBypass() {
+    rknn_rga_bound_input_normalize_bypasses_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void InferencePipelineMetrics::RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
@@ -266,6 +299,17 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_bound_input_sync_nanoseconds);
     SNAPSHOT_FIELD(rknn_bound_input_sync_failures);
     SNAPSHOT_FIELD(rknn_bound_input_frames);
+    SNAPSHOT_FIELD(rknn_rga_bound_input_bind_attempts);
+    SNAPSHOT_FIELD(rknn_rga_bound_input_bind_failures);
+    SNAPSHOT_FIELD(rknn_rga_bound_input_import_calls);
+    SNAPSHOT_FIELD(rknn_rga_bound_input_import_nanoseconds);
+    SNAPSHOT_FIELD(rknn_rga_bound_input_import_failures);
+    SNAPSHOT_FIELD(rknn_rga_bound_input_frames);
+    SNAPSHOT_FIELD(rknn_rga_bound_native_int8_frames);
+    SNAPSHOT_FIELD(rknn_rga_bound_requantize_calls);
+    SNAPSHOT_FIELD(rknn_rga_bound_requantize_nanoseconds);
+    SNAPSHOT_FIELD(rknn_rga_bound_requantize_failures);
+    SNAPSHOT_FIELD(rknn_rga_bound_input_normalize_bypasses);
     SNAPSHOT_FIELD(rknn_native_int8_outputs);
     SNAPSHOT_FIELD(rknn_float_outputs);
     SNAPSHOT_FIELD(rknn_output_compatibility_fallbacks);

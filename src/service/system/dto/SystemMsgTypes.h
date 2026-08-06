@@ -148,6 +148,17 @@ struct MsgGpuInfo {
     double rknnBoundInputSyncMs{0.0};
     uint64_t rknnBoundInputSyncFailures{0};
     uint64_t rknnBoundInputFrames{0};
+    uint64_t rknnRgaBoundInputBindAttempts{0};
+    uint64_t rknnRgaBoundInputBindFailures{0};
+    uint64_t rknnRgaBoundInputImportCalls{0};
+    double rknnRgaBoundInputImportMs{0.0};
+    uint64_t rknnRgaBoundInputImportFailures{0};
+    uint64_t rknnRgaBoundInputFrames{0};
+    uint64_t rknnRgaBoundNativeInt8Frames{0};
+    uint64_t rknnRgaBoundRequantizeCalls{0};
+    double rknnRgaBoundRequantizeMs{0.0};
+    uint64_t rknnRgaBoundRequantizeFailures{0};
+    uint64_t rknnRgaBoundInputNormalizeBypasses{0};
     uint64_t rknnNativeInt8Outputs{0};
     uint64_t rknnFloatOutputs{0};
     uint64_t rknnOutputCompatibilityFallbacks{0};

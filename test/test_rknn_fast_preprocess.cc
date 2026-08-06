@@ -36,6 +36,14 @@ private:
     std::optional<std::string> previous_;
 };
 
+class StubBoundInputProvider final : public cosmo::nn::RknnBoundInputProvider {
+public:
+    bool EnsureRgaBoundInput(int /*height*/, int /*width*/, std::string& reason) override {
+        reason.clear();
+        return true;
+    }
+};
+
 cosmo::nn::BlobDesc PackedImageDesc(int height, int width, cosmo::nn::ImageFormat format,
                                     cosmo::nn::DataType type = cosmo::nn::DATA_TYPE_UINT8) {
     cosmo::nn::BlobDesc desc;
@@ -130,6 +138,69 @@ TEST_CASE("RKNN bound input validates native stride and copies packed rows", "[n
     CHECK(reason.find("stride") != std::string::npos);
     CHECK_FALSE(
         CopyRknnPackedInt8Input(source.data(), source.size(), destination.data(), 8, 2, 2, 3, 2, &reason));
+    CHECK(reason.find("smaller") != std::string::npos);
+}
+
+TEST_CASE("RKNN RGA bound input validates the native tensor and DMA-BUF target stride",
+          "[nn][rknn][bound-input][rga]") {
+    using namespace cosmo::nn;
+    rknn_tensor_attr attr{};
+    attr.n_dims           = 4;
+    attr.dims[0]          = 1;
+    attr.dims[1]          = 2;
+    attr.dims[2]          = 2;
+    attr.dims[3]          = 3;
+    attr.fmt              = RKNN_TENSOR_NHWC;
+    attr.type             = RKNN_TENSOR_INT8;
+    attr.qnt_type         = RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC;
+    attr.zp               = -128;
+    attr.scale            = 0.00392157f;
+    attr.w_stride         = 4;
+    attr.size             = 12;
+    attr.size_with_stride = 24;
+    std::string reason;
+    CHECK(IsRknnRgaBoundInputCompatible(attr, 2, 2, &reason));
+
+    StubBoundInputProvider provider;
+    uint8_t storage[24]{};
+    RknnBoundInputTarget target;
+    target.owner           = &provider;
+    target.virtual_address = storage;
+    target.fd              = 3;
+    target.bytes           = sizeof(storage);
+    target.height          = 2;
+    target.width           = 2;
+    target.channels        = 3;
+    target.width_stride    = 4;
+    CHECK(target.Matches(2, 2));
+    target.bytes = 23;
+    CHECK_FALSE(target.Matches(2, 2));
+}
+
+TEST_CASE("RKNN RGA bound input requantizes UINT8 pixels in place without touching stride padding",
+          "[nn][rknn][bound-input][rga]") {
+    using namespace cosmo::nn;
+    std::array<uint8_t, 24> pixels{};
+    pixels.fill(99);
+    const std::array<uint8_t, 12> packed{0, 1, 127, 128, 254, 255,
+                                         255, 128, 127, 126, 1, 0};
+    std::copy(packed.begin(), packed.begin() + 6, pixels.begin());
+    std::copy(packed.begin() + 6, packed.end(), pixels.begin() + 12);
+    std::string reason;
+    REQUIRE(RequantizeRknnPackedUint8ToInt8InPlace(pixels.data(), pixels.size(), 2, 2, 3, 4,
+                                                   &reason));
+    CHECK((std::array<uint8_t, 6>{pixels[0], pixels[1], pixels[2], pixels[3], pixels[4], pixels[5]}) ==
+          std::array<uint8_t, 6>{128, 129, 255, 0, 126, 127});
+    CHECK((std::array<uint8_t, 6>{pixels[12], pixels[13], pixels[14], pixels[15], pixels[16], pixels[17]}) ==
+          std::array<uint8_t, 6>{127, 0, 255, 254, 129, 128});
+    CHECK(std::all_of(pixels.begin() + 6, pixels.begin() + 12,
+                      [](uint8_t value) { return value == 99; }));
+    CHECK(std::all_of(pixels.begin() + 18, pixels.end(),
+                      [](uint8_t value) { return value == 99; }));
+    CHECK(reason.empty());
+
+    CHECK_FALSE(RequantizeRknnPackedUint8ToInt8InPlace(pixels.data(), 8, 2, 2, 3, 2,
+                                                       &reason));
     CHECK(reason.find("smaller") != std::string::npos);
 }
 
@@ -285,6 +356,56 @@ TEST_CASE("RKNN classifier-sized normalization keeps the legacy float layout",
     CHECK(output[0] == Catch::Approx(30.0f * 0.00392157f));
     CHECK(output[224 * 224] == Catch::Approx(20.0f * 0.00392157f));
     CHECK(output[2 * 224 * 224] == Catch::Approx(10.0f * 0.00392157f));
+}
+
+TEST_CASE("RKNN normalize bypasses host mapping for an RGA-bound frame", "[nn][rknn][bound-input][rga]") {
+    using namespace cosmo::nn;
+    Normalize normalize;
+    normalize.mean   = {0.0f, 0.0f, 0.0f};
+    normalize.scale  = 0.00392157f;
+    normalize.is_bgr = false;
+    SharedResource resource;
+    StubBoundInputProvider provider;
+    resource.rknn_bound_input_provider = &provider;
+    RknnNormalizeNode node;
+    node.SetSharedResource(&resource);
+    node.LoadParam(&normalize);
+    REQUIRE(bool(node.InferTopShapesWithBottoms({{1, 640, 640, 3}}, {DATA_TYPE_UINT8})));
+
+    auto bottom = std::make_shared<Blob>(PackedImageDesc(640, 640, IMAGE_RGB), true);
+    BlobDesc top_desc;
+    top_desc.device_type = DEVICE_NAIVE;
+    top_desc.data_type   = node.GetTopBlobDataTypes().front();
+    top_desc.data_format = DATA_FORMAT_NHWC;
+    top_desc.dims        = node.GetTopBlobShapes().front();
+    auto top             = std::make_shared<Blob>(top_desc, true);
+    auto* output         = static_cast<int8_t*>(top->GetHandle().base);
+    const size_t bytes   = static_cast<size_t>(640) * 640 * 3;
+    std::fill(output, output + bytes, static_cast<int8_t>(42));
+
+    auto& target           = resource.rknn_bound_input_target;
+    target.owner           = &provider;
+    target.virtual_address = bottom->GetHandle().base;
+    target.fd              = 3;
+    target.bytes           = bytes;
+    target.height          = 640;
+    target.width           = 640;
+    target.channels        = 3;
+    target.width_stride    = 640;
+    target.generation      = 1;
+    target.frame_ready     = true;
+
+    const auto before = GetInferencePipelineMetrics().Snapshot();
+    std::vector<std::shared_ptr<Blob>> bottoms{bottom};
+    std::vector<std::shared_ptr<Blob>> tops{top};
+    REQUIRE(bool(node.Forward(bottoms, tops)));
+    const auto after = GetInferencePipelineMetrics().Snapshot();
+    CHECK(after.rknn_rga_bound_input_normalize_bypasses ==
+          before.rknn_rga_bound_input_normalize_bypasses + 1);
+    CHECK(after.rknn_native_input_map_calls == before.rknn_native_input_map_calls);
+    CHECK(target.frame_ready);
+    CHECK(output[0] == 42);
+    CHECK(output[bytes - 1] == 42);
 }
 
 TEST_CASE("RKNN RGA preprocessing performs centered RGB letterbox on host buffers",

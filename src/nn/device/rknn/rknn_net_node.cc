@@ -195,6 +195,14 @@ bool IsRknnBoundInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc
     return true;
 }
 
+bool IsRknnRgaBoundInputCompatible(const rknn_tensor_attr& attr, int height, int width, std::string* reason) {
+    BlobDesc desc;
+    desc.data_type   = DATA_TYPE_INT8;
+    desc.data_format = DATA_FORMAT_NHWC;
+    desc.dims        = {1, height, width, 3};
+    return IsRknnBoundInt8InputCompatible(attr, desc, reason);
+}
+
 bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
                              size_t destination_bytes, int height, int width, int channels, int width_stride,
                              std::string* reason) {
@@ -229,6 +237,34 @@ bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* 
     return true;
 }
 
+bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height,
+                                            int width, int channels, int width_stride,
+                                            std::string* reason) {
+    const auto reject = [&](const char* message) {
+        if (reason)
+            *reason = message;
+        return false;
+    };
+    if (!data || height <= 0 || width <= 0 || channels <= 0)
+        return reject("RGA bound input requantization received an invalid packed tensor");
+    const int effective_stride = width_stride == 0 ? width : width_stride;
+    if (effective_stride < width)
+        return reject("RGA bound input requantization width stride is too small");
+    const uint64_t required = static_cast<uint64_t>(height) * effective_stride * channels;
+    if (required == 0 || required > data_bytes)
+        return reject("RGA bound input requantization buffer is smaller than its tensor contract");
+    const size_t row_bytes    = static_cast<size_t>(width) * static_cast<size_t>(channels);
+    const size_t stride_bytes = static_cast<size_t>(effective_stride) * static_cast<size_t>(channels);
+    for (int row = 0; row < height; ++row) {
+        auto* row_data = data + static_cast<size_t>(row) * stride_bytes;
+        for (size_t index = 0; index < row_bytes; ++index)
+            row_data[index] ^= 0x80;
+    }
+    if (reason)
+        reason->clear();
+    return true;
+}
+
 bool RknnFastOutputEnabled() {
     return EnvironmentFlag("COSMO_RKNN_FAST_OUTPUT", true);
 }
@@ -241,6 +277,10 @@ bool RknnBoundInputEnabled() {
     return EnvironmentFlag("COSMO_RKNN_BOUND_INPUT", true);
 }
 
+bool RknnRgaBoundInputEnabled() {
+    return EnvironmentFlag("COSMO_RKNN_RGA_BOUND_INPUT", true);
+}
+
 RknnNetNode::RknnNetNode() : NetNode() {
     name = NodeTypeUtils::NodeTypeToStr(NodeType::NODE_NET).append("_0");
 }
@@ -251,6 +291,7 @@ RknnNetNode::~RknnNetNode() {
 }
 
 void RknnNetNode::DestroyContext() {
+    ClearRgaBoundInputTarget();
     if (bound_input_memory_) {
         if (context_ != 0)
             rknn_destroy_mem(context_, bound_input_memory_);
@@ -277,11 +318,42 @@ void RknnNetNode::DestroyContext() {
     native_yolov8_outputs_ = false;
     detector_model_        = false;
     bound_input_eligible_    = true;
+    rga_bound_input_eligible_ = true;
+    bound_input_mode_         = BoundInputMode::None;
     yolov8_class_count_    = 0;
     yolov8_point_count_    = 0;
 }
 
-bool RknnNetNode::TryBindInputMemory(const BlobDesc& desc, std::string& reason) {
+bool RknnNetNode::AllocateAndBindInputMemory(rknn_tensor_attr attr, BoundInputMode mode,
+                                             std::string& reason) {
+    if (bound_input_memory_) {
+        reason = "RKNN input memory is already bound";
+        return false;
+    }
+    const uint32_t bytes = attr.size_with_stride == 0 ? attr.size : attr.size_with_stride;
+    auto* memory         = rknn_create_mem(context_, bytes);
+    if (!memory || !memory->virt_addr || memory->size < bytes) {
+        if (memory)
+            rknn_destroy_mem(context_, memory);
+        reason = "rknn_create_mem failed for the bound input";
+        return false;
+    }
+    const int result = rknn_set_io_mem(context_, memory, &attr);
+    if (result != RKNN_SUCC) {
+        rknn_destroy_mem(context_, memory);
+        reason = "rknn_set_io_mem failed with RKNN code " + std::to_string(result);
+        return false;
+    }
+    bound_input_attr_   = attr;
+    bound_input_memory_ = memory;
+    bound_input_mode_   = mode;
+    if (mode == BoundInputMode::RgaNativeInt8)
+        PublishRgaBoundInputTarget();
+    reason.clear();
+    return true;
+}
+
+bool RknnNetNode::TryBindNativeInputMemory(const BlobDesc& desc, std::string& reason) {
     rknn_tensor_attr attr{};
     attr.index = 0;
     int result = rknn_query(context_, RKNN_QUERY_NATIVE_INPUT_ATTR, &attr, sizeof(attr));
@@ -291,26 +363,84 @@ bool RknnNetNode::TryBindInputMemory(const BlobDesc& desc, std::string& reason) 
     }
     if (!IsRknnBoundInt8InputCompatible(attr, desc, &reason))
         return false;
-
-    const uint32_t bytes = attr.size_with_stride == 0 ? attr.size : attr.size_with_stride;
-    auto* memory         = rknn_create_mem(context_, bytes);
-    if (!memory || !memory->virt_addr || memory->size < bytes) {
-        if (memory)
-            rknn_destroy_mem(context_, memory);
-        reason = "rknn_create_mem failed for the bound input";
-        return false;
-    }
-    std::memset(memory->virt_addr, 0, memory->size);
     attr.pass_through = 1;
-    result            = rknn_set_io_mem(context_, memory, &attr);
+    return AllocateAndBindInputMemory(attr, BoundInputMode::NativeInt8, reason);
+}
+
+bool RknnNetNode::TryBindRgaInputMemory(int height, int width, std::string& reason) {
+    rknn_tensor_attr attr{};
+    attr.index = 0;
+    int result = rknn_query(context_, RKNN_QUERY_NATIVE_INPUT_ATTR, &attr, sizeof(attr));
     if (result != RKNN_SUCC) {
-        rknn_destroy_mem(context_, memory);
-        reason = "rknn_set_io_mem failed with RKNN code " + std::to_string(result);
+        reason = "RKNN_QUERY_NATIVE_INPUT_ATTR failed with RKNN code " + std::to_string(result);
         return false;
     }
-    bound_input_attr_   = attr;
-    bound_input_memory_ = memory;
-    reason.clear();
+    if (!IsRknnRgaBoundInputCompatible(attr, height, width, &reason))
+        return false;
+    attr.pass_through = 1;
+    return AllocateAndBindInputMemory(attr, BoundInputMode::RgaNativeInt8, reason);
+}
+
+void RknnNetNode::PublishRgaBoundInputTarget() {
+    if (!shared_resource || !bound_input_memory_ ||
+        bound_input_mode_ != BoundInputMode::RgaNativeInt8) {
+        return;
+    }
+    auto& target           = shared_resource->rknn_bound_input_target;
+    target.owner           = this;
+    target.virtual_address = bound_input_memory_->virt_addr;
+    target.fd              = bound_input_memory_->fd;
+    target.bytes           = bound_input_memory_->size;
+    target.height          = static_cast<int>(bound_input_attr_.dims[1]);
+    target.width           = static_cast<int>(bound_input_attr_.dims[2]);
+    target.channels        = static_cast<int>(bound_input_attr_.dims[3]);
+    target.width_stride    = static_cast<int>(bound_input_attr_.w_stride == 0 ? bound_input_attr_.dims[2]
+                                                                              : bound_input_attr_.w_stride);
+    target.generation      = ++bound_input_generation_;
+    target.frame_ready     = false;
+}
+
+void RknnNetNode::ClearRgaBoundInputTarget() {
+    if (!shared_resource)
+        return;
+    if (shared_resource->rknn_bound_input_provider == this)
+        shared_resource->rknn_bound_input_provider = nullptr;
+    if (shared_resource->rknn_bound_input_target.owner == this)
+        shared_resource->rknn_bound_input_target.Reset();
+}
+
+bool RknnNetNode::EnsureRgaBoundInput(int height, int width, std::string& reason) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (context_ == 0 || !detector_model_) {
+        reason = "RKNN detector context is not initialized";
+        return false;
+    }
+    if (!RknnBoundInputEnabled() || !RknnRgaBoundInputEnabled()) {
+        reason = "RKNN RGA bound input is disabled";
+        return false;
+    }
+    if (bound_input_memory_) {
+        if (bound_input_mode_ == BoundInputMode::RgaNativeInt8 && shared_resource &&
+            shared_resource->rknn_bound_input_target.owner == this &&
+            shared_resource->rknn_bound_input_target.Matches(height, width)) {
+            reason.clear();
+            return true;
+        }
+        reason = "RKNN input was already bound by another input path";
+        return false;
+    }
+    if (!rga_bound_input_eligible_) {
+        reason = "RKNN RGA bound input was previously rejected";
+        return false;
+    }
+    const bool bound = TryBindRgaInputMemory(height, width, reason);
+    GetInferencePipelineMetrics().RecordRknnRgaBoundInputBind(bound);
+    if (!bound) {
+        rga_bound_input_eligible_ = false;
+        return false;
+    }
+    LOG_INFO("RKNN RGA native INT8 input bound: bytes={} fd={} width_stride={}",
+             bound_input_memory_->size, bound_input_memory_->fd, bound_input_attr_.w_stride);
     return true;
 }
 
@@ -444,6 +574,8 @@ Status RknnNetNode::LoadWeight(const char* data, size_t size) {
         DestroyContext();
         return Status(COSMO_NN_ERR_INVALID_CFG, "RKNN logical output count does not match config.json");
     }
+    if (detector_model_ && shared_resource)
+        shared_resource->rknn_bound_input_provider = this;
 
     LOG_INFO(
         "RKNN model loaded: api={} driver={} inputs={} runtime_outputs={} logical_outputs={} "
@@ -590,8 +722,31 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     input.index = 0;
     const auto prepare_started = MetricsClock::now();
     const auto input_desc = bottom_blobs[0]->GetBlobDesc();
+    bool rga_bound_frame       = false;
+    if (shared_resource && shared_resource->rknn_bound_input_target.frame_ready &&
+        shared_resource->rknn_bound_input_target.owner == this) {
+        auto& target       = shared_resource->rknn_bound_input_target;
+        target.frame_ready = false;
+        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaNativeInt8;
+        const bool blob_matches = input_desc.data_type == DATA_TYPE_INT8 &&
+                                  input_desc.data_format == DATA_FORMAT_NHWC &&
+                                  input_desc.image_format == IMAGE_RGB && input_desc.dims.size() == 4 &&
+                                  input_desc.dims[0] == 1 && input_desc.dims[1] == target.height &&
+                                  input_desc.dims[2] == target.width && input_desc.dims[3] == 3;
+        if (target.owner != this || !rga_bound_mode || !blob_matches ||
+            target.generation != bound_input_generation_ ||
+            !target.Matches(input_desc.dims[1], input_desc.dims[2])) {
+            return finish(
+                Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN RGA bound input frame has a stale target"));
+        }
+        input_height    = target.height;
+        input_width     = target.width;
+        rga_bound_frame = true;
+    }
     Status prepare_status;
-    if (input_desc.data_type == DATA_TYPE_INT8 && input_desc.data_format == DATA_FORMAT_NHWC) {
+    if (rga_bound_frame) {
+        prepare_status = COSMO_NN_OK;
+    } else if (input_desc.data_type == DATA_TYPE_INT8 && input_desc.data_format == DATA_FORMAT_NHWC) {
         native_int8 = IsRknnNativeInt8InputCompatible(input_attrs_[0], input_desc);
         if (native_int8) {
             const auto count = BlobElementCount(input_desc);
@@ -620,7 +775,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     GetInferencePipelineMetrics().RecordRknnPrepare(ElapsedNanoseconds(prepare_started), scope);
     if (!prepare_status)
         return finish(prepare_status);
-    if (!native_int8) {
+    if (!native_int8 && !rga_bound_frame) {
         if (input_nhwc_.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
             return finish(
                 Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit"));
@@ -632,15 +787,16 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         // reporting success. The graph boundary copy above makes NHWC explicit.
         input.fmt = RKNN_TENSOR_NHWC;
     }
-    GetInferencePipelineMetrics().RecordRknnInputFormat(native_int8, compatibility_fallback);
-    bool use_bound_input = false;
-    if (bound_input_memory_ && !native_int8) {
+    if (!rga_bound_frame)
+        GetInferencePipelineMetrics().RecordRknnInputFormat(native_int8, compatibility_fallback);
+    bool use_bound_input = rga_bound_frame;
+    if (bound_input_memory_ && !native_int8 && !rga_bound_frame) {
         return finish(
             Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN bound input cannot accept a non-native tensor"));
     }
     if (native_int8 && !bound_input_memory_ && bound_input_eligible_ && RknnBoundInputEnabled()) {
         std::string bind_reason;
-        const bool bound = TryBindInputMemory(input_desc, bind_reason);
+        const bool bound = TryBindNativeInputMemory(input_desc, bind_reason);
         GetInferencePipelineMetrics().RecordRknnBoundInputBind(bound);
         if (bound) {
             LOG_INFO("RKNN bound input enabled: bytes={} fd={} width_stride={}", bound_input_memory_->size,
@@ -654,10 +810,11 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         std::string copy_reason;
         const auto copy_started   = MetricsClock::now();
         const size_t source_bytes = BlobElementCount(input_desc);
-        const bool copied         = CopyRknnPackedInt8Input(
+        const bool copied = CopyRknnPackedInt8Input(
             static_cast<const int8_t*>(input.buf), source_bytes,
-            static_cast<int8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size, input_height,
-            input_width, input_desc.dims[3], static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
+            static_cast<int8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size,
+            input_height, input_width, input_desc.dims[3],
+            static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
         GetInferencePipelineMetrics().RecordRknnBoundInputCopy(ElapsedNanoseconds(copy_started),
                                                                copied ? source_bytes : 0, copied);
         if (!copied)
@@ -668,7 +825,38 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                                                                sync_result == RKNN_SUCC);
         if (sync_result != RKNN_SUCC)
             return finish(RknnError("rknn_mem_sync", sync_result));
+        GetInferencePipelineMetrics().RecordRknnBoundInputFrame();
         use_bound_input = true;
+    }
+    if (rga_bound_frame && bound_input_mode_ == BoundInputMode::RgaNativeInt8) {
+        const auto sync_from_started = MetricsClock::now();
+        int sync_result =
+            rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_FROM_DEVICE);
+        GetInferencePipelineMetrics().RecordRknnBoundInputSync(
+            ElapsedNanoseconds(sync_from_started), sync_result == RKNN_SUCC);
+        if (sync_result != RKNN_SUCC)
+            return finish(RknnError("rknn_mem_sync from device", sync_result));
+
+        std::string requantize_reason;
+        const auto requantize_started = MetricsClock::now();
+        const bool requantized = RequantizeRknnPackedUint8ToInt8InPlace(
+            static_cast<uint8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size,
+            input_height, input_width, 3, static_cast<int>(bound_input_attr_.w_stride),
+            &requantize_reason);
+        GetInferencePipelineMetrics().RecordRknnRgaBoundInputRequantize(
+            ElapsedNanoseconds(requantize_started), requantized);
+        if (!requantized)
+            return finish(Status(COSMO_NN_ERR_INVALID_INPUT, requantize_reason));
+
+        const auto sync_to_started = MetricsClock::now();
+        sync_result = rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_TO_DEVICE);
+        GetInferencePipelineMetrics().RecordRknnBoundInputSync(
+            ElapsedNanoseconds(sync_to_started), sync_result == RKNN_SUCC);
+        if (sync_result != RKNN_SUCC)
+            return finish(RknnError("rknn_mem_sync to device", sync_result));
+    }
+    if (rga_bound_frame) {
+        GetInferencePipelineMetrics().RecordRknnRgaBoundInputFrame();
     }
     int result = RKNN_SUCC;
     if (!use_bound_input) {

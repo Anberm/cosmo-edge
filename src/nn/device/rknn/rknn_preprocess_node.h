@@ -23,7 +23,7 @@ void MapPackedU8ToNativeInt8(const uint8_t* source, int8_t* destination, size_t 
 class RknnResizeNode final : public Node {
 public:
     RknnResizeNode();
-    ~RknnResizeNode() override = default;
+    ~RknnResizeNode() override;
 
     void LoadParam(Op* op) override;
     DeviceType GetTopBlobDeviceType() override;
@@ -34,8 +34,11 @@ public:
                    std::vector<std::shared_ptr<Blob>>& top_blobs) override;
 
 private:
-    Status ResizeSingle(const std::shared_ptr<Blob>& bottom, const std::shared_ptr<Blob>& top);
-    bool ResizeWithRga(const Blob& bottom, Blob& top);
+    Status ResizeSingle(const std::shared_ptr<Blob>& bottom, const std::shared_ptr<Blob>& top,
+                        bool allow_bound_target);
+    bool ResizeWithRga(const Blob& bottom, Blob& top, bool allow_bound_target);
+    bool AcquireRgaBoundTarget(uint32_t& handle);
+    void ReleaseRgaBoundTarget();
     void ResizeWithCpu(const Blob& bottom, Blob& top, bool output_rgb) const;
 
     int out_height_{0};
@@ -43,6 +46,9 @@ private:
     int gravity_{0};
     std::vector<int> padding_color_{114, 114, 114};
     bool detector_contract_{false};
+    uint32_t rga_bound_target_handle_{0};
+    uint64_t rga_bound_target_generation_{0};
+    bool rga_bound_target_unavailable_{false};
 };
 
 class RknnNormalizeNode final : public Node {
@@ -62,6 +68,7 @@ public:
 
 private:
     bool NeedSwapRedBlue(ImageFormat format) const;
+    bool CanBypassBoundInput(const Blob& bottom) const;
     Status ForwardNative(const Blob& bottom, Blob& top);
     Status ForwardFloat(const Blob& bottom, Blob& top);
 

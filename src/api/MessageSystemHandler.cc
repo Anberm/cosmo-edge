@@ -212,6 +212,27 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnBoundInputSyncMs            = inference.rknn_bound_input_sync_nanoseconds / 1000000.0;
     accelerator.rknnBoundInputSyncFailures      = inference.rknn_bound_input_sync_failures;
     accelerator.rknnBoundInputFrames            = inference.rknn_bound_input_frames;
+    accelerator.rknnRgaBoundInputBindAttempts =
+        inference.rknn_rga_bound_input_bind_attempts;
+    accelerator.rknnRgaBoundInputBindFailures =
+        inference.rknn_rga_bound_input_bind_failures;
+    accelerator.rknnRgaBoundInputImportCalls =
+        inference.rknn_rga_bound_input_import_calls;
+    accelerator.rknnRgaBoundInputImportMs =
+        inference.rknn_rga_bound_input_import_nanoseconds / 1000000.0;
+    accelerator.rknnRgaBoundInputImportFailures =
+        inference.rknn_rga_bound_input_import_failures;
+    accelerator.rknnRgaBoundInputFrames = inference.rknn_rga_bound_input_frames;
+    accelerator.rknnRgaBoundNativeInt8Frames =
+        inference.rknn_rga_bound_native_int8_frames;
+    accelerator.rknnRgaBoundRequantizeCalls =
+        inference.rknn_rga_bound_requantize_calls;
+    accelerator.rknnRgaBoundRequantizeMs =
+        inference.rknn_rga_bound_requantize_nanoseconds / 1000000.0;
+    accelerator.rknnRgaBoundRequantizeFailures =
+        inference.rknn_rga_bound_requantize_failures;
+    accelerator.rknnRgaBoundInputNormalizeBypasses =
+        inference.rknn_rga_bound_input_normalize_bypasses;
     accelerator.rknnNativeInt8Outputs         = inference.rknn_native_int8_outputs;
     accelerator.rknnFloatOutputs              = inference.rknn_float_outputs;
     accelerator.rknnOutputCompatibilityFallbacks =

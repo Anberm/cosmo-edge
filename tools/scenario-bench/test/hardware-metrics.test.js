@@ -161,6 +161,17 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         rknnBoundInputSyncMs: index,
         rknnBoundInputSyncFailures: 0,
         rknnBoundInputFrames: index * 4,
+        rknnRgaBoundInputBindAttempts: index,
+        rknnRgaBoundInputBindFailures: 0,
+        rknnRgaBoundInputImportCalls: index,
+        rknnRgaBoundInputImportMs: index * 0.25,
+        rknnRgaBoundInputImportFailures: 0,
+        rknnRgaBoundInputFrames: index * 4,
+        rknnRgaBoundNativeInt8Frames: index * 4,
+        rknnRgaBoundRequantizeCalls: index * 4,
+        rknnRgaBoundRequantizeMs: index * 1.6,
+        rknnRgaBoundRequantizeFailures: 0,
+        rknnRgaBoundInputNormalizeBypasses: index * 4,
         rknnNativeInt8Outputs: index * 4,
         rknnFloatOutputs: index * 6,
         rknnOutputCompatibilityFallbacks: index,
@@ -242,6 +253,17 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
   assert.equal(summary.mediaStages.rknnBoundInputSyncAvgMs, 0.25);
   assert.equal(summary.mediaStages.rknnBoundInputSyncFailures, 0);
   assert.equal(summary.mediaStages.rknnBoundInputFrames, 4);
+  assert.equal(summary.mediaStages.rknnRgaBoundInputBindAttempts, 1);
+  assert.equal(summary.mediaStages.rknnRgaBoundInputBindFailures, 0);
+  assert.equal(summary.mediaStages.rknnRgaBoundInputImportCalls, 1);
+  assert.equal(summary.mediaStages.rknnRgaBoundInputImportAvgMs, 0.25);
+  assert.equal(summary.mediaStages.rknnRgaBoundInputImportFailures, 0);
+  assert.equal(summary.mediaStages.rknnRgaBoundInputFrames, 4);
+  assert.equal(summary.mediaStages.rknnRgaBoundNativeInt8Frames, 4);
+  assert.equal(summary.mediaStages.rknnRgaBoundRequantizeCalls, 4);
+  assert.equal(summary.mediaStages.rknnRgaBoundRequantizeAvgMs, 0.4);
+  assert.equal(summary.mediaStages.rknnRgaBoundRequantizeFailures, 0);
+  assert.equal(summary.mediaStages.rknnRgaBoundInputNormalizeBypasses, 4);
   assert.equal(summary.mediaStages.rknnNativeInt8Outputs, 4);
   assert.equal(summary.mediaStages.rknnFloatOutputs, 6);
   assert.equal(summary.mediaStages.rknnOutputCompatibilityFallbacks, 1);
