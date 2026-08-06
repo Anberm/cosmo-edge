@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "util/JsonFieldOpt.h"
 #include "util/LimitedTypeJson.h"
 
 // Auto-generated JSON serialization
@@ -18,15 +19,12 @@ void to_json(nlohmann::json& j, const LinkAgeParamNode& v) {
 void from_json(const nlohmann::json& j, LinkAgeParamNode& v) {
     from_json(j, static_cast<ActionBase&>(v));
     j.at("actionId").get_to(v.action_id);
-    if (j.contains("actionName") && !j["actionName"].is_null())
-        j.at("actionName").get_to(v.action_name);
-    if (j.contains("configObject") && !j["configObject"].is_null())
-        j.at("configObject").get_to(v.config_object);
+    JSON_OPT_KEY(j, v, "actionName", action_name);
+    JSON_OPT_KEY(j, v, "configObject", config_object);
 }
 
 void from_json(const nlohmann::json& j, LinkageStrategyWorkflow& v) {
-    if (j.contains("workflow") && !j["workflow"].is_null())
-        j.at("workflow").get_to(v.workflow);
+    JSON_OPT(j, v, workflow);
 }
 
 void to_json(nlohmann::json& j, const LinkageStrategyWorkflow& v) {

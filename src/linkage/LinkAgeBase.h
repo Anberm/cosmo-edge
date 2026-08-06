@@ -10,19 +10,19 @@ public:
     virtual ~LinkAgeBase() = default;
 
     std::string GetActionId() const {
-        return action_.action_id;
+        return action_id_;
     }
 
     std::string GetFlowActionId() const {
-        return action_.flowActionId;
+        return flow_action_id_;
     }
 
     std::string GetPreFlowActionId() const {
-        return action_.preFlowActionId;
+        return pre_flow_action_id_;
     }
 
     std::string GetName() const {
-        return action_.action_name;
+        return action_name_;
     }
 
     virtual bool DoAlarm(const std::string& channel_id, const std::string& alg_id);
@@ -31,7 +31,10 @@ public:
     virtual bool IsAudioFileInUse(const std::string& dev_id) const;
 
 private:
-    LinkAgeParamNode action_;
+    std::string action_id_;
+    std::string action_name_;
+    std::string flow_action_id_;
+    std::string pre_flow_action_id_;
 };
 
 using LinkAgeBasePtr = std::shared_ptr<LinkAgeBase>;
