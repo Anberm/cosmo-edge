@@ -174,6 +174,12 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, rknnRgaBoundRequantizeMs);
     JSON_OPT(j, v, rknnRgaBoundRequantizeFailures);
     JSON_OPT(j, v, rknnRgaBoundInputNormalizeBypasses);
+    JSON_OPT(j, v, rknnMppDmaBufImportCalls);
+    JSON_OPT(j, v, rknnMppDmaBufImportMs);
+    JSON_OPT(j, v, rknnMppDmaBufImportFailures);
+    JSON_OPT(j, v, rknnMppDmaBufFrames);
+    JSON_OPT(j, v, rknnMppDmaBufFallbacks);
+    JSON_OPT(j, v, rknnMppDmaBufSourceBytes);
     JSON_OPT(j, v, rknnNativeInt8Outputs);
     JSON_OPT(j, v, rknnFloatOutputs);
     JSON_OPT(j, v, rknnOutputCompatibilityFallbacks);
@@ -322,6 +328,12 @@ void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["rknnRgaBoundRequantizeMs"]           = v.rknnRgaBoundRequantizeMs;
     j["rknnRgaBoundRequantizeFailures"]     = v.rknnRgaBoundRequantizeFailures;
     j["rknnRgaBoundInputNormalizeBypasses"] = v.rknnRgaBoundInputNormalizeBypasses;
+    j["rknnMppDmaBufImportCalls"]           = v.rknnMppDmaBufImportCalls;
+    j["rknnMppDmaBufImportMs"]              = v.rknnMppDmaBufImportMs;
+    j["rknnMppDmaBufImportFailures"]        = v.rknnMppDmaBufImportFailures;
+    j["rknnMppDmaBufFrames"]                = v.rknnMppDmaBufFrames;
+    j["rknnMppDmaBufFallbacks"]             = v.rknnMppDmaBufFallbacks;
+    j["rknnMppDmaBufSourceBytes"]           = v.rknnMppDmaBufSourceBytes;
     j["rknnNativeInt8Outputs"]         = v.rknnNativeInt8Outputs;
     j["rknnFloatOutputs"]              = v.rknnFloatOutputs;
     j["rknnOutputCompatibilityFallbacks"] = v.rknnOutputCompatibilityFallbacks;

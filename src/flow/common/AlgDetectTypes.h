@@ -9,6 +9,7 @@
 #include "flow/common/AlgAlarmTypes.h"
 #include "flow/common/AlgDataType.h"
 #include "infer/AiCommon.h"
+#include "media/NativeVideoBuffer.h"
 #include "media/VideoFrame.h"
 #include "media/VideoPacket.h"
 #include "util/Rect.h"
@@ -23,6 +24,7 @@ struct AlgChannelDataOrig {
 
 struct AlgChannelDataDec {
     VideoFramePtr frame;  // AI processed frame, might be YUV or BGR depending on platform
+    media::NativeVideoBufferPtr native_buffer;  // Optional borrowed hardware inference source.
     int64_t reportTimeStamp{0};
 };
 

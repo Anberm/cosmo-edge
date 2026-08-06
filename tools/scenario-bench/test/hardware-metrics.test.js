@@ -172,6 +172,12 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
         rknnRgaBoundRequantizeMs: index * 1.6,
         rknnRgaBoundRequantizeFailures: 0,
         rknnRgaBoundInputNormalizeBypasses: index * 4,
+        rknnMppDmaBufImportCalls: index * 4,
+        rknnMppDmaBufImportMs: index,
+        rknnMppDmaBufImportFailures: 0,
+        rknnMppDmaBufFrames: index * 4,
+        rknnMppDmaBufFallbacks: 0,
+        rknnMppDmaBufSourceBytes: index * 4 * 3_133_440,
         rknnNativeInt8Outputs: index * 4,
         rknnFloatOutputs: index * 6,
         rknnOutputCompatibilityFallbacks: index,
@@ -264,6 +270,12 @@ test('step summary derives platform-neutral preview timings and lifecycle deltas
   assert.equal(summary.mediaStages.rknnRgaBoundRequantizeAvgMs, 0.4);
   assert.equal(summary.mediaStages.rknnRgaBoundRequantizeFailures, 0);
   assert.equal(summary.mediaStages.rknnRgaBoundInputNormalizeBypasses, 4);
+  assert.equal(summary.mediaStages.rknnMppDmaBufImportCalls, 4);
+  assert.equal(summary.mediaStages.rknnMppDmaBufImportAvgMs, 0.25);
+  assert.equal(summary.mediaStages.rknnMppDmaBufImportFailures, 0);
+  assert.equal(summary.mediaStages.rknnMppDmaBufFrames, 4);
+  assert.equal(summary.mediaStages.rknnMppDmaBufFallbacks, 0);
+  assert.equal(summary.mediaStages.rknnMppDmaBufSourceAvgBytes, 3_133_440);
   assert.equal(summary.mediaStages.rknnNativeInt8Outputs, 4);
   assert.equal(summary.mediaStages.rknnFloatOutputs, 6);
   assert.equal(summary.mediaStages.rknnOutputCompatibilityFallbacks, 1);

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <exception>
 #include <iterator>
+#include <utility>
 
 #include "nn/core/inference_pipeline_metrics.h"
 #include "util/Log.h"
@@ -62,6 +63,13 @@ util::ErrorEnum AiDetectorUnify::Init() {
 util::ErrorEnum AiDetectorUnify::Detect(const std::vector<VideoFramePtr>& images,
                                         std::vector<AiConfidence> conf_thres,
                                         std::vector<std::vector<AiDetectRstEl>>& results) {
+    return Detect(images, {}, std::move(conf_thres), results);
+}
+
+util::ErrorEnum AiDetectorUnify::Detect(
+    const std::vector<VideoFramePtr>& images,
+    const std::vector<media::NativeVideoBufferPtr>& native_buffers,
+    std::vector<AiConfidence> conf_thres, std::vector<std::vector<AiDetectRstEl>>& results) {
     if (!detector_) {
         LOG_WARN("{}", "SDK Detector Not Init");
         return util::ErrorEnum::NotInit;
@@ -73,12 +81,14 @@ util::ErrorEnum AiDetectorUnify::Detect(const std::vector<VideoFramePtr>& images
     try {
         size_t image_num = images.size();
         std::vector<VideoFramePtr> inputs;
+        std::vector<media::NativeVideoBufferPtr> native_inputs;
         for (size_t i = 0; i < image_num; i++) {
             inputs.push_back(images[i]);
+            native_inputs.push_back(i < native_buffers.size() ? native_buffers[i] : nullptr);
             size_t input_size = inputs.size();
             if (input_size == max_batch_size_ || (i + 1) == image_num) {
                 std::vector<std::vector<AiDetectRstEl>> outputs;
-                auto ret = Forward(inputs, outputs);
+                auto ret = Forward(inputs, native_inputs, outputs);
                 if (util::ErrorEnum::Success != ret) {
                     LOG_ERRO("Forward Failed. Ret:{}", ret);
                     return ret;
@@ -92,6 +102,7 @@ util::ErrorEnum AiDetectorUnify::Detect(const std::vector<VideoFramePtr>& images
                     std::copy(outputs.begin(), outputs.end(), std::back_inserter(results));
                 }
                 inputs.clear();
+                native_inputs.clear();
             }
         }
     } catch (const std::exception& e) {
@@ -106,11 +117,13 @@ util::ErrorEnum AiDetectorUnify::Detect(const std::vector<VideoFramePtr>& images
     return util::ErrorEnum::Success;
 }
 
-util::ErrorEnum AiDetectorUnify::Forward(const std::vector<VideoFramePtr>& images,
+util::ErrorEnum AiDetectorUnify::Forward(
+    const std::vector<VideoFramePtr>& images,
+    const std::vector<media::NativeVideoBufferPtr>& native_buffers,
                                          std::vector<std::vector<AiDetectRstEl>>& results) {
     std::vector<std::shared_ptr<cosmo::nn::Blob>> image_blobs{};
     const auto blob_convert_started = MetricsClock::now();
-    auto ret = ConvertImagesToBlobs(images, image_blobs);
+    auto ret = ConvertImagesToBlobs(images, native_buffers, image_blobs);
     cosmo::nn::GetInferencePipelineMetrics().RecordBlobConvert(
         ElapsedNanoseconds(blob_convert_started), static_cast<uint64_t>(image_blobs.size()));
     if (util::ErrorEnum::Success != ret) {

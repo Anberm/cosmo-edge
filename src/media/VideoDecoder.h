@@ -6,6 +6,7 @@
 
 #include "media/VideoCodecType.h"
 #include "media/VideoFrame.h"
+#include "media/NativeVideoBuffer.h"
 
 namespace cosmo {
 namespace media {
@@ -28,11 +29,13 @@ namespace media {
     public:
         using Materializer = std::function<VideoFramePtr()>;
         using DiscardHandler = std::function<void()>;
+        using NativeBufferExporter = std::function<NativeVideoBufferPtr()>;
 
         DecodedVideoFrame() = default;
         explicit DecodedVideoFrame(VideoFramePtr frame);
         DecodedVideoFrame(uint64_t frame_index, size_t width, size_t height, PixelFormat format,
-                          Materializer materializer, DiscardHandler discard_handler);
+                          Materializer materializer, DiscardHandler discard_handler,
+                          NativeBufferExporter native_buffer_exporter = {});
 
         DecodedVideoFrame(const DecodedVideoFrame&)            = delete;
         DecodedVideoFrame& operator=(const DecodedVideoFrame&) = delete;
@@ -45,6 +48,7 @@ namespace media {
         [[nodiscard]] size_t GetWidth() const;
         [[nodiscard]] size_t GetHeight() const;
         [[nodiscard]] PixelFormat GetPixelFormat() const;
+        NativeVideoBufferPtr ExportNativeBuffer();
 
         VideoFramePtr Materialize();
         void Discard();
@@ -57,6 +61,8 @@ namespace media {
         PixelFormat format_{PixelFormat::PIXEL_UNKNOWN};
         Materializer materializer_;
         DiscardHandler discard_handler_;
+        NativeBufferExporter native_buffer_exporter_;
+        NativeVideoBufferPtr native_buffer_;
     };
 
     class VideoDecoder {

@@ -186,6 +186,22 @@ void InferencePipelineMetrics::RecordRknnRgaBoundInputNormalizeBypass() {
     rknn_rga_bound_input_normalize_bypasses_.fetch_add(1, std::memory_order_relaxed);
 }
 
+void InferencePipelineMetrics::RecordRknnMppDmaBufImport(uint64_t nanoseconds, bool success) {
+    RecordStage(rknn_mpp_dmabuf_import_calls_, rknn_mpp_dmabuf_import_nanoseconds_, 1,
+                nanoseconds);
+    if (!success)
+        rknn_mpp_dmabuf_import_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnMppDmaBufFrame(uint64_t source_bytes) {
+    rknn_mpp_dmabuf_frames_.fetch_add(1, std::memory_order_relaxed);
+    rknn_mpp_dmabuf_source_bytes_.fetch_add(source_bytes, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnMppDmaBufFallback() {
+    rknn_mpp_dmabuf_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+}
+
 void InferencePipelineMetrics::RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
                                                       bool compatibility_fallback) {
     (native_int8 ? rknn_native_int8_outputs_ : rknn_float_outputs_)
@@ -310,6 +326,12 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_rga_bound_requantize_nanoseconds);
     SNAPSHOT_FIELD(rknn_rga_bound_requantize_failures);
     SNAPSHOT_FIELD(rknn_rga_bound_input_normalize_bypasses);
+    SNAPSHOT_FIELD(rknn_mpp_dmabuf_import_calls);
+    SNAPSHOT_FIELD(rknn_mpp_dmabuf_import_nanoseconds);
+    SNAPSHOT_FIELD(rknn_mpp_dmabuf_import_failures);
+    SNAPSHOT_FIELD(rknn_mpp_dmabuf_frames);
+    SNAPSHOT_FIELD(rknn_mpp_dmabuf_fallbacks);
+    SNAPSHOT_FIELD(rknn_mpp_dmabuf_source_bytes);
     SNAPSHOT_FIELD(rknn_native_int8_outputs);
     SNAPSHOT_FIELD(rknn_float_outputs);
     SNAPSHOT_FIELD(rknn_output_compatibility_fallbacks);

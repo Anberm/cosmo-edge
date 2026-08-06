@@ -277,6 +277,12 @@ AlgFrameDistributionPlan AlgDataQueueDistributor::PrepareFrameDistribution(AlgDa
             task_group.que->RecordDiscard();
             continue;
         }
+        const bool detector_group =
+            !task_group.tasks.empty() &&
+            std::all_of(task_group.tasks.begin(), task_group.tasks.end(), [](const AlgTaskUnit& task) {
+                return task.actionId == AADetect_Code.data();
+            });
+        plan.native_inference_eligible = plan.native_inference_eligible && detector_group;
         plan.queues.push_back(task_group.que);
     }
     return plan;
@@ -296,7 +302,17 @@ int AlgDataQueueDistributor::DistributorPreparedFrame(
 
     int message_count = 0;
     for (const auto& queue : plan.queues) {
-        if (queue && queue->Insert(converted)) {
+        // Native inference buffers are released by each detector immediately
+        // after its synchronous Forward. Give parallel detector queues their
+        // own AlgData wrapper so one consumer cannot clear another consumer's
+        // borrowed DMA-BUF descriptor. VideoFrame and the native owner remain
+        // shared; the ordinary single-queue path keeps its existing allocation
+        // behavior.
+        auto queued = converted;
+        if (plan.queues.size() > 1 && converted->chanDataDec.native_buffer) {
+            queued = AlgDataCopy(converted);
+        }
+        if (queue && queue->Insert(std::move(queued))) {
             message_count += 1;
         }
     }

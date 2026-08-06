@@ -24,13 +24,15 @@ namespace media {
 
     DecodedVideoFrame::DecodedVideoFrame(uint64_t frame_index, size_t width, size_t height,
                                          PixelFormat format, Materializer materializer,
-                                         DiscardHandler discard_handler)
+                                         DiscardHandler discard_handler,
+                                         NativeBufferExporter native_buffer_exporter)
         : frame_index_(frame_index),
           width_(width),
           height_(height),
           format_(format),
           materializer_(std::move(materializer)),
-          discard_handler_(std::move(discard_handler)) {}
+          discard_handler_(std::move(discard_handler)),
+          native_buffer_exporter_(std::move(native_buffer_exporter)) {}
 
     bool DecodedVideoFrame::HasFrame() const {
         return frame_ != nullptr || static_cast<bool>(materializer_);
@@ -56,6 +58,13 @@ namespace media {
         return frame_ ? frame_->GetPixelFormat() : format_;
     }
 
+    NativeVideoBufferPtr DecodedVideoFrame::ExportNativeBuffer() {
+        if (!native_buffer_ && native_buffer_exporter_) {
+            native_buffer_ = native_buffer_exporter_();
+        }
+        return native_buffer_;
+    }
+
     VideoFramePtr DecodedVideoFrame::Materialize() {
         if (frame_) {
             return frame_;
@@ -77,6 +86,8 @@ namespace media {
         frame_.reset();
         materializer_    = nullptr;
         discard_handler_ = nullptr;
+        native_buffer_exporter_ = nullptr;
+        native_buffer_.reset();
     }
 
     VideoDecoder::VideoDecoder(size_t name) : idx_name_("atomicDecoder_" + std::to_string(name)) {

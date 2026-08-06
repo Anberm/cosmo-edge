@@ -233,6 +233,13 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
         inference.rknn_rga_bound_requantize_failures;
     accelerator.rknnRgaBoundInputNormalizeBypasses =
         inference.rknn_rga_bound_input_normalize_bypasses;
+    accelerator.rknnMppDmaBufImportCalls = inference.rknn_mpp_dmabuf_import_calls;
+    accelerator.rknnMppDmaBufImportMs =
+        inference.rknn_mpp_dmabuf_import_nanoseconds / 1000000.0;
+    accelerator.rknnMppDmaBufImportFailures = inference.rknn_mpp_dmabuf_import_failures;
+    accelerator.rknnMppDmaBufFrames         = inference.rknn_mpp_dmabuf_frames;
+    accelerator.rknnMppDmaBufFallbacks      = inference.rknn_mpp_dmabuf_fallbacks;
+    accelerator.rknnMppDmaBufSourceBytes    = inference.rknn_mpp_dmabuf_source_bytes;
     accelerator.rknnNativeInt8Outputs         = inference.rknn_native_int8_outputs;
     accelerator.rknnFloatOutputs              = inference.rknn_float_outputs;
     accelerator.rknnOutputCompatibilityFallbacks =

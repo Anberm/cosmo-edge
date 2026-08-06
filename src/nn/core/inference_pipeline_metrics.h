@@ -91,6 +91,12 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_rga_bound_requantize_nanoseconds{0};
     uint64_t rknn_rga_bound_requantize_failures{0};
     uint64_t rknn_rga_bound_input_normalize_bypasses{0};
+    uint64_t rknn_mpp_dmabuf_import_calls{0};
+    uint64_t rknn_mpp_dmabuf_import_nanoseconds{0};
+    uint64_t rknn_mpp_dmabuf_import_failures{0};
+    uint64_t rknn_mpp_dmabuf_frames{0};
+    uint64_t rknn_mpp_dmabuf_fallbacks{0};
+    uint64_t rknn_mpp_dmabuf_source_bytes{0};
     uint64_t rknn_native_int8_outputs{0};
     uint64_t rknn_float_outputs{0};
     uint64_t rknn_output_compatibility_fallbacks{0};
@@ -152,6 +158,9 @@ public:
     void RecordRknnRgaBoundInputRequantize(uint64_t nanoseconds, bool success);
     void RecordRknnRgaBoundInputFrame();
     void RecordRknnRgaBoundInputNormalizeBypass();
+    void RecordRknnMppDmaBufImport(uint64_t nanoseconds, bool success);
+    void RecordRknnMppDmaBufFrame(uint64_t source_bytes);
+    void RecordRknnMppDmaBufFallback();
     void RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
                                 bool compatibility_fallback = false);
     void RecordRknnYolov8Transform(uint64_t dfl_nanoseconds, uint64_t class_nanoseconds);
@@ -247,6 +256,12 @@ private:
     std::atomic<uint64_t> rknn_rga_bound_requantize_nanoseconds_{0};
     std::atomic<uint64_t> rknn_rga_bound_requantize_failures_{0};
     std::atomic<uint64_t> rknn_rga_bound_input_normalize_bypasses_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_import_calls_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_import_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_import_failures_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_frames_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_fallbacks_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_source_bytes_{0};
     std::atomic<uint64_t> rknn_native_int8_outputs_{0};
     std::atomic<uint64_t> rknn_float_outputs_{0};
     std::atomic<uint64_t> rknn_output_compatibility_fallbacks_{0};

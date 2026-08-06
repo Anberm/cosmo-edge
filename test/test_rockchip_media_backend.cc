@@ -3,7 +3,10 @@
 #ifdef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,6 +19,13 @@
 #include "media/VideoFrameProcRockchip.h"
 #include "mem/AllocatorCpu.h"
 #include "mem/MemoryPoolMng.h"
+#if defined(COSMO_NN_USE_RKNN_BACKEND)
+#include "nn/core/blob.h"
+#include "nn/core/inference_pipeline_metrics.h"
+#include "nn/core/shared_resource.h"
+#include "nn/device/rknn/rknn_preprocess_node.h"
+#include "nn/utils/op.h"
+#endif
 
 namespace {
 
@@ -39,6 +49,27 @@ bool HasAnnexBStartCode(const std::vector<uint8_t>& data) {
     return data.size() >= 4 && data[0] == 0 && data[1] == 0 &&
            ((data[2] == 1) || (data[2] == 0 && data[3] == 1));
 }
+
+#if defined(COSMO_NN_USE_RKNN_BACKEND)
+class ScopedEnvValue {
+public:
+    ScopedEnvValue(const char* name, const char* value) : name_(name) {
+        if (const char* current = std::getenv(name))
+            previous_ = current;
+        setenv(name, value, 1);
+    }
+    ~ScopedEnvValue() {
+        if (previous_)
+            setenv(name_.c_str(), previous_->c_str(), 1);
+        else
+            unsetenv(name_.c_str());
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> previous_;
+};
+#endif
 
 }  // namespace
 
@@ -107,7 +138,9 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     constexpr int width     = 640;
     constexpr int height    = 360;
     constexpr int pool_size = width * height * 3 / 2;
-    cosmo::mem::MemoryPoolMng memory_pool(std::make_unique<cosmo::mem::AllocatorCpu>(), {pool_size});
+    constexpr int bgr_size  = width * height * 3;
+    cosmo::mem::MemoryPoolMng memory_pool(std::make_unique<cosmo::mem::AllocatorCpu>(),
+                                          {pool_size, bgr_size});
     cosmo::mem::SetMemoryPoolContext(&memory_pool);
     struct PoolReset {
         ~PoolReset() {
@@ -137,6 +170,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
 
     const auto before = cosmo::media::GetPreviewPipelineMetrics().Snapshot();
     cosmo::media::VideoFramePtr decoded;
+    cosmo::media::NativeVideoBufferPtr native_buffer;
     bool discarded_deferred_output = false;
     for (size_t index = 0; index < packets.size(); ++index) {
         bool accepted = false;
@@ -149,6 +183,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
             continue;
         }
         if (output.HasFrame()) {
+            native_buffer = output.ExportNativeBuffer();
             decoded = output.Materialize();
         }
         if (decoded) {
@@ -164,6 +199,99 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     CHECK(decoded->GetHeight() == height);
     CHECK(decoded->GetPixelFormat() == cosmo::media::PixelFormat::PIXEL_I420);
     CHECK(decoded->Active());
+    REQUIRE(native_buffer);
+    CHECK(native_buffer->Valid());
+    CHECK(native_buffer->format == cosmo::media::NativeVideoBufferFormat::NV12);
+    CHECK(native_buffer->width == width);
+    CHECK(native_buffer->height == height);
+    CHECK(native_buffer->width_stride >= width);
+    CHECK(native_buffer->height_stride >= height);
+
+#if defined(COSMO_NN_USE_RKNN_BACKEND)
+    StubOsdTextRenderer osd;
+    cosmo::media::VideoFrameProcRockchip processor(osd);
+    auto bgr = processor.I4202BGR(decoded);
+    REQUIRE(VideoFrameValid(bgr, true));
+
+    cosmo::nn::BlobDesc source_desc;
+    source_desc.device_type  = cosmo::nn::DEVICE_NAIVE;
+    source_desc.data_type    = cosmo::nn::DATA_TYPE_UINT8;
+    source_desc.data_format  = cosmo::nn::DATA_FORMAT_NHWC;
+    source_desc.image_format = cosmo::nn::IMAGE_BGR;
+    source_desc.dims         = {1, height, width, 3};
+    cosmo::nn::BlobHandle source_handle;
+    source_handle.base                       = bgr->GetData();
+    source_handle.native_image.fd            = native_buffer->fd;
+    source_handle.native_image.bytes         = native_buffer->bytes;
+    source_handle.native_image.width         = native_buffer->width;
+    source_handle.native_image.height        = native_buffer->height;
+    source_handle.native_image.width_stride  = native_buffer->width_stride;
+    source_handle.native_image.height_stride = native_buffer->height_stride;
+    source_handle.native_image.format        = cosmo::nn::IMAGE_NV12;
+    auto source_blob = std::make_shared<cosmo::nn::Blob>(source_desc, source_handle);
+
+    cosmo::nn::Resize resize;
+    resize.dsize   = {640, 640};
+    resize.gravity = 1;
+    resize.color   = {114, 114, 114};
+    cosmo::nn::SharedResource resource;
+    cosmo::nn::RknnResizeNode resize_node;
+    resize_node.SetSharedResource(&resource);
+    resize_node.LoadParam(&resize);
+    REQUIRE(bool(resize_node.InferTopShapes()));
+    cosmo::nn::BlobDesc target_desc;
+    target_desc.device_type  = cosmo::nn::DEVICE_NAIVE;
+    target_desc.data_type    = cosmo::nn::DATA_TYPE_UINT8;
+    target_desc.data_format  = cosmo::nn::DATA_FORMAT_NHWC;
+    target_desc.image_format = cosmo::nn::IMAGE_RGB;
+    target_desc.dims         = {1, 640, 640, 3};
+    auto target = std::make_shared<cosmo::nn::Blob>(target_desc, true);
+    REQUIRE(target->GetHandle().base);
+    std::vector<std::shared_ptr<cosmo::nn::Blob>> bottoms{source_blob};
+    std::vector<std::shared_ptr<cosmo::nn::Blob>> tops{target};
+
+    std::vector<uint8_t> host_result(640 * 640 * 3);
+    {
+        ScopedEnvValue disabled("COSMO_RKNN_MPP_DMABUF", "0");
+        REQUIRE(bool(resize_node.Forward(bottoms, tops)));
+        std::copy_n(static_cast<const uint8_t*>(target->GetHandle().base), host_result.size(),
+                    host_result.begin());
+    }
+    const auto inference_before = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
+    {
+        ScopedEnvValue enabled("COSMO_RKNN_MPP_DMABUF", "1");
+        REQUIRE(bool(resize_node.Forward(bottoms, tops)));
+    }
+    const auto inference_after = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
+    const auto* native_result  = static_cast<const uint8_t*>(target->GetHandle().base);
+    uint64_t absolute_error_sum = 0;
+    int max_absolute_error      = 0;
+    for (size_t index = 0; index < host_result.size(); ++index) {
+        const int error = std::abs(static_cast<int>(host_result[index]) - native_result[index]);
+        absolute_error_sum += static_cast<uint64_t>(error);
+        max_absolute_error = std::max(max_absolute_error, error);
+    }
+    const double mean_absolute_error =
+        static_cast<double>(absolute_error_sum) / static_cast<double>(host_result.size());
+    CHECK(mean_absolute_error <= 2.0);
+    CHECK(max_absolute_error <= 12);
+    CHECK(inference_after.rknn_mpp_dmabuf_frames ==
+          inference_before.rknn_mpp_dmabuf_frames + 1);
+    CHECK(inference_after.rknn_mpp_dmabuf_import_failures ==
+          inference_before.rknn_mpp_dmabuf_import_failures);
+
+    const auto fallback_before = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
+    {
+        ScopedEnvValue enabled("COSMO_RKNN_MPP_DMABUF", "1");
+        ScopedEnvValue forced("COSMO_RKNN_MPP_DMABUF_FORCE_FAIL", "1");
+        REQUIRE(bool(resize_node.Forward(bottoms, tops)));
+    }
+    const auto fallback_after = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
+    CHECK(std::equal(host_result.begin(), host_result.end(),
+                     static_cast<const uint8_t*>(target->GetHandle().base)));
+    CHECK(fallback_after.rknn_mpp_dmabuf_fallbacks ==
+          fallback_before.rknn_mpp_dmabuf_fallbacks + 1);
+#endif
 
     const auto after = cosmo::media::GetPreviewPipelineMetrics().Snapshot();
     CHECK(discarded_deferred_output);
@@ -173,6 +301,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     CHECK(after.mpp_copy_out_frames > before.mpp_copy_out_frames);
     CHECK(after.mpp_copy_out_failures == before.mpp_copy_out_failures);
     CHECK(after.mpp_early_dropped_frames == before.mpp_early_dropped_frames + 1);
+    native_buffer.reset();
     CHECK(decoder->Close());
 }
 

@@ -46,6 +46,10 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     metrics.RecordRknnRgaBoundInputRequantize(5'000, false);
     metrics.RecordRknnRgaBoundInputFrame();
     metrics.RecordRknnRgaBoundInputNormalizeBypass();
+    metrics.RecordRknnMppDmaBufImport(60'000, true);
+    metrics.RecordRknnMppDmaBufImport(7'000, false);
+    metrics.RecordRknnMppDmaBufFrame(3'133'440);
+    metrics.RecordRknnMppDmaBufFallback();
     metrics.RecordRknnOutputFormat(true, 1'225'600);
     metrics.RecordRknnOutputFormat(false, 4'902'400, true);
     metrics.RecordRknnYolov8Transform(1'400'000, 1'500'000);
@@ -116,6 +120,12 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     CHECK(snapshot.rknn_rga_bound_requantize_nanoseconds == 55'000);
     CHECK(snapshot.rknn_rga_bound_requantize_failures == 1);
     CHECK(snapshot.rknn_rga_bound_input_normalize_bypasses == 1);
+    CHECK(snapshot.rknn_mpp_dmabuf_import_calls == 2);
+    CHECK(snapshot.rknn_mpp_dmabuf_import_nanoseconds == 67'000);
+    CHECK(snapshot.rknn_mpp_dmabuf_import_failures == 1);
+    CHECK(snapshot.rknn_mpp_dmabuf_frames == 1);
+    CHECK(snapshot.rknn_mpp_dmabuf_fallbacks == 1);
+    CHECK(snapshot.rknn_mpp_dmabuf_source_bytes == 3'133'440);
     CHECK(snapshot.rknn_native_int8_outputs == 1);
     CHECK(snapshot.rknn_float_outputs == 1);
     CHECK(snapshot.rknn_output_compatibility_fallbacks == 1);

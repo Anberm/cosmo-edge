@@ -348,6 +348,18 @@ function summarizeMediaStages(ticks, inferMs) {
     rknnRgaBoundInputNormalizeBypasses: counterDelta(
       'rknnRgaBoundInputNormalizeBypasses',
     ),
+    rknnMppDmaBufImportCalls: counterDelta('rknnMppDmaBufImportCalls'),
+    rknnMppDmaBufImportAvgMs: counterAverage(
+      'rknnMppDmaBufImportMs',
+      'rknnMppDmaBufImportCalls',
+    ),
+    rknnMppDmaBufImportFailures: counterDelta('rknnMppDmaBufImportFailures'),
+    rknnMppDmaBufFrames: counterDelta('rknnMppDmaBufFrames'),
+    rknnMppDmaBufFallbacks: counterDelta('rknnMppDmaBufFallbacks'),
+    rknnMppDmaBufSourceAvgBytes: counterAverage(
+      'rknnMppDmaBufSourceBytes',
+      'rknnMppDmaBufFrames',
+    ),
     rknnNativeInt8Outputs: counterDelta('rknnNativeInt8Outputs'),
     rknnFloatOutputs: counterDelta('rknnFloatOutputs'),
     rknnOutputCompatibilityFallbacks: counterDelta('rknnOutputCompatibilityFallbacks'),

@@ -98,6 +98,11 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
           inference.rknn_rga_bound_requantize_calls);
     CHECK(ret.resData.accelerator.rknnRgaBoundInputNormalizeBypasses ==
           inference.rknn_rga_bound_input_normalize_bypasses);
+    CHECK(ret.resData.accelerator.rknnMppDmaBufImportCalls ==
+          inference.rknn_mpp_dmabuf_import_calls);
+    CHECK(ret.resData.accelerator.rknnMppDmaBufFrames == inference.rknn_mpp_dmabuf_frames);
+    CHECK(ret.resData.accelerator.rknnMppDmaBufFallbacks ==
+          inference.rknn_mpp_dmabuf_fallbacks);
     CHECK(ret.resData.accelerator.rknnOutputCompatibilityFallbacks ==
           inference.rknn_output_compatibility_fallbacks);
     CHECK(ret.resData.accelerator.rknnYolov8DflCalls == inference.rknn_yolov8_dfl_calls);

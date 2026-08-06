@@ -216,6 +216,35 @@ TEST_CASE("RKNN bound input switch defaults on and supports explicit rollback", 
     }
 }
 
+TEST_CASE("RKNN MPP DMA-BUF switch defaults on and supports explicit rollback",
+          "[nn][rknn][mpp-dmabuf]") {
+    using namespace cosmo::nn;
+    {
+        ScopedEnvironment enabled("COSMO_RKNN_MPP_DMABUF", "1");
+        CHECK(RknnMppDmaBufEnabled());
+    }
+    {
+        ScopedEnvironment disabled("COSMO_RKNN_MPP_DMABUF", "0");
+        CHECK_FALSE(RknnMppDmaBufEnabled());
+    }
+    {
+        ScopedEnvironment forced("COSMO_RKNN_MPP_DMABUF_FORCE_FAIL", "1");
+        CHECK(RknnForceMppDmaBufFailure());
+    }
+
+    BlobHandle handle;
+    handle.native_image.fd            = 7;
+    handle.native_image.bytes         = 1920 * 1088 * 3 / 2;
+    handle.native_image.width         = 1920;
+    handle.native_image.height        = 1080;
+    handle.native_image.width_stride  = 1920;
+    handle.native_image.height_stride = 1088;
+    handle.native_image.format        = IMAGE_NV12;
+    CHECK(handle.native_image.Valid());
+    handle.native_image.width_stride = 1919;
+    CHECK_FALSE(handle.native_image.Valid());
+}
+
 TEST_CASE("RKNN native output capability excludes FP16 and malformed YOLOv8 heads",
           "[nn][rknn][fast-output][fp16]") {
     using namespace cosmo::nn;

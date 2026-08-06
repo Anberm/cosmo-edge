@@ -77,6 +77,14 @@ public:
         handle_ = importbuffer_virtualaddr(data, static_cast<int>(size));
     }
 
+    void ImportFd(int fd, size_t size) {
+        if (handle_ != 0 || fd < 0 || size == 0 ||
+            size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            return;
+        }
+        handle_ = importbuffer_fd(fd, static_cast<int>(size));
+    }
+
 private:
     rga_buffer_handle_t handle_{0};
 };
@@ -93,6 +101,14 @@ void LogRgaBoundInputFallbackOnce(const std::string& reason) {
     static std::atomic_flag logged = ATOMIC_FLAG_INIT;
     if (!logged.test_and_set(std::memory_order_relaxed)) {
         LOG_WARN("RKNN RGA bound input unavailable; retaining the host preprocessing path: {}", reason);
+    }
+}
+
+void LogMppDmaBufFallbackOnce(IM_STATUS status) {
+    static std::atomic_flag logged = ATOMIC_FLAG_INIT;
+    if (!logged.test_and_set(std::memory_order_relaxed)) {
+        LOG_WARN("RKNN MPP DMA-BUF preprocessing failed with status {} ({}); using host RGA input",
+                 status, imStrError_t(status));
     }
 }
 
@@ -147,6 +163,14 @@ bool RknnFastPreprocessEnabled() {
 
 bool RknnForceRgaFailure() {
     return EnvironmentFlag("COSMO_RKNN_RGA_FORCE_FAIL", false);
+}
+
+bool RknnMppDmaBufEnabled() {
+    return EnvironmentFlag("COSMO_RKNN_MPP_DMABUF", true);
+}
+
+bool RknnForceMppDmaBufFailure() {
+    return EnvironmentFlag("COSMO_RKNN_MPP_DMABUF_FORCE_FAIL", false);
 }
 
 bool IsRknnDetectorResizeContract(int out_height, int out_width, int gravity,
@@ -300,7 +324,6 @@ bool RknnResizeNode::ResizeWithRga(const Blob& bottom, Blob& top, bool allow_bou
     const int source_width  = bottom_desc.dims[2];
     const auto source_size  = PackedByteCount(source_width, source_height);
     const auto target_size  = PackedByteCount(out_width_, out_height_);
-    ScopedRgaHandle source_handle(bottom_handle.base, source_size);
     ScopedRgaHandle host_target_handle;
     uint32_t target_handle  = 0;
     const bool bound_target = allow_bound_target && AcquireRgaBoundTarget(target_handle);
@@ -308,51 +331,101 @@ bool RknnResizeNode::ResizeWithRga(const Blob& bottom, Blob& top, bool allow_bou
         host_target_handle.ImportVirtual(top_handle.base, target_size);
         target_handle = host_target_handle.Get();
     }
-    if (source_handle.Get() == 0 || target_handle == 0) {
+    if (target_handle == 0) {
         GetInferencePipelineMetrics().RecordRknnRgaFailure();
         LogRgaFallbackOnce(IM_STATUS_OUT_OF_MEMORY);
         return false;
     }
 
-    const int source_format =
-        bottom_desc.image_format == IMAGE_RGB ? RK_FORMAT_RGB_888 : RK_FORMAT_BGR_888;
-    auto source = wrapbuffer_handle_t(source_handle.Get(), source_width, source_height,
-                                      source_width, source_height, source_format);
     int target_width_stride = out_width_;
     if (bound_target)
         target_width_stride = shared_resource->rknn_bound_input_target.width_stride;
     auto target = wrapbuffer_handle_t(static_cast<rga_buffer_handle_t>(target_handle), out_width_,
                                       out_height_, target_width_stride, out_height_, RK_FORMAT_RGB_888);
 
-    const auto fill_started = MetricsClock::now();
-    const im_rect full_target{0, 0, out_width_, out_height_};
-    const int fill_color = (padding_color_[0] << 16) | (padding_color_[1] << 8) |
-                           padding_color_[2];
-    auto status = imfill_t(target, full_target, fill_color, 1);
-    GetInferencePipelineMetrics().RecordRknnRgaFill(ElapsedNanoseconds(fill_started));
-    if (!RgaSucceeded(status)) {
-        GetInferencePipelineMetrics().RecordRknnRgaFailure();
-        LogRgaFallbackOnce(status);
-        return false;
+    IM_STATUS last_status = IM_STATUS_FAILED;
+    const auto run_resize = [&](rga_buffer_handle_t source_handle, int visible_width,
+                                int visible_height, int width_stride, int height_stride,
+                                int source_format, bool yuv_source) {
+        auto source = wrapbuffer_handle_t(source_handle, visible_width, visible_height, width_stride,
+                                          height_stride, source_format);
+        if (yuv_source)
+            source.color_space_mode = IM_YUV_TO_RGB_BT601_LIMIT;
+
+        const auto fill_started = MetricsClock::now();
+        const im_rect full_target{0, 0, out_width_, out_height_};
+        const int fill_color = (padding_color_[0] << 16) | (padding_color_[1] << 8) |
+                               padding_color_[2];
+        last_status = imfill_t(target, full_target, fill_color, 1);
+        GetInferencePipelineMetrics().RecordRknnRgaFill(ElapsedNanoseconds(fill_started));
+        if (!RgaSucceeded(last_status))
+            return false;
+
+        const float scale = std::min(static_cast<float>(out_width_) / visible_width,
+                                     static_cast<float>(out_height_) / visible_height);
+        const int resized_width  = static_cast<int>(visible_width * scale);
+        const int resized_height = static_cast<int>(visible_height * scale);
+        const int offset_x       = (out_width_ - resized_width) / 2;
+        const int offset_y       = (out_height_ - resized_height) / 2;
+        const im_rect source_rect{0, 0, visible_width, visible_height};
+        const im_rect target_rect{offset_x, offset_y, resized_width, resized_height};
+        const im_rect empty_rect{};
+        const rga_buffer_t empty_buffer{};
+        const auto resize_started = MetricsClock::now();
+        last_status =
+            improcess(source, target, empty_buffer, source_rect, target_rect, empty_rect, IM_SYNC);
+        GetInferencePipelineMetrics().RecordRknnRgaResizeColor(
+            ElapsedNanoseconds(resize_started));
+        return RgaSucceeded(last_status);
+    };
+
+    const auto& native = bottom_handle.native_image;
+    const bool native_compatible =
+        RknnMppDmaBufEnabled() && native.Valid() && native.width == source_width &&
+        native.height == source_height &&
+        (native.format == IMAGE_NV12 || native.format == IMAGE_I420);
+    if (native_compatible) {
+        bool native_success = false;
+        ScopedRgaHandle native_source_handle;
+        if (!RknnForceMppDmaBufFailure()) {
+            const auto import_started = MetricsClock::now();
+            native_source_handle.ImportFd(native.fd, native.bytes);
+            GetInferencePipelineMetrics().RecordRknnMppDmaBufImport(
+                ElapsedNanoseconds(import_started), native_source_handle.Get() != 0);
+            if (native_source_handle.Get() != 0) {
+                const int native_format = native.format == IMAGE_NV12 ? RK_FORMAT_YCbCr_420_SP
+                                                                      : RK_FORMAT_YCbCr_420_P;
+                native_success = run_resize(native_source_handle.Get(), native.width, native.height,
+                                            native.width_stride, native.height_stride, native_format,
+                                            true);
+            }
+        }
+        if (native_success) {
+            GetInferencePipelineMetrics().RecordRknnMppDmaBufFrame(native.bytes);
+        } else {
+            GetInferencePipelineMetrics().RecordRknnMppDmaBufFallback();
+            LogMppDmaBufFallbackOnce(last_status);
+        }
+        if (native_success) {
+            if (bound_target) {
+                auto& bound_input = shared_resource->rknn_bound_input_target;
+                if (bound_input.owner == shared_resource->rknn_bound_input_provider &&
+                    bound_input.generation == rga_bound_target_generation_) {
+                    bound_input.frame_ready = true;
+                }
+            }
+            return true;
+        }
     }
 
-    const float scale = std::min(static_cast<float>(out_width_) / source_width,
-                                 static_cast<float>(out_height_) / source_height);
-    const int resized_width  = static_cast<int>(source_width * scale);
-    const int resized_height = static_cast<int>(source_height * scale);
-    const int offset_x       = (out_width_ - resized_width) / 2;
-    const int offset_y       = (out_height_ - resized_height) / 2;
-    const im_rect source_rect{0, 0, source_width, source_height};
-    const im_rect target_rect{offset_x, offset_y, resized_width, resized_height};
-    const im_rect empty_rect{};
-    const rga_buffer_t empty_buffer{};
-    const auto resize_started = MetricsClock::now();
-    status = improcess(source, target, empty_buffer, source_rect, target_rect, empty_rect, IM_SYNC);
-    GetInferencePipelineMetrics().RecordRknnRgaResizeColor(
-        ElapsedNanoseconds(resize_started));
-    if (!RgaSucceeded(status)) {
+    ScopedRgaHandle host_source_handle(bottom_handle.base, source_size);
+    const int host_source_format =
+        bottom_desc.image_format == IMAGE_RGB ? RK_FORMAT_RGB_888 : RK_FORMAT_BGR_888;
+    if (host_source_handle.Get() == 0 ||
+        !run_resize(host_source_handle.Get(), source_width, source_height, source_width,
+                    source_height, host_source_format, false)) {
         GetInferencePipelineMetrics().RecordRknnRgaFailure();
-        LogRgaFallbackOnce(status);
+        LogRgaFallbackOnce(host_source_handle.Get() == 0 ? IM_STATUS_OUT_OF_MEMORY : last_status);
         return false;
     }
     if (bound_target) {

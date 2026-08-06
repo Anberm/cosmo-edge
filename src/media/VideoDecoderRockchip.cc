@@ -66,6 +66,57 @@ bool IsCompact420Format(MppFrameFormat format) {
     return base == MPP_FMT_YUV420P || base == MPP_FMT_YUV420SP || base == MPP_FMT_YUV420SP_VU;
 }
 
+NativeVideoBufferPtr ExportMppBuffer(const std::string& decoder_name, MppFrame frame) {
+    if (!frame) {
+        return nullptr;
+    }
+    auto buffer                    = mpp_frame_get_buffer(frame);
+    const auto format              = mpp_frame_get_fmt(frame);
+    const auto base_format         = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
+    const size_t width             = mpp_frame_get_width(frame);
+    const size_t height            = mpp_frame_get_height(frame);
+    const size_t horizontal_stride = mpp_frame_get_hor_stride(frame);
+    const size_t vertical_stride   = mpp_frame_get_ver_stride(frame);
+    if (!buffer || !IsCompact420Format(format) || width == 0 || height == 0 ||
+        width > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+        height > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+        horizontal_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+        vertical_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+        horizontal_stride < width || vertical_stride < height) {
+        return nullptr;
+    }
+
+    NativeVideoBufferFormat native_format = NativeVideoBufferFormat::Unknown;
+    if (base_format == MPP_FMT_YUV420SP) {
+        native_format = NativeVideoBufferFormat::NV12;
+    } else if (base_format == MPP_FMT_YUV420SP_VU) {
+        native_format = NativeVideoBufferFormat::NV21;
+    } else if (base_format == MPP_FMT_YUV420P) {
+        native_format = NativeVideoBufferFormat::I420;
+    }
+    const int fd = mpp_buffer_get_fd(buffer);
+    if (native_format == NativeVideoBufferFormat::Unknown || fd < 0 ||
+        mpp_buffer_inc_ref(buffer) != MPP_OK) {
+        LOG_WARN("{} could not retain MPP DMA-BUF for inference", decoder_name);
+        return nullptr;
+    }
+
+    auto result          = std::make_shared<NativeVideoBuffer>();
+    result->fd            = fd;
+    result->bytes         = mpp_buffer_get_size(buffer);
+    result->width         = static_cast<int>(width);
+    result->height        = static_cast<int>(height);
+    result->width_stride  = static_cast<int>(horizontal_stride);
+    result->height_stride = static_cast<int>(vertical_stride);
+    result->format        = native_format;
+    result->owner = std::shared_ptr<void>(buffer, [](void* value) {
+        if (value) {
+            mpp_buffer_put(static_cast<MppBuffer>(value));
+        }
+    });
+    return result;
+}
+
 VideoFramePtr CopyMppFrame(const std::string& decoder_name, MppFrame frame) {
     if (!frame) {
         return nullptr;
@@ -513,7 +564,8 @@ DecodedVideoFrame VideoDecoderRockchip::ReceiveMppFrame(bool& made_progress) {
                 output != nullptr, ElapsedNanoseconds(copy_started));
             return output;
         },
-        []() { GetPreviewPipelineMetrics().RecordMppEarlyDrop(); });
+        []() { GetPreviewPipelineMetrics().RecordMppEarlyDrop(); },
+        [holder, decoder_name]() { return ExportMppBuffer(decoder_name, holder->frame); });
 }
 
 VideoFramePtr VideoDecoderRockchip::GetFrame() {

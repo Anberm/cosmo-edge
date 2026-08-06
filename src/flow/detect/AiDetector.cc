@@ -283,10 +283,12 @@ void AiDetector::HandFrames(std::vector<AlgDataPtr> alg_datas) {
             return;
     }
     std::vector<VideoFramePtr> images;
+    std::vector<media::NativeVideoBufferPtr> native_buffers;
     std::vector<AlgDataPtr> activeAlgDatas;
     for (auto algData : alg_datas) {
-        if (algData->chanDataDec.frame->Active()) {
+        if (algData && algData->chanDataDec.frame && algData->chanDataDec.frame->Active()) {
             images.push_back(algData->chanDataDec.frame);
+            native_buffers.push_back(algData->chanDataDec.native_buffer);
             activeAlgDatas.push_back(algData);
         }
     }
@@ -305,7 +307,11 @@ void AiDetector::HandFrames(std::vector<AlgDataPtr> alg_datas) {
         confThres                      = active_confidence_;
         LOG_INFO("{}[{} {}] Confidence Active. confThres size:{}", kTag, name_, uuid, confThres.size());
     }
-    action_status = detector_->Detect(images, confThres, detRsts);
+    action_status = detector_->Detect(images, native_buffers, confThres, detRsts);
+    native_buffers.clear();
+    for (auto& alg_data : activeAlgDatas) {
+        alg_data->chanDataDec.native_buffer.reset();
+    }
     if (util::ErrorEnum::Success != action_status) {
         LOG_ERRO("{}[{} {}] Detect Failed. Ret:{} images:{} confThres:{}", kTag, name_, uuid, action_status,
                  images.size(), confThres.size());

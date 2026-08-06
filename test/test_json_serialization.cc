@@ -167,6 +167,10 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     original.rknnBoundInputSyncCalls            = 4;
     original.rknnBoundInputSyncMs               = 0.5;
     original.rknnBoundInputFrames               = 4;
+    original.rknnMppDmaBufImportCalls           = 4;
+    original.rknnMppDmaBufImportMs              = 1.25;
+    original.rknnMppDmaBufFrames                = 4;
+    original.rknnMppDmaBufSourceBytes           = 12'533'760;
 
     std::string json;
     REQUIRE(cosmo::util::EncodeJson(original, json));
@@ -183,6 +187,9 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(doc["rknnBoundInputBindAttempts"] == 1);
     CHECK(doc["rknnBoundInputCopyBytes"] == 4'915'200);
     CHECK(doc["rknnBoundInputFrames"] == 4);
+    CHECK(doc["rknnMppDmaBufImportCalls"] == 4);
+    CHECK(doc["rknnMppDmaBufFrames"] == 4);
+    CHECK(doc["rknnMppDmaBufSourceBytes"] == 12'533'760);
 
     cosmo::MsgGpuInfo restored;
     REQUIRE(cosmo::util::DecodeJson(json, restored));
@@ -202,6 +209,10 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(restored.rknnBoundInputSyncCalls == original.rknnBoundInputSyncCalls);
     CHECK(restored.rknnBoundInputSyncMs == original.rknnBoundInputSyncMs);
     CHECK(restored.rknnBoundInputFrames == original.rknnBoundInputFrames);
+    CHECK(restored.rknnMppDmaBufImportCalls == original.rknnMppDmaBufImportCalls);
+    CHECK(restored.rknnMppDmaBufImportMs == original.rknnMppDmaBufImportMs);
+    CHECK(restored.rknnMppDmaBufFrames == original.rknnMppDmaBufFrames);
+    CHECK(restored.rknnMppDmaBufSourceBytes == original.rknnMppDmaBufSourceBytes);
 }
 
 TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {

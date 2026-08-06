@@ -12,6 +12,8 @@ namespace cosmo::nn {
 
 bool RknnFastPreprocessEnabled();
 bool RknnForceRgaFailure();
+bool RknnMppDmaBufEnabled();
+bool RknnForceMppDmaBufFailure();
 bool IsRknnDetectorResizeContract(int out_height, int out_width, int gravity,
                                   const std::vector<int>& padding_color);
 bool IsRknnNativeNormalizeContract(const std::vector<float>& mean,

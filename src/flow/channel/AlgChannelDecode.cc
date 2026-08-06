@@ -1,6 +1,9 @@
 // AlgChannelDecode — video decoding, color conversion and frame distribution.
 // Image capture and viewer distribution are in AlgChannelDecodeCapture.cc.
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 
 #include "flow/channel/AlgChannel.h"
@@ -24,6 +27,24 @@ namespace chrono = std::chrono;
 
 static constexpr const char* kTag = "ALGCHANNEL ";
 namespace cosmo {
+namespace {
+
+bool NativeInferenceBufferEnabled() {
+#if defined(COSMO_NN_USE_RKNN_BACKEND) && defined(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    const char* raw = std::getenv("COSMO_RKNN_MPP_DMABUF");
+    if (!raw || *raw == '\0') {
+        return true;
+    }
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value != "0" && value != "false" && value != "off" && value != "no";
+#else
+    return false;
+#endif
+}
+
+}  // namespace
 
 AlgChannelDecode::~AlgChannelDecode() {
     LOG_INFO("ChannelDecode:{}/{} Delete", channel_id_, uuid_);
@@ -285,6 +306,11 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
         task_plan = PrepareFrameDistribution(demux_data);
     }
 
+    media::NativeVideoBufferPtr native_inference_buffer;
+    if (task_plan.SupportsNativeInference() && NativeInferenceBufferEnabled()) {
+        native_inference_buffer = decoded_frame.ExportNativeBuffer();
+    }
+
     ViewerDistributionPlan viewer_plan;
 #ifdef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
     // Rockchip viewers move their existing FPS filter ahead of Copy-out. The
@@ -360,8 +386,10 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
     }
     DoCaptureImage(output_frame);
     CaptureJpeg(output_frame);
-    const auto color_convert =
-        [this](AlgDataPtr frame, VideoFramePtr in_data) { return ColorConvert(frame, in_data); };
+    const auto color_convert = [this, native_inference_buffer](AlgDataPtr frame,
+                                                               VideoFramePtr in_data) {
+        return ColorConvert(frame, in_data, native_inference_buffer);
+    };
     if (prepared_task_distribution) {
         DistributorPreparedFrame(task_plan, demux_data, output_frame, color_convert);
     } else {
@@ -402,7 +430,8 @@ AlgFrameInfo AlgChannelDecode::FrameInfoGet(int64_t index) {
 
 // Image capture and viewer distribution — moved to AlgChannelDecodeCapture.cc
 
-AlgDataPtr AlgChannelDecode::ColorConvert(AlgDataPtr demux_data, VideoFramePtr in_data) {
+AlgDataPtr AlgChannelDecode::ColorConvert(AlgDataPtr demux_data, VideoFramePtr in_data,
+                                          media::NativeVideoBufferPtr native_buffer) {
     if (!VideoFrameValid(in_data, true)) {
         return nullptr;
     }
@@ -444,6 +473,7 @@ AlgDataPtr AlgChannelDecode::ColorConvert(AlgDataPtr demux_data, VideoFramePtr i
     data->chanDataOrig.fps    = demux_data->chanDataOrig.fps;
     data->dataType            = AlgDataType::ChannelDataDec;
     data->chanDataDec.frame   = ai_frame;
+    data->chanDataDec.native_buffer = std::move(native_buffer);
     data->channelId           = channel_id_;
 
     data->firstTimePoint = demux_data->firstTimePoint;
