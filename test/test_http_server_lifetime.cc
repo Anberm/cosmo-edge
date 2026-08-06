@@ -2,6 +2,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
@@ -10,6 +12,8 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -17,6 +21,7 @@
 
 #include "catch_amalgamated.hpp"
 #include "network/http/HttpServer.h"
+#include "network/http/HttpServerThreadPool.h"
 #include "nlohmann/json.hpp"
 #include "util/ErrorCode.h"
 #include "util/IRequestDispatcher.h"
@@ -140,6 +145,102 @@ namespace {
     private:
         std::shared_ptr<BlockingDispatchState> state_;
     };
+
+    struct DispatcherProbe {
+        std::atomic<int> live_count{0};
+        std::atomic<int> dispatch_count{0};
+        std::array<int, 5> dispatch_count_by_instance{};
+    };
+
+    class CountingDispatcher final : public cosmo::IRequestDispatcher {
+    public:
+        explicit CountingDispatcher(std::shared_ptr<DispatcherProbe> probe,
+                                    std::optional<std::size_t> instance_index = std::nullopt)
+            : probe_(std::move(probe)), instance_index_(instance_index) {
+            probe_->live_count.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        ~CountingDispatcher() override {
+            probe_->live_count.fetch_sub(1, std::memory_order_relaxed);
+        }
+
+        bool SupportsRoute(const std::string& /*interface*/) override {
+            return true;
+        }
+
+        cosmo::RequestAdmission InspectRequest(cosmo::RequestDispatchContext& context,
+                                               bool /*require_known_route*/) override {
+            context.principal = "thread-pool-test";
+            return cosmo::RequestAdmission::kAllowed;
+        }
+
+        bool DispatchRequest(const cosmo::RequestDispatchContext& /*context*/, const std::string& /*body*/,
+                             std::string& response) override {
+            probe_->dispatch_count.fetch_add(1, std::memory_order_relaxed);
+            if (instance_index_ && *instance_index_ < probe_->dispatch_count_by_instance.size()) {
+                ++probe_->dispatch_count_by_instance[*instance_index_];
+            }
+            response = R"({"ok":true})";
+            return true;
+        }
+
+    private:
+        std::shared_ptr<DispatcherProbe> probe_;
+        std::optional<std::size_t> instance_index_;
+    };
+
+    class CopyThrowingDispatcherFactory {
+    public:
+        CopyThrowingDispatcherFactory(std::shared_ptr<DispatcherProbe> probe,
+                                      std::shared_ptr<std::atomic<bool>> should_throw)
+            : probe_(std::move(probe)), should_throw_(std::move(should_throw)) {}
+
+        CopyThrowingDispatcherFactory(const CopyThrowingDispatcherFactory& other)
+            : probe_(other.probe_), should_throw_(other.should_throw_) {
+            if (should_throw_->load(std::memory_order_relaxed)) {
+                throw std::runtime_error("dispatcher factory copy failure");
+            }
+        }
+
+        CopyThrowingDispatcherFactory(CopyThrowingDispatcherFactory&&) noexcept        = default;
+        CopyThrowingDispatcherFactory& operator=(const CopyThrowingDispatcherFactory&) = delete;
+        CopyThrowingDispatcherFactory& operator=(CopyThrowingDispatcherFactory&&)      = delete;
+
+        std::unique_ptr<cosmo::IRequestDispatcher> operator()() const {
+            return std::make_unique<CountingDispatcher>(probe_);
+        }
+
+    private:
+        std::shared_ptr<DispatcherProbe> probe_;
+        std::shared_ptr<std::atomic<bool>> should_throw_;
+    };
+
+    HttpServerThreadPool::DispatcherFactory MakeCountingDispatcherFactory(
+        const std::shared_ptr<DispatcherProbe>& probe, std::size_t* call_count = nullptr) {
+        return [probe, call_count]() -> std::unique_ptr<cosmo::IRequestDispatcher> {
+            std::optional<std::size_t> instance_index;
+            if (call_count != nullptr) {
+                instance_index = (*call_count)++;
+            }
+            return std::make_unique<CountingDispatcher>(probe, instance_index);
+        };
+    }
+
+    HttpServerCallbacks MakeThreadPoolTestCallbacks() {
+        return {
+            []() { return std::string("/tmp"); },
+            []() { return std::string("/tmp"); },
+            []() { return std::string("/tmp"); },
+        };
+    }
+
+    cosmo::MsgEnvelope MakeHttpRequestMessage(std::string interface) {
+        auto task          = std::make_unique<HttpReqTask>();
+        task->request_time = std::chrono::steady_clock::now();
+        task->interface    = std::move(interface);
+        task->mtk          = "thread-pool-token";
+        return {static_cast<int>(InnerMsgId::kHttpReq), std::move(task)};
+    }
 
     class ReleaseGuard {
     public:
@@ -346,6 +447,162 @@ namespace {
     }
 
 }  // namespace
+
+TEST_CASE("HttpServerThreadPool rejects invalid initialization inputs",
+          "[http-server][thread-pool][lifecycle]") {
+    HttpServer server;
+    HttpServerThreadPool thread_pool;
+    auto probe               = std::make_shared<DispatcherProbe>();
+    std::size_t call_count   = 0;
+    const auto valid_factory = MakeCountingDispatcherFactory(probe, &call_count);
+
+    for (const int thread_count : {-1, 0, 1, 2}) {
+        CAPTURE(thread_count);
+        CHECK_FALSE(thread_pool.Initialize(thread_count, &server, valid_factory));
+    }
+    CHECK(call_count == 0);
+    CHECK_FALSE(thread_pool.Initialize(3, nullptr, valid_factory));
+    CHECK(call_count == 0);
+    CHECK_FALSE(thread_pool.Initialize(3, &server, HttpServerThreadPool::DispatcherFactory{}));
+    CHECK(call_count == 0);
+
+    CHECK_NOTHROW(thread_pool.Uninitialize());
+    CHECK_NOTHROW(thread_pool.Uninitialize());
+    CHECK(probe->live_count.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("HttpServerThreadPool rolls back dispatcher factory failures",
+          "[http-server][thread-pool][lifecycle]") {
+    for (const bool should_throw : {false, true}) {
+        for (std::size_t failure_index = 0; failure_index < 3; ++failure_index) {
+            CAPTURE(should_throw, failure_index);
+            HttpServer server;
+            HttpServerThreadPool thread_pool;
+            auto probe             = std::make_shared<DispatcherProbe>();
+            std::size_t call_count = 0;
+            HttpServerThreadPool::DispatcherFactory failing_factory =
+                [probe, &call_count, failure_index,
+                 should_throw]() -> std::unique_ptr<cosmo::IRequestDispatcher> {
+                const auto current_index = call_count++;
+                if (current_index == failure_index) {
+                    if (should_throw) {
+                        throw std::runtime_error("dispatcher factory failure");
+                    }
+                    return nullptr;
+                }
+                return std::make_unique<CountingDispatcher>(probe);
+            };
+
+            CHECK_FALSE(thread_pool.Initialize(3, &server, std::move(failing_factory)));
+            CHECK(call_count == failure_index + 1);
+            CHECK(probe->live_count.load(std::memory_order_relaxed) == 0);
+            auto rejected_message = MakeHttpRequestMessage("/normal");
+            CHECK(thread_pool.PutMsg(std::move(rejected_message)) == -1);
+            CHECK_NOTHROW(thread_pool.Uninitialize());
+
+            REQUIRE(thread_pool.Initialize(3, &server, MakeCountingDispatcherFactory(probe)));
+            CHECK(probe->live_count.load(std::memory_order_relaxed) == 3);
+            thread_pool.Uninitialize();
+            CHECK(probe->live_count.load(std::memory_order_relaxed) == 0);
+        }
+    }
+}
+
+TEST_CASE("HttpServerThreadPool preserves active workers and drains accepted requests",
+          "[http-server][thread-pool][lifecycle]") {
+    constexpr std::array<const char*, 5> kInterfaces = {"/normal", "/api/dologin", "/api/ResetSystem",
+                                                        "/api/ThreadDebugInfo", "/api/QueryDeviceInfo"};
+
+    for (const int thread_count : {3, 4}) {
+        CAPTURE(thread_count);
+        HttpServer server;
+        HttpServerThreadPool thread_pool;
+        auto probe             = std::make_shared<DispatcherProbe>();
+        std::size_t call_count = 0;
+        const auto factory     = MakeCountingDispatcherFactory(probe, &call_count);
+
+        REQUIRE(thread_pool.Initialize(thread_count, &server, factory));
+        CHECK(probe->live_count.load(std::memory_order_relaxed) == thread_count);
+        CHECK(call_count == static_cast<std::size_t>(thread_count));
+
+        CHECK_FALSE(thread_pool.Initialize(thread_count, &server, factory));
+        CHECK(call_count == static_cast<std::size_t>(thread_count));
+
+        for (const auto* interface : kInterfaces) {
+            auto message = MakeHttpRequestMessage(interface);
+            REQUIRE(thread_pool.PutMsg(std::move(message)) >= 0);
+        }
+
+        CHECK_NOTHROW(thread_pool.Uninitialize());
+        CHECK(probe->dispatch_count.load(std::memory_order_relaxed) == static_cast<int>(kInterfaces.size()));
+        CHECK(probe->dispatch_count_by_instance[0] == 2);
+        CHECK(probe->dispatch_count_by_instance[1] == 2);
+        CHECK(probe->dispatch_count_by_instance[2] == 1);
+        if (thread_count == 4) {
+            CHECK(probe->dispatch_count_by_instance[3] == 0);
+        }
+        CHECK(probe->live_count.load(std::memory_order_relaxed) == 0);
+        CHECK_NOTHROW(thread_pool.Uninitialize());
+    }
+}
+
+TEST_CASE("HttpServer releases resources after worker dispatcher construction fails",
+          "[http-server][thread-pool][lifecycle]") {
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+
+    HttpServer server;
+    auto failing_probe                 = std::make_shared<DispatcherProbe>();
+    std::size_t call_count             = 0;
+    constexpr std::size_t kFailureCall = 2;
+    HttpServer::DispatcherFactory failing_factory =
+        [failing_probe, &call_count]() -> std::unique_ptr<cosmo::IRequestDispatcher> {
+        const auto current_call = call_count++;
+        if (current_call == kFailureCall) {
+            throw std::runtime_error("worker dispatcher construction failure");
+        }
+        return std::make_unique<CountingDispatcher>(failing_probe);
+    };
+
+    CHECK_FALSE(
+        server.Initialize("127.0.0.1", port, std::move(failing_factory), MakeThreadPoolTestCallbacks()));
+    CHECK(call_count == kFailureCall + 1);
+    CHECK(failing_probe->live_count.load(std::memory_order_relaxed) == 0);
+
+    auto valid_probe = std::make_shared<DispatcherProbe>();
+    REQUIRE(server.Initialize("127.0.0.1", port, MakeCountingDispatcherFactory(valid_probe),
+                              MakeThreadPoolTestCallbacks()));
+    CHECK(valid_probe->live_count.load(std::memory_order_relaxed) == 5);
+    CHECK_NOTHROW(server.UnInitialize());
+    CHECK(valid_probe->live_count.load(std::memory_order_relaxed) == 0);
+    CHECK_NOTHROW(server.UnInitialize());
+}
+
+TEST_CASE("HttpServer releases resources when the worker dispatcher factory copy throws",
+          "[http-server][thread-pool][lifecycle]") {
+    auto port = FindAvailablePort();
+    REQUIRE(port != 0);
+
+    HttpServer server;
+    auto failing_probe = std::make_shared<DispatcherProbe>();
+    auto should_throw  = std::make_shared<std::atomic<bool>>(false);
+    HttpServer::DispatcherFactory failing_factory =
+        CopyThrowingDispatcherFactory(failing_probe, should_throw);
+    should_throw->store(true, std::memory_order_relaxed);
+
+    bool is_initialized = true;
+    REQUIRE_NOTHROW(is_initialized = server.Initialize("127.0.0.1", port, std::move(failing_factory),
+                                                       MakeThreadPoolTestCallbacks()));
+    CHECK_FALSE(is_initialized);
+    CHECK(failing_probe->live_count.load(std::memory_order_relaxed) == 0);
+
+    auto valid_probe = std::make_shared<DispatcherProbe>();
+    REQUIRE(server.Initialize("127.0.0.1", port, MakeCountingDispatcherFactory(valid_probe),
+                              MakeThreadPoolTestCallbacks()));
+    CHECK(valid_probe->live_count.load(std::memory_order_relaxed) == 5);
+    CHECK_NOTHROW(server.UnInitialize());
+    CHECK(valid_probe->live_count.load(std::memory_order_relaxed) == 0);
+}
 
 TEST_CASE("HttpServer keeps libevent requests on the event thread during shutdown", "[http-server][thread]") {
     ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
