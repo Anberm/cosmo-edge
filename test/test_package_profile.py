@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import json
 import pathlib
 import tarfile
 import tempfile
@@ -22,7 +23,12 @@ spec.loader.exec_module(verifier)
 
 
 class PackageProfileTests(unittest.TestCase):
-    def make_package(self, profile: str, model: bytes = b"plain-model") -> pathlib.Path:
+    def make_package(
+        self,
+        profile: str,
+        model: bytes = b"plain-model",
+        model_type: str = "yolov8_det",
+    ) -> pathlib.Path:
         root = "cosmo-V1.5.0"
         directory = pathlib.Path(tempfile.mkdtemp())
         initial = directory / f"{root}.tar.gz"
@@ -52,6 +58,11 @@ class PackageProfileTests(unittest.TestCase):
             info.size = len(model)
             info.mode = 0o644
             archive.addfile(info, io.BytesIO(model))
+            config = json.dumps({"model_type": model_type}).encode()
+            info = tarfile.TarInfo(f"{root}/resource/models/preset/config.json")
+            info.size = len(config)
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(config))
         digest = hashlib.md5(initial.read_bytes(), usedforsecurity=False).hexdigest()
         final = directory / f"{root}-{digest}.tar.gz"
         initial.rename(final)
@@ -65,6 +76,14 @@ class PackageProfileTests(unittest.TestCase):
             self.make_package("production-release", b"CEMC" + b"encrypted"),
             "production-release",
         )
+
+    def test_protected_accepts_plain_vllm_model(self) -> None:
+        for model_type in ("qwen3vl", "qwen3_5"):
+            with self.subTest(model_type=model_type):
+                verifier.verify_package(
+                    self.make_package("production-release", model_type=model_type),
+                    "production-release",
+                )
 
     def test_channels_reject_each_others_model_format(self) -> None:
         with self.assertRaises(verifier.PackageAuditError):
