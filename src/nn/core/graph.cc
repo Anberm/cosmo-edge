@@ -410,6 +410,7 @@ Status Graph::WireNetNode(const ModelInfo& model, const std::vector<std::string>
     }
     net_ptr->SetNetworkInputNames(actual_input_names);
     net_ptr->SetNetworkOutputNames(actual_output_names);
+    net_ptr->SetInputContract(model.input_contract);
 
     // Insert copy nodes right before net_node (after all preprocess nodes)
     for (auto& copy_node : new_copy_nodes) {
@@ -732,15 +733,14 @@ Status Graph::LoadWeight(const std::string& model_path) {
     }
 
     if (!fs::is_directory(base_path)) {
-        return Status(COSMO_NN_ERR_LOAD_MODEL, std::string(backend_name) +
-                                                   " backend expects a model directory with per-net files");
+        return Status(COSMO_NN_ERR_LOAD_MODEL,
+                      std::string(backend_name) + " backend expects a model directory with per-net files");
     }
 
     if (net_node_num != static_cast<int>(model_infos_.size())) {
-        return Status(COSMO_NN_ERR_LOAD_MODEL, std::string(backend_name) + " graph net nodes (" +
-                                                   std::to_string(net_node_num) +
-                                                   ") do not match config models (" +
-                                                   std::to_string(model_infos_.size()) + ")");
+        return Status(COSMO_NN_ERR_LOAD_MODEL,
+                      std::string(backend_name) + " graph net nodes (" + std::to_string(net_node_num) +
+                          ") do not match config models (" + std::to_string(model_infos_.size()) + ")");
     }
 
     std::vector<fs::path> model_files;
@@ -764,25 +764,25 @@ Status Graph::LoadWeight(const std::string& model_path) {
 
         std::ifstream model_stream(part_path, std::ios::in | std::ios::binary);
         if (model_stream.fail()) {
-            return Status(COSMO_NN_ERR_LOAD_MODEL, "open " + std::string(backend_name) +
-                                                       " model file failed: " + part_path.string());
+            return Status(COSMO_NN_ERR_LOAD_MODEL,
+                          "open " + std::string(backend_name) + " model file failed: " + part_path.string());
         }
 
         model_stream.seekg(0, std::ios::end);
         long int model_size = static_cast<long int>(model_stream.tellg());
         model_stream.seekg(0, std::ios::beg);
         if (model_size <= 0) {
-            return Status(COSMO_NN_ERR_LOAD_MODEL,
-                          std::string(backend_name) + " model file is empty or unreadable: " +
-                              part_path.string());
+            return Status(
+                COSMO_NN_ERR_LOAD_MODEL,
+                std::string(backend_name) + " model file is empty or unreadable: " + part_path.string());
         }
 
         std::unique_ptr<char[]> model_data;
         try {
             model_data.reset(new char[static_cast<size_t>(model_size)]);
         } catch (const std::bad_alloc&) {
-            return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "not enough memory to load " +
-                                                          std::string(backend_name) + " model");
+            return Status(COSMO_NN_ERR_OUT_OF_MEMORY,
+                          "not enough memory to load " + std::string(backend_name) + " model");
         }
         model_stream.read(model_data.get(), model_size);
 

@@ -99,11 +99,12 @@ Status YoloV5DetPipeline::Init(const PipelineConfig& config, const std::string& 
     for (auto& mc : config.models) {
         nlohmann::json p = pipeline_utils::ParseJsonObject(mc.params_json);
         ModelInfo model;
-        model.name      = mc.name;
-        model.filename  = mc.file_name;
-        model.file_md5  = mc.file_md5;
-        model.max_batch = mc.max_batch;
-        max_batch_      = mc.max_batch;
+        model.name           = mc.name;
+        model.filename       = mc.file_name;
+        model.file_md5       = mc.file_md5;
+        model.input_contract = pipeline_utils::ReadString(p, "rknn_input_contract", std::string());
+        model.max_batch      = mc.max_batch;
+        max_batch_           = mc.max_batch;
 
         for (auto& in_def : mc.inputs) {
             InputNodeInfo input;
@@ -191,11 +192,12 @@ Status YoloV8DetPipeline::Init(const PipelineConfig& config, const std::string& 
     for (auto& mc : config.models) {
         nlohmann::json p = pipeline_utils::ParseJsonObject(mc.params_json);
         ModelInfo model;
-        model.name      = mc.name;
-        model.filename  = mc.file_name;
-        model.file_md5  = mc.file_md5;
-        model.max_batch = mc.max_batch;
-        max_batch_      = mc.max_batch;
+        model.name           = mc.name;
+        model.filename       = mc.file_name;
+        model.file_md5       = mc.file_md5;
+        model.input_contract = pipeline_utils::ReadString(p, "rknn_input_contract", std::string());
+        model.max_batch      = mc.max_batch;
+        max_batch_           = mc.max_batch;
 
         for (auto& in_def : mc.inputs) {
             InputNodeInfo input;

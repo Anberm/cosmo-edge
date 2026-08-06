@@ -62,12 +62,9 @@ TEST_CASE("RKNN detector fast preprocessing contracts are exact", "[nn][rknn][fa
     CHECK(IsRknnDetectorResizeContract(640, 640, 1, {114, 114, 114}));
     CHECK_FALSE(IsRknnDetectorResizeContract(640, 640, 0, {114, 114, 114}));
     CHECK_FALSE(IsRknnDetectorResizeContract(224, 224, 1, {114, 114, 114}));
-    CHECK(IsRknnNativeNormalizeContract({0.0f, 0.0f, 0.0f}, {}, 0.00392157f,
-                                        {1, 640, 640, 3}));
-    CHECK_FALSE(IsRknnNativeNormalizeContract({1.0f, 0.0f, 0.0f}, {}, 0.00392157f,
-                                              {1, 640, 640, 3}));
-    CHECK_FALSE(IsRknnNativeNormalizeContract({0.0f, 0.0f, 0.0f}, {}, 0.00392157f,
-                                              {1, 224, 224, 3}));
+    CHECK(IsRknnNativeNormalizeContract({0.0f, 0.0f, 0.0f}, {}, 0.00392157f, {1, 640, 640, 3}));
+    CHECK_FALSE(IsRknnNativeNormalizeContract({1.0f, 0.0f, 0.0f}, {}, 0.00392157f, {1, 640, 640, 3}));
+    CHECK_FALSE(IsRknnNativeNormalizeContract({0.0f, 0.0f, 0.0f}, {}, 0.00392157f, {1, 224, 224, 3}));
 
     const std::array<uint8_t, 6> rgb{0, 127, 255, 255, 1, 128};
     std::array<int8_t, 6> native{};
@@ -81,16 +78,16 @@ TEST_CASE("RKNN native input contract requires the model quantization identity",
           "[nn][rknn][fast-preprocess]") {
     using namespace cosmo::nn;
     rknn_tensor_attr attr{};
-    attr.n_dims    = 4;
-    attr.dims[0]   = 1;
-    attr.dims[1]   = 640;
-    attr.dims[2]   = 640;
-    attr.dims[3]   = 3;
-    attr.fmt       = RKNN_TENSOR_NHWC;
-    attr.type      = RKNN_TENSOR_INT8;
-    attr.qnt_type  = RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC;
-    attr.zp        = -128;
-    attr.scale     = 0.00392157f;
+    attr.n_dims     = 4;
+    attr.dims[0]    = 1;
+    attr.dims[1]    = 640;
+    attr.dims[2]    = 640;
+    attr.dims[3]    = 3;
+    attr.fmt        = RKNN_TENSOR_NHWC;
+    attr.type       = RKNN_TENSOR_INT8;
+    attr.qnt_type   = RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC;
+    attr.zp         = -128;
+    attr.scale      = 0.00392157f;
     const auto desc = PackedImageDesc(640, 640, IMAGE_RGB, DATA_TYPE_INT8);
     CHECK(IsRknnNativeInt8InputCompatible(attr, desc));
     attr.zp = 0;
@@ -144,6 +141,9 @@ TEST_CASE("RKNN bound input validates native stride and copies packed rows", "[n
 TEST_CASE("RKNN RGA bound input validates the native tensor and DMA-BUF target stride",
           "[nn][rknn][bound-input][rga]") {
     using namespace cosmo::nn;
+    CHECK(IsRknnRgbUint8InputContract(kRknnRgbUint8InputContract));
+    CHECK_FALSE(IsRknnRgbUint8InputContract("host-normalized-int8"));
+
     rknn_tensor_attr attr{};
     attr.n_dims           = 4;
     attr.dims[0]          = 1;
@@ -160,6 +160,22 @@ TEST_CASE("RKNN RGA bound input validates the native tensor and DMA-BUF target s
     attr.size_with_stride = 24;
     std::string reason;
     CHECK(IsRknnRgaBoundInputCompatible(attr, 2, 2, &reason));
+
+    rknn_tensor_attr uint8_attr{};
+    REQUIRE(ConfigureRknnRgaUint8InputAttr(attr, 2, 2, uint8_attr, &reason));
+    CHECK(uint8_attr.type == RKNN_TENSOR_UINT8);
+    CHECK(uint8_attr.fmt == RKNN_TENSOR_NHWC);
+    CHECK(uint8_attr.pass_through == 0);
+    CHECK(uint8_attr.qnt_type == attr.qnt_type);
+    CHECK(uint8_attr.zp == attr.zp);
+    CHECK(uint8_attr.scale == attr.scale);
+    CHECK(uint8_attr.size_with_stride == attr.size_with_stride);
+    CHECK(reason.empty());
+
+    auto incompatible = attr;
+    incompatible.zp   = 0;
+    CHECK_FALSE(ConfigureRknnRgaUint8InputAttr(incompatible, 2, 2, uint8_attr, &reason));
+    CHECK(reason.find("quantization") != std::string::npos);
 
     StubBoundInputProvider provider;
     uint8_t storage[24]{};
@@ -182,25 +198,20 @@ TEST_CASE("RKNN RGA bound input requantizes UINT8 pixels in place without touchi
     using namespace cosmo::nn;
     std::array<uint8_t, 24> pixels{};
     pixels.fill(99);
-    const std::array<uint8_t, 12> packed{0, 1, 127, 128, 254, 255,
-                                         255, 128, 127, 126, 1, 0};
+    const std::array<uint8_t, 12> packed{0, 1, 127, 128, 254, 255, 255, 128, 127, 126, 1, 0};
     std::copy(packed.begin(), packed.begin() + 6, pixels.begin());
     std::copy(packed.begin() + 6, packed.end(), pixels.begin() + 12);
     std::string reason;
-    REQUIRE(RequantizeRknnPackedUint8ToInt8InPlace(pixels.data(), pixels.size(), 2, 2, 3, 4,
-                                                   &reason));
+    REQUIRE(RequantizeRknnPackedUint8ToInt8InPlace(pixels.data(), pixels.size(), 2, 2, 3, 4, &reason));
     CHECK((std::array<uint8_t, 6>{pixels[0], pixels[1], pixels[2], pixels[3], pixels[4], pixels[5]}) ==
           std::array<uint8_t, 6>{128, 129, 255, 0, 126, 127});
     CHECK((std::array<uint8_t, 6>{pixels[12], pixels[13], pixels[14], pixels[15], pixels[16], pixels[17]}) ==
           std::array<uint8_t, 6>{127, 0, 255, 254, 129, 128});
-    CHECK(std::all_of(pixels.begin() + 6, pixels.begin() + 12,
-                      [](uint8_t value) { return value == 99; }));
-    CHECK(std::all_of(pixels.begin() + 18, pixels.end(),
-                      [](uint8_t value) { return value == 99; }));
+    CHECK(std::all_of(pixels.begin() + 6, pixels.begin() + 12, [](uint8_t value) { return value == 99; }));
+    CHECK(std::all_of(pixels.begin() + 18, pixels.end(), [](uint8_t value) { return value == 99; }));
     CHECK(reason.empty());
 
-    CHECK_FALSE(RequantizeRknnPackedUint8ToInt8InPlace(pixels.data(), 8, 2, 2, 3, 2,
-                                                       &reason));
+    CHECK_FALSE(RequantizeRknnPackedUint8ToInt8InPlace(pixels.data(), 8, 2, 2, 3, 2, &reason));
     CHECK(reason.find("smaller") != std::string::npos);
 }
 
@@ -243,8 +254,7 @@ TEST_CASE("RKNN core scheduling maps explicit and split modes deterministically"
     CHECK(std::string(RknnCoreModeName(RknnCoreMode::Core01)) == "core0_1");
 }
 
-TEST_CASE("RKNN MPP DMA-BUF switch defaults on and supports explicit rollback",
-          "[nn][rknn][mpp-dmabuf]") {
+TEST_CASE("RKNN MPP DMA-BUF switch defaults on and supports explicit rollback", "[nn][rknn][mpp-dmabuf]") {
     using namespace cosmo::nn;
     {
         ScopedEnvironment enabled("COSMO_RKNN_MPP_DMABUF", "1");
@@ -276,8 +286,12 @@ TEST_CASE("RKNN native output capability excludes FP16 and malformed YOLOv8 head
           "[nn][rknn][fast-output][fp16]") {
     using namespace cosmo::nn;
     const std::array<std::array<uint32_t, 4>, 6> shapes{{
-        {{1, 64, 80, 80}}, {{1, 80, 80, 80}}, {{1, 64, 40, 40}},
-        {{1, 80, 40, 40}}, {{1, 64, 20, 20}}, {{1, 80, 20, 20}},
+        {{1, 64, 80, 80}},
+        {{1, 80, 80, 80}},
+        {{1, 64, 40, 40}},
+        {{1, 80, 40, 40}},
+        {{1, 64, 20, 20}},
+        {{1, 80, 20, 20}},
     }};
     std::vector<rknn_tensor_attr> attrs(shapes.size());
     for (size_t index = 0; index < attrs.size(); ++index) {
@@ -302,20 +316,20 @@ TEST_CASE("RKNN native output capability excludes FP16 and malformed YOLOv8 head
     CHECK(IsRknnNativeYolov8OutputCompatible(attrs, &reason));
     CHECK(reason.empty());
 
-    auto fp16       = attrs;
-    fp16[0].type    = RKNN_TENSOR_FLOAT16;
-    fp16[0].size   *= 2;
+    auto fp16    = attrs;
+    fp16[0].type = RKNN_TENSOR_FLOAT16;
+    fp16[0].size *= 2;
     CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(fp16, &reason));
     CHECK(reason.find("FP16") != std::string::npos);
 
-    auto wrong_format    = attrs;
-    wrong_format[0].fmt  = RKNN_TENSOR_NHWC;
+    auto wrong_format   = attrs;
+    wrong_format[0].fmt = RKNN_TENSOR_NHWC;
     CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(wrong_format));
-    auto wrong_size      = attrs;
-    wrong_size[0].size  += 1;
+    auto wrong_size = attrs;
+    wrong_size[0].size += 1;
     CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(wrong_size));
-    auto wrong_quantization      = attrs;
-    wrong_quantization[0].scale  = 0.0f;
+    auto wrong_quantization     = attrs;
+    wrong_quantization[0].scale = 0.0f;
     CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(wrong_quantization));
 
     const std::array<std::array<uint32_t, 4>, 9> score_sum_shapes{{
@@ -355,8 +369,7 @@ TEST_CASE("RKNN native output capability excludes FP16 and malformed YOLOv8 head
     CHECK(reason.find("FP16") != std::string::npos);
 }
 
-TEST_CASE("RKNN native output switch defaults on and supports explicit rollback",
-          "[nn][rknn][fast-output]") {
+TEST_CASE("RKNN native output switch defaults on and supports explicit rollback", "[nn][rknn][fast-output]") {
     using namespace cosmo::nn;
     {
         ScopedEnvironment enabled("COSMO_RKNN_FAST_OUTPUT", "1");
@@ -541,8 +554,7 @@ TEST_CASE("RKNN RGA failure falls back once to CPU while preserving native input
     REQUIRE(bool(resize_node.Forward(resize_bottoms, resize_tops)));
     const auto resized_metrics = GetInferencePipelineMetrics().Snapshot();
     CHECK(resized_metrics.rknn_rga_failures == before.rknn_rga_failures + 1);
-    CHECK(resized_metrics.rknn_cpu_resize_fallback_calls ==
-          before.rknn_cpu_resize_fallback_calls + 1);
+    CHECK(resized_metrics.rknn_cpu_resize_fallback_calls == before.rknn_cpu_resize_fallback_calls + 1);
 
     Normalize normalize;
     normalize.mean   = {0.0f, 0.0f, 0.0f};
@@ -551,8 +563,8 @@ TEST_CASE("RKNN RGA failure falls back once to CPU while preserving native input
     RknnNormalizeNode normalize_node;
     normalize_node.SetSharedResource(&resource);
     normalize_node.LoadParam(&normalize);
-    REQUIRE(bool(normalize_node.InferTopShapesWithBottoms(
-        {resized->GetBlobDesc().dims}, {resized->GetBlobDesc().data_type})));
+    REQUIRE(bool(normalize_node.InferTopShapesWithBottoms({resized->GetBlobDesc().dims},
+                                                          {resized->GetBlobDesc().data_type})));
     BlobDesc native_desc;
     native_desc.device_type = DEVICE_NAIVE;
     native_desc.data_type   = normalize_node.GetTopBlobDataTypes().front();

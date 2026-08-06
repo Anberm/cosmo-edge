@@ -13,6 +13,9 @@
 
 namespace cosmo::nn {
 
+inline constexpr char kRknnRgbUint8InputContract[] = "cosmo.rknn.input.rgb_u8_nhwc_0_255_to_0_1.v1";
+
+bool IsRknnRgbUint8InputContract(const std::string& contract);
 bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc);
 bool IsRknnNativeYolov8OutputCompatible(const std::vector<rknn_tensor_attr>& attrs,
                                         std::string* reason = nullptr);
@@ -20,12 +23,13 @@ bool IsRknnBoundInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc
                                     std::string* reason = nullptr);
 bool IsRknnRgaBoundInputCompatible(const rknn_tensor_attr& attr, int height, int width,
                                    std::string* reason = nullptr);
+bool ConfigureRknnRgaUint8InputAttr(const rknn_tensor_attr& native_attr, int height, int width,
+                                    rknn_tensor_attr& bound_attr, std::string* reason = nullptr);
 bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
                              size_t destination_bytes, int height, int width, int channels, int width_stride,
                              std::string* reason = nullptr);
-bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height,
-                                            int width, int channels, int width_stride,
-                                            std::string* reason = nullptr);
+bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height, int width,
+                                            int channels, int width_stride, std::string* reason = nullptr);
 bool RknnFastOutputEnabled();
 bool RknnDirectCandidatesEnabled();
 bool RknnBoundInputEnabled();
@@ -62,13 +66,14 @@ private:
     enum class BoundInputMode : uint8_t {
         None = 0,
         NativeInt8,
+        RgaUint8,
         RgaNativeInt8,
     };
 
     Status QueryTensorAttributes();
     Status PrepareInput(const Blob& blob, std::vector<float>& nhwc, int& height, int& width) const;
-    Status PrepareNativeCompatibilityInput(const Blob& blob, std::vector<float>& nhwc,
-                                           int& height, int& width) const;
+    Status PrepareNativeCompatibilityInput(const Blob& blob, std::vector<float>& nhwc, int& height,
+                                           int& width) const;
     std::vector<int> TensorShape(const rknn_tensor_attr& attr) const;
     size_t TensorElementCount(const rknn_tensor_attr& attr) const;
     bool TryBindNativeInputMemory(const BlobDesc& desc, std::string& reason);

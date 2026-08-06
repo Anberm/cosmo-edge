@@ -34,11 +34,12 @@ struct PUBLIC OutputNodeInfo {
 };
 
 struct PUBLIC ModelInfo {
-    std::string description = {};
-    std::string name        = {};
-    std::string filename    = {};
-    std::string file_md5    = {};
-    int max_batch           = 0;
+    std::string description    = {};
+    std::string name           = {};
+    std::string filename       = {};
+    std::string file_md5       = {};
+    std::string input_contract = {};
+    int max_batch              = 0;
 
     std::vector<InputNodeInfo> input_node_infos   = {};
     std::vector<OutputNodeInfo> output_node_infos = {};

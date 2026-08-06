@@ -25,9 +25,8 @@ namespace {
     using MetricsClock = std::chrono::steady_clock;
 
     uint64_t ElapsedNanoseconds(MetricsClock::time_point started_at) {
-        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                         MetricsClock::now() - started_at)
-                                         .count());
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(MetricsClock::now() - started_at).count());
     }
 
     Status RknnError(const std::string& operation, int code) {
@@ -42,13 +41,14 @@ namespace {
             if (active_)
                 rknn_outputs_release(context_, static_cast<uint32_t>(outputs_.size()), outputs_.data());
         }
-        void Activate() { active_ = true; }
+        void Activate() {
+            active_ = true;
+        }
         int Release() {
             if (!active_)
                 return RKNN_SUCC;
             active_ = false;
-            return rknn_outputs_release(context_, static_cast<uint32_t>(outputs_.size()),
-                                        outputs_.data());
+            return rknn_outputs_release(context_, static_cast<uint32_t>(outputs_.size()), outputs_.data());
         }
 
     private:
@@ -77,8 +77,7 @@ namespace {
         size_t count = 1;
         for (uint32_t index = 0; index < attr.n_dims; ++index) {
             if (attr.dims[index] == 0 ||
-                count > std::numeric_limits<size_t>::max() /
-                            static_cast<size_t>(attr.dims[index])) {
+                count > std::numeric_limits<size_t>::max() / static_cast<size_t>(attr.dims[index])) {
                 return 0;
             }
             count *= static_cast<size_t>(attr.dims[index]);
@@ -197,6 +196,10 @@ const char* RknnCoreModeName(RknnCoreMode mode) {
     }
 }
 
+bool IsRknnRgbUint8InputContract(const std::string& contract) {
+    return contract == kRknnRgbUint8InputContract;
+}
+
 bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc) {
     constexpr float kExpectedScale = 0.00392157f;
     return desc.data_type == DATA_TYPE_INT8 && desc.data_format == DATA_FORMAT_NHWC &&
@@ -208,8 +211,7 @@ bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDes
            attr.dims[2] == static_cast<uint32_t>(desc.dims[2]) && attr.dims[3] == 3;
 }
 
-bool IsRknnNativeYolov8OutputCompatible(const std::vector<rknn_tensor_attr>& attrs,
-                                        std::string* reason) {
+bool IsRknnNativeYolov8OutputCompatible(const std::vector<rknn_tensor_attr>& attrs, std::string* reason) {
     const auto reject = [&](const char* message) {
         if (reason)
             *reason = message;
@@ -289,6 +291,24 @@ bool IsRknnRgaBoundInputCompatible(const rknn_tensor_attr& attr, int height, int
     return IsRknnBoundInt8InputCompatible(attr, desc, reason);
 }
 
+bool ConfigureRknnRgaUint8InputAttr(const rknn_tensor_attr& native_attr, int height, int width,
+                                    rknn_tensor_attr& bound_attr, std::string* reason) {
+    if (!IsRknnRgaBoundInputCompatible(native_attr, height, width, reason))
+        return false;
+
+    // RKNN's native tensor is INT8, but the zero-copy contract permits a UINT8
+    // bound input. Runtime then fuses the model's normalize/quantize operation
+    // onto the NPU, so RGA can write RGB bytes directly without a host-wide
+    // XOR/subtract-128 pass. This mirrors Rockchip's rknpu2 zero-copy sample.
+    bound_attr              = native_attr;
+    bound_attr.type         = RKNN_TENSOR_UINT8;
+    bound_attr.fmt          = RKNN_TENSOR_NHWC;
+    bound_attr.pass_through = 0;
+    if (reason)
+        reason->clear();
+    return true;
+}
+
 bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
                              size_t destination_bytes, int height, int width, int channels, int width_stride,
                              std::string* reason) {
@@ -323,9 +343,8 @@ bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* 
     return true;
 }
 
-bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height,
-                                            int width, int channels, int width_stride,
-                                            std::string* reason) {
+bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height, int width,
+                                            int channels, int width_stride, std::string* reason) {
     const auto reject = [&](const char* message) {
         if (reason)
             *reason = message;
@@ -397,17 +416,17 @@ void RknnNetNode::DestroyContext() {
     std::vector<int>().swap(yolov8_candidate_scratch_.active_points);
     model_data_.clear();
     std::vector<float>().swap(input_nhwc_);
-    io_count_                = {};
-    output_adapter_contract_ = {};
-    bound_input_attr_        = {};
-    yolov8_heads_          = false;
-    native_yolov8_outputs_ = false;
-    detector_model_        = false;
-    bound_input_eligible_    = true;
+    io_count_                 = {};
+    output_adapter_contract_  = {};
+    bound_input_attr_         = {};
+    yolov8_heads_             = false;
+    native_yolov8_outputs_    = false;
+    detector_model_           = false;
+    bound_input_eligible_     = true;
     rga_bound_input_eligible_ = true;
     bound_input_mode_         = BoundInputMode::None;
-    yolov8_class_count_    = 0;
-    yolov8_point_count_    = 0;
+    yolov8_class_count_       = 0;
+    yolov8_point_count_       = 0;
 }
 
 bool RknnNetNode::AllocateAndBindInputMemory(rknn_tensor_attr attr, BoundInputMode mode,
@@ -433,7 +452,7 @@ bool RknnNetNode::AllocateAndBindInputMemory(rknn_tensor_attr attr, BoundInputMo
     bound_input_attr_   = attr;
     bound_input_memory_ = memory;
     bound_input_mode_   = mode;
-    if (mode == BoundInputMode::RgaNativeInt8)
+    if (mode == BoundInputMode::RgaUint8 || mode == BoundInputMode::RgaNativeInt8)
         PublishRgaBoundInputTarget();
     reason.clear();
     return true;
@@ -454,22 +473,48 @@ bool RknnNetNode::TryBindNativeInputMemory(const BlobDesc& desc, std::string& re
 }
 
 bool RknnNetNode::TryBindRgaInputMemory(int height, int width, std::string& reason) {
-    rknn_tensor_attr attr{};
-    attr.index = 0;
-    int result = rknn_query(context_, RKNN_QUERY_NATIVE_INPUT_ATTR, &attr, sizeof(attr));
+    rknn_tensor_attr native_attr{};
+    native_attr.index = 0;
+    int result        = rknn_query(context_, RKNN_QUERY_NATIVE_INPUT_ATTR, &native_attr, sizeof(native_attr));
     if (result != RKNN_SUCC) {
         reason = "RKNN_QUERY_NATIVE_INPUT_ATTR failed with RKNN code " + std::to_string(result);
         return false;
     }
-    if (!IsRknnRgaBoundInputCompatible(attr, height, width, &reason))
+    if (!IsRknnRgaBoundInputCompatible(native_attr, height, width, &reason))
         return false;
-    attr.pass_through = 1;
-    return AllocateAndBindInputMemory(attr, BoundInputMode::RgaNativeInt8, reason);
+
+    if (IsRknnRgbUint8InputContract(input_contract_)) {
+        rknn_tensor_attr uint8_attr{};
+        if (!ConfigureRknnRgaUint8InputAttr(native_attr, height, width, uint8_attr, &reason))
+            return false;
+        std::string uint8_reason;
+        if (AllocateAndBindInputMemory(uint8_attr, BoundInputMode::RgaUint8, uint8_reason))
+            return true;
+
+        // Older or model-specific runtimes may reject the declared UINT8
+        // contract. Preserve the native-INT8 binding as a correctness fallback;
+        // telemetry keeps this CPU-requantized mode visible.
+        native_attr.pass_through = 1;
+        if (AllocateAndBindInputMemory(native_attr, BoundInputMode::RgaNativeInt8, reason)) {
+            LOG_WARN("RKNN fused UINT8 bound input unavailable ({}); using native INT8 fallback",
+                     uint8_reason);
+            return true;
+        }
+        reason = "UINT8 bound input failed: " + uint8_reason + "; native INT8 fallback failed: " + reason;
+        return false;
+    }
+
+    // A native INT8 tensor does not prove that the model embeds normalization.
+    // Host-owned models therefore retain the exact, already-qualified
+    // uint8-to-int8 conversion until their config declares the contract.
+    native_attr.pass_through = 1;
+    return AllocateAndBindInputMemory(native_attr, BoundInputMode::RgaNativeInt8, reason);
 }
 
 void RknnNetNode::PublishRgaBoundInputTarget() {
-    if (!shared_resource || !bound_input_memory_ ||
-        bound_input_mode_ != BoundInputMode::RgaNativeInt8) {
+    const bool rga_bound_mode =
+        bound_input_mode_ == BoundInputMode::RgaUint8 || bound_input_mode_ == BoundInputMode::RgaNativeInt8;
+    if (!shared_resource || !bound_input_memory_ || !rga_bound_mode) {
         return;
     }
     auto& target           = shared_resource->rknn_bound_input_target;
@@ -506,8 +551,9 @@ bool RknnNetNode::EnsureRgaBoundInput(int height, int width, std::string& reason
         return false;
     }
     if (bound_input_memory_) {
-        if (bound_input_mode_ == BoundInputMode::RgaNativeInt8 && shared_resource &&
-            shared_resource->rknn_bound_input_target.owner == this &&
+        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaUint8 ||
+                                    bound_input_mode_ == BoundInputMode::RgaNativeInt8;
+        if (rga_bound_mode && shared_resource && shared_resource->rknn_bound_input_target.owner == this &&
             shared_resource->rknn_bound_input_target.Matches(height, width)) {
             reason.clear();
             return true;
@@ -525,7 +571,8 @@ bool RknnNetNode::EnsureRgaBoundInput(int height, int width, std::string& reason
         rga_bound_input_eligible_ = false;
         return false;
     }
-    LOG_INFO("RKNN RGA native INT8 input bound: bytes={} fd={} width_stride={}",
+    LOG_INFO("RKNN RGA input bound: mode={} bytes={} fd={} width_stride={}",
+             bound_input_mode_ == BoundInputMode::RgaUint8 ? "fused-uint8" : "native-int8",
              bound_input_memory_->size, bound_input_memory_->fd, bound_input_attr_.w_stride);
     return true;
 }
@@ -566,8 +613,8 @@ Status RknnNetNode::QueryTensorAttributes() {
     for (uint32_t index = 0; index < io_count_.n_input; ++index) {
         input_attrs_[index]       = {};
         input_attrs_[index].index = index;
-        result = rknn_query(context_, RKNN_QUERY_INPUT_ATTR, &input_attrs_[index],
-                            sizeof(input_attrs_[index]));
+        result =
+            rknn_query(context_, RKNN_QUERY_INPUT_ATTR, &input_attrs_[index], sizeof(input_attrs_[index]));
         if (result != RKNN_SUCC)
             return RknnError("RKNN_QUERY_INPUT_ATTR", result);
     }
@@ -578,8 +625,8 @@ Status RknnNetNode::QueryTensorAttributes() {
     for (uint32_t index = 0; index < io_count_.n_output; ++index) {
         output_attrs_[index]       = {};
         output_attrs_[index].index = index;
-        result = rknn_query(context_, RKNN_QUERY_OUTPUT_ATTR, &output_attrs_[index],
-                            sizeof(output_attrs_[index]));
+        result =
+            rknn_query(context_, RKNN_QUERY_OUTPUT_ATTR, &output_attrs_[index], sizeof(output_attrs_[index]));
         if (result != RKNN_SUCC)
             return RknnError("RKNN_QUERY_OUTPUT_ATTR", result);
         auto shape = TensorShape(output_attrs_[index]);
@@ -601,13 +648,12 @@ Status RknnNetNode::QueryTensorAttributes() {
     }
     std::string native_output_reason;
     native_yolov8_outputs_ =
-        yolov8_heads_ &&
-        IsRknnNativeYolov8OutputCompatible(output_attrs_, &native_output_reason);
+        yolov8_heads_ && IsRknnNativeYolov8OutputCompatible(output_attrs_, &native_output_reason);
     if (yolov8_heads_ && !native_yolov8_outputs_) {
         LOG_INFO("RKNN YOLOv8 native INT8 output disabled: {}", native_output_reason);
     }
     const auto& input = input_attrs_.front();
-    detector_model_ = yolov8_heads_ && input.n_dims == 4 && input.fmt == RKNN_TENSOR_NHWC &&
+    detector_model_   = yolov8_heads_ && input.n_dims == 4 && input.fmt == RKNN_TENSOR_NHWC &&
                       input.dims[0] == 1 && input.dims[1] == 640 && input.dims[2] == 640 &&
                       input.dims[3] == 3;
     return COSMO_NN_OK;
@@ -628,20 +674,18 @@ Status RknnNetNode::LoadWeight(const char* data, size_t size) {
         return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "Not enough memory to retain RKNN model data");
     }
 
-    int result = rknn_init(&context_, model_data_.data(), static_cast<uint32_t>(model_data_.size()), 0,
-                           nullptr);
+    int result =
+        rknn_init(&context_, model_data_.data(), static_cast<uint32_t>(model_data_.size()), 0, nullptr);
     if (result != RKNN_SUCC) {
         DestroyContext();
         return RknnError("rknn_init", result);
     }
     const uint64_t context_sequence = NextModelContextSequence(model_data_);
-    bool core_mode_valid = true;
-    const char* core_mode_env = std::getenv("COSMO_RKNN_CORE_MODE");
-    const auto core_mode = ParseRknnCoreMode(core_mode_env ? core_mode_env : "auto",
-                                             &core_mode_valid);
+    bool core_mode_valid            = true;
+    const char* core_mode_env       = std::getenv("COSMO_RKNN_CORE_MODE");
+    const auto core_mode = ParseRknnCoreMode(core_mode_env ? core_mode_env : "auto", &core_mode_valid);
     if (!core_mode_valid) {
-        LOG_WARN("Invalid COSMO_RKNN_CORE_MODE value:{}, fallback:auto",
-                 core_mode_env ? core_mode_env : "");
+        LOG_WARN("Invalid COSMO_RKNN_CORE_MODE value:{}, fallback:auto", core_mode_env ? core_mode_env : "");
     }
     const auto core_mask = ResolveRknnCoreMask(core_mode, context_sequence);
     result               = rknn_set_core_mask(context_, core_mask);
@@ -708,16 +752,14 @@ Status RknnNetNode::InferTopShapes() {
     return COSMO_NN_OK;
 }
 
-Status RknnNetNode::PrepareInput(const Blob& blob, std::vector<float>& nhwc, int& height,
-                                 int& width) const {
+Status RknnNetNode::PrepareInput(const Blob& blob, std::vector<float>& nhwc, int& height, int& width) const {
     auto& mutable_blob = const_cast<Blob&>(blob);
     const auto desc    = mutable_blob.GetBlobDesc();
     const auto handle  = mutable_blob.GetHandle();
     if (!handle.base || desc.data_type != DATA_TYPE_FLOAT || desc.data_format != DATA_FORMAT_NCHW ||
         desc.dims.size() != 4 || desc.dims[0] != 1 || desc.dims[1] <= 0 || desc.dims[2] <= 0 ||
         desc.dims[3] <= 0) {
-        return Status(COSMO_NN_ERR_INVALID_INPUT,
-                      "RKNN input must be a non-empty batch-1 NCHW float blob");
+        return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input must be a non-empty batch-1 NCHW float blob");
     }
     const int channels = desc.dims[1];
     height             = desc.dims[2];
@@ -735,8 +777,7 @@ Status RknnNetNode::PrepareInput(const Blob& blob, std::vector<float>& nhwc, int
             attr.dims[2] != static_cast<uint32_t>(width) || attr.dims[3] != 3)
             return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN NHWC model dimensions do not match the graph");
     } else if (attr.fmt == RKNN_TENSOR_NCHW) {
-        if (attr.dims[0] != 1 || attr.dims[1] != 3 ||
-            attr.dims[2] != static_cast<uint32_t>(height) ||
+        if (attr.dims[0] != 1 || attr.dims[1] != 3 || attr.dims[2] != static_cast<uint32_t>(height) ||
             attr.dims[3] != static_cast<uint32_t>(width))
             return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN NCHW model dimensions do not match the graph");
     } else {
@@ -761,8 +802,8 @@ Status RknnNetNode::PrepareInput(const Blob& blob, std::vector<float>& nhwc, int
     return COSMO_NN_OK;
 }
 
-Status RknnNetNode::PrepareNativeCompatibilityInput(const Blob& blob, std::vector<float>& nhwc,
-                                                    int& height, int& width) const {
+Status RknnNetNode::PrepareNativeCompatibilityInput(const Blob& blob, std::vector<float>& nhwc, int& height,
+                                                    int& width) const {
     auto& mutable_blob = const_cast<Blob&>(blob);
     const auto desc    = mutable_blob.GetBlobDesc();
     const auto handle  = mutable_blob.GetHandle();
@@ -772,8 +813,8 @@ Status RknnNetNode::PrepareNativeCompatibilityInput(const Blob& blob, std::vecto
         return Status(COSMO_NN_ERR_INVALID_INPUT,
                       "RKNN native compatibility input must be batch-1 NHWC int8");
     }
-    height = desc.dims[1];
-    width  = desc.dims[2];
+    height           = desc.dims[1];
+    width            = desc.dims[2];
     const auto count = BlobElementCount(desc);
     try {
         nhwc.resize(count);
@@ -781,7 +822,7 @@ Status RknnNetNode::PrepareNativeCompatibilityInput(const Blob& blob, std::vecto
         return Status(COSMO_NN_ERR_OUT_OF_MEMORY,
                       "Not enough memory for RKNN native-input compatibility fallback");
     }
-    const auto* source = static_cast<const int8_t*>(handle.base);
+    const auto* source              = static_cast<const int8_t*>(handle.base);
     constexpr float kNormalizeScale = 0.00392157f;
     for (size_t index = 0; index < count; ++index)
         nhwc[index] = static_cast<float>(static_cast<int>(source[index]) + 128) * kNormalizeScale;
@@ -806,25 +847,26 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
 
     timer.Start();
     const auto forward_started = MetricsClock::now();
-    const auto finish = [&](Status status) -> Status {
+    const auto finish          = [&](Status status) -> Status {
         timer.Stop();
-        GetInferencePipelineMetrics().RecordRknnForward(ElapsedNanoseconds(forward_started),
-                                                        bool(status), scope);
+        GetInferencePipelineMetrics().RecordRknnForward(ElapsedNanoseconds(forward_started), bool(status),
+                                                                 scope);
         return status;
     };
     int input_height = 0, input_width = 0;
-    bool native_int8 = false;
+    bool native_int8            = false;
     bool compatibility_fallback = false;
     rknn_input input{};
-    input.index = 0;
+    input.index                = 0;
     const auto prepare_started = MetricsClock::now();
-    const auto input_desc = bottom_blobs[0]->GetBlobDesc();
+    const auto input_desc      = bottom_blobs[0]->GetBlobDesc();
     bool rga_bound_frame       = false;
     if (shared_resource && shared_resource->rknn_bound_input_target.frame_ready &&
         shared_resource->rknn_bound_input_target.owner == this) {
-        auto& target       = shared_resource->rknn_bound_input_target;
-        target.frame_ready = false;
-        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaNativeInt8;
+        auto& target              = shared_resource->rknn_bound_input_target;
+        target.frame_ready        = false;
+        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaUint8 ||
+                                    bound_input_mode_ == BoundInputMode::RgaNativeInt8;
         const bool blob_matches = input_desc.data_type == DATA_TYPE_INT8 &&
                                   input_desc.data_format == DATA_FORMAT_NHWC &&
                                   input_desc.image_format == IMAGE_RGB && input_desc.dims.size() == 4 &&
@@ -863,8 +905,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             }
         } else {
             compatibility_fallback = true;
-            prepare_status = PrepareNativeCompatibilityInput(*bottom_blobs[0], input_nhwc_,
-                                                              input_height, input_width);
+            prepare_status =
+                PrepareNativeCompatibilityInput(*bottom_blobs[0], input_nhwc_, input_height, input_width);
         }
     } else {
         prepare_status = PrepareInput(*bottom_blobs[0], input_nhwc_, input_height, input_width);
@@ -874,8 +916,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         return finish(prepare_status);
     if (!native_int8 && !rga_bound_frame) {
         if (input_nhwc_.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
-            return finish(
-                Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit"));
+            return finish(Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit"));
         input.buf          = input_nhwc_.data();
         input.size         = static_cast<uint32_t>(input_nhwc_.size() * sizeof(float));
         input.pass_through = 0;
@@ -907,11 +948,10 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         std::string copy_reason;
         const auto copy_started   = MetricsClock::now();
         const size_t source_bytes = BlobElementCount(input_desc);
-        const bool copied = CopyRknnPackedInt8Input(
+        const bool copied         = CopyRknnPackedInt8Input(
             static_cast<const int8_t*>(input.buf), source_bytes,
-            static_cast<int8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size,
-            input_height, input_width, input_desc.dims[3],
-            static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
+            static_cast<int8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size, input_height,
+            input_width, input_desc.dims[3], static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
         GetInferencePipelineMetrics().RecordRknnBoundInputCopy(ElapsedNanoseconds(copy_started),
                                                                copied ? source_bytes : 0, copied);
         if (!copied)
@@ -927,33 +967,32 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     }
     if (rga_bound_frame && bound_input_mode_ == BoundInputMode::RgaNativeInt8) {
         const auto sync_from_started = MetricsClock::now();
-        int sync_result =
-            rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_FROM_DEVICE);
-        GetInferencePipelineMetrics().RecordRknnBoundInputSync(
-            ElapsedNanoseconds(sync_from_started), sync_result == RKNN_SUCC);
+        int sync_result = rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_FROM_DEVICE);
+        GetInferencePipelineMetrics().RecordRknnBoundInputSync(ElapsedNanoseconds(sync_from_started),
+                                                               sync_result == RKNN_SUCC);
         if (sync_result != RKNN_SUCC)
             return finish(RknnError("rknn_mem_sync from device", sync_result));
 
         std::string requantize_reason;
         const auto requantize_started = MetricsClock::now();
-        const bool requantized = RequantizeRknnPackedUint8ToInt8InPlace(
-            static_cast<uint8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size,
-            input_height, input_width, 3, static_cast<int>(bound_input_attr_.w_stride),
-            &requantize_reason);
+        const bool requantized        = RequantizeRknnPackedUint8ToInt8InPlace(
+            static_cast<uint8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size, input_height,
+            input_width, 3, static_cast<int>(bound_input_attr_.w_stride), &requantize_reason);
         GetInferencePipelineMetrics().RecordRknnRgaBoundInputRequantize(
             ElapsedNanoseconds(requantize_started), requantized);
         if (!requantized)
             return finish(Status(COSMO_NN_ERR_INVALID_INPUT, requantize_reason));
 
         const auto sync_to_started = MetricsClock::now();
-        sync_result = rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_TO_DEVICE);
-        GetInferencePipelineMetrics().RecordRknnBoundInputSync(
-            ElapsedNanoseconds(sync_to_started), sync_result == RKNN_SUCC);
+        sync_result                = rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_TO_DEVICE);
+        GetInferencePipelineMetrics().RecordRknnBoundInputSync(ElapsedNanoseconds(sync_to_started),
+                                                               sync_result == RKNN_SUCC);
         if (sync_result != RKNN_SUCC)
             return finish(RknnError("rknn_mem_sync to device", sync_result));
     }
     if (rga_bound_frame) {
-        GetInferencePipelineMetrics().RecordRknnRgaBoundInputFrame();
+        GetInferencePipelineMetrics().RecordRknnRgaBoundInputFrame(bound_input_mode_ ==
+                                                                   BoundInputMode::RgaUint8);
     }
     int result = RKNN_SUCC;
     if (!use_bound_input) {
@@ -965,7 +1004,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             return finish(RknnError("rknn_inputs_set", result));
     }
     const auto run_started = MetricsClock::now();
-    result = rknn_run(context_, nullptr);
+    result                 = rknn_run(context_, nullptr);
     GetInferencePipelineMetrics().RecordRknnRun(ElapsedNanoseconds(run_started), scope);
     if (result != RKNN_SUCC)
         return finish(RknnError("rknn_run", result));
@@ -996,41 +1035,39 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     uint64_t output_bytes = 0;
     for (const auto& output : outputs)
         output_bytes += output.size;
-    GetInferencePipelineMetrics().RecordRknnOutputFormat(
-        native_yolov8_output, output_bytes, yolov8_heads_ && !native_yolov8_outputs_);
+    GetInferencePipelineMetrics().RecordRknnOutputFormat(native_yolov8_output, output_bytes,
+                                                         yolov8_heads_ && !native_yolov8_outputs_);
 
     const auto output_transform_started = MetricsClock::now();
-    const auto release_outputs = [&]() {
+    const auto release_outputs          = [&]() {
         const auto release_started = MetricsClock::now();
-        const int release_result = output_guard.Release();
-        GetInferencePipelineMetrics().RecordRknnOutputsRelease(
-            ElapsedNanoseconds(release_started), scope);
+        const int release_result   = output_guard.Release();
+        GetInferencePipelineMetrics().RecordRknnOutputsRelease(ElapsedNanoseconds(release_started), scope);
         return release_result;
     };
     const auto finish_output_error = [&](Status status) -> Status {
-        GetInferencePipelineMetrics().RecordRknnOutputTransform(
-            ElapsedNanoseconds(output_transform_started), scope);
+        GetInferencePipelineMetrics().RecordRknnOutputTransform(ElapsedNanoseconds(output_transform_started),
+                                                                scope);
         release_outputs();
         return finish(status);
     };
     if (yolov8_heads_) {
-        auto top_desc = top_blobs[0]->GetBlobDesc();
+        auto top_desc          = top_blobs[0]->GetBlobDesc();
         const size_t top_count = BlobElementCount(top_desc);
         if (!top_blobs[0]->GetHandle().base || top_desc.data_type != DATA_TYPE_FLOAT)
-            return finish_output_error(
-                Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN YOLOv8 top blob is invalid"));
+            return finish_output_error(Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN YOLOv8 top blob is invalid"));
         std::string adapter_error;
         if (native_yolov8_output) {
             auto& heads = quantized_yolov8_heads_;
             heads.clear();
             for (size_t index = 0; index < outputs.size(); ++index) {
                 if (!outputs[index].buf || outputs[index].size != output_attrs_[index].size) {
-                    return finish_output_error(Status(
-                        COSMO_NN_ERR_NET, "RKNN returned an invalid native YOLOv8 output buffer"));
+                    return finish_output_error(
+                        Status(COSMO_NN_ERR_NET, "RKNN returned an invalid native YOLOv8 output buffer"));
                 }
-                heads.push_back({static_cast<const int8_t*>(outputs[index].buf),
-                                 outputs[index].size, TensorShape(output_attrs_[index]),
-                                 output_attrs_[index].zp, output_attrs_[index].scale});
+                heads.push_back({static_cast<const int8_t*>(outputs[index].buf), outputs[index].size,
+                                 TensorShape(output_attrs_[index]), output_attrs_[index].zp,
+                                 output_attrs_[index].scale});
             }
             if (direct_yolov8_candidates) {
                 auto& candidate_batch = shared_resource->yolov8_candidate_batch;
@@ -1062,23 +1099,21 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             heads.clear();
             for (size_t index = 0; index < outputs.size(); ++index) {
                 if (!outputs[index].buf || outputs[index].size % sizeof(float) != 0) {
-                    return finish_output_error(Status(
-                        COSMO_NN_ERR_NET, "RKNN returned an invalid YOLOv8 output buffer"));
+                    return finish_output_error(
+                        Status(COSMO_NN_ERR_NET, "RKNN returned an invalid YOLOv8 output buffer"));
                 }
                 heads.push_back({static_cast<const float*>(outputs[index].buf),
-                                 outputs[index].size / sizeof(float),
-                                 TensorShape(output_attrs_[index])});
+                                 outputs[index].size / sizeof(float), TensorShape(output_attrs_[index])});
             }
-            if (!ReconstructRknnYolov8(
-                    heads, input_height, input_width,
-                    static_cast<float*>(top_blobs[0]->GetHandle().base), top_count,
-                    adapter_error)) {
+            if (!ReconstructRknnYolov8(heads, input_height, input_width,
+                                       static_cast<float*>(top_blobs[0]->GetHandle().base), top_count,
+                                       adapter_error)) {
                 return finish_output_error(Status(COSMO_NN_ERR_NET, adapter_error));
             }
         }
     } else {
         for (size_t index = 0; index < outputs.size(); ++index) {
-            auto desc = top_blobs[index]->GetBlobDesc();
+            auto desc          = top_blobs[index]->GetBlobDesc();
             const size_t count = BlobElementCount(desc);
             if (!top_blobs[index]->GetHandle().base || desc.data_type != DATA_TYPE_FLOAT ||
                 !outputs[index].buf || outputs[index].size != count * sizeof(float)) {
@@ -1088,8 +1123,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             std::memcpy(top_blobs[index]->GetHandle().base, outputs[index].buf, outputs[index].size);
         }
     }
-    GetInferencePipelineMetrics().RecordRknnOutputTransform(
-        ElapsedNanoseconds(output_transform_started), scope);
+    GetInferencePipelineMetrics().RecordRknnOutputTransform(ElapsedNanoseconds(output_transform_started),
+                                                            scope);
     result = release_outputs();
     if (result != RKNN_SUCC)
         return finish(RknnError("rknn_outputs_release", result));
