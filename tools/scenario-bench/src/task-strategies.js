@@ -1,5 +1,22 @@
 const DEFAULT_TYPE = 'cv';
 
+// These actions emit business events after frame processing has completed.
+// Their process rate follows the alarm/event rate rather than the video-frame
+// rate, so they must not be used as a CV throughput floor.
+const CV_TERMINAL_EVENT_ACTION_IDS = new Set([
+  'BA_00004', // event report / task alarm
+  'BA_10004', // face-feature report / face alarm
+]);
+
+const CV_TERMINAL_EVENT_NAMES = [
+  'eventreport',
+  'event report',
+  'taskalarm',
+  'facealarm',
+  '事件上报',
+  '人脸特征上报',
+];
+
 const TASK_TYPE_ALIASES = new Map([
   ['cv', 'cv'],
   ['detect', 'cv'],
@@ -153,6 +170,16 @@ export function isPrimaryThroughputAction(name, actionId, taskType) {
   const normalizedActionId = String(actionId ?? '');
   return strategy.primaryThroughputNames.some((pattern) => normalizedName.includes(pattern.toLowerCase()))
     || strategy.primaryActionIds.some((pattern) => pattern.test(normalizedActionId));
+}
+
+export function isThroughputBearingAction(name, actionId, taskType) {
+  if (normalizeTaskType(taskType) !== 'cv') return true;
+
+  const normalizedActionId = String(actionId ?? '').trim().toUpperCase();
+  if (CV_TERMINAL_EVENT_ACTION_IDS.has(normalizedActionId)) return false;
+
+  const normalizedName = String(name ?? '').trim().toLowerCase();
+  return !CV_TERMINAL_EVENT_NAMES.some((pattern) => normalizedName.includes(pattern));
 }
 
 export function latencyMetricsForNodes(nodes, taskType) {

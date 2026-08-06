@@ -1,5 +1,9 @@
 // metrics-sampler.js — Collect RunningDetail + HardwareResource each tick.
-import { isPrimaryThroughputAction, normalizeTaskType } from './task-strategies.js';
+import {
+  isPrimaryThroughputAction,
+  isThroughputBearingAction,
+  normalizeTaskType,
+} from './task-strategies.js';
 //
 // Response shapes (verified against source DTOs):
 //   RunningDetail: resData.status[] where each item has
@@ -149,6 +153,7 @@ export class MetricsSampler {
       const actionName = String(a.name ?? '');
       const actionId = String(a.actionId ?? '');
       const primaryThroughputAction = isPrimaryThroughputAction(actionName, actionId, taskType);
+      const throughputBearingAction = isThroughputBearingAction(actionName, actionId, taskType);
       if (primaryAction == null && primaryThroughputAction) {
         primaryAction = a;
         primaryProcessTotal = num(a.processCount);
@@ -163,7 +168,7 @@ export class MetricsSampler {
         periodMs: actionPeriodMs,
       });
 
-      if (actionFps != null && actionProcessPeriod > 0) {
+      if (actionFps != null && actionProcessPeriod > 0 && throughputBearingAction) {
         pipelineMinFps = Math.min(pipelineMinFps, actionFps);
         if (primaryFps == null && primaryThroughputAction) {
           primaryFps = actionFps;
@@ -192,7 +197,9 @@ export class MetricsSampler {
     // A detector instance may be shared by several channels. Its AA_00001 counter is then the
     // aggregate rate and is repeated in every task detail, while downstream per-channel actions
     // retain the actual channel rate. CV throughput is therefore the slowest effective pipeline
-    // action; direct VLM keeps its dedicated completion-counter semantics.
+    // frame-throughput action. Terminal event/report actions run only when a
+    // business event fires and are intentionally excluded. Direct VLM keeps
+    // its dedicated completion-counter semantics.
     const measuredFps = isVlm ? primaryFps : minPipelineFps;
     const discardRate = maxDiscardRate;
     const fpsRatio = targetFps && targetFps > 0 && measuredFps != null ? measuredFps / targetFps : null;
