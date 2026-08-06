@@ -57,6 +57,48 @@ test('hardware sampler omits explicitly unavailable NPU utilization', async () =
   assert.equal(sample.hardware.npuUtilization, undefined);
 });
 
+test('CV sampler reports per-channel pipeline FPS when a detector is shared', async () => {
+  const sampler = new MetricsSampler({
+    taskRunningDetail: async () => ({
+      status: [{
+        taskId: 'ch1_alg',
+        channelId: 'ch1',
+        actionStatus: [
+          {
+            actionId: 'AA_00001',
+            name: '9275710 AiDetector',
+            processCount: 2400,
+            processCountPeriod: 2400,
+            periodMs: 60_000,
+          },
+          {
+            actionId: 'AA_00003',
+            name: 'ch1 tracker',
+            processCount: 300,
+            processCountPeriod: 300,
+            periodMs: 60_000,
+          },
+        ],
+        nodeDurationInfos: [],
+      }],
+    }),
+    queryHardwareResource: async () => ({ itemList: [] }),
+  });
+
+  const sample = await sampler.sample([{
+    taskKey: 'helmet',
+    taskType: 'cv',
+    channelId: 'ch1',
+    taskId: 'ch1_alg',
+    targetFps: 5,
+  }]);
+
+  assert.equal(sample.channels[0].actionSummaries[0].fps, 40);
+  assert.equal(sample.channels[0].measuredFps, 5);
+  assert.equal(sample.channels[0].pipelineMinFps, 5);
+  assert.equal(sample.channels[0].fpsRatio, 1);
+});
+
 test('step summary derives platform-neutral preview timings and lifecycle deltas', () => {
   const samples = [0, 1, 2, 3].map((index) => ({
     stepIndex: 0,

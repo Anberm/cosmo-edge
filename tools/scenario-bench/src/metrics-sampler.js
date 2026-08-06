@@ -188,8 +188,12 @@ export class MetricsSampler {
       const firstEffective = actionSummaries.find((a) => a.fps != null && a.processPeriod > 0);
       primaryFps = firstEffective?.fps ?? null;
     }
-    const measuredFps = primaryFps ?? (isVlm ? null : 0);
     const minPipelineFps = pipelineMinFps !== Infinity ? pipelineMinFps : 0;
+    // A detector instance may be shared by several channels. Its AA_00001 counter is then the
+    // aggregate rate and is repeated in every task detail, while downstream per-channel actions
+    // retain the actual channel rate. CV throughput is therefore the slowest effective pipeline
+    // action; direct VLM keeps its dedicated completion-counter semantics.
+    const measuredFps = isVlm ? primaryFps : minPipelineFps;
     const discardRate = maxDiscardRate;
     const fpsRatio = targetFps && targetFps > 0 && measuredFps != null ? measuredFps / targetFps : null;
 
