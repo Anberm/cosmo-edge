@@ -41,6 +41,39 @@ def output_files(directory: Path) -> list[Path]:
     return sorted(directory.glob("*.f32.bin"))
 
 
+def decode_candidate_output(
+    output: np.ndarray,
+    confidence: float,
+    top_k: int,
+    class_filter: set[int] | None,
+) -> list[dict]:
+    rows = output.reshape(-1, 6)
+    detections = []
+    for row in rows:
+        score = float(row[4])
+        class_id = int(row[5])
+        if not math.isfinite(score) or score < confidence:
+            continue
+        if class_filter is not None and class_id not in class_filter:
+            continue
+        center_x, center_y, width, height = (float(value) for value in row[:4])
+        detections.append(
+            {
+                "class_id": class_id,
+                "score": score,
+                "box": [
+                    center_x - width / 2,
+                    center_y - height / 2,
+                    center_x + width / 2,
+                    center_y + height / 2,
+                ],
+            }
+        )
+        if len(detections) >= top_k:
+            break
+    return detections
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reference-dir", required=True, type=Path)
@@ -53,6 +86,11 @@ def main() -> int:
     parser.add_argument("--match-iou", type=float, default=0.5)
     parser.add_argument("--top-k", type=int, default=1000)
     parser.add_argument("--class-id", type=int, action="append")
+    parser.add_argument(
+        "--candidate-output",
+        action="store_true",
+        help="inputs are post-NMS [batch, top_k, 6] candidate tensors",
+    )
     parser.add_argument("--minimum-precision", type=float, default=0.99)
     parser.add_argument("--minimum-recall", type=float, default=0.99)
     parser.add_argument("--minimum-median-iou", type=float, default=0.99)
@@ -89,8 +127,20 @@ def main() -> int:
         actual_values = load_values(actual_path, args.shape)
         if not np.isfinite(reference_values).all() or not np.isfinite(actual_values).all():
             nonfinite_frames += 1
-        reference = decode(reference_values, args.confidence, args.nms, args.top_k, class_filter)
-        actual = decode(actual_values, args.confidence, args.nms, args.top_k, class_filter)
+        if args.candidate_output:
+            reference = decode_candidate_output(
+                reference_values, args.confidence, args.top_k, class_filter
+            )
+            actual = decode_candidate_output(
+                actual_values, args.confidence, args.top_k, class_filter
+            )
+        else:
+            reference = decode(
+                reference_values, args.confidence, args.nms, args.top_k, class_filter
+            )
+            actual = decode(
+                actual_values, args.confidence, args.nms, args.top_k, class_filter
+            )
         matching = match(reference, actual, args.match_iou)
         frame_ious = [item["iou"] for item in matching["matches"]]
         frame_score_errors = [item["score_error"] for item in matching["matches"]]
@@ -172,6 +222,7 @@ def main() -> int:
             "reference_dir": str(args.reference_dir.resolve()),
             "actual_dir": str(args.actual_dir.resolve()),
             "shape": args.shape,
+            "candidate_output": args.candidate_output,
             "class_filter": sorted(class_filter) if class_filter else None,
             "confidence": args.confidence,
             "nms": args.nms,

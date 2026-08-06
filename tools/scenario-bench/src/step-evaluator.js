@@ -322,6 +322,19 @@ function summarizeMediaStages(ticks, inferMs) {
     rknnFloatOutputAvgBytes: counterAverage('rknnFloatOutputBytes', 'rknnFloatOutputs'),
     rknnYolov8DflAvgMs: counterAverage('rknnYolov8DflMs', 'rknnYolov8DflCalls'),
     rknnYolov8ClassAvgMs: counterAverage('rknnYolov8ClassMs', 'rknnYolov8ClassCalls'),
+    rknnYolov8DirectCandidateCalls: counterDelta('rknnYolov8DirectCandidateCalls'),
+    rknnYolov8DirectCandidateFailures: counterDelta('rknnYolov8DirectCandidateFailures'),
+    rknnYolov8DirectAvgPointsScanned: counterAverage(
+      'rknnYolov8DirectPointsScanned',
+      'rknnYolov8DirectCandidateCalls',
+    ),
+    rknnYolov8DirectAvgPointsDecoded: counterAverage(
+      'rknnYolov8DirectPointsDecoded',
+      'rknnYolov8DirectCandidateCalls',
+    ),
+    rknnYolov8LogicalFloatBytesAvoided: counterDelta(
+      'rknnYolov8LogicalFloatBytesAvoided',
+    ),
     yolov8PostprocessAvgMs: counterAverage('yolov8PostprocessMs', 'yolov8PostprocessCalls'),
     yolov8NmsAvgMs: counterAverage('yolov8NmsMs', 'yolov8NmsCalls'),
     rgaAvgMs: counterAverage('rgaMs', 'rgaFrames'),

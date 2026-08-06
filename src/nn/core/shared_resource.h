@@ -12,6 +12,32 @@
 
 namespace cosmo::nn {
 
+struct Yolov8DirectPostprocessConfig {
+    bool configured{false};
+    float confidence_threshold{0.0f};
+    int input_width{0};
+    int input_height{0};
+};
+
+struct Yolov8Candidate {
+    float x{0.0f};
+    float y{0.0f};
+    float width{0.0f};
+    float height{0.0f};
+    float confidence{0.0f};
+    int class_id{-1};
+};
+
+struct Yolov8CandidateBatch {
+    bool ready{false};
+    std::vector<Yolov8Candidate> candidates;
+
+    void Reset() {
+        ready = false;
+        candidates.clear();
+    }
+};
+
 class SharedResource {
 public:
     explicit SharedResource(int i = 0) noexcept(false);
@@ -40,6 +66,13 @@ public:
     // Optional producer/consumer hint. Only compatible RKNN YOLOv8 native-output
     // graphs set this; every other backend keeps the established box-major scan.
     bool prefer_yolov8_class_major_scan = false;
+
+    // Optional producer/consumer capability for a backend that can decode native
+    // YOLOv8 heads directly into candidates. The graph instance is exclusively
+    // leased by InstancePool while Forward runs, so this sidecar has the same
+    // lifetime and concurrency boundary as the graph's ordinary BlobStore.
+    Yolov8DirectPostprocessConfig yolov8_direct_postprocess{};
+    Yolov8CandidateBatch yolov8_candidate_batch{};
 };
 
 }  // namespace cosmo::nn

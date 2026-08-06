@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "nn/core/shared_resource.h"
+
 namespace cosmo::nn {
 
 struct RknnYolov8Head {
@@ -28,6 +30,18 @@ struct RknnYolov8TransformTiming {
     uint64_t class_nanoseconds{0};
 };
 
+struct RknnYolov8CandidateTiming {
+    uint64_t dfl_nanoseconds{0};
+    uint64_t class_nanoseconds{0};
+    uint64_t points_scanned{0};
+    uint64_t points_decoded{0};
+};
+
+struct RknnYolov8CandidateScratch {
+    std::vector<int8_t> class_max;
+    std::vector<int> class_ids;
+};
+
 struct RknnYolov8Layout {
     int class_count{0};
     int point_count{0};
@@ -45,6 +59,12 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
                                     int input_height, int input_width, float* output,
                                     size_t output_count, std::string& error,
                                     RknnYolov8TransformTiming* timing = nullptr);
+
+bool DecodeRknnYolov8QuantizedCandidates(const std::vector<RknnYolov8QuantizedHead>& heads, int input_height,
+                                         int input_width, float confidence_threshold,
+                                         RknnYolov8CandidateScratch& scratch,
+                                         std::vector<Yolov8Candidate>& candidates, std::string& error,
+                                         RknnYolov8CandidateTiming* timing = nullptr);
 
 }  // namespace cosmo::nn
 

@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -18,6 +19,7 @@
 #include "nn/device/cpu/cpu_resize_node.h"
 #include "nn/device/rknn/rknn_net_node.h"
 #include "nn/device/rknn/rknn_preprocess_node.h"
+#include "nn/node/yolov8_decode_node.h"
 #include "nn/utils/op.h"
 #include "stb/stb_image.h"
 #include "util/Log.h"
@@ -141,6 +143,36 @@ struct StageTimes {
     double total_ms{0};
 };
 
+struct DirectOutputStageTimes {
+    double network_ms{0};
+    double postprocess_ms{0};
+    double total_ms{0};
+};
+
+class ScopedEnvironmentFlag {
+public:
+    ScopedEnvironmentFlag(const char* name, const char* value) : name_(name) {
+        if (const char* current = std::getenv(name_)) {
+            had_value_ = true;
+            value_     = current;
+        }
+        if (setenv(name_, value, 1) != 0)
+            throw std::runtime_error(std::string("cannot set environment flag ") + name_);
+    }
+
+    ~ScopedEnvironmentFlag() {
+        if (had_value_)
+            setenv(name_, value_.c_str(), 1);
+        else
+            unsetenv(name_);
+    }
+
+private:
+    const char* name_;
+    bool had_value_{false};
+    std::string value_;
+};
+
 struct PathBuffers {
     std::unique_ptr<Node> resize;
     std::unique_ptr<Node> normalize;
@@ -185,6 +217,10 @@ public:
                   kPackedBytes);
         WriteFile(output_dir / "fast-resized.rgb.u8.bin", fast_.resized->GetHandle().base,
                   kPackedBytes);
+    }
+
+    const std::shared_ptr<Blob>& FastNormalized() const {
+        return fast_.normalized;
     }
 
 private:
@@ -280,6 +316,70 @@ private:
     std::shared_ptr<Blob> output_;
 };
 
+class DirectOutputQualificationRunner {
+public:
+    explicit DirectOutputQualificationRunner(const std::vector<unsigned char>& model) {
+        network_.SetSharedResource(&resource_);
+        network_.SetNetworkInputNames({"images"});
+        network_.SetNetworkOutputNames({"output0"});
+        CheckStatus(network_.LoadWeight(reinterpret_cast<const char*>(model.data()), model.size()),
+                    "load direct-output RKNN model");
+        CheckStatus(network_.InferTopShapes(), "infer direct-output RKNN shapes");
+        const auto network_shapes = network_.GetTopBlobShapes();
+        const auto network_types  = network_.GetTopBlobDataTypes();
+        if (network_shapes.size() != 1 || network_types.size() != 1 ||
+            network_types.front() != cosmo::nn::DATA_TYPE_FLOAT) {
+            throw std::runtime_error("direct-output qualification requires one logical float output");
+        }
+        logical_output_ = AllocateBlob(MakeDesc(network_types.front(), cosmo::nn::DATA_FORMAT_NCHW,
+                                                cosmo::nn::IMAGE_UNKNOWN, network_shapes.front()));
+
+        cosmo::nn::YoloPost post;
+        post.nms_threshold      = 0.7f;
+        post.nms_detection_conf = 0.25f;
+        post.top_k              = 1000;
+        post.input_width        = 640;
+        post.input_height       = 640;
+        decode_.SetSharedResource(&resource_);
+        decode_.SetMaxBatch(1);
+        decode_.LoadParam(&post);
+        CheckStatus(decode_.InferTopShapes(), "infer direct-output YOLOv8 decode shape");
+        detection_output_ =
+            AllocateBlob(MakeDesc(decode_.GetTopBlobDataTypes().front(), cosmo::nn::DATA_FORMAT_NCHW,
+                                  cosmo::nn::IMAGE_UNKNOWN, decode_.GetTopBlobShapes().front()));
+        detection_bytes_ = ElementCount(decode_.GetTopBlobShapes().front()) * sizeof(float);
+    }
+
+    DirectOutputStageTimes Run(const std::shared_ptr<Blob>& normalized, bool direct,
+                               const std::filesystem::path& output_path) {
+        ScopedEnvironmentFlag direct_flag("COSMO_RKNN_DIRECT_CANDIDATES", direct ? "1" : "0");
+        DirectOutputStageTimes times;
+        const auto total_started = Clock::now();
+        std::vector<std::shared_ptr<Blob>> network_bottoms{normalized};
+        std::vector<std::shared_ptr<Blob>> network_tops{logical_output_};
+        auto stage_started = Clock::now();
+        CheckStatus(network_.Forward(network_bottoms, network_tops), "run direct-output RKNN detector");
+        times.network_ms = ElapsedMilliseconds(stage_started);
+
+        std::vector<std::shared_ptr<Blob>> decode_bottoms{logical_output_};
+        std::vector<std::shared_ptr<Blob>> decode_tops{detection_output_};
+        stage_started = Clock::now();
+        CheckStatus(decode_.Forward(decode_bottoms, decode_tops), "decode direct-output detections");
+        times.postprocess_ms = ElapsedMilliseconds(stage_started);
+        times.total_ms       = ElapsedMilliseconds(total_started);
+        WriteFile(output_path, detection_output_->GetHandle().base, detection_bytes_);
+        return times;
+    }
+
+private:
+    cosmo::nn::SharedResource resource_;
+    cosmo::nn::RknnNetNode network_;
+    cosmo::nn::YoloV8DecodeNode decode_;
+    std::shared_ptr<Blob> logical_output_;
+    std::shared_ptr<Blob> detection_output_;
+    size_t detection_bytes_{0};
+};
+
 class LogGuard {
 public:
     LogGuard() { cosmo::log::LogInit("cosmo-rknn-fastpath-qualify", "/tmp", "qualify"); }
@@ -289,9 +389,10 @@ public:
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 6) {
+    if (argc != 6 && argc != 7) {
         std::cerr << "Usage: " << argv[0]
-                  << " <model.rknn> <bgr-input-list.txt> <height> <width> <output-dir>\n";
+                  << " <model.rknn> <bgr-input-list.txt> <height> <width> <output-dir> "
+                     "[--direct-output-parity]\n";
         return 2;
     }
 
@@ -301,18 +402,36 @@ int main(int argc, char** argv) {
         const int height       = std::stoi(argv[3]);
         const int width        = std::stoi(argv[4]);
         const std::filesystem::path output_dir(argv[5]);
+        const bool qualify_direct_output = argc == 7 && std::string(argv[6]) == "--direct-output-parity";
+        if (argc == 7 && !qualify_direct_output)
+            throw std::runtime_error("unknown qualification option");
         if (height <= 0 || width <= 0)
             throw std::runtime_error("source dimensions must be positive");
         std::filesystem::create_directories(output_dir / "legacy");
         std::filesystem::create_directories(output_dir / "fast");
+        if (qualify_direct_output) {
+            std::filesystem::create_directories(output_dir / "output-legacy");
+            std::filesystem::create_directories(output_dir / "output-direct");
+        }
 
         LogGuard log_guard;
         QualificationRunner runner(model, height, width);
+        std::unique_ptr<DirectOutputQualificationRunner> direct_output_runner;
+        if (qualify_direct_output)
+            direct_output_runner = std::make_unique<DirectOutputQualificationRunner>(model);
         std::ofstream timings(output_dir / "timings.tsv");
         if (!timings)
             throw std::runtime_error("cannot write timing report");
         timings << "sample\tmode\tresize_ms\tnormalize_ms\tnetwork_ms\ttotal_ms\n";
         timings << std::fixed << std::setprecision(4);
+        std::ofstream direct_output_timings;
+        if (qualify_direct_output) {
+            direct_output_timings.open(output_dir / "direct-output-timings.tsv");
+            if (!direct_output_timings)
+                throw std::runtime_error("cannot write direct-output timing report");
+            direct_output_timings << "sample\tmode\tnetwork_ms\tpostprocess_ms\ttotal_ms\n";
+            direct_output_timings << std::fixed << std::setprecision(4);
+        }
 
         for (size_t index = 0; index < input_paths.size(); ++index) {
             const auto source = ReadBgrFrame(input_paths[index], height, width);
@@ -330,6 +449,18 @@ int main(int argc, char** argv) {
             };
             write_times("legacy", legacy);
             write_times("fast", fast);
+            if (direct_output_runner) {
+                const auto legacy_output = direct_output_runner->Run(
+                    runner.FastNormalized(), false, output_dir / "output-legacy" / (sample + ".f32.bin"));
+                const auto direct_output = direct_output_runner->Run(
+                    runner.FastNormalized(), true, output_dir / "output-direct" / (sample + ".f32.bin"));
+                const auto write_direct_times = [&](const char* mode, const DirectOutputStageTimes& value) {
+                    direct_output_timings << sample << '\t' << mode << '\t' << value.network_ms << '\t'
+                                          << value.postprocess_ms << '\t' << value.total_ms << '\n';
+                };
+                write_direct_times("legacy-output", legacy_output);
+                write_direct_times("direct-output", direct_output);
+            }
             if (index == 0)
                 runner.DumpLastResizedInputs(output_dir / "preprocessed-sample-0000");
             std::cout << "qualified=" << (index + 1) << '/' << input_paths.size() << '\n';

@@ -154,6 +154,11 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     original.utilizationMetric = "busy-time-load";
     original.coreUtilizations  = {0.09, 0.42};
     original.memoryDomain      = "shared-system";
+    original.rknnYolov8DirectCandidateCalls     = 4;
+    original.rknnYolov8DirectCandidateFailures  = 1;
+    original.rknnYolov8DirectPointsScanned      = 33'600;
+    original.rknnYolov8DirectPointsDecoded      = 68;
+    original.rknnYolov8LogicalFloatBytesAvoided = 11'289'600;
 
     std::string json;
     REQUIRE(cosmo::util::EncodeJson(original, json));
@@ -163,12 +168,20 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     REQUIRE(doc["coreUtilizations"].size() == 2);
     CHECK(doc["coreUtilizations"][0].get<double>() == Catch::Approx(0.09));
     CHECK(doc["coreUtilizations"][1].get<double>() == Catch::Approx(0.42));
+    CHECK(doc["rknnYolov8DirectCandidateCalls"] == 4);
+    CHECK(doc["rknnYolov8DirectPointsDecoded"] == 68);
+    CHECK(doc["rknnYolov8LogicalFloatBytesAvoided"] == 11'289'600);
 
     cosmo::MsgGpuInfo restored;
     REQUIRE(cosmo::util::DecodeJson(json, restored));
     CHECK(restored.utilizationMetric == original.utilizationMetric);
     CHECK(restored.coreUtilizations == original.coreUtilizations);
     CHECK(restored.memoryDomain == original.memoryDomain);
+    CHECK(restored.rknnYolov8DirectCandidateCalls == original.rknnYolov8DirectCandidateCalls);
+    CHECK(restored.rknnYolov8DirectCandidateFailures == original.rknnYolov8DirectCandidateFailures);
+    CHECK(restored.rknnYolov8DirectPointsScanned == original.rknnYolov8DirectPointsScanned);
+    CHECK(restored.rknnYolov8DirectPointsDecoded == original.rknnYolov8DirectPointsDecoded);
+    CHECK(restored.rknnYolov8LogicalFloatBytesAvoided == original.rknnYolov8LogicalFloatBytesAvoided);
 }
 
 TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {

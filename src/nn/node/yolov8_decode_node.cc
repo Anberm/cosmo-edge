@@ -60,6 +60,10 @@ Status YoloV8DecodeNode::InferTopShapes() {
     top_blob_shapes     = {{max_batch, top_k, top_col}};
     top_blob_data_types = {DataType::DATA_TYPE_FLOAT};
 
+    if (shared_resource) {
+        shared_resource->yolov8_direct_postprocess = {true, base_conf, input_width_, input_height_};
+    }
+
     return COSMO_NN_OK;
 }
 
@@ -80,6 +84,12 @@ Status YoloV8DecodeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob
     auto top_blob    = top_blobs.at(0);
     ResetTopBlob(top_blob);
     RETURN_ON_FAIL(CheckNodeInputOutput(bottom_blob, top_blob, true));
+
+    if (shared_resource && shared_resource->yolov8_candidate_batch.ready) {
+        const auto status = ForwardDirectCandidates(top_blob);
+        timer.Stop();
+        return status;
+    }
 
     auto bottom_desc   = bottom_blob->GetBlobDesc();
     auto bottom_handle = bottom_blob->GetHandle();
@@ -312,6 +322,58 @@ Status YoloV8DecodeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob
     timer.Stop();
 
     return COSMO_NN_OK;
+}
+
+Status YoloV8DecodeNode::ForwardDirectCandidates(std::shared_ptr<Blob>& top_blob) {
+    auto& batch      = shared_resource->yolov8_candidate_batch;
+    batch.ready      = false;
+    auto& candidates = batch.candidates;
+    SetCurrentBatch(top_blob, 1);
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Yolov8Candidate& lhs, const Yolov8Candidate& rhs) {
+                  return lhs.confidence > rhs.confidence;
+              });
+    const auto nms_started = MetricsClock::now();
+    NmsDirectCandidates(candidates);
+    GetInferencePipelineMetrics().RecordYolov8Nms(ElapsedNanoseconds(nms_started));
+
+    auto* output = static_cast<float*>(top_blob->GetHandle().base);
+    if (!output)
+        return Status(COSMO_NN_ERR_NULL_PARAM, "YOLOv8 direct candidate output is null");
+    const int limit = std::min(top_k, static_cast<int>(candidates.size()));
+    int valid_count = 0;
+    for (const auto& candidate : candidates) {
+        if (valid_count >= limit)
+            break;
+        if (!std::isfinite(candidate.confidence) || candidate.confidence < 0.0f)
+            continue;
+        output[valid_count * top_col + 0] = candidate.x;
+        output[valid_count * top_col + 1] = candidate.y;
+        output[valid_count * top_col + 2] = candidate.width;
+        output[valid_count * top_col + 3] = candidate.height;
+        output[valid_count * top_col + 4] = candidate.confidence;
+        output[valid_count * top_col + 5] = static_cast<float>(candidate.class_id);
+        ++valid_count;
+    }
+    return COSMO_NN_OK;
+}
+
+void YoloV8DecodeNode::NmsDirectCandidates(std::vector<Yolov8Candidate>& candidates) {
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        auto& lhs = candidates[i];
+        if (lhs.confidence < 0.0f)
+            continue;
+        for (size_t j = i + 1; j < candidates.size(); ++j) {
+            auto& rhs = candidates[j];
+            if (rhs.confidence < 0.0f || lhs.class_id != rhs.class_id)
+                continue;
+            float lhs_box[4]{lhs.x, lhs.y, lhs.width, lhs.height};
+            float rhs_box[4]{rhs.x, rhs.y, rhs.width, rhs.height};
+            if (IOU(lhs_box, rhs_box) >= nms_threshold)
+                rhs.confidence = -1.0f;
+        }
+    }
 }
 
 void YoloV8DecodeNode::NMS(std::vector<std::tuple<int, float, int, bool>>& conf_list, float* bottom,

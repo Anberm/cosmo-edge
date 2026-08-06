@@ -166,6 +166,10 @@ bool RknnFastOutputEnabled() {
     return EnvironmentFlag("COSMO_RKNN_FAST_OUTPUT", true);
 }
 
+bool RknnDirectCandidatesEnabled() {
+    return EnvironmentFlag("COSMO_RKNN_DIRECT_CANDIDATES", true);
+}
+
 RknnNetNode::RknnNetNode() : NetNode() {
     name = NodeTypeUtils::NodeTypeToStr(NodeType::NODE_NET).append("_0");
 }
@@ -185,6 +189,8 @@ void RknnNetNode::DestroyContext() {
     std::vector<rknn_output>().swap(runtime_outputs_);
     std::vector<RknnYolov8Head>().swap(float_yolov8_heads_);
     std::vector<RknnYolov8QuantizedHead>().swap(quantized_yolov8_heads_);
+    std::vector<int8_t>().swap(yolov8_candidate_scratch_.class_max);
+    std::vector<int>().swap(yolov8_candidate_scratch_.class_ids);
     model_data_.clear();
     std::vector<float>().swap(input_nhwc_);
     io_count_              = {};
@@ -451,6 +457,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     const size_t logical_outputs = yolov8_heads_ ? 1 : output_attrs_.size();
     if (top_blobs.size() != logical_outputs)
         return Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN output blob count mismatch");
+    if (yolov8_heads_ && shared_resource)
+        shared_resource->yolov8_candidate_batch.Reset();
 
     timer.Start();
     const auto forward_started = MetricsClock::now();
@@ -522,8 +530,13 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         return finish(RknnError("rknn_run", result));
 
     const bool native_yolov8_output = native_yolov8_outputs_ && RknnFastOutputEnabled();
+    const bool direct_yolov8_candidates =
+        native_yolov8_output && RknnDirectCandidatesEnabled() && shared_resource &&
+        shared_resource->yolov8_direct_postprocess.configured &&
+        shared_resource->yolov8_direct_postprocess.input_width == input_width &&
+        shared_resource->yolov8_direct_postprocess.input_height == input_height;
     if (shared_resource)
-        shared_resource->prefer_yolov8_class_major_scan = native_yolov8_output;
+        shared_resource->prefer_yolov8_class_major_scan = native_yolov8_output && !direct_yolov8_candidates;
     auto& outputs = runtime_outputs_;
     std::fill(outputs.begin(), outputs.end(), rknn_output{});
     for (uint32_t index = 0; index < outputs.size(); ++index) {
@@ -578,15 +591,31 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                                  outputs[index].size, TensorShape(output_attrs_[index]),
                                  output_attrs_[index].zp, output_attrs_[index].scale});
             }
-            RknnYolov8TransformTiming timing;
-            const bool reconstructed = ReconstructRknnYolov8Quantized(
-                heads, input_height, input_width,
-                static_cast<float*>(top_blobs[0]->GetHandle().base), top_count, adapter_error,
-                &timing);
-            GetInferencePipelineMetrics().RecordRknnYolov8Transform(
-                timing.dfl_nanoseconds, timing.class_nanoseconds);
-            if (!reconstructed)
-                return finish_output_error(Status(COSMO_NN_ERR_NET, adapter_error));
+            if (direct_yolov8_candidates) {
+                auto& candidate_batch = shared_resource->yolov8_candidate_batch;
+                const auto& config    = shared_resource->yolov8_direct_postprocess;
+                RknnYolov8CandidateTiming timing;
+                const bool decoded = DecodeRknnYolov8QuantizedCandidates(
+                    heads, input_height, input_width, config.confidence_threshold, yolov8_candidate_scratch_,
+                    candidate_batch.candidates, adapter_error, &timing);
+                GetInferencePipelineMetrics().RecordRknnYolov8Transform(timing.dfl_nanoseconds,
+                                                                        timing.class_nanoseconds);
+                GetInferencePipelineMetrics().RecordRknnYolov8DirectCandidates(
+                    decoded, timing.points_scanned, timing.points_decoded,
+                    decoded ? top_count * sizeof(float) : 0);
+                if (!decoded)
+                    return finish_output_error(Status(COSMO_NN_ERR_NET, adapter_error));
+                candidate_batch.ready = true;
+            } else {
+                RknnYolov8TransformTiming timing;
+                const bool reconstructed = ReconstructRknnYolov8Quantized(
+                    heads, input_height, input_width, static_cast<float*>(top_blobs[0]->GetHandle().base),
+                    top_count, adapter_error, &timing);
+                GetInferencePipelineMetrics().RecordRknnYolov8Transform(timing.dfl_nanoseconds,
+                                                                        timing.class_nanoseconds);
+                if (!reconstructed)
+                    return finish_output_error(Status(COSMO_NN_ERR_NET, adapter_error));
+            }
         } else {
             auto& heads = float_yolov8_heads_;
             heads.clear();

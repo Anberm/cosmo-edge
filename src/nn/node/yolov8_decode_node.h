@@ -39,6 +39,10 @@ public:
 private:
     void ResetTopBlob(std::shared_ptr<Blob> top);
 
+    Status ForwardDirectCandidates(std::shared_ptr<Blob>& top_blob);
+
+    void NmsDirectCandidates(std::vector<Yolov8Candidate>& candidates);
+
     void NMS(std::vector<std::tuple<int, float, int, bool>>& list, float* bottom, int num_features,
              int num_boxes, bool is_format1);
 

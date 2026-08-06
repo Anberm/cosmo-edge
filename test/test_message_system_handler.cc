@@ -89,6 +89,8 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     CHECK(ret.resData.accelerator.rknnOutputCompatibilityFallbacks ==
           inference.rknn_output_compatibility_fallbacks);
     CHECK(ret.resData.accelerator.rknnYolov8DflCalls == inference.rknn_yolov8_dfl_calls);
+    CHECK(ret.resData.accelerator.rknnYolov8DirectCandidateCalls ==
+          inference.rknn_yolov8_direct_candidate_calls);
     CHECK(ret.resData.accelerator.yolov8PostprocessCalls == inference.yolov8_postprocess_calls);
     REQUIRE(ret.resData.itemList.size() == 1);
     CHECK(ret.resData.itemList.front().memoryDomain == "system");

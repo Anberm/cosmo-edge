@@ -147,6 +147,14 @@ TEST_CASE("RKNN native output switch defaults on and supports explicit rollback"
         ScopedEnvironment disabled("COSMO_RKNN_FAST_OUTPUT", "0");
         CHECK_FALSE(RknnFastOutputEnabled());
     }
+    {
+        ScopedEnvironment enabled("COSMO_RKNN_DIRECT_CANDIDATES", "1");
+        CHECK(RknnDirectCandidatesEnabled());
+    }
+    {
+        ScopedEnvironment disabled("COSMO_RKNN_DIRECT_CANDIDATES", "0");
+        CHECK_FALSE(RknnDirectCandidatesEnabled());
+    }
 }
 
 TEST_CASE("RKNN classifier-sized normalization keeps the legacy float layout",

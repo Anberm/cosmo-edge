@@ -33,6 +33,8 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     metrics.RecordRknnOutputFormat(true, 1'225'600);
     metrics.RecordRknnOutputFormat(false, 4'902'400, true);
     metrics.RecordRknnYolov8Transform(1'400'000, 1'500'000);
+    metrics.RecordRknnYolov8DirectCandidates(true, 8'400, 17, 2'822'400);
+    metrics.RecordRknnYolov8DirectCandidates(false, 0, 0, 0);
     metrics.RecordYolov8Postprocess(1'200'000);
     metrics.RecordYolov8Nms(1'300'000);
 
@@ -86,6 +88,11 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     CHECK(snapshot.rknn_yolov8_dfl_nanoseconds == 1'400'000);
     CHECK(snapshot.rknn_yolov8_class_calls == 1);
     CHECK(snapshot.rknn_yolov8_class_nanoseconds == 1'500'000);
+    CHECK(snapshot.rknn_yolov8_direct_candidate_calls == 2);
+    CHECK(snapshot.rknn_yolov8_direct_candidate_failures == 1);
+    CHECK(snapshot.rknn_yolov8_direct_points_scanned == 8'400);
+    CHECK(snapshot.rknn_yolov8_direct_points_decoded == 17);
+    CHECK(snapshot.rknn_yolov8_logical_float_bytes_avoided == 2'822'400);
     CHECK(snapshot.yolov8_postprocess_calls == 1);
     CHECK(snapshot.yolov8_nms_calls == 1);
 }

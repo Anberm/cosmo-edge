@@ -79,6 +79,11 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_yolov8_dfl_nanoseconds{0};
     uint64_t rknn_yolov8_class_calls{0};
     uint64_t rknn_yolov8_class_nanoseconds{0};
+    uint64_t rknn_yolov8_direct_candidate_calls{0};
+    uint64_t rknn_yolov8_direct_candidate_failures{0};
+    uint64_t rknn_yolov8_direct_points_scanned{0};
+    uint64_t rknn_yolov8_direct_points_decoded{0};
+    uint64_t rknn_yolov8_logical_float_bytes_avoided{0};
     uint64_t yolov8_postprocess_calls{0};
     uint64_t yolov8_postprocess_nanoseconds{0};
     uint64_t yolov8_nms_calls{0};
@@ -119,6 +124,8 @@ public:
     void RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
                                 bool compatibility_fallback = false);
     void RecordRknnYolov8Transform(uint64_t dfl_nanoseconds, uint64_t class_nanoseconds);
+    void RecordRknnYolov8DirectCandidates(bool success, uint64_t points_scanned, uint64_t points_decoded,
+                                          uint64_t logical_float_bytes_avoided);
     void RecordYolov8Postprocess(uint64_t nanoseconds);
     void RecordYolov8Nms(uint64_t nanoseconds);
 
@@ -196,6 +203,11 @@ private:
     std::atomic<uint64_t> rknn_yolov8_dfl_nanoseconds_{0};
     std::atomic<uint64_t> rknn_yolov8_class_calls_{0};
     std::atomic<uint64_t> rknn_yolov8_class_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_candidate_calls_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_candidate_failures_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_points_scanned_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_points_decoded_{0};
+    std::atomic<uint64_t> rknn_yolov8_logical_float_bytes_avoided_{0};
     std::atomic<uint64_t> yolov8_postprocess_calls_{0};
     std::atomic<uint64_t> yolov8_postprocess_nanoseconds_{0};
     std::atomic<uint64_t> yolov8_nms_calls_{0};

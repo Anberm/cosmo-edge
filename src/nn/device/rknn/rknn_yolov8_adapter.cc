@@ -296,6 +296,131 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
     return true;
 }
 
+bool DecodeRknnYolov8QuantizedCandidates(const std::vector<RknnYolov8QuantizedHead>& heads, int input_height,
+                                         int input_width, float confidence_threshold,
+                                         RknnYolov8CandidateScratch& scratch,
+                                         std::vector<Yolov8Candidate>& candidates, std::string& error,
+                                         RknnYolov8CandidateTiming* timing) {
+    candidates.clear();
+    if (timing)
+        *timing = {};
+
+    std::vector<std::vector<int>> shapes;
+    shapes.reserve(heads.size());
+    for (const auto& head : heads)
+        shapes.push_back(head.shape);
+
+    RknnYolov8Layout layout;
+    if (!DetectRknnYolov8Layout(shapes, layout, error))
+        return false;
+    if (input_height <= 0 || input_width <= 0 || !std::isfinite(confidence_threshold)) {
+        error = "RKNN YOLOv8 candidate adapter received an invalid input contract";
+        return false;
+    }
+    const auto initial_capacity = static_cast<size_t>(std::min(layout.point_count, 1024));
+    if (candidates.capacity() < initial_capacity)
+        candidates.reserve(initial_capacity);
+
+    for (size_t branch = 0; branch < 3; ++branch) {
+        const auto& box_head = heads[branch * 2];
+        const auto& cls_head = heads[branch * 2 + 1];
+        int box_channels = 0, height = 0, width = 0;
+        int cls_channels = 0, cls_height = 0, cls_width = 0;
+        ParseNchw(box_head.shape, box_channels, height, width);
+        ParseNchw(cls_head.shape, cls_channels, cls_height, cls_width);
+        if (!box_head.data || !cls_head.data || box_head.element_count != ShapeCount(box_head.shape) ||
+            cls_head.element_count != ShapeCount(cls_head.shape)) {
+            error = "RKNN YOLOv8 candidate head byte count does not match its shape";
+            candidates.clear();
+            return false;
+        }
+        if (!std::isfinite(box_head.scale) || !(box_head.scale > 0.0f) || !std::isfinite(cls_head.scale) ||
+            !(cls_head.scale > 0.0f) || box_head.zero_point < -128 || box_head.zero_point > 127 ||
+            cls_head.zero_point < -128 || cls_head.zero_point > 127) {
+            error = "RKNN YOLOv8 candidate quantization parameters are invalid";
+            candidates.clear();
+            return false;
+        }
+
+        std::array<float, 256> dfl_exp_lut{};
+        std::array<float, 256> class_score_lut{};
+        for (size_t index = 0; index < dfl_exp_lut.size(); ++index) {
+            dfl_exp_lut[index]  = std::exp(-static_cast<float>(index) * box_head.scale);
+            const int quantized = static_cast<int>(index) - 128;
+            class_score_lut[index] =
+                Sigmoid((static_cast<float>(quantized) - cls_head.zero_point) * cls_head.scale);
+        }
+
+        const int spatial_count  = height * width;
+        const auto class_started = std::chrono::steady_clock::now();
+        scratch.class_max.assign(static_cast<size_t>(spatial_count), std::numeric_limits<int8_t>::min());
+        scratch.class_ids.assign(static_cast<size_t>(spatial_count), -1);
+        for (int cls = 0; cls < cls_channels; ++cls) {
+            const auto* source = cls_head.data + cls * spatial_count;
+            for (int spatial_index = 0; spatial_index < spatial_count; ++spatial_index) {
+                if (scratch.class_ids[spatial_index] < 0 ||
+                    source[spatial_index] > scratch.class_max[spatial_index]) {
+                    scratch.class_max[spatial_index] = source[spatial_index];
+                    scratch.class_ids[spatial_index] = cls;
+                }
+            }
+        }
+        if (timing) {
+            timing->class_nanoseconds += ElapsedNanoseconds(class_started);
+            timing->points_scanned += static_cast<uint64_t>(spatial_count);
+        }
+
+        const float stride_x   = static_cast<float>(input_width) / static_cast<float>(width);
+        const float stride_y   = static_cast<float>(input_height) / static_cast<float>(height);
+        const auto dfl_started = std::chrono::steady_clock::now();
+        for (int spatial_index = 0; spatial_index < spatial_count; ++spatial_index) {
+            const float confidence = class_score_lut[QuantizedIndex(scratch.class_max[spatial_index])];
+            if (confidence < confidence_threshold)
+                continue;
+
+            float distance[4]{};
+            for (int side = 0; side < 4; ++side) {
+                int maximum = -128;
+                for (int bin = 0; bin < 16; ++bin) {
+                    const int channel = side * 16 + bin;
+                    maximum           = std::max(
+                        maximum, static_cast<int>(box_head.data[channel * spatial_count + spatial_index]));
+                }
+                float denominator = 0.0f;
+                float numerator   = 0.0f;
+                for (int bin = 0; bin < 16; ++bin) {
+                    const int channel = side * 16 + bin;
+                    const int quantized =
+                        static_cast<int>(box_head.data[channel * spatial_count + spatial_index]);
+                    const float value = dfl_exp_lut[static_cast<size_t>(maximum - quantized)];
+                    denominator += value;
+                    numerator += value * static_cast<float>(bin);
+                }
+                if (!(denominator > 0.0f) || !std::isfinite(denominator)) {
+                    error = "RKNN YOLOv8 candidate DFL produced an invalid denominator";
+                    candidates.clear();
+                    return false;
+                }
+                distance[side] = numerator / denominator;
+            }
+
+            const int x        = spatial_index % width;
+            const int y        = spatial_index / width;
+            const float left   = (static_cast<float>(x) + 0.5f - distance[0]) * stride_x;
+            const float top    = (static_cast<float>(y) + 0.5f - distance[1]) * stride_y;
+            const float right  = (static_cast<float>(x) + 0.5f + distance[2]) * stride_x;
+            const float bottom = (static_cast<float>(y) + 0.5f + distance[3]) * stride_y;
+            candidates.push_back({(left + right) * 0.5f, (top + bottom) * 0.5f, right - left, bottom - top,
+                                  confidence, scratch.class_ids[spatial_index]});
+            if (timing)
+                ++timing->points_decoded;
+        }
+        if (timing)
+            timing->dfl_nanoseconds += ElapsedNanoseconds(dfl_started);
+    }
+    return true;
+}
+
 }  // namespace cosmo::nn
 
 #endif  // COSMO_NN_USE_RKNN_BACKEND

@@ -16,6 +16,7 @@ bool IsRknnNativeInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDes
 bool IsRknnNativeYolov8OutputCompatible(const std::vector<rknn_tensor_attr>& attrs,
                                         std::string* reason = nullptr);
 bool RknnFastOutputEnabled();
+bool RknnDirectCandidatesEnabled();
 
 class RknnNetNode final : public NetNode {
 public:
@@ -47,6 +48,7 @@ private:
     std::vector<rknn_output> runtime_outputs_;
     std::vector<RknnYolov8Head> float_yolov8_heads_;
     std::vector<RknnYolov8QuantizedHead> quantized_yolov8_heads_;
+    RknnYolov8CandidateScratch yolov8_candidate_scratch_;
     std::vector<unsigned char> model_data_;
     std::vector<float> input_nhwc_;
     bool yolov8_heads_{false};

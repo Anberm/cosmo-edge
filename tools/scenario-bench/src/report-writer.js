@@ -274,6 +274,7 @@ export class ReportWriter {
         <td>${m.rknnCpuResizeFallbacks ?? '-'}/${m.rknnCpuNormalizeFallbacks ?? '-'}/${m.rknnInputCompatibilityFallbacks ?? '-'}</td>
         <td>${m.rknnNativeInt8Outputs ?? '-'}/${m.rknnFloatOutputs ?? '-'}/${m.rknnOutputCompatibilityFallbacks ?? '-'}/${formatMib(m.rknnNativeOutputAvgBytes)}/${formatMib(m.rknnFloatOutputAvgBytes)}</td>
         <td>${metric(m.rknnYolov8DflAvgMs)}/${metric(m.rknnYolov8ClassAvgMs)}</td>
+        <td>${m.rknnYolov8DirectCandidateCalls ?? '-'}/${m.rknnYolov8DirectCandidateFailures ?? '-'}/${metric(m.rknnYolov8DirectAvgPointsScanned)}/${metric(m.rknnYolov8DirectAvgPointsDecoded)}/${formatMib(m.rknnYolov8LogicalFloatBytesAvoided)}</td>
         <td>${metric(m.yolov8PostprocessAvgMs)}/${metric(m.yolov8NmsAvgMs)}</td>
         <td>${metric(m.rgaAvgMs)}/${m.rgaFailures ?? '-'}</td>
         <td>${metric(m.mppEncodeAvgMs)}/${m.mppEncodeFailures ?? '-'}</td>
@@ -322,7 +323,7 @@ ${bottleneckBanner}
 </table>
 <h2>媒体与预览分阶段指标</h2>
 <table>
-  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/释放/转换 ms</th><th>RKNN总计/失败</th><th>Detector总计/等待/失败</th><th>Fast Fill/Resize/Map/命中/失败</th><th>Fallback Resize/Normalize/Compat</th><th>输出 Native/Float/Compat/NativeMiB/FloatMiB</th><th>量化 DFL/Class ms</th><th>YOLO Post/NMS</th><th>RGA/失败</th><th>MPP编码/失败</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
+  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/释放/转换 ms</th><th>RKNN总计/失败</th><th>Detector总计/等待/失败</th><th>Fast Fill/Resize/Map/命中/失败</th><th>Fallback Resize/Normalize/Compat</th><th>输出 Native/Float/Compat/NativeMiB/FloatMiB</th><th>量化 DFL/Class ms</th><th>直接候选 调用/失败/扫描/解码/省略MiB</th><th>YOLO Post/NMS</th><th>RGA/失败</th><th>MPP编码/失败</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
   ${mediaRows}
 </table>
 <h2>分任务汇总</h2>

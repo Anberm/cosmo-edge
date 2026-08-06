@@ -148,6 +148,20 @@ void InferencePipelineMetrics::RecordRknnYolov8Transform(uint64_t dfl_nanosecond
                 class_nanoseconds);
 }
 
+void InferencePipelineMetrics::RecordRknnYolov8DirectCandidates(bool success, uint64_t points_scanned,
+                                                                uint64_t points_decoded,
+                                                                uint64_t logical_float_bytes_avoided) {
+    rknn_yolov8_direct_candidate_calls_.fetch_add(1, std::memory_order_relaxed);
+    if (!success) {
+        rknn_yolov8_direct_candidate_failures_.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    rknn_yolov8_direct_points_scanned_.fetch_add(points_scanned, std::memory_order_relaxed);
+    rknn_yolov8_direct_points_decoded_.fetch_add(points_decoded, std::memory_order_relaxed);
+    rknn_yolov8_logical_float_bytes_avoided_.fetch_add(logical_float_bytes_avoided,
+                                                       std::memory_order_relaxed);
+}
+
 void InferencePipelineMetrics::RecordYolov8Postprocess(uint64_t nanoseconds) {
     RecordStage(yolov8_postprocess_calls_, yolov8_postprocess_nanoseconds_, 1, nanoseconds);
 }
@@ -227,6 +241,11 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_yolov8_dfl_nanoseconds);
     SNAPSHOT_FIELD(rknn_yolov8_class_calls);
     SNAPSHOT_FIELD(rknn_yolov8_class_nanoseconds);
+    SNAPSHOT_FIELD(rknn_yolov8_direct_candidate_calls);
+    SNAPSHOT_FIELD(rknn_yolov8_direct_candidate_failures);
+    SNAPSHOT_FIELD(rknn_yolov8_direct_points_scanned);
+    SNAPSHOT_FIELD(rknn_yolov8_direct_points_decoded);
+    SNAPSHOT_FIELD(rknn_yolov8_logical_float_bytes_avoided);
     SNAPSHOT_FIELD(yolov8_postprocess_calls);
     SNAPSHOT_FIELD(yolov8_postprocess_nanoseconds);
     SNAPSHOT_FIELD(yolov8_nms_calls);

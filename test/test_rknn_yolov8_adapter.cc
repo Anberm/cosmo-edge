@@ -120,6 +120,98 @@ TEST_CASE("RKNN YOLOv8 quantized adapter rejects invalid quantization",
     std::string error;
     CHECK_FALSE(ReconstructRknnYolov8Quantized(heads, 32, 32, output.data(), output.size(), error));
     CHECK_FALSE(error.empty());
+
+    RknnYolov8CandidateScratch scratch;
+    std::vector<Yolov8Candidate> candidates;
+    error.clear();
+    CHECK_FALSE(DecodeRknnYolov8QuantizedCandidates(heads, 32, 32, 0.25f, scratch, candidates, error));
+    CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("RKNN YOLOv8 direct candidates match the logical tensor decoder",
+          "[nn][rknn][yolov8][direct-candidates]") {
+    using namespace cosmo::nn;
+
+    const std::vector<std::vector<int>> shapes{
+        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 2, 2}, {1, 3, 2, 2}, {1, 64, 1, 1}, {1, 3, 1, 1},
+    };
+    std::vector<std::vector<int8_t>> quantized_values;
+    std::vector<std::vector<float>> float_values;
+    std::vector<RknnYolov8QuantizedHead> quantized_heads;
+    std::vector<RknnYolov8Head> float_heads;
+    for (size_t head = 0; head < shapes.size(); ++head) {
+        const size_t count    = static_cast<size_t>(shapes[head][1] * shapes[head][2] * shapes[head][3]);
+        const bool class_head = head % 2 == 1;
+        const int8_t initial  = class_head ? static_cast<int8_t>(-30) : static_cast<int8_t>(0);
+        quantized_values.emplace_back(count, initial);
+        float_values.emplace_back(count, static_cast<float>(initial) * 0.1f);
+        quantized_heads.push_back({quantized_values.back().data(), count, shapes[head], 0, 0.1f});
+        float_heads.push_back({float_values.back().data(), count, shapes[head]});
+    }
+
+    const auto set_score = [&](size_t head, int class_id, int spatial_index, int8_t value) {
+        const int spatial_count       = shapes[head][2] * shapes[head][3];
+        const size_t index            = static_cast<size_t>(class_id * spatial_count + spatial_index);
+        quantized_values[head][index] = value;
+        float_values[head][index]     = static_cast<float>(value) * 0.1f;
+    };
+    set_score(1, 0, 0, 20);
+    set_score(1, 1, 15, 18);
+    set_score(3, 2, 0, 22);
+
+    std::vector<float> logical_output(static_cast<size_t>(7 * 21));
+    std::string error;
+    REQUIRE(ReconstructRknnYolov8(float_heads, 32, 32, logical_output.data(), logical_output.size(), error));
+
+    SharedResource resource;
+    YoloV8DecodeNode node;
+    node.SetSharedResource(&resource);
+    node.SetMaxBatch(1);
+    YoloPost post;
+    post.nms_threshold      = 0.7f;
+    post.nms_detection_conf = 0.25f;
+    post.top_k              = 8;
+    post.input_width        = 32;
+    post.input_height       = 32;
+    node.LoadParam(&post);
+    REQUIRE(bool(node.InferTopShapes()));
+
+    BlobDesc input_desc;
+    input_desc.device_type = DEVICE_NAIVE;
+    input_desc.data_type   = DATA_TYPE_FLOAT;
+    input_desc.data_format = DATA_FORMAT_NCHW;
+    input_desc.dims        = {1, 7, 21};
+    auto input             = std::make_shared<Blob>(input_desc, true);
+    std::memcpy(input->GetHandle().base, logical_output.data(), logical_output.size() * sizeof(float));
+
+    BlobDesc output_desc;
+    output_desc.device_type = DEVICE_NAIVE;
+    output_desc.data_type   = DATA_TYPE_FLOAT;
+    output_desc.data_format = DATA_FORMAT_NCHW;
+    output_desc.dims        = node.GetTopBlobShapes().front();
+    auto legacy_output      = std::make_shared<Blob>(output_desc, true);
+    auto direct_output      = std::make_shared<Blob>(output_desc, true);
+    std::vector<std::shared_ptr<Blob>> bottoms{input};
+    std::vector<std::shared_ptr<Blob>> legacy_tops{legacy_output};
+    REQUIRE(bool(node.Forward(bottoms, legacy_tops)));
+
+    RknnYolov8CandidateScratch scratch;
+    RknnYolov8CandidateTiming timing;
+    REQUIRE(DecodeRknnYolov8QuantizedCandidates(quantized_heads, 32, 32, 0.25f, scratch,
+                                                resource.yolov8_candidate_batch.candidates, error, &timing));
+    CHECK(timing.points_scanned == 21);
+    CHECK(timing.points_decoded == 3);
+    CHECK(resource.yolov8_candidate_batch.candidates.size() == 3);
+    resource.yolov8_candidate_batch.ready = true;
+
+    std::vector<std::shared_ptr<Blob>> direct_tops{direct_output};
+    REQUIRE(bool(node.Forward(bottoms, direct_tops)));
+    CHECK_FALSE(resource.yolov8_candidate_batch.ready);
+    const auto count     = static_cast<size_t>(post.top_k) * 6;
+    const auto* expected = static_cast<const float*>(legacy_output->GetHandle().base);
+    const auto* actual   = static_cast<const float*>(direct_output->GetHandle().base);
+    for (size_t index = 0; index < count; ++index)
+        CHECK(actual[index] == Catch::Approx(expected[index]).margin(1e-5f));
 }
 
 TEST_CASE("RKNN YOLOv8 class-major capability preserves decode results",
