@@ -24,6 +24,7 @@ public:
     bool Open() override;
     bool Close() override;
     bool IsOpened() override;
+    bool ReuseForStreamRestart(VideoCodecType type, int width, int height) override;
 
     bool SendPacket(const uint8_t* pkt, size_t len, int64_t frame_idx) override;
     VideoFramePtr GetFrame() override;

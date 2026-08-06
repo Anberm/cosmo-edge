@@ -78,6 +78,17 @@ namespace media {
 
         virtual bool IsOpened() = 0;
 
+        /// Allow a backend to retain a compatible decoder context when a new
+        /// stream generation starts at an independently decodable keyframe.
+        /// Backends that do not explicitly support this keep the existing
+        /// Close/Open lifecycle.
+        virtual bool ReuseForStreamRestart(VideoCodecType type, int width, int height) {
+            (void)type;
+            (void)width;
+            (void)height;
+            return false;
+        }
+
         VideoFramePtr Decode(const uint8_t* pkt, size_t len, int64_t frame_idx, bool& result);
 
         /// Decode one packet while preserving a backend-specific delayed

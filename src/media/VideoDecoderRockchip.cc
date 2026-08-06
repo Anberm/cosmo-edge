@@ -215,6 +215,8 @@ struct RockchipDecoderState {
     MppApi* api{nullptr};
     MppDecCfg config{nullptr};
     MppBufferGroup frame_group{nullptr};
+    size_t frame_group_buffer_size{0};
+    bool frame_group_reuse_logged{false};
     MppCodingType coding{MPP_VIDEO_CodingUnused};
     bool opened{false};
     std::deque<PendingDecodeTiming> pending;
@@ -382,6 +384,24 @@ bool VideoDecoderRockchip::IsOpened() {
     return (fallback_ && fallback_->IsOpened()) || (state_ && state_->opened);
 }
 
+bool VideoDecoderRockchip::ReuseForStreamRestart(VideoCodecType type, int width, int height) {
+    if (fallback_ || !state_ || !state_->opened || !state_->context || !state_->api ||
+        type != codec_type_ || width <= 0 || height <= 0 ||
+        static_cast<size_t>(width) != width_ || static_cast<size_t>(height) != height_) {
+        return false;
+    }
+
+    // A local loop or RTSP reconnect starts with a validated keyframe. Keep
+    // the MPP context and its external frame group alive so synchronous RGA
+    // imports never outlive a frame group that is destroyed every few seconds.
+    // Codec parameter sets on the new keyframe update the decoder as needed;
+    // ConfigureFrameGroup reuses the group when the requested buffer layout is
+    // unchanged and reconfigures it when the layout really changes.
+    state_->pending.clear();
+    state_->ready_frames.clear();
+    return true;
+}
+
 bool VideoDecoderRockchip::SendPacket(const uint8_t* pkt, size_t len, int64_t frame_idx) {
     if (fallback_) {
         return fallback_->SendPacket(pkt, len, frame_idx);
@@ -448,30 +468,38 @@ bool VideoDecoderRockchip::ConfigureFrameGroup(size_t buffer_size) {
     }
 
     MPP_RET ret = MPP_OK;
+    const bool reuse_existing_group =
+        state_->frame_group && state_->frame_group_buffer_size == buffer_size;
     if (!state_->frame_group) {
         ret = mpp_buffer_group_get_internal(
             &state_->frame_group,
             static_cast<MppBufferType>(MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE));
-    } else {
+    } else if (!reuse_existing_group) {
         ret = mpp_buffer_group_clear(state_->frame_group);
     }
     if (ret != MPP_OK || !state_->frame_group) {
         LOG_WARN("{} MPP decoder frame-group allocation/reset failed: {}", idx_name_, ret);
         return false;
     }
-    ret = mpp_buffer_group_limit_config(state_->frame_group, buffer_size, kDecoderBufferCount);
-    if (ret != MPP_OK) {
-        LOG_WARN("{} MPP decoder frame-group limit failed: {}", idx_name_, ret);
-        return false;
-    }
-    ret = state_->api->control(state_->context, MPP_DEC_SET_EXT_BUF_GROUP, state_->frame_group);
-    if (ret != MPP_OK) {
-        LOG_WARN("{} MPP decoder external frame-group setup failed: {}", idx_name_, ret);
-        return false;
+    if (!reuse_existing_group) {
+        ret = mpp_buffer_group_limit_config(state_->frame_group, buffer_size, kDecoderBufferCount);
+        if (ret != MPP_OK) {
+            LOG_WARN("{} MPP decoder frame-group limit failed: {}", idx_name_, ret);
+            return false;
+        }
+        ret = state_->api->control(state_->context, MPP_DEC_SET_EXT_BUF_GROUP, state_->frame_group);
+        if (ret != MPP_OK) {
+            LOG_WARN("{} MPP decoder external frame-group setup failed: {}", idx_name_, ret);
+            return false;
+        }
+        state_->frame_group_buffer_size = buffer_size;
     }
     ret = state_->api->control(state_->context, MPP_DEC_SET_INFO_CHANGE_READY, nullptr);
     if (ret != MPP_OK) {
         LOG_WARN("{} MPP decoder info-change acknowledgement failed: {}", idx_name_, ret);
+        if (!reuse_existing_group) {
+            state_->frame_group_buffer_size = 0;
+        }
         return false;
     }
     return true;
@@ -499,11 +527,19 @@ DecodedVideoFrame VideoDecoderRockchip::ReceiveMppFrame(bool& made_progress) {
     if (mpp_frame_get_info_change(frame)) {
         made_progress          = true;
         const auto buffer_size = mpp_frame_get_buf_size(frame);
+        const bool reused_group = state_->frame_group &&
+                                  state_->frame_group_buffer_size == buffer_size;
         const auto configured  = ConfigureFrameGroup(buffer_size);
-        LOG_INFO("{} MPP decoder info change: {}x{} stride={}x{} buffer={} configured={}", idx_name_,
-                 mpp_frame_get_width(frame), mpp_frame_get_height(frame),
-                 mpp_frame_get_hor_stride(frame), mpp_frame_get_ver_stride(frame), buffer_size,
-                 configured);
+        if (!reused_group || !configured) {
+            LOG_INFO("{} MPP decoder info change: {}x{} stride={}x{} buffer={} configured={} reused={}",
+                     idx_name_, mpp_frame_get_width(frame), mpp_frame_get_height(frame),
+                     mpp_frame_get_hor_stride(frame), mpp_frame_get_ver_stride(frame), buffer_size,
+                     configured, reused_group);
+        } else if (!state_->frame_group_reuse_logged) {
+            state_->frame_group_reuse_logged = true;
+            LOG_INFO("{} MPP decoder reuses its existing {}-byte frame group for repeated stream headers",
+                     idx_name_, buffer_size);
+        }
         mpp_frame_deinit(&frame);
         if (!configured) {
             GetPreviewPipelineMetrics().RecordMppDecode(false, ElapsedNanoseconds(decode_started));

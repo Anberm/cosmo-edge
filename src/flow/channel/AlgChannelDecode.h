@@ -119,6 +119,7 @@ private:
     int64_t frame_index_{-1};
     int64_t stream_index_{-1};
     int64_t decode_count_{0};
+    uint64_t decoder_stream_reuse_count_{0};
     int64_t cap_image_stream_index_{-1};
     float fps_{0.0};
     std::atomic<bool> is_running_{false};

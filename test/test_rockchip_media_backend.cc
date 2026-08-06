@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -48,6 +50,24 @@ public:
 bool HasAnnexBStartCode(const std::vector<uint8_t>& data) {
     return data.size() >= 4 && data[0] == 0 && data[1] == 0 &&
            ((data[2] == 1) || (data[2] == 0 && data[3] == 1));
+}
+
+size_t CountSelfDmaBufFds() {
+    std::error_code error;
+    size_t count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc/self/fdinfo", error)) {
+        if (error)
+            break;
+        std::ifstream input(entry.path());
+        std::string line;
+        while (std::getline(input, line)) {
+            if (line.rfind("exp_name:", 0) == 0) {
+                ++count;
+                break;
+            }
+        }
+    }
+    return count;
 }
 
 #if defined(COSMO_NN_USE_RKNN_BACKEND)
@@ -302,6 +322,70 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     CHECK(after.mpp_copy_out_failures == before.mpp_copy_out_failures);
     CHECK(after.mpp_early_dropped_frames == before.mpp_early_dropped_frames + 1);
     native_buffer.reset();
+    decoded.reset();
+    CHECK(decoder->Close());
+
+    // Local loop playback changes streamIndex for every pass. Keep a compatible
+    // RK3576 MPP context alive while exporting its DMA-BUF through RGA, then
+    // require the warmed frame-group FD count to remain bounded.
+    REQUIRE(decoder->Open());
+    CHECK_FALSE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH264,
+                                               width + 2, height));
+    CHECK_FALSE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH265,
+                                               width, height));
+    size_t dmabuf_fds_after_warmup = 0;
+    size_t reused_stream_frames = 0;
+    for (int cycle = 0; cycle < 17; ++cycle) {
+        if (cycle > 0) {
+            REQUIRE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH264,
+                                                   width, height));
+        }
+        bool got_frame = false;
+        for (size_t packet_index = 0; packet_index < packets.size() && !got_frame;
+             ++packet_index) {
+            bool accepted = false;
+            auto output = decoder->DecodeFrame(packets[packet_index]->data.data(),
+                                               packets[packet_index]->data.size(),
+                                               1000 + cycle * 100 + packet_index, accepted);
+            REQUIRE(accepted);
+            if (!output.HasFrame())
+                continue;
+            auto replay_native = output.ExportNativeBuffer();
+            auto replay_frame  = output.Materialize();
+            REQUIRE(replay_native);
+            REQUIRE(replay_frame);
+#if defined(COSMO_NN_USE_RKNN_BACKEND)
+            auto replay_bgr = processor.I4202BGR(replay_frame);
+            REQUIRE(VideoFrameValid(replay_bgr, true));
+            auto replay_handle                       = source_blob->GetHandle();
+            replay_handle.base                       = replay_bgr->GetData();
+            replay_handle.native_image.fd            = replay_native->fd;
+            replay_handle.native_image.bytes         = replay_native->bytes;
+            replay_handle.native_image.width         = replay_native->width;
+            replay_handle.native_image.height        = replay_native->height;
+            replay_handle.native_image.width_stride  = replay_native->width_stride;
+            replay_handle.native_image.height_stride = replay_native->height_stride;
+            replay_handle.native_image.format        = cosmo::nn::IMAGE_NV12;
+            source_blob->SetHandle(replay_handle);
+            {
+                ScopedEnvValue enabled("COSMO_RKNN_MPP_DMABUF", "1");
+                REQUIRE(bool(resize_node.Forward(bottoms, tops)));
+            }
+#endif
+            ++reused_stream_frames;
+            got_frame = true;
+        }
+        REQUIRE(got_frame);
+        if (cycle == 0) {
+            dmabuf_fds_after_warmup = CountSelfDmaBufFds();
+            REQUIRE(dmabuf_fds_after_warmup > 0);
+        }
+    }
+    REQUIRE(reused_stream_frames == 17);
+    const auto dmabuf_fds_after_reuse = CountSelfDmaBufFds();
+    INFO("DMA-BUF FDs after warmup=" << dmabuf_fds_after_warmup
+                                     << " after stream reuse=" << dmabuf_fds_after_reuse);
+    CHECK(dmabuf_fds_after_reuse <= dmabuf_fds_after_warmup + 4);
     CHECK(decoder->Close());
 }
 

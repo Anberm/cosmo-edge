@@ -168,8 +168,32 @@ void AlgChannelDecode::PrepareDecoder(VideoPacketPtr& video_frame) {
         auto* media_handle = service::ServiceRegistry::Instance().Get<mem::IDeviceContext>().GetMediaHandle();
         decoder_           = media::VideoDecoder::Create(static_cast<size_t>(device_id_), media_handle);
     }
-    // Rebuild decoder on stream restart or exception.
-    if ((stream_index_ != video_frame->stream_idx) || (codec_reset_sign_)) {
+    const bool needs_resize = NeedsResize(video_frame);
+    const int decoder_width = needs_resize ? media::kVideoDefaultWidth
+                                           : static_cast<int>(video_frame->width);
+    const int decoder_height = needs_resize ? media::kVideoDefaultHeight
+                                            : static_cast<int>(video_frame->height);
+    const bool stream_restarted = stream_index_ != video_frame->stream_idx;
+
+    // A backend may retain a compatible hardware context across a clean
+    // keyframe boundary. CPU/Sophon keep their existing Close/Open behavior.
+    if (stream_restarted && !codec_reset_sign_ &&
+        decoder_->ReuseForStreamRestart(video_frame->codec_type, decoder_width, decoder_height)) {
+        frame_info_.clear();
+        stream_index_     = video_frame->stream_idx;
+        decode_count_     = 0;
+        frame_index_      = -1;
+        ++decoder_stream_reuse_count_;
+        if (decoder_stream_reuse_count_ == 1 || decoder_stream_reuse_count_ % 240 == 0) {
+            LOG_INFO("{} reused decoder across stream restart: stream={} codec={} size={}x{} count={}",
+                     name_, stream_index_, video_frame->codec_type, decoder_width, decoder_height,
+                     decoder_stream_reuse_count_);
+        }
+        return;
+    }
+
+    // Rebuild decoder on an incompatible stream restart or exception.
+    if (stream_restarted || codec_reset_sign_) {
         if (decoder_->IsOpened()) {
             decoder_->Close();
             LOG_INFO("{} Decoder Reset Last stream:{} New Stream:{} SuccessCount:{} codecResetSign:{} ",
@@ -182,16 +206,11 @@ void AlgChannelDecode::PrepareDecoder(VideoPacketPtr& video_frame) {
         codec_reset_sign_ = false;
         decode_count_     = 0;
         frame_index_      = -1;
+        decoder_stream_reuse_count_ = 0;
         LOG_INFO("{} streamIndex:{} videoType:{} Changed, dumux video width:{}, height:{}", name_,
                  stream_index_, video_frame->codec_type, video_frame->width, video_frame->height);
 
-        if (NeedsResize(video_frame)) {
-            decoder_->SetCodecType(video_frame->codec_type, media::kVideoDefaultWidth,
-                                   media::kVideoDefaultHeight);
-        } else {
-            decoder_->SetCodecType(video_frame->codec_type, static_cast<int>(video_frame->width),
-                                   static_cast<int>(video_frame->height));
-        }
+        decoder_->SetCodecType(video_frame->codec_type, decoder_width, decoder_height);
         decoder_->Open();
     }
 }
