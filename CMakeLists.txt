@@ -593,6 +593,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/scripts/
         PATTERN "package_md5_rename.sh" EXCLUDE
         PATTERN "restore-symlinks.sh" EXCLUDE
         PATTERN "sync-source-volume.sh" EXCLUDE
+        PATTERN "legacy_migration_install.sh" EXCLUDE
         PATTERN "install.sh" EXCLUDE
         PATTERN "start.sh" EXCLUDE
         PATTERN "inte_run_start.sh" EXCLUDE
