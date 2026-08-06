@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "fixture-invalid",
+  "task": "documentation",
+  "expectedDeliverables": [
+    "Documentation source"
+  ],
+  "allowedChanges": [
+    "docs/"
+  ],
+  "requiredCapabilities": [],
+  "acceptance": {},
+  "authority": {
+    "workspace": "current isolated checkout"
+  }
+}

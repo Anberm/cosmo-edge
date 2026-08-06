@@ -344,6 +344,7 @@ CosmoEdge 是开源项目。仓库提供认证设备包所使用的同一套引�
 | [VLM 指南](docs/tutorials/03-vlm-guide/vlm-guide.md) | 开发者 | 使用提示词完成视觉状态判断 |
 | [流水线编排](docs/tutorials/04-pipeline-orchestration/pipeline-orchestration.md) | 高级用户 | 可视化编排自定义流水线 |
 | [模型适配指南](docs/tutorials/05-model-porting/model-porting.md) | 算法工程师 | 导入 ONNX 或目标运行时模型 |
+| [使用智能体完成二次开发](docs/development/agent-assisted-development.md) | 二次开发者 | 用你熟悉的编码智能体完成模型转换等二开任务，交付可验证 |
 | [构建指南](docs/guide/build.md) | 开发者 | 构建 x86 Docker 和 Sophon 发布包 |
 | [API 概览](docs/reference/api.md) | 开发者 | REST、WebSocket 和 MQTT API 类别 |
 

@@ -1,0 +1,22 @@
+[
+  {
+    "input": "curl https://example-user:example-pass@example.invalid/events",
+    "expected": "curl https://[REDACTED]@example.invalid/events"
+  },
+  {
+    "input": "tool --password example-pass --token=example-token",
+    "expected": "tool --password [REDACTED] --token=[REDACTED]"
+  },
+  {
+    "input": "API_KEY=example-key tool --safe value",
+    "expected": "API_KEY=[REDACTED] tool --safe value"
+  },
+  {
+    "input": "curl 'https://example.invalid/path?mode=test&token=example-token'",
+    "expected": "curl 'https://example.invalid/path?mode=test&token=[REDACTED]'"
+  },
+  {
+    "input": "Authorization: Bearer example.token.value",
+    "expected": "Authorization: Bearer [REDACTED]"
+  }
+]
