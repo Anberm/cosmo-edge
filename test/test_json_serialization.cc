@@ -160,6 +160,13 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     original.rknnYolov8DirectPointsDecoded      = 68;
     original.rknnYolov8ScoreSumPointsRejected   = 32'000;
     original.rknnYolov8LogicalFloatBytesAvoided = 11'289'600;
+    original.rknnBoundInputBindAttempts         = 1;
+    original.rknnBoundInputCopyCalls            = 4;
+    original.rknnBoundInputCopyMs               = 1.5;
+    original.rknnBoundInputCopyBytes            = 4'915'200;
+    original.rknnBoundInputSyncCalls            = 4;
+    original.rknnBoundInputSyncMs               = 0.5;
+    original.rknnBoundInputFrames               = 4;
 
     std::string json;
     REQUIRE(cosmo::util::EncodeJson(original, json));
@@ -173,6 +180,9 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(doc["rknnYolov8DirectPointsDecoded"] == 68);
     CHECK(doc["rknnYolov8ScoreSumPointsRejected"] == 32'000);
     CHECK(doc["rknnYolov8LogicalFloatBytesAvoided"] == 11'289'600);
+    CHECK(doc["rknnBoundInputBindAttempts"] == 1);
+    CHECK(doc["rknnBoundInputCopyBytes"] == 4'915'200);
+    CHECK(doc["rknnBoundInputFrames"] == 4);
 
     cosmo::MsgGpuInfo restored;
     REQUIRE(cosmo::util::DecodeJson(json, restored));
@@ -185,6 +195,13 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(restored.rknnYolov8DirectPointsDecoded == original.rknnYolov8DirectPointsDecoded);
     CHECK(restored.rknnYolov8ScoreSumPointsRejected == original.rknnYolov8ScoreSumPointsRejected);
     CHECK(restored.rknnYolov8LogicalFloatBytesAvoided == original.rknnYolov8LogicalFloatBytesAvoided);
+    CHECK(restored.rknnBoundInputBindAttempts == original.rknnBoundInputBindAttempts);
+    CHECK(restored.rknnBoundInputCopyCalls == original.rknnBoundInputCopyCalls);
+    CHECK(restored.rknnBoundInputCopyMs == original.rknnBoundInputCopyMs);
+    CHECK(restored.rknnBoundInputCopyBytes == original.rknnBoundInputCopyBytes);
+    CHECK(restored.rknnBoundInputSyncCalls == original.rknnBoundInputSyncCalls);
+    CHECK(restored.rknnBoundInputSyncMs == original.rknnBoundInputSyncMs);
+    CHECK(restored.rknnBoundInputFrames == original.rknnBoundInputFrames);
 }
 
 TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {

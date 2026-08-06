@@ -70,6 +70,16 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_native_int8_inputs{0};
     uint64_t rknn_float_inputs{0};
     uint64_t rknn_input_compatibility_fallbacks{0};
+    uint64_t rknn_bound_input_bind_attempts{0};
+    uint64_t rknn_bound_input_bind_failures{0};
+    uint64_t rknn_bound_input_copy_calls{0};
+    uint64_t rknn_bound_input_copy_nanoseconds{0};
+    uint64_t rknn_bound_input_copy_bytes{0};
+    uint64_t rknn_bound_input_copy_failures{0};
+    uint64_t rknn_bound_input_sync_calls{0};
+    uint64_t rknn_bound_input_sync_nanoseconds{0};
+    uint64_t rknn_bound_input_sync_failures{0};
+    uint64_t rknn_bound_input_frames{0};
     uint64_t rknn_native_int8_outputs{0};
     uint64_t rknn_float_outputs{0};
     uint64_t rknn_output_compatibility_fallbacks{0};
@@ -122,6 +132,9 @@ public:
     void RecordRknnCpuNormalizeFallback(uint64_t nanoseconds);
     void RecordRknnNativeInputMap(uint64_t nanoseconds);
     void RecordRknnInputFormat(bool native_int8, bool compatibility_fallback = false);
+    void RecordRknnBoundInputBind(bool success);
+    void RecordRknnBoundInputCopy(uint64_t nanoseconds, uint64_t bytes, bool success);
+    void RecordRknnBoundInputSync(uint64_t nanoseconds, bool success);
     void RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
                                 bool compatibility_fallback = false);
     void RecordRknnYolov8Transform(uint64_t dfl_nanoseconds, uint64_t class_nanoseconds);
@@ -196,6 +209,16 @@ private:
     std::atomic<uint64_t> rknn_native_int8_inputs_{0};
     std::atomic<uint64_t> rknn_float_inputs_{0};
     std::atomic<uint64_t> rknn_input_compatibility_fallbacks_{0};
+    std::atomic<uint64_t> rknn_bound_input_bind_attempts_{0};
+    std::atomic<uint64_t> rknn_bound_input_bind_failures_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_calls_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_bytes_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_failures_{0};
+    std::atomic<uint64_t> rknn_bound_input_sync_calls_{0};
+    std::atomic<uint64_t> rknn_bound_input_sync_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_bound_input_sync_failures_{0};
+    std::atomic<uint64_t> rknn_bound_input_frames_{0};
     std::atomic<uint64_t> rknn_native_int8_outputs_{0};
     std::atomic<uint64_t> rknn_float_outputs_{0};
     std::atomic<uint64_t> rknn_output_compatibility_fallbacks_{0};

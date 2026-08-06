@@ -162,12 +162,83 @@ bool IsRknnNativeYolov8OutputCompatible(const std::vector<rknn_tensor_attr>& att
     return true;
 }
 
+bool IsRknnBoundInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc& desc, std::string* reason) {
+    const auto reject = [&](const char* message) {
+        if (reason)
+            *reason = message;
+        return false;
+    };
+    if (desc.data_type != DATA_TYPE_INT8 || desc.data_format != DATA_FORMAT_NHWC || desc.dims.size() != 4 ||
+        desc.dims[0] != 1 || desc.dims[1] <= 0 || desc.dims[2] <= 0 || desc.dims[3] <= 0) {
+        return reject("bound input requires packed batch-1 INT8 NHWC data");
+    }
+    if (attr.n_dims != 4 || attr.fmt != RKNN_TENSOR_NHWC || attr.type != RKNN_TENSOR_INT8)
+        return reject("RKNN native input is not INT8 NHWC");
+    if (attr.qnt_type != RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC || attr.zp != -128 || !std::isfinite(attr.scale) ||
+        std::fabs(attr.scale - 0.00392157f) > 1e-7f) {
+        return reject("RKNN native input quantization does not match the host fast path");
+    }
+    if (attr.dims[0] != 1 || attr.dims[1] != static_cast<uint32_t>(desc.dims[1]) ||
+        attr.dims[2] != static_cast<uint32_t>(desc.dims[2]) ||
+        attr.dims[3] != static_cast<uint32_t>(desc.dims[3])) {
+        return reject("RKNN native input dimensions do not match the graph blob");
+    }
+    const uint32_t width_stride = attr.w_stride == 0 ? attr.dims[2] : attr.w_stride;
+    if (width_stride < attr.dims[2])
+        return reject("RKNN native input width stride is smaller than the tensor width");
+    const uint64_t required  = static_cast<uint64_t>(attr.dims[1]) * width_stride * attr.dims[3];
+    const uint64_t available = attr.size_with_stride == 0 ? attr.size : attr.size_with_stride;
+    if (required == 0 || available < required)
+        return reject("RKNN native input stride allocation is too small");
+    if (reason)
+        reason->clear();
+    return true;
+}
+
+bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
+                             size_t destination_bytes, int height, int width, int channels, int width_stride,
+                             std::string* reason) {
+    const auto reject = [&](const char* message) {
+        if (reason)
+            *reason = message;
+        return false;
+    };
+    if (!source || !destination || height <= 0 || width <= 0 || channels <= 0)
+        return reject("bound input copy received an invalid packed tensor");
+    const int effective_stride = width_stride == 0 ? width : width_stride;
+    if (effective_stride < width)
+        return reject("bound input copy width stride is too small");
+    const uint64_t row_bytes            = static_cast<uint64_t>(width) * channels;
+    const uint64_t source_required      = static_cast<uint64_t>(height) * row_bytes;
+    const uint64_t destination_required = static_cast<uint64_t>(height) * effective_stride * channels;
+    if (source_required > source_bytes || destination_required > destination_bytes)
+        return reject("bound input copy buffer is smaller than its tensor contract");
+    if (effective_stride == width) {
+        std::memcpy(destination, source, static_cast<size_t>(source_required));
+    } else {
+        const size_t source_row_bytes = static_cast<size_t>(row_bytes);
+        const size_t destination_row_bytes =
+            static_cast<size_t>(effective_stride) * static_cast<size_t>(channels);
+        for (int row = 0; row < height; ++row) {
+            std::memcpy(destination + static_cast<size_t>(row) * destination_row_bytes,
+                        source + static_cast<size_t>(row) * source_row_bytes, source_row_bytes);
+        }
+    }
+    if (reason)
+        reason->clear();
+    return true;
+}
+
 bool RknnFastOutputEnabled() {
     return EnvironmentFlag("COSMO_RKNN_FAST_OUTPUT", true);
 }
 
 bool RknnDirectCandidatesEnabled() {
     return EnvironmentFlag("COSMO_RKNN_DIRECT_CANDIDATES", true);
+}
+
+bool RknnBoundInputEnabled() {
+    return EnvironmentFlag("COSMO_RKNN_BOUND_INPUT", true);
 }
 
 RknnNetNode::RknnNetNode() : NetNode() {
@@ -180,6 +251,11 @@ RknnNetNode::~RknnNetNode() {
 }
 
 void RknnNetNode::DestroyContext() {
+    if (bound_input_memory_) {
+        if (context_ != 0)
+            rknn_destroy_mem(context_, bound_input_memory_);
+        bound_input_memory_ = nullptr;
+    }
     if (context_ != 0) {
         rknn_destroy(context_);
         context_ = 0;
@@ -196,11 +272,46 @@ void RknnNetNode::DestroyContext() {
     std::vector<float>().swap(input_nhwc_);
     io_count_                = {};
     output_adapter_contract_ = {};
+    bound_input_attr_        = {};
     yolov8_heads_          = false;
     native_yolov8_outputs_ = false;
     detector_model_        = false;
+    bound_input_eligible_    = true;
     yolov8_class_count_    = 0;
     yolov8_point_count_    = 0;
+}
+
+bool RknnNetNode::TryBindInputMemory(const BlobDesc& desc, std::string& reason) {
+    rknn_tensor_attr attr{};
+    attr.index = 0;
+    int result = rknn_query(context_, RKNN_QUERY_NATIVE_INPUT_ATTR, &attr, sizeof(attr));
+    if (result != RKNN_SUCC) {
+        reason = "RKNN_QUERY_NATIVE_INPUT_ATTR failed with RKNN code " + std::to_string(result);
+        return false;
+    }
+    if (!IsRknnBoundInt8InputCompatible(attr, desc, &reason))
+        return false;
+
+    const uint32_t bytes = attr.size_with_stride == 0 ? attr.size : attr.size_with_stride;
+    auto* memory         = rknn_create_mem(context_, bytes);
+    if (!memory || !memory->virt_addr || memory->size < bytes) {
+        if (memory)
+            rknn_destroy_mem(context_, memory);
+        reason = "rknn_create_mem failed for the bound input";
+        return false;
+    }
+    std::memset(memory->virt_addr, 0, memory->size);
+    attr.pass_through = 1;
+    result            = rknn_set_io_mem(context_, memory, &attr);
+    if (result != RKNN_SUCC) {
+        rknn_destroy_mem(context_, memory);
+        reason = "rknn_set_io_mem failed with RKNN code " + std::to_string(result);
+        return false;
+    }
+    bound_input_attr_   = attr;
+    bound_input_memory_ = memory;
+    reason.clear();
+    return true;
 }
 
 size_t RknnNetNode::TensorElementCount(const rknn_tensor_attr& attr) const {
@@ -522,11 +633,52 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         input.fmt = RKNN_TENSOR_NHWC;
     }
     GetInferencePipelineMetrics().RecordRknnInputFormat(native_int8, compatibility_fallback);
-    const auto inputs_set_started = MetricsClock::now();
-    int result = rknn_inputs_set(context_, 1, &input);
-    GetInferencePipelineMetrics().RecordRknnInputsSet(ElapsedNanoseconds(inputs_set_started), scope);
-    if (result != RKNN_SUCC)
-        return finish(RknnError("rknn_inputs_set", result));
+    bool use_bound_input = false;
+    if (bound_input_memory_ && !native_int8) {
+        return finish(
+            Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN bound input cannot accept a non-native tensor"));
+    }
+    if (native_int8 && !bound_input_memory_ && bound_input_eligible_ && RknnBoundInputEnabled()) {
+        std::string bind_reason;
+        const bool bound = TryBindInputMemory(input_desc, bind_reason);
+        GetInferencePipelineMetrics().RecordRknnBoundInputBind(bound);
+        if (bound) {
+            LOG_INFO("RKNN bound input enabled: bytes={} fd={} width_stride={}", bound_input_memory_->size,
+                     bound_input_memory_->fd, bound_input_attr_.w_stride);
+        } else {
+            bound_input_eligible_ = false;
+            LOG_WARN("RKNN bound input unavailable; retaining rknn_inputs_set path: {}", bind_reason);
+        }
+    }
+    if (native_int8 && bound_input_memory_) {
+        std::string copy_reason;
+        const auto copy_started   = MetricsClock::now();
+        const size_t source_bytes = BlobElementCount(input_desc);
+        const bool copied         = CopyRknnPackedInt8Input(
+            static_cast<const int8_t*>(input.buf), source_bytes,
+            static_cast<int8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size, input_height,
+            input_width, input_desc.dims[3], static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
+        GetInferencePipelineMetrics().RecordRknnBoundInputCopy(ElapsedNanoseconds(copy_started),
+                                                               copied ? source_bytes : 0, copied);
+        if (!copied)
+            return finish(Status(COSMO_NN_ERR_INVALID_INPUT, copy_reason));
+        const auto sync_started = MetricsClock::now();
+        const int sync_result   = rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_TO_DEVICE);
+        GetInferencePipelineMetrics().RecordRknnBoundInputSync(ElapsedNanoseconds(sync_started),
+                                                               sync_result == RKNN_SUCC);
+        if (sync_result != RKNN_SUCC)
+            return finish(RknnError("rknn_mem_sync", sync_result));
+        use_bound_input = true;
+    }
+    int result = RKNN_SUCC;
+    if (!use_bound_input) {
+        bound_input_eligible_         = false;
+        const auto inputs_set_started = MetricsClock::now();
+        result                        = rknn_inputs_set(context_, 1, &input);
+        GetInferencePipelineMetrics().RecordRknnInputsSet(ElapsedNanoseconds(inputs_set_started), scope);
+        if (result != RKNN_SUCC)
+            return finish(RknnError("rknn_inputs_set", result));
+    }
     const auto run_started = MetricsClock::now();
     result = rknn_run(context_, nullptr);
     GetInferencePipelineMetrics().RecordRknnRun(ElapsedNanoseconds(run_started), scope);

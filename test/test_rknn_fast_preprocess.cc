@@ -89,6 +89,62 @@ TEST_CASE("RKNN native input contract requires the model quantization identity",
     CHECK_FALSE(IsRknnNativeInt8InputCompatible(attr, desc));
 }
 
+TEST_CASE("RKNN bound input validates native stride and copies packed rows", "[nn][rknn][bound-input]") {
+    using namespace cosmo::nn;
+    rknn_tensor_attr attr{};
+    attr.n_dims           = 4;
+    attr.dims[0]          = 1;
+    attr.dims[1]          = 2;
+    attr.dims[2]          = 2;
+    attr.dims[3]          = 3;
+    attr.fmt              = RKNN_TENSOR_NHWC;
+    attr.type             = RKNN_TENSOR_INT8;
+    attr.qnt_type         = RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC;
+    attr.zp               = -128;
+    attr.scale            = 0.00392157f;
+    attr.w_stride         = 4;
+    attr.size             = 12;
+    attr.size_with_stride = 24;
+    const auto desc       = PackedImageDesc(2, 2, IMAGE_RGB, DATA_TYPE_INT8);
+    std::string reason;
+    CHECK(IsRknnBoundInt8InputCompatible(attr, desc, &reason));
+    CHECK(reason.empty());
+
+    const std::array<int8_t, 12> source{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    std::array<int8_t, 24> destination{};
+    destination.fill(-1);
+    REQUIRE(CopyRknnPackedInt8Input(source.data(), source.size(), destination.data(), destination.size(), 2,
+                                    2, 3, 4, &reason));
+    CHECK(std::equal(source.begin(), source.begin() + 6, destination.begin()));
+    CHECK(std::equal(source.begin() + 6, source.end(), destination.begin() + 12));
+    CHECK(std::all_of(destination.begin() + 6, destination.begin() + 12,
+                      [](int8_t value) { return value == -1; }));
+
+    std::array<int8_t, 12> compact{};
+    REQUIRE(CopyRknnPackedInt8Input(source.data(), source.size(), compact.data(), compact.size(), 2, 2, 3, 0,
+                                    &reason));
+    CHECK(compact == source);
+
+    attr.w_stride = 1;
+    CHECK_FALSE(IsRknnBoundInt8InputCompatible(attr, desc, &reason));
+    CHECK(reason.find("stride") != std::string::npos);
+    CHECK_FALSE(
+        CopyRknnPackedInt8Input(source.data(), source.size(), destination.data(), 8, 2, 2, 3, 2, &reason));
+    CHECK(reason.find("smaller") != std::string::npos);
+}
+
+TEST_CASE("RKNN bound input switch defaults on and supports explicit rollback", "[nn][rknn][bound-input]") {
+    using namespace cosmo::nn;
+    {
+        ScopedEnvironment enabled("COSMO_RKNN_BOUND_INPUT", "1");
+        CHECK(RknnBoundInputEnabled());
+    }
+    {
+        ScopedEnvironment disabled("COSMO_RKNN_BOUND_INPUT", "0");
+        CHECK_FALSE(RknnBoundInputEnabled());
+    }
+}
+
 TEST_CASE("RKNN native output capability excludes FP16 and malformed YOLOv8 heads",
           "[nn][rknn][fast-output][fp16]") {
     using namespace cosmo::nn;

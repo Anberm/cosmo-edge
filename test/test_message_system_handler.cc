@@ -86,6 +86,8 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
           inference.rknn_outputs_release_calls);
     CHECK(ret.resData.accelerator.rknnNativeInt8Outputs ==
           inference.rknn_native_int8_outputs);
+    CHECK(ret.resData.accelerator.rknnBoundInputBindAttempts == inference.rknn_bound_input_bind_attempts);
+    CHECK(ret.resData.accelerator.rknnBoundInputFrames == inference.rknn_bound_input_frames);
     CHECK(ret.resData.accelerator.rknnOutputCompatibilityFallbacks ==
           inference.rknn_output_compatibility_fallbacks);
     CHECK(ret.resData.accelerator.rknnYolov8DflCalls == inference.rknn_yolov8_dfl_calls);

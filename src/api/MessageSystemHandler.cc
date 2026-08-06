@@ -202,6 +202,16 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnNativeInt8Inputs          = inference.rknn_native_int8_inputs;
     accelerator.rknnFloatInputs               = inference.rknn_float_inputs;
     accelerator.rknnInputCompatibilityFallbacks = inference.rknn_input_compatibility_fallbacks;
+    accelerator.rknnBoundInputBindAttempts      = inference.rknn_bound_input_bind_attempts;
+    accelerator.rknnBoundInputBindFailures      = inference.rknn_bound_input_bind_failures;
+    accelerator.rknnBoundInputCopyCalls         = inference.rknn_bound_input_copy_calls;
+    accelerator.rknnBoundInputCopyMs            = inference.rknn_bound_input_copy_nanoseconds / 1000000.0;
+    accelerator.rknnBoundInputCopyBytes         = inference.rknn_bound_input_copy_bytes;
+    accelerator.rknnBoundInputCopyFailures      = inference.rknn_bound_input_copy_failures;
+    accelerator.rknnBoundInputSyncCalls         = inference.rknn_bound_input_sync_calls;
+    accelerator.rknnBoundInputSyncMs            = inference.rknn_bound_input_sync_nanoseconds / 1000000.0;
+    accelerator.rknnBoundInputSyncFailures      = inference.rknn_bound_input_sync_failures;
+    accelerator.rknnBoundInputFrames            = inference.rknn_bound_input_frames;
     accelerator.rknnNativeInt8Outputs         = inference.rknn_native_int8_outputs;
     accelerator.rknnFloatOutputs              = inference.rknn_float_outputs;
     accelerator.rknnOutputCompatibilityFallbacks =

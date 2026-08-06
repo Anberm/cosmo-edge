@@ -131,6 +131,28 @@ void InferencePipelineMetrics::RecordRknnInputFormat(bool native_int8,
         rknn_input_compatibility_fallbacks_.fetch_add(1, std::memory_order_relaxed);
 }
 
+void InferencePipelineMetrics::RecordRknnBoundInputBind(bool success) {
+    rknn_bound_input_bind_attempts_.fetch_add(1, std::memory_order_relaxed);
+    if (!success)
+        rknn_bound_input_bind_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnBoundInputCopy(uint64_t nanoseconds, uint64_t bytes, bool success) {
+    RecordStage(rknn_bound_input_copy_calls_, rknn_bound_input_copy_nanoseconds_, 1, nanoseconds);
+    if (success)
+        rknn_bound_input_copy_bytes_.fetch_add(bytes, std::memory_order_relaxed);
+    else
+        rknn_bound_input_copy_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnBoundInputSync(uint64_t nanoseconds, bool success) {
+    RecordStage(rknn_bound_input_sync_calls_, rknn_bound_input_sync_nanoseconds_, 1, nanoseconds);
+    if (success)
+        rknn_bound_input_frames_.fetch_add(1, std::memory_order_relaxed);
+    else
+        rknn_bound_input_sync_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
 void InferencePipelineMetrics::RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
                                                       bool compatibility_fallback) {
     (native_int8 ? rknn_native_int8_outputs_ : rknn_float_outputs_)
@@ -234,6 +256,16 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_native_int8_inputs);
     SNAPSHOT_FIELD(rknn_float_inputs);
     SNAPSHOT_FIELD(rknn_input_compatibility_fallbacks);
+    SNAPSHOT_FIELD(rknn_bound_input_bind_attempts);
+    SNAPSHOT_FIELD(rknn_bound_input_bind_failures);
+    SNAPSHOT_FIELD(rknn_bound_input_copy_calls);
+    SNAPSHOT_FIELD(rknn_bound_input_copy_nanoseconds);
+    SNAPSHOT_FIELD(rknn_bound_input_copy_bytes);
+    SNAPSHOT_FIELD(rknn_bound_input_copy_failures);
+    SNAPSHOT_FIELD(rknn_bound_input_sync_calls);
+    SNAPSHOT_FIELD(rknn_bound_input_sync_nanoseconds);
+    SNAPSHOT_FIELD(rknn_bound_input_sync_failures);
+    SNAPSHOT_FIELD(rknn_bound_input_frames);
     SNAPSHOT_FIELD(rknn_native_int8_outputs);
     SNAPSHOT_FIELD(rknn_float_outputs);
     SNAPSHOT_FIELD(rknn_output_compatibility_fallbacks);

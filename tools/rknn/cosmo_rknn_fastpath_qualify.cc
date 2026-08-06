@@ -485,6 +485,33 @@ int main(int argc, char** argv) {
                       << metrics_after.rknn_yolov8_score_sum_points_rejected -
                              metrics_before.rknn_yolov8_score_sum_points_rejected
                       << '\n';
+            std::cout << "bound_input_bind_attempts="
+                      << metrics_after.rknn_bound_input_bind_attempts -
+                             metrics_before.rknn_bound_input_bind_attempts
+                      << '\n';
+            std::cout << "bound_input_bind_failures="
+                      << metrics_after.rknn_bound_input_bind_failures -
+                             metrics_before.rknn_bound_input_bind_failures
+                      << '\n';
+            std::cout << "bound_input_frames="
+                      << metrics_after.rknn_bound_input_frames - metrics_before.rknn_bound_input_frames
+                      << '\n';
+            std::cout << "bound_input_copy_bytes="
+                      << metrics_after.rknn_bound_input_copy_bytes -
+                             metrics_before.rknn_bound_input_copy_bytes
+                      << '\n';
+            std::cout << "bound_input_copy_ms="
+                      << (metrics_after.rknn_bound_input_copy_nanoseconds -
+                          metrics_before.rknn_bound_input_copy_nanoseconds) /
+                             1000000.0
+                      << '\n';
+            std::cout << "bound_input_sync_ms="
+                      << (metrics_after.rknn_bound_input_sync_nanoseconds -
+                          metrics_before.rknn_bound_input_sync_nanoseconds) /
+                             1000000.0
+                      << '\n';
+            std::cout << "rknn_inputs_set_calls="
+                      << metrics_after.rknn_inputs_set_calls - metrics_before.rknn_inputs_set_calls << '\n';
         }
         std::cout << "fastpath_qualification_status=PASS samples=" << input_paths.size() << '\n';
         return 0;
