@@ -29,6 +29,7 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     metrics.RecordRknnNativeInputMap(1'100'000);
     metrics.RecordRknnInputFormat(true);
     metrics.RecordRknnInputFormat(false, true);
+    metrics.RecordRknnInputFormat(false, false, true);
     metrics.RecordRknnBoundInputBind(true);
     metrics.RecordRknnBoundInputBind(false);
     metrics.RecordRknnBoundInputCopy(210'000, 1'228'800, true);
@@ -97,6 +98,7 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     CHECK(snapshot.rknn_native_input_map_calls == 1);
     CHECK(snapshot.rknn_native_int8_inputs == 1);
     CHECK(snapshot.rknn_float_inputs == 1);
+    CHECK(snapshot.rknn_uint8_contract_inputs == 1);
     CHECK(snapshot.rknn_input_compatibility_fallbacks == 1);
     CHECK(snapshot.rknn_bound_input_bind_attempts == 4);
     CHECK(snapshot.rknn_bound_input_bind_failures == 2);

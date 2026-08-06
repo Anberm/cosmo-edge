@@ -137,6 +137,7 @@ struct MsgGpuInfo {
     double rknnNativeInputMapMs{0.0};
     uint64_t rknnNativeInt8Inputs{0};
     uint64_t rknnFloatInputs{0};
+    uint64_t rknnUint8ContractInputs{0};
     uint64_t rknnInputCompatibilityFallbacks{0};
     uint64_t rknnBoundInputBindAttempts{0};
     uint64_t rknnBoundInputBindFailures{0};

@@ -28,6 +28,11 @@ bool ConfigureRknnRgaUint8InputAttr(const rknn_tensor_attr& native_attr, int hei
 bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
                              size_t destination_bytes, int height, int width, int channels, int width_stride,
                              std::string* reason = nullptr);
+bool CopyRknnPackedNativeInt8ToUint8(const int8_t* source, size_t source_bytes, uint8_t* destination,
+                                     size_t destination_bytes, int height, int width, int channels,
+                                     int width_stride, std::string* reason = nullptr);
+bool ConvertRknnNormalizedFloatToUint8(const float* source, size_t source_count, uint8_t* destination,
+                                       size_t destination_count, std::string* reason = nullptr);
 bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height, int width,
                                             int channels, int width_stride, std::string* reason = nullptr);
 bool RknnFastOutputEnabled();
@@ -96,6 +101,7 @@ private:
     rknn_tensor_mem* bound_input_memory_{nullptr};
     std::vector<unsigned char> model_data_;
     std::vector<float> input_nhwc_;
+    std::vector<uint8_t> input_uint8_;
     bool yolov8_heads_{false};
     bool native_yolov8_outputs_{false};
     bool detector_model_{false};

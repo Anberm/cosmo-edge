@@ -215,6 +215,32 @@ TEST_CASE("RKNN RGA bound input requantizes UINT8 pixels in place without touchi
     CHECK(reason.find("smaller") != std::string::npos);
 }
 
+TEST_CASE("RKNN UINT8 model contract restores raw pixels for FP16 runtime input",
+          "[nn][rknn][input-contract]") {
+    using namespace cosmo::nn;
+    const std::array<int8_t, 12> native{-128, -127, -1, 0, 126, 127, 127, 0, -1, -2, -127, -128};
+    std::array<uint8_t, 24> restored{};
+    restored.fill(99);
+    std::string reason;
+    REQUIRE(CopyRknnPackedNativeInt8ToUint8(native.data(), native.size(), restored.data(), restored.size(), 2,
+                                            2, 3, 4, &reason));
+    CHECK((std::array<uint8_t, 6>{restored[0], restored[1], restored[2], restored[3], restored[4],
+                                  restored[5]}) == std::array<uint8_t, 6>{0, 1, 127, 128, 254, 255});
+    CHECK((std::array<uint8_t, 6>{restored[12], restored[13], restored[14], restored[15], restored[16],
+                                  restored[17]}) == std::array<uint8_t, 6>{255, 128, 127, 126, 1, 0});
+    CHECK(
+        std::all_of(restored.begin() + 6, restored.begin() + 12, [](uint8_t value) { return value == 99; }));
+    CHECK(std::all_of(restored.begin() + 18, restored.end(), [](uint8_t value) { return value == 99; }));
+    CHECK(reason.empty());
+
+    const std::array<float, 6> normalized{0.0f, 1.0f / 255.0f, 0.5f, 1.0f, -0.1f, 1.1f};
+    std::array<uint8_t, 6> pixels{};
+    REQUIRE(ConvertRknnNormalizedFloatToUint8(normalized.data(), normalized.size(), pixels.data(),
+                                              pixels.size(), &reason));
+    CHECK((pixels == std::array<uint8_t, 6>{0, 1, 128, 255, 0, 255}));
+    CHECK(reason.empty());
+}
+
 TEST_CASE("RKNN bound input switch defaults on and supports explicit rollback", "[nn][rknn][bound-input]") {
     using namespace cosmo::nn;
     {

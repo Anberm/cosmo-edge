@@ -187,6 +187,7 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnNativeInputMapMs          = inference.rknn_native_input_map_nanoseconds / 1000000.0;
     accelerator.rknnNativeInt8Inputs          = inference.rknn_native_int8_inputs;
     accelerator.rknnFloatInputs               = inference.rknn_float_inputs;
+    accelerator.rknnUint8ContractInputs       = inference.rknn_uint8_contract_inputs;
     accelerator.rknnInputCompatibilityFallbacks = inference.rknn_input_compatibility_fallbacks;
     accelerator.rknnBoundInputBindAttempts      = inference.rknn_bound_input_bind_attempts;
     accelerator.rknnBoundInputBindFailures      = inference.rknn_bound_input_bind_failures;

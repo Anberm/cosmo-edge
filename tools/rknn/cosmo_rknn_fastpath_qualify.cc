@@ -192,11 +192,13 @@ struct PathBuffers {
 class QualificationRunner {
 public:
     QualificationRunner(const std::vector<unsigned char>& model, int source_height, int source_width,
-                        bool qualify_rga_bound_input, bool qualify_rga_uint8_input)
+                        bool qualify_rga_bound_input, bool qualify_rga_uint8_input, bool uint8_input_contract)
         : source_height_(source_height),
           source_width_(source_width),
           qualify_rga_bound_input_(qualify_rga_bound_input) {
         ConfigurePreprocessing();
+        if (uint8_input_contract)
+            network_.SetInputContract(cosmo::nn::kRknnRgbUint8InputContract);
         ConfigureNetwork(network_, model, nullptr, output_);
         if (qualify_rga_bound_input_) {
             bound_network_ = std::make_unique<cosmo::nn::RknnNetNode>();
@@ -350,7 +352,9 @@ private:
 
 class DirectOutputQualificationRunner {
 public:
-    explicit DirectOutputQualificationRunner(const std::vector<unsigned char>& model) {
+    DirectOutputQualificationRunner(const std::vector<unsigned char>& model, bool uint8_input_contract) {
+        if (uint8_input_contract)
+            network_.SetInputContract(cosmo::nn::kRknnRgbUint8InputContract);
         network_.SetSharedResource(&resource_);
         network_.SetNetworkInputNames({"images"});
         network_.SetNetworkOutputNames({"output0"});
@@ -428,7 +432,8 @@ int main(int argc, char** argv) {
     if (argc != 6 && argc != 7) {
         std::cerr << "Usage: " << argv[0]
                   << " <model.rknn> <bgr-input-list.txt> <height> <width> <output-dir> "
-                     "[--direct-output-parity|--rga-bound-input-parity|--rga-bound-uint8-parity]\n";
+                     "[--direct-output-parity|--direct-output-parity-uint8-contract|"
+                     "--rga-bound-input-parity|--rga-bound-uint8-parity]\n";
         return 2;
     }
 
@@ -438,7 +443,11 @@ int main(int argc, char** argv) {
         const int height       = std::stoi(argv[3]);
         const int width        = std::stoi(argv[4]);
         const std::filesystem::path output_dir(argv[5]);
-        const bool qualify_direct_output   = argc == 7 && std::string(argv[6]) == "--direct-output-parity";
+        const std::string qualification_option = argc == 7 ? argv[6] : "";
+        const bool qualify_direct_output       = qualification_option == "--direct-output-parity" ||
+                                           qualification_option == "--direct-output-parity-uint8-contract";
+        const bool qualify_direct_output_uint8 =
+            qualification_option == "--direct-output-parity-uint8-contract";
         const bool qualify_rga_bound_input = argc == 7 && std::string(argv[6]) == "--rga-bound-input-parity";
         const bool qualify_rga_uint8_input = argc == 7 && std::string(argv[6]) == "--rga-bound-uint8-parity";
         if (argc == 7 && !qualify_direct_output && !qualify_rga_bound_input && !qualify_rga_uint8_input)
@@ -455,10 +464,11 @@ int main(int argc, char** argv) {
         LogGuard log_guard;
         const auto metrics_before = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
         QualificationRunner runner(model, height, width, qualify_rga_bound_input || qualify_rga_uint8_input,
-                                   qualify_rga_uint8_input);
+                                   qualify_rga_uint8_input, qualify_direct_output_uint8);
         std::unique_ptr<DirectOutputQualificationRunner> direct_output_runner;
         if (qualify_direct_output)
-            direct_output_runner = std::make_unique<DirectOutputQualificationRunner>(model);
+            direct_output_runner =
+                std::make_unique<DirectOutputQualificationRunner>(model, qualify_direct_output_uint8);
         std::ofstream timings(output_dir / "timings.tsv");
         if (!timings)
             throw std::runtime_error("cannot write timing report");
@@ -597,6 +607,9 @@ int main(int argc, char** argv) {
                       << '\n';
             std::cout << "rknn_inputs_set_calls="
                       << metrics_after.rknn_inputs_set_calls - metrics_before.rknn_inputs_set_calls << '\n';
+            std::cout << "uint8_contract_inputs="
+                      << metrics_after.rknn_uint8_contract_inputs - metrics_before.rknn_uint8_contract_inputs
+                      << '\n';
         }
         std::cout << "fastpath_qualification_status=PASS samples=" << input_paths.size() << '\n';
         return 0;

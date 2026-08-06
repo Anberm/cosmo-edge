@@ -112,8 +112,12 @@ void InferencePipelineMetrics::RecordRknnNativeInputMap(uint64_t nanoseconds) {
     RecordStage(rknn_native_input_map_calls_, rknn_native_input_map_nanoseconds_, 1, nanoseconds);
 }
 
-void InferencePipelineMetrics::RecordRknnInputFormat(bool native_int8, bool compatibility_fallback) {
-    (native_int8 ? rknn_native_int8_inputs_ : rknn_float_inputs_).fetch_add(1, std::memory_order_relaxed);
+void InferencePipelineMetrics::RecordRknnInputFormat(bool native_int8, bool compatibility_fallback,
+                                                     bool uint8_contract) {
+    if (uint8_contract)
+        rknn_uint8_contract_inputs_.fetch_add(1, std::memory_order_relaxed);
+    else
+        (native_int8 ? rknn_native_int8_inputs_ : rknn_float_inputs_).fetch_add(1, std::memory_order_relaxed);
     if (compatibility_fallback)
         rknn_input_compatibility_fallbacks_.fetch_add(1, std::memory_order_relaxed);
 }
@@ -289,6 +293,7 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_native_input_map_nanoseconds);
     SNAPSHOT_FIELD(rknn_native_int8_inputs);
     SNAPSHOT_FIELD(rknn_float_inputs);
+    SNAPSHOT_FIELD(rknn_uint8_contract_inputs);
     SNAPSHOT_FIELD(rknn_input_compatibility_fallbacks);
     SNAPSHOT_FIELD(rknn_bound_input_bind_attempts);
     SNAPSHOT_FIELD(rknn_bound_input_bind_failures);

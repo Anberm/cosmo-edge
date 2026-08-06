@@ -69,6 +69,7 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_native_input_map_nanoseconds{0};
     uint64_t rknn_native_int8_inputs{0};
     uint64_t rknn_float_inputs{0};
+    uint64_t rknn_uint8_contract_inputs{0};
     uint64_t rknn_input_compatibility_fallbacks{0};
     uint64_t rknn_bound_input_bind_attempts{0};
     uint64_t rknn_bound_input_bind_failures{0};
@@ -142,7 +143,8 @@ public:
     void RecordRknnCpuResizeFallback(uint64_t nanoseconds);
     void RecordRknnCpuNormalizeFallback(uint64_t nanoseconds);
     void RecordRknnNativeInputMap(uint64_t nanoseconds);
-    void RecordRknnInputFormat(bool native_int8, bool compatibility_fallback = false);
+    void RecordRknnInputFormat(bool native_int8, bool compatibility_fallback = false,
+                               bool uint8_contract = false);
     void RecordRknnBoundInputBind(bool success);
     void RecordRknnBoundInputCopy(uint64_t nanoseconds, uint64_t bytes, bool success);
     void RecordRknnBoundInputSync(uint64_t nanoseconds, bool success);
@@ -227,6 +229,7 @@ private:
     std::atomic<uint64_t> rknn_native_input_map_nanoseconds_{0};
     std::atomic<uint64_t> rknn_native_int8_inputs_{0};
     std::atomic<uint64_t> rknn_float_inputs_{0};
+    std::atomic<uint64_t> rknn_uint8_contract_inputs_{0};
     std::atomic<uint64_t> rknn_input_compatibility_fallbacks_{0};
     std::atomic<uint64_t> rknn_bound_input_bind_attempts_{0};
     std::atomic<uint64_t> rknn_bound_input_bind_failures_{0};

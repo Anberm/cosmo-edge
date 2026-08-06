@@ -152,6 +152,7 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, rknnNativeInputMapMs);
     JSON_OPT(j, v, rknnNativeInt8Inputs);
     JSON_OPT(j, v, rknnFloatInputs);
+    JSON_OPT(j, v, rknnUint8ContractInputs);
     JSON_OPT(j, v, rknnInputCompatibilityFallbacks);
     JSON_OPT(j, v, rknnBoundInputBindAttempts);
     JSON_OPT(j, v, rknnBoundInputBindFailures);
@@ -307,6 +308,7 @@ void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["rknnNativeInputMapMs"]               = v.rknnNativeInputMapMs;
     j["rknnNativeInt8Inputs"]               = v.rknnNativeInt8Inputs;
     j["rknnFloatInputs"]                    = v.rknnFloatInputs;
+    j["rknnUint8ContractInputs"]            = v.rknnUint8ContractInputs;
     j["rknnInputCompatibilityFallbacks"]    = v.rknnInputCompatibilityFallbacks;
     j["rknnBoundInputBindAttempts"]         = v.rknnBoundInputBindAttempts;
     j["rknnBoundInputBindFailures"]         = v.rknnBoundInputBindFailures;

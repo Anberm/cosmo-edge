@@ -343,6 +343,57 @@ bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* 
     return true;
 }
 
+bool CopyRknnPackedNativeInt8ToUint8(const int8_t* source, size_t source_bytes, uint8_t* destination,
+                                     size_t destination_bytes, int height, int width, int channels,
+                                     int width_stride, std::string* reason) {
+    const auto reject = [&](const char* message) {
+        if (reason)
+            *reason = message;
+        return false;
+    };
+    if (!source || !destination || height <= 0 || width <= 0 || channels <= 0)
+        return reject("UINT8 contract restore received an invalid packed tensor");
+    const int effective_stride = width_stride == 0 ? width : width_stride;
+    if (effective_stride < width)
+        return reject("UINT8 contract restore width stride is too small");
+    const uint64_t row_elements         = static_cast<uint64_t>(width) * channels;
+    const uint64_t source_required      = static_cast<uint64_t>(height) * row_elements;
+    const uint64_t destination_required = static_cast<uint64_t>(height) * effective_stride * channels;
+    if (source_required > source_bytes || destination_required > destination_bytes)
+        return reject("UINT8 contract restore buffer is smaller than its tensor contract");
+    const size_t source_row_elements = static_cast<size_t>(row_elements);
+    const size_t destination_stride  = static_cast<size_t>(effective_stride) * static_cast<size_t>(channels);
+    for (int row = 0; row < height; ++row) {
+        const auto* source_row = source + static_cast<size_t>(row) * source_row_elements;
+        auto* destination_row  = destination + static_cast<size_t>(row) * destination_stride;
+        for (size_t index = 0; index < source_row_elements; ++index)
+            destination_row[index] = static_cast<uint8_t>(static_cast<int>(source_row[index]) + 128);
+    }
+    if (reason)
+        reason->clear();
+    return true;
+}
+
+bool ConvertRknnNormalizedFloatToUint8(const float* source, size_t source_count, uint8_t* destination,
+                                       size_t destination_count, std::string* reason) {
+    const auto reject = [&](const char* message) {
+        if (reason)
+            *reason = message;
+        return false;
+    };
+    if (!source || !destination || source_count == 0 || destination_count < source_count)
+        return reject("UINT8 contract conversion received an invalid tensor");
+    for (size_t index = 0; index < source_count; ++index) {
+        if (!std::isfinite(source[index]))
+            return reject("UINT8 contract conversion received a non-finite value");
+        destination[index] =
+            static_cast<uint8_t>(std::lround(std::clamp(source[index], 0.0f, 1.0f) * 255.0f));
+    }
+    if (reason)
+        reason->clear();
+    return true;
+}
+
 bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height, int width,
                                             int channels, int width_stride, std::string* reason) {
     const auto reject = [&](const char* message) {
@@ -416,6 +467,7 @@ void RknnNetNode::DestroyContext() {
     std::vector<int>().swap(yolov8_candidate_scratch_.active_points);
     model_data_.clear();
     std::vector<float>().swap(input_nhwc_);
+    std::vector<uint8_t>().swap(input_uint8_);
     io_count_                 = {};
     output_adapter_contract_  = {};
     bound_input_attr_         = {};
@@ -855,6 +907,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
     };
     int input_height = 0, input_width = 0;
     bool native_int8            = false;
+    bool uint8_contract_input   = false;
     bool compatibility_fallback = false;
     rknn_input input{};
     input.index                = 0;
@@ -903,6 +956,33 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                 input_width        = input_desc.dims[2];
                 prepare_status     = COSMO_NN_OK;
             }
+        } else if (IsRknnRgbUint8InputContract(input_contract_)) {
+            const auto count = BlobElementCount(input_desc);
+            if (!bottom_blobs[0]->GetHandle().base || count == 0 ||
+                count > std::numeric_limits<uint32_t>::max()) {
+                prepare_status = Status(COSMO_NN_ERR_INVALID_INPUT,
+                                        "RKNN UINT8 contract input exceeds runtime size limit");
+            } else {
+                try {
+                    input_uint8_.resize(count);
+                } catch (const std::bad_alloc&) {
+                    return finish(Status(COSMO_NN_ERR_OUT_OF_MEMORY,
+                                         "Not enough memory for RKNN UINT8 contract input"));
+                }
+                std::string conversion_reason;
+                const bool converted = CopyRknnPackedNativeInt8ToUint8(
+                    static_cast<const int8_t*>(bottom_blobs[0]->GetHandle().base), count, input_uint8_.data(),
+                    input_uint8_.size(), input_desc.dims[1], input_desc.dims[2], input_desc.dims[3],
+                    input_desc.dims[2], &conversion_reason);
+                if (!converted) {
+                    prepare_status = Status(COSMO_NN_ERR_INVALID_INPUT, conversion_reason);
+                } else {
+                    input_height         = input_desc.dims[1];
+                    input_width          = input_desc.dims[2];
+                    uint8_contract_input = true;
+                    prepare_status       = COSMO_NN_OK;
+                }
+            }
         } else {
             compatibility_fallback = true;
             prepare_status =
@@ -910,11 +990,33 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         }
     } else {
         prepare_status = PrepareInput(*bottom_blobs[0], input_nhwc_, input_height, input_width);
+        if (prepare_status && IsRknnRgbUint8InputContract(input_contract_)) {
+            try {
+                input_uint8_.resize(input_nhwc_.size());
+            } catch (const std::bad_alloc&) {
+                return finish(
+                    Status(COSMO_NN_ERR_OUT_OF_MEMORY, "Not enough memory for RKNN UINT8 contract input"));
+            }
+            std::string conversion_reason;
+            if (!ConvertRknnNormalizedFloatToUint8(input_nhwc_.data(), input_nhwc_.size(),
+                                                   input_uint8_.data(), input_uint8_.size(),
+                                                   &conversion_reason)) {
+                prepare_status = Status(COSMO_NN_ERR_INVALID_INPUT, conversion_reason);
+            } else {
+                uint8_contract_input = true;
+            }
+        }
     }
     GetInferencePipelineMetrics().RecordRknnPrepare(ElapsedNanoseconds(prepare_started), scope);
     if (!prepare_status)
         return finish(prepare_status);
-    if (!native_int8 && !rga_bound_frame) {
+    if (uint8_contract_input) {
+        input.buf          = input_uint8_.data();
+        input.size         = static_cast<uint32_t>(input_uint8_.size());
+        input.pass_through = 0;
+        input.type         = RKNN_TENSOR_UINT8;
+        input.fmt          = RKNN_TENSOR_NHWC;
+    } else if (!native_int8 && !rga_bound_frame) {
         if (input_nhwc_.size() > std::numeric_limits<uint32_t>::max() / sizeof(float))
             return finish(Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN input exceeds the runtime size limit"));
         input.buf          = input_nhwc_.data();
@@ -925,10 +1027,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         // reporting success. The graph boundary copy above makes NHWC explicit.
         input.fmt = RKNN_TENSOR_NHWC;
     }
-    if (!rga_bound_frame)
-        GetInferencePipelineMetrics().RecordRknnInputFormat(native_int8, compatibility_fallback);
     bool use_bound_input = rga_bound_frame;
-    if (bound_input_memory_ && !native_int8 && !rga_bound_frame) {
+    if (bound_input_memory_ && !native_int8 && !uint8_contract_input && !rga_bound_frame) {
         return finish(
             Status(COSMO_NN_ERR_INVALID_INPUT, "RKNN bound input cannot accept a non-native tensor"));
     }
@@ -944,14 +1044,35 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             LOG_WARN("RKNN bound input unavailable; retaining rknn_inputs_set path: {}", bind_reason);
         }
     }
-    if (native_int8 && bound_input_memory_) {
+    const bool runtime_uint8_contract =
+        uint8_contract_input ||
+        (native_int8 && bound_input_memory_ && bound_input_mode_ == BoundInputMode::RgaUint8);
+    if (!rga_bound_frame)
+        GetInferencePipelineMetrics().RecordRknnInputFormat(native_int8 && !runtime_uint8_contract,
+                                                            compatibility_fallback, runtime_uint8_contract);
+    if ((native_int8 || uint8_contract_input) && bound_input_memory_) {
         std::string copy_reason;
         const auto copy_started   = MetricsClock::now();
-        const size_t source_bytes = BlobElementCount(input_desc);
-        const bool copied         = CopyRknnPackedInt8Input(
-            static_cast<const int8_t*>(input.buf), source_bytes,
-            static_cast<int8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size, input_height,
-            input_width, input_desc.dims[3], static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
+        const size_t source_bytes = input.size;
+        bool copied               = false;
+        if (bound_input_mode_ == BoundInputMode::RgaUint8 && native_int8) {
+            copied = CopyRknnPackedNativeInt8ToUint8(
+                static_cast<const int8_t*>(input.buf), source_bytes,
+                static_cast<uint8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size,
+                input_height, input_width, 3, static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
+        } else if (bound_input_mode_ == BoundInputMode::RgaUint8 && uint8_contract_input) {
+            copied = CopyRknnPackedInt8Input(reinterpret_cast<const int8_t*>(input.buf), source_bytes,
+                                             static_cast<int8_t*>(bound_input_memory_->virt_addr),
+                                             bound_input_memory_->size, input_height, input_width, 3,
+                                             static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
+        } else if (native_int8) {
+            copied = CopyRknnPackedInt8Input(static_cast<const int8_t*>(input.buf), source_bytes,
+                                             static_cast<int8_t*>(bound_input_memory_->virt_addr),
+                                             bound_input_memory_->size, input_height, input_width, 3,
+                                             static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
+        } else {
+            copy_reason = "RKNN bound input mode does not accept the UINT8 contract tensor";
+        }
         GetInferencePipelineMetrics().RecordRknnBoundInputCopy(ElapsedNanoseconds(copy_started),
                                                                copied ? source_bytes : 0, copied);
         if (!copied)
