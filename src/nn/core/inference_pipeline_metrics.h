@@ -86,6 +86,7 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_rga_bound_input_import_nanoseconds{0};
     uint64_t rknn_rga_bound_input_import_failures{0};
     uint64_t rknn_rga_bound_input_frames{0};
+    uint64_t rknn_rga_bound_uint8_frames{0};
     uint64_t rknn_rga_bound_native_int8_frames{0};
     uint64_t rknn_rga_bound_requantize_calls{0};
     uint64_t rknn_rga_bound_requantize_nanoseconds{0};
@@ -126,21 +127,14 @@ public:
     void RecordBlobConvert(uint64_t nanoseconds, uint64_t frames);
     void RecordGraphForward(uint64_t nanoseconds, uint64_t frames, bool success);
     void RecordResultParse(uint64_t nanoseconds, uint64_t frames, bool success);
-    void RecordRknnForward(uint64_t nanoseconds, bool success,
-                           RknnModelScope scope = RknnModelScope::Other);
-    void RecordRknnPrepare(uint64_t nanoseconds,
-                           RknnModelScope scope = RknnModelScope::Other);
-    void RecordRknnInputsSet(uint64_t nanoseconds,
-                             RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnForward(uint64_t nanoseconds, bool success, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnPrepare(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnInputsSet(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
     void RecordRknnRun(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
-    void RecordRknnOutputsGet(uint64_t nanoseconds,
-                              RknnModelScope scope = RknnModelScope::Other);
-    void RecordRknnOutputsRelease(uint64_t nanoseconds,
-                                  RknnModelScope scope = RknnModelScope::Other);
-    void RecordRknnOutputTransform(uint64_t nanoseconds,
-                                   RknnModelScope scope = RknnModelScope::Other);
-    void RecordRknnMutexWait(uint64_t nanoseconds,
-                             RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnOutputsGet(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnOutputsRelease(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnOutputTransform(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnMutexWait(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
     void RecordRknnPreprocessFastHit();
     void RecordRknnRgaFill(uint64_t nanoseconds);
     void RecordRknnRgaResizeColor(uint64_t nanoseconds);
@@ -156,13 +150,12 @@ public:
     void RecordRknnRgaBoundInputBind(bool success);
     void RecordRknnRgaBoundInputImport(uint64_t nanoseconds, bool success);
     void RecordRknnRgaBoundInputRequantize(uint64_t nanoseconds, bool success);
-    void RecordRknnRgaBoundInputFrame();
+    void RecordRknnRgaBoundInputFrame(bool fused_uint8 = false);
     void RecordRknnRgaBoundInputNormalizeBypass();
     void RecordRknnMppDmaBufImport(uint64_t nanoseconds, bool success);
     void RecordRknnMppDmaBufFrame(uint64_t source_bytes);
     void RecordRknnMppDmaBufFallback();
-    void RecordRknnOutputFormat(bool native_int8, uint64_t bytes,
-                                bool compatibility_fallback = false);
+    void RecordRknnOutputFormat(bool native_int8, uint64_t bytes, bool compatibility_fallback = false);
     void RecordRknnYolov8Transform(uint64_t dfl_nanoseconds, uint64_t class_nanoseconds);
     void RecordRknnYolov8DirectCandidates(bool success, uint64_t points_scanned, uint64_t points_decoded,
                                           uint64_t logical_float_bytes_avoided,
@@ -173,8 +166,8 @@ public:
     [[nodiscard]] InferencePipelineMetricsSnapshot Snapshot() const;
 
 private:
-    static void RecordStage(std::atomic<uint64_t>& count, std::atomic<uint64_t>& duration,
-                            uint64_t samples, uint64_t nanoseconds);
+    static void RecordStage(std::atomic<uint64_t>& count, std::atomic<uint64_t>& duration, uint64_t samples,
+                            uint64_t nanoseconds);
 
     std::atomic<uint64_t> color_convert_frames_{0};
     std::atomic<uint64_t> color_convert_nanoseconds_{0};
@@ -251,6 +244,7 @@ private:
     std::atomic<uint64_t> rknn_rga_bound_input_import_nanoseconds_{0};
     std::atomic<uint64_t> rknn_rga_bound_input_import_failures_{0};
     std::atomic<uint64_t> rknn_rga_bound_input_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_uint8_frames_{0};
     std::atomic<uint64_t> rknn_rga_bound_native_int8_frames_{0};
     std::atomic<uint64_t> rknn_rga_bound_requantize_calls_{0};
     std::atomic<uint64_t> rknn_rga_bound_requantize_nanoseconds_{0};

@@ -37,6 +37,7 @@ function accelerator(index) {
     rknnForwardFailures: 0,
     rknnRgaFailures: 0,
     rknnRgaBoundInputFrames: frames * 3,
+    rknnRgaBoundUint8Frames: frames * 3,
     rknnRgaBoundInputImportFailures: 0,
     rknnRgaBoundRequantizeFailures: 0,
     rknnForwards: frames * 3,
@@ -108,6 +109,7 @@ const options = {
   expectedPreviewStreams: 4,
   expectedDecoderBackend: 'rockchip-copy-out',
   expectedEncoderBackend: 'rockchip-copy-first',
+  minRgaBoundUint8Frames: 1,
 };
 
 test('long-run audit passes only after duration and all native gates pass', () => {
@@ -174,6 +176,15 @@ test('long-run audit fails RGA bound-input import and requantize errors', () => 
   const nativeFailures = result.checks.find((item) => item.id === 'native.failures');
   assert.equal(nativeFailures.actual.rknnRgaBoundInputImportFailures, 1);
   assert.equal(nativeFailures.actual.rknnRgaBoundRequantizeFailures, 1);
+});
+
+test('long-run audit fails when the fused UINT8 bound-input path is inactive', () => {
+  const input = runResult();
+  for (const item of input.samples) item.hardware.accelerator.rknnRgaBoundUint8Frames = 0;
+
+  const result = auditLongRun(input, options);
+  assert.equal(result.verdict, 'FAIL');
+  assert.ok(result.failures.includes('native.rgaBoundUint8'));
 });
 
 test('file audit binds source and allowlisted candidate identity by SHA-256', () => {

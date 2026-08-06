@@ -119,6 +119,7 @@ checkpoint options:
   --expected-preview-streams <n> Required preview publishing stream count
   --expected-decoder-backend <s> Required decoder backend identifier
   --expected-encoder-backend <s> Required encoder backend identifier
+  --min-rga-bound-uint8-frames <n> Required fused RGA-to-RKNN UINT8 frames
 `);
 }
 
@@ -747,6 +748,7 @@ async function runCheckpoint(args) {
     maxCpuPercent: optionalNumber(args, 'max-cpu-percent'),
     maxMemoryPercent: optionalNumber(args, 'max-memory-percent'),
     maxPoolGrowthBytes: optionalNumber(args, 'max-pool-growth-bytes'),
+    minRgaBoundUint8Frames: optionalNumber(args, 'min-rga-bound-uint8-frames'),
     expectedPreviewStreams: optionalNumber(args, 'expected-preview-streams'),
     expectedDecoderBackend: args['expected-decoder-backend'],
     expectedEncoderBackend: args['expected-encoder-backend'],

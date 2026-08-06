@@ -33,6 +33,7 @@ const MONOTONIC_COUNTERS = [
   'rgaFrames',
   'rknnForwards',
   'rknnRgaBoundInputFrames',
+  'rknnRgaBoundUint8Frames',
 ];
 
 const IDENTITY_ALLOWLIST = new Set([
@@ -131,6 +132,9 @@ export function auditLongRun(runResult, options = {}) {
   const maxCpuPercent = Number(options.maxCpuPercent ?? 98);
   const maxMemoryPercent = Number(options.maxMemoryPercent ?? 98);
   const maxPoolGrowthBytes = Number(options.maxPoolGrowthBytes ?? 64 * MIB);
+  const minRgaBoundUint8Frames = options.minRgaBoundUint8Frames == null
+    ? null
+    : Number(options.minRgaBoundUint8Frames);
   const nowMs = Number(options.nowMs ?? Date.now());
   const expectedPreviewStreams = options.expectedPreviewStreams == null
     ? null
@@ -153,6 +157,10 @@ export function auditLongRun(runResult, options = {}) {
   if (expectedPreviewStreams != null
       && (!Number.isInteger(expectedPreviewStreams) || expectedPreviewStreams < 0)) {
     throw new Error('expectedPreviewStreams must be a non-negative integer');
+  }
+  if (minRgaBoundUint8Frames != null
+      && (!Number.isInteger(minRgaBoundUint8Frames) || minRgaBoundUint8Frames < 0)) {
+    throw new Error('minRgaBoundUint8Frames must be a non-negative integer');
   }
 
   const checks = [];
@@ -435,6 +443,15 @@ export function auditLongRun(runResult, options = {}) {
     Object.fromEntries(nonZeroFailures),
     'all failure/fallback counter deltas equal zero',
   );
+  if (minRgaBoundUint8Frames != null) {
+    const fusedFrames = counters.rknnRgaBoundUint8Frames?.delta;
+    add(
+      'native.rgaBoundUint8',
+      Number.isFinite(fusedFrames) && fusedFrames >= minRgaBoundUint8Frames ? 'PASS' : 'FAIL',
+      fusedFrames ?? null,
+      `>= ${minRgaBoundUint8Frames} fused UINT8 bound-input frames`,
+    );
+  }
 
   const backendValues = (key) => [...new Set(
     accelerators.map((value) => value?.[key]).filter(Boolean),

@@ -1,8 +1,7 @@
 #include "catch_amalgamated.hpp"
 #include "nn/core/inference_pipeline_metrics.h"
 
-TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings",
-          "[nn][rknn][metrics]") {
+TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings", "[nn][rknn][metrics]") {
     cosmo::nn::InferencePipelineMetrics metrics;
 
     metrics.RecordColorConvert(2'000'000, 2);
@@ -41,10 +40,10 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     metrics.RecordRknnRgaBoundInputBind(false);
     metrics.RecordRknnRgaBoundInputImport(30'000, true);
     metrics.RecordRknnRgaBoundInputImport(40'000, false);
-    metrics.RecordRknnRgaBoundInputFrame();
+    metrics.RecordRknnRgaBoundInputFrame(true);
     metrics.RecordRknnRgaBoundInputRequantize(50'000, true);
     metrics.RecordRknnRgaBoundInputRequantize(5'000, false);
-    metrics.RecordRknnRgaBoundInputFrame();
+    metrics.RecordRknnRgaBoundInputFrame(false);
     metrics.RecordRknnRgaBoundInputNormalizeBypass();
     metrics.RecordRknnMppDmaBufImport(60'000, true);
     metrics.RecordRknnMppDmaBufImport(7'000, false);
@@ -115,7 +114,8 @@ TEST_CASE("Inference pipeline metrics expose host, graph, and RKNN stage timings
     CHECK(snapshot.rknn_rga_bound_input_import_nanoseconds == 70'000);
     CHECK(snapshot.rknn_rga_bound_input_import_failures == 1);
     CHECK(snapshot.rknn_rga_bound_input_frames == 2);
-    CHECK(snapshot.rknn_rga_bound_native_int8_frames == 2);
+    CHECK(snapshot.rknn_rga_bound_uint8_frames == 1);
+    CHECK(snapshot.rknn_rga_bound_native_int8_frames == 1);
     CHECK(snapshot.rknn_rga_bound_requantize_calls == 2);
     CHECK(snapshot.rknn_rga_bound_requantize_nanoseconds == 55'000);
     CHECK(snapshot.rknn_rga_bound_requantize_failures == 1);

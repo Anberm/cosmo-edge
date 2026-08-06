@@ -338,6 +338,7 @@ function summarizeMediaStages(ticks, inferMs) {
     ),
     rknnRgaBoundInputImportFailures: counterDelta('rknnRgaBoundInputImportFailures'),
     rknnRgaBoundInputFrames: counterDelta('rknnRgaBoundInputFrames'),
+    rknnRgaBoundUint8Frames: counterDelta('rknnRgaBoundUint8Frames'),
     rknnRgaBoundNativeInt8Frames: counterDelta('rknnRgaBoundNativeInt8Frames'),
     rknnRgaBoundRequantizeCalls: counterDelta('rknnRgaBoundRequantizeCalls'),
     rknnRgaBoundRequantizeAvgMs: counterAverage(

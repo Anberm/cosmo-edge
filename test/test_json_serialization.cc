@@ -149,11 +149,11 @@ TEST_CASE("device status exposes additive reboot identity", "[json][system][upgr
 
 TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][system][metrics]") {
     cosmo::MsgGpuInfo original;
-    original.gpuusage          = 0.42;
-    original.gpuusageAvailable = true;
-    original.utilizationMetric = "busy-time-load";
-    original.coreUtilizations  = {0.09, 0.42};
-    original.memoryDomain      = "shared-system";
+    original.gpuusage                           = 0.42;
+    original.gpuusageAvailable                  = true;
+    original.utilizationMetric                  = "busy-time-load";
+    original.coreUtilizations                   = {0.09, 0.42};
+    original.memoryDomain                       = "shared-system";
     original.rknnYolov8DirectCandidateCalls     = 4;
     original.rknnYolov8DirectCandidateFailures  = 1;
     original.rknnYolov8DirectPointsScanned      = 33'600;
@@ -167,6 +167,8 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     original.rknnBoundInputSyncCalls            = 4;
     original.rknnBoundInputSyncMs               = 0.5;
     original.rknnBoundInputFrames               = 4;
+    original.rknnRgaBoundInputFrames            = 4;
+    original.rknnRgaBoundUint8Frames            = 4;
     original.rknnMppDmaBufImportCalls           = 4;
     original.rknnMppDmaBufImportMs              = 1.25;
     original.rknnMppDmaBufFrames                = 4;
@@ -187,6 +189,8 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(doc["rknnBoundInputBindAttempts"] == 1);
     CHECK(doc["rknnBoundInputCopyBytes"] == 4'915'200);
     CHECK(doc["rknnBoundInputFrames"] == 4);
+    CHECK(doc["rknnRgaBoundInputFrames"] == 4);
+    CHECK(doc["rknnRgaBoundUint8Frames"] == 4);
     CHECK(doc["rknnMppDmaBufImportCalls"] == 4);
     CHECK(doc["rknnMppDmaBufFrames"] == 4);
     CHECK(doc["rknnMppDmaBufSourceBytes"] == 12'533'760);
@@ -209,6 +213,8 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(restored.rknnBoundInputSyncCalls == original.rknnBoundInputSyncCalls);
     CHECK(restored.rknnBoundInputSyncMs == original.rknnBoundInputSyncMs);
     CHECK(restored.rknnBoundInputFrames == original.rknnBoundInputFrames);
+    CHECK(restored.rknnRgaBoundInputFrames == original.rknnRgaBoundInputFrames);
+    CHECK(restored.rknnRgaBoundUint8Frames == original.rknnRgaBoundUint8Frames);
     CHECK(restored.rknnMppDmaBufImportCalls == original.rknnMppDmaBufImportCalls);
     CHECK(restored.rknnMppDmaBufImportMs == original.rknnMppDmaBufImportMs);
     CHECK(restored.rknnMppDmaBufFrames == original.rknnMppDmaBufFrames);
