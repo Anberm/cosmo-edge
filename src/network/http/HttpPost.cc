@@ -166,7 +166,7 @@ void HttpPost::AppendData(const std::string& key, const std::string& value) {
 
 long HttpPost::Submit() {
     http_post_.SetData(data_);
-    return http_post_.Submit();
+    return http_post_.Submit(HttpRequestMethod::kPost);
 }
 
 std::string HttpPost::GetContentType() const {
