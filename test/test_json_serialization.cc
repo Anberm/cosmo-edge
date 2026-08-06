@@ -158,6 +158,7 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     original.rknnYolov8DirectCandidateFailures  = 1;
     original.rknnYolov8DirectPointsScanned      = 33'600;
     original.rknnYolov8DirectPointsDecoded      = 68;
+    original.rknnYolov8ScoreSumPointsRejected   = 32'000;
     original.rknnYolov8LogicalFloatBytesAvoided = 11'289'600;
 
     std::string json;
@@ -170,6 +171,7 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(doc["coreUtilizations"][1].get<double>() == Catch::Approx(0.42));
     CHECK(doc["rknnYolov8DirectCandidateCalls"] == 4);
     CHECK(doc["rknnYolov8DirectPointsDecoded"] == 68);
+    CHECK(doc["rknnYolov8ScoreSumPointsRejected"] == 32'000);
     CHECK(doc["rknnYolov8LogicalFloatBytesAvoided"] == 11'289'600);
 
     cosmo::MsgGpuInfo restored;
@@ -181,6 +183,7 @@ TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][syste
     CHECK(restored.rknnYolov8DirectCandidateFailures == original.rknnYolov8DirectCandidateFailures);
     CHECK(restored.rknnYolov8DirectPointsScanned == original.rknnYolov8DirectPointsScanned);
     CHECK(restored.rknnYolov8DirectPointsDecoded == original.rknnYolov8DirectPointsDecoded);
+    CHECK(restored.rknnYolov8ScoreSumPointsRejected == original.rknnYolov8ScoreSumPointsRejected);
     CHECK(restored.rknnYolov8LogicalFloatBytesAvoided == original.rknnYolov8LogicalFloatBytesAvoided);
 }
 

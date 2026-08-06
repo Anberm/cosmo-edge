@@ -37,7 +37,7 @@ def sigmoid(values: np.ndarray) -> np.ndarray:
 
 def reconstruct(heads: list[np.ndarray], input_size: int) -> np.ndarray:
     if len(heads) != 6:
-        raise ValueError("yolov8_dfl_v1 requires three box/class head pairs")
+        raise ValueError("yolo_dfl_6head_v1 requires three box/class head pairs")
     branches = []
     weights = np.arange(16, dtype=np.float32).reshape(1, 1, 16, 1, 1)
     for branch in range(3):
@@ -77,8 +77,8 @@ def main() -> int:
     args = parser.parse_args()
 
     spec = json.loads(args.spec.read_text(encoding="utf-8"))
-    if spec["conversion"].get("output_adapter") != "yolov8_dfl_v1":
-        raise ValueError("spec does not select yolov8_dfl_v1")
+    if spec["conversion"].get("output_adapter") != "yolo_dfl_6head_v1":
+        raise ValueError("spec does not select yolo_dfl_6head_v1")
     runtime_outputs = spec["runtime_outputs"]
     input_paths = [args.input_dir / f"output-{index}.f32.bin" for index in range(len(runtime_outputs))]
     heads = [load_head(path, item["shape"]) for path, item in zip(input_paths, runtime_outputs)]
@@ -96,7 +96,7 @@ def main() -> int:
     logical.tofile(binary_path)
     report = {
         "schema_version": 1,
-        "adapter": "yolov8_dfl_v1",
+        "adapter": "yolo_dfl_6head_v1",
         "inputs": [
             {"path": str(path.resolve()), "sha256": sha256(path.resolve()), "shape": item["shape"]}
             for path, item in zip(input_paths, runtime_outputs)

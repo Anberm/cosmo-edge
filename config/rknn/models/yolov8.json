@@ -11,7 +11,7 @@
     "maximum_onnx_ir_version": 9,
     "optimization_level": 3,
     "preprocessing_owner": "host",
-    "output_adapter": "yolov8_dfl_v1"
+    "output_adapter": "yolo_dfl_6head_v1"
   },
   "input": {
     "name": "images",

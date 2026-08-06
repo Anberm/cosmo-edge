@@ -150,7 +150,8 @@ void InferencePipelineMetrics::RecordRknnYolov8Transform(uint64_t dfl_nanosecond
 
 void InferencePipelineMetrics::RecordRknnYolov8DirectCandidates(bool success, uint64_t points_scanned,
                                                                 uint64_t points_decoded,
-                                                                uint64_t logical_float_bytes_avoided) {
+                                                                uint64_t logical_float_bytes_avoided,
+                                                                uint64_t score_sum_points_rejected) {
     rknn_yolov8_direct_candidate_calls_.fetch_add(1, std::memory_order_relaxed);
     if (!success) {
         rknn_yolov8_direct_candidate_failures_.fetch_add(1, std::memory_order_relaxed);
@@ -158,6 +159,7 @@ void InferencePipelineMetrics::RecordRknnYolov8DirectCandidates(bool success, ui
     }
     rknn_yolov8_direct_points_scanned_.fetch_add(points_scanned, std::memory_order_relaxed);
     rknn_yolov8_direct_points_decoded_.fetch_add(points_decoded, std::memory_order_relaxed);
+    rknn_yolov8_score_sum_points_rejected_.fetch_add(score_sum_points_rejected, std::memory_order_relaxed);
     rknn_yolov8_logical_float_bytes_avoided_.fetch_add(logical_float_bytes_avoided,
                                                        std::memory_order_relaxed);
 }
@@ -245,6 +247,7 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_yolov8_direct_candidate_failures);
     SNAPSHOT_FIELD(rknn_yolov8_direct_points_scanned);
     SNAPSHOT_FIELD(rknn_yolov8_direct_points_decoded);
+    SNAPSHOT_FIELD(rknn_yolov8_score_sum_points_rejected);
     SNAPSHOT_FIELD(rknn_yolov8_logical_float_bytes_avoided);
     SNAPSHOT_FIELD(yolov8_postprocess_calls);
     SNAPSHOT_FIELD(yolov8_postprocess_nanoseconds);

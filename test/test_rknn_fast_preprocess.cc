@@ -134,6 +134,42 @@ TEST_CASE("RKNN native output capability excludes FP16 and malformed YOLOv8 head
     auto wrong_quantization      = attrs;
     wrong_quantization[0].scale  = 0.0f;
     CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(wrong_quantization));
+
+    const std::array<std::array<uint32_t, 4>, 9> score_sum_shapes{{
+        {{1, 64, 80, 80}},
+        {{1, 80, 80, 80}},
+        {{1, 1, 80, 80}},
+        {{1, 64, 40, 40}},
+        {{1, 80, 40, 40}},
+        {{1, 1, 40, 40}},
+        {{1, 64, 20, 20}},
+        {{1, 80, 20, 20}},
+        {{1, 1, 20, 20}},
+    }};
+    std::vector<rknn_tensor_attr> score_sum_attrs(score_sum_shapes.size());
+    for (size_t index = 0; index < score_sum_attrs.size(); ++index) {
+        auto& attr    = score_sum_attrs[index];
+        attr.index    = static_cast<uint32_t>(index);
+        attr.n_dims   = 4;
+        attr.fmt      = RKNN_TENSOR_NCHW;
+        attr.type     = RKNN_TENSOR_INT8;
+        attr.qnt_type = RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC;
+        attr.zp       = 0;
+        attr.scale    = index % 3 == 0 ? 0.1f : 0.01f;
+        size_t count  = 1;
+        for (size_t dim = 0; dim < score_sum_shapes[index].size(); ++dim) {
+            attr.dims[dim] = score_sum_shapes[index][dim];
+            count *= score_sum_shapes[index][dim];
+        }
+        attr.n_elems = static_cast<uint32_t>(count);
+        attr.size    = static_cast<uint32_t>(count);
+    }
+    CHECK(IsRknnNativeYolov8OutputCompatible(score_sum_attrs, &reason));
+    auto score_sum_fp16    = score_sum_attrs;
+    score_sum_fp16[4].type = RKNN_TENSOR_FLOAT16;
+    score_sum_fp16[4].size *= 2;
+    CHECK_FALSE(IsRknnNativeYolov8OutputCompatible(score_sum_fp16, &reason));
+    CHECK(reason.find("FP16") != std::string::npos);
 }
 
 TEST_CASE("RKNN native output switch defaults on and supports explicit rollback",

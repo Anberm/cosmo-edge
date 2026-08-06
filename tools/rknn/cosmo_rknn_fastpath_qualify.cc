@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "nn/core/blob.h"
+#include "nn/core/inference_pipeline_metrics.h"
 #include "nn/core/shared_resource.h"
 #include "nn/device/cpu/cpu_normalize_node.h"
 #include "nn/device/cpu/cpu_resize_node.h"
@@ -415,6 +416,7 @@ int main(int argc, char** argv) {
         }
 
         LogGuard log_guard;
+        const auto metrics_before = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
         QualificationRunner runner(model, height, width);
         std::unique_ptr<DirectOutputQualificationRunner> direct_output_runner;
         if (qualify_direct_output)
@@ -464,6 +466,25 @@ int main(int argc, char** argv) {
             if (index == 0)
                 runner.DumpLastResizedInputs(output_dir / "preprocessed-sample-0000");
             std::cout << "qualified=" << (index + 1) << '/' << input_paths.size() << '\n';
+        }
+        if (qualify_direct_output) {
+            const auto metrics_after = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
+            std::cout << "direct_candidate_calls="
+                      << metrics_after.rknn_yolov8_direct_candidate_calls -
+                             metrics_before.rknn_yolov8_direct_candidate_calls
+                      << '\n';
+            std::cout << "direct_points_scanned="
+                      << metrics_after.rknn_yolov8_direct_points_scanned -
+                             metrics_before.rknn_yolov8_direct_points_scanned
+                      << '\n';
+            std::cout << "direct_points_decoded="
+                      << metrics_after.rknn_yolov8_direct_points_decoded -
+                             metrics_before.rknn_yolov8_direct_points_decoded
+                      << '\n';
+            std::cout << "score_sum_points_rejected="
+                      << metrics_after.rknn_yolov8_score_sum_points_rejected -
+                             metrics_before.rknn_yolov8_score_sum_points_rejected
+                      << '\n';
         }
         std::cout << "fastpath_qualification_status=PASS samples=" << input_paths.size() << '\n';
         return 0;

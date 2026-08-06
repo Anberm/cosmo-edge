@@ -218,6 +218,7 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnYolov8DirectCandidateFailures  = inference.rknn_yolov8_direct_candidate_failures;
     accelerator.rknnYolov8DirectPointsScanned      = inference.rknn_yolov8_direct_points_scanned;
     accelerator.rknnYolov8DirectPointsDecoded      = inference.rknn_yolov8_direct_points_decoded;
+    accelerator.rknnYolov8ScoreSumPointsRejected   = inference.rknn_yolov8_score_sum_points_rejected;
     accelerator.rknnYolov8LogicalFloatBytesAvoided = inference.rknn_yolov8_logical_float_bytes_avoided;
     accelerator.yolov8PostprocessCalls        = inference.yolov8_postprocess_calls;
     accelerator.yolov8PostprocessMs           =

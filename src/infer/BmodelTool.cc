@@ -296,12 +296,16 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
         output_shapes.push_back(std::move(shape));
     }
 
-    cosmo::nn::RknnYolov8Layout yolo_layout;
+    cosmo::nn::RknnOutputAdapterContract output_adapter;
     std::string adapter_error;
-    if (cosmo::nn::DetectRknnYolov8Layout(output_shapes, yolo_layout, adapter_error)) {
+    if (!cosmo::nn::ResolveRknnOutputAdapter(output_shapes, output_adapter, adapter_error)) {
+        info.error_msg = adapter_error;
+        return info;
+    }
+    if (cosmo::nn::IsRknnYolov8DflAdapter(output_adapter.kind)) {
         BmodelNodeInfo node;
         node.name      = "output0";
-        node.shape     = yolo_layout.logical_shape;
+        node.shape     = output_adapter.logical_shape;
         node.data_type = 0;
         network.outputs.push_back(std::move(node));
     } else {

@@ -72,7 +72,7 @@ def main() -> int:
                 {"name": name, "shape": shape} for name, shape in zip(OUTPUT_NAMES, output_shapes)
             ],
         },
-        "host_output_adapter": "yolov8_dfl_v1",
+        "host_output_adapter": "yolo_dfl_6head_v1",
     }
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")

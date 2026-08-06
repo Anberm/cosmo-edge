@@ -166,6 +166,7 @@ void from_json(const nlohmann::json& j, MsgGpuInfo& v) {
     JSON_OPT(j, v, rknnYolov8DirectCandidateFailures);
     JSON_OPT(j, v, rknnYolov8DirectPointsScanned);
     JSON_OPT(j, v, rknnYolov8DirectPointsDecoded);
+    JSON_OPT(j, v, rknnYolov8ScoreSumPointsRejected);
     JSON_OPT(j, v, rknnYolov8LogicalFloatBytesAvoided);
     JSON_OPT(j, v, yolov8PostprocessCalls);
     JSON_OPT(j, v, yolov8PostprocessMs);
@@ -292,6 +293,7 @@ void to_json(nlohmann::json& j, const MsgGpuInfo& v) {
     j["rknnYolov8DirectCandidateFailures"]  = v.rknnYolov8DirectCandidateFailures;
     j["rknnYolov8DirectPointsScanned"]      = v.rknnYolov8DirectPointsScanned;
     j["rknnYolov8DirectPointsDecoded"]      = v.rknnYolov8DirectPointsDecoded;
+    j["rknnYolov8ScoreSumPointsRejected"]   = v.rknnYolov8ScoreSumPointsRejected;
     j["rknnYolov8LogicalFloatBytesAvoided"] = v.rknnYolov8LogicalFloatBytesAvoided;
     j["yolov8PostprocessCalls"]        = v.yolov8PostprocessCalls;
     j["yolov8PostprocessMs"]           = v.yolov8PostprocessMs;

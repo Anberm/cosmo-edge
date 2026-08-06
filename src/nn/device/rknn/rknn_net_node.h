@@ -49,6 +49,7 @@ private:
     std::vector<RknnYolov8Head> float_yolov8_heads_;
     std::vector<RknnYolov8QuantizedHead> quantized_yolov8_heads_;
     RknnYolov8CandidateScratch yolov8_candidate_scratch_;
+    RknnOutputAdapterContract output_adapter_contract_;
     std::vector<unsigned char> model_data_;
     std::vector<float> input_nhwc_;
     bool yolov8_heads_{false};

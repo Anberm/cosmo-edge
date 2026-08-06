@@ -332,6 +332,10 @@ function summarizeMediaStages(ticks, inferMs) {
       'rknnYolov8DirectPointsDecoded',
       'rknnYolov8DirectCandidateCalls',
     ),
+    rknnYolov8ScoreSumAvgPointsRejected: counterAverage(
+      'rknnYolov8ScoreSumPointsRejected',
+      'rknnYolov8DirectCandidateCalls',
+    ),
     rknnYolov8LogicalFloatBytesAvoided: counterDelta(
       'rknnYolov8LogicalFloatBytesAvoided',
     ),

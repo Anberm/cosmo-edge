@@ -191,9 +191,11 @@ void RknnNetNode::DestroyContext() {
     std::vector<RknnYolov8QuantizedHead>().swap(quantized_yolov8_heads_);
     std::vector<int8_t>().swap(yolov8_candidate_scratch_.class_max);
     std::vector<int>().swap(yolov8_candidate_scratch_.class_ids);
+    std::vector<int>().swap(yolov8_candidate_scratch_.active_points);
     model_data_.clear();
     std::vector<float>().swap(input_nhwc_);
-    io_count_              = {};
+    io_count_                = {};
+    output_adapter_contract_ = {};
     yolov8_heads_          = false;
     native_yolov8_outputs_ = false;
     detector_model_        = false;
@@ -262,12 +264,13 @@ Status RknnNetNode::QueryTensorAttributes() {
     float_yolov8_heads_.reserve(output_attrs_.size());
     quantized_yolov8_heads_.reserve(output_attrs_.size());
 
-    RknnYolov8Layout yolo_layout;
     std::string adapter_error;
-    yolov8_heads_ = DetectRknnYolov8Layout(output_shapes, yolo_layout, adapter_error);
+    if (!ResolveRknnOutputAdapter(output_shapes, output_adapter_contract_, adapter_error))
+        return Status(COSMO_NN_ERR_UNSUPPORT_NET, adapter_error);
+    yolov8_heads_ = IsRknnYolov8DflAdapter(output_adapter_contract_.kind);
     if (yolov8_heads_) {
-        yolov8_class_count_ = yolo_layout.class_count;
-        yolov8_point_count_ = yolo_layout.point_count;
+        yolov8_class_count_ = output_adapter_contract_.class_count;
+        yolov8_point_count_ = output_adapter_contract_.point_count;
     }
     std::string native_output_reason;
     native_yolov8_outputs_ =
@@ -331,10 +334,11 @@ Status RknnNetNode::LoadWeight(const char* data, size_t size) {
         return Status(COSMO_NN_ERR_INVALID_CFG, "RKNN logical output count does not match config.json");
     }
 
-    LOG_INFO("RKNN model loaded: api={} driver={} inputs={} runtime_outputs={} logical_outputs={} "
-             "native_int8_output={}",
-             version.api_version, version.drv_version, io_count_.n_input, io_count_.n_output,
-             logical_outputs, native_yolov8_outputs_);
+    LOG_INFO(
+        "RKNN model loaded: api={} driver={} inputs={} runtime_outputs={} logical_outputs={} "
+        "output_adapter={} native_int8_output={}",
+        version.api_version, version.drv_version, io_count_.n_input, io_count_.n_output, logical_outputs,
+        RknnOutputAdapterName(output_adapter_contract_.kind), native_yolov8_outputs_);
     return COSMO_NN_OK;
 }
 
@@ -602,7 +606,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                                                                         timing.class_nanoseconds);
                 GetInferencePipelineMetrics().RecordRknnYolov8DirectCandidates(
                     decoded, timing.points_scanned, timing.points_decoded,
-                    decoded ? top_count * sizeof(float) : 0);
+                    decoded ? top_count * sizeof(float) : 0, timing.score_sum_points_rejected);
                 if (!decoded)
                     return finish_output_error(Status(COSMO_NN_ERR_NET, adapter_error));
                 candidate_batch.ready = true;

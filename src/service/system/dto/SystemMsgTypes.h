@@ -151,6 +151,7 @@ struct MsgGpuInfo {
     uint64_t rknnYolov8DirectCandidateFailures{0};
     uint64_t rknnYolov8DirectPointsScanned{0};
     uint64_t rknnYolov8DirectPointsDecoded{0};
+    uint64_t rknnYolov8ScoreSumPointsRejected{0};
     uint64_t rknnYolov8LogicalFloatBytesAvoided{0};
     uint64_t yolov8PostprocessCalls{0};
     double yolov8PostprocessMs{0.0};

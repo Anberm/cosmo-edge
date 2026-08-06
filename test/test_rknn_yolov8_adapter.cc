@@ -58,6 +58,123 @@ TEST_CASE("RKNN YOLOv8 adapter rejects malformed head order", "[nn][rknn][yolov8
     std::string error;
     CHECK_FALSE(DetectRknnYolov8Layout(shapes, layout, error));
     CHECK_FALSE(error.empty());
+
+    RknnOutputAdapterContract fallback;
+    REQUIRE(ResolveRknnOutputAdapter(shapes, fallback, error));
+    CHECK(fallback.kind == RknnOutputAdapterKind::GenericTensorV1);
+    CHECK(fallback.logical_shape.empty());
+}
+
+TEST_CASE("RKNN output adapter registry separates implemented tensor contracts",
+          "[nn][rknn][output-adapter]") {
+    using namespace cosmo::nn;
+
+    const auto& registry = RknnOutputAdapterRegistry();
+    REQUIRE(registry.size() == 7);
+    CHECK(std::string(RknnOutputAdapterName(RknnOutputAdapterKind::GenericTensorV1)) == "generic_tensor_v1");
+    CHECK(std::string(RknnOutputAdapterName(RknnOutputAdapterKind::YoloDfl6HeadV1)) == "yolo_dfl_6head_v1");
+    CHECK(std::string(RknnOutputAdapterName(RknnOutputAdapterKind::YoloDfl9HeadScoreSumV1)) ==
+          "yolo_dfl_9head_score_sum_v1");
+
+    const auto pose =
+        std::find_if(registry.begin(), registry.end(), [](const RknnOutputAdapterRegistryEntry& entry) {
+            return entry.kind == RknnOutputAdapterKind::YoloPoseV1;
+        });
+    REQUIRE(pose != registry.end());
+    CHECK_FALSE(pose->implemented);
+    CHECK_FALSE(pose->auto_detect);
+
+    const std::vector<std::vector<int>> generic_shapes{{1, 2}, {1, 3}};
+    RknnOutputAdapterContract contract;
+    std::string error;
+    REQUIRE(ResolveRknnOutputAdapter(generic_shapes, contract, error));
+    CHECK(contract.kind == RknnOutputAdapterKind::GenericTensorV1);
+}
+
+TEST_CASE("RKNN YOLOv8 nine-head contract preserves probability scores for FP16 fallback",
+          "[nn][rknn][yolov8][score-sum][fp16]") {
+    using namespace cosmo::nn;
+
+    const std::vector<std::vector<int>> shapes{
+        {1, 64, 4, 4}, {1, 3, 4, 4},  {1, 1, 4, 4}, {1, 64, 2, 2}, {1, 3, 2, 2},
+        {1, 1, 2, 2},  {1, 64, 1, 1}, {1, 3, 1, 1}, {1, 1, 1, 1},
+    };
+    RknnYolov8Layout layout;
+    std::string error;
+    REQUIRE(DetectRknnYolov8Layout(shapes, layout, error));
+    CHECK(layout.kind == RknnOutputAdapterKind::YoloDfl9HeadScoreSumV1);
+    CHECK(layout.class_scores_are_probabilities);
+    CHECK(layout.branches[0].box_index == 0);
+    CHECK(layout.branches[0].class_index == 1);
+    CHECK(layout.branches[0].score_sum_index == 2);
+    CHECK(layout.logical_shape == std::vector<int>{1, 7, 21});
+
+    std::vector<std::vector<float>> values;
+    std::vector<RknnYolov8Head> heads;
+    values.reserve(shapes.size());
+    heads.reserve(shapes.size());
+    for (size_t index = 0; index < shapes.size(); ++index) {
+        const auto& shape     = shapes[index];
+        const size_t count    = static_cast<size_t>(shape[1] * shape[2] * shape[3]);
+        const bool class_head = index % 3 == 1;
+        values.emplace_back(count, class_head ? 0.2f : 0.0f);
+        heads.push_back({values.back().data(), values.back().size(), shape});
+    }
+
+    std::vector<float> output(static_cast<size_t>(7 * 21));
+    REQUIRE(ReconstructRknnYolov8(heads, 32, 32, output.data(), output.size(), error));
+    CHECK(output[4 * 21] == Catch::Approx(0.2f));
+    CHECK(output[5 * 21] == Catch::Approx(0.2f));
+    CHECK(output[6 * 21] == Catch::Approx(0.2f));
+
+    auto malformed = shapes;
+    malformed[2]   = {1, 2, 4, 4};
+    CHECK_FALSE(DetectRknnYolov8Layout(malformed, layout, error));
+    CHECK(error.find("score-sum") != std::string::npos);
+}
+
+TEST_CASE("RKNN YOLOv8 nine-head direct path uses score-sum without double sigmoid",
+          "[nn][rknn][yolov8][score-sum][direct-candidates]") {
+    using namespace cosmo::nn;
+
+    const std::vector<std::vector<int>> shapes{
+        {1, 64, 4, 4}, {1, 3, 4, 4},  {1, 1, 4, 4}, {1, 64, 2, 2}, {1, 3, 2, 2},
+        {1, 1, 2, 2},  {1, 64, 1, 1}, {1, 3, 1, 1}, {1, 1, 1, 1},
+    };
+    std::vector<std::vector<int8_t>> values;
+    std::vector<RknnYolov8QuantizedHead> heads;
+    values.reserve(shapes.size());
+    heads.reserve(shapes.size());
+    for (size_t index = 0; index < shapes.size(); ++index) {
+        const auto& shape     = shapes[index];
+        const size_t count    = static_cast<size_t>(shape[1] * shape[2] * shape[3]);
+        const bool class_head = index % 3 == 1;
+        const bool sum_head   = index % 3 == 2;
+        values.emplace_back(count, class_head
+                                       ? static_cast<int8_t>(5)
+                                       : (sum_head ? static_cast<int8_t>(10) : static_cast<int8_t>(0)));
+        heads.push_back({values.back().data(), count, shape, 0, class_head || sum_head ? 0.01f : 0.1f});
+    }
+    values[1][0] = 80;
+    values[2][0] = 90;
+
+    RknnYolov8CandidateScratch scratch;
+    RknnYolov8CandidateTiming timing;
+    std::vector<Yolov8Candidate> candidates;
+    std::string error;
+    REQUIRE(DecodeRknnYolov8QuantizedCandidates(heads, 32, 32, 0.25f, scratch, candidates, error, &timing));
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().confidence == Catch::Approx(0.8f));
+    CHECK(candidates.front().class_id == 0);
+    CHECK(timing.points_scanned == 21);
+    CHECK(timing.points_decoded == 1);
+    CHECK(timing.score_sum_points_rejected == 20);
+
+    std::vector<float> reconstructed(static_cast<size_t>(7 * 21));
+    RknnYolov8TransformTiming transform_timing;
+    REQUIRE(ReconstructRknnYolov8Quantized(heads, 32, 32, reconstructed.data(), reconstructed.size(), error,
+                                           &transform_timing));
+    CHECK(reconstructed[4 * 21] == Catch::Approx(0.8f));
 }
 
 TEST_CASE("RKNN YOLOv8 quantized adapter matches dequantized float heads",
