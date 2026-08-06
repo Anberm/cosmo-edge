@@ -34,28 +34,32 @@ struct HttpRequest::MimePart {
     }
 };
 
-const char* GetMethodString(HttpRequestMethod method) {
-    switch (method) {
-        case HttpRequestMethod::kGet:
-            return "GET";
-        case HttpRequestMethod::kPost:
-            return "POST";
-        case HttpRequestMethod::kPut:
-            return "PUT";
-        case HttpRequestMethod::kDelete:
-            return "DELETE";
-        case HttpRequestMethod::kConnect:
-            return "CONNECT";
-        case HttpRequestMethod::kOptions:
-            return "OPTIONS";
-        case HttpRequestMethod::kTrace:
-            return "TRACE";
-        case HttpRequestMethod::kPatch:
-            return "PATCH";
-        default:
-            return nullptr;
+namespace {
+
+    const char* GetMethodString(HttpRequestMethod method) {
+        switch (method) {
+            case HttpRequestMethod::kGet:
+                return "GET";
+            case HttpRequestMethod::kPost:
+                return "POST";
+            case HttpRequestMethod::kPut:
+                return "PUT";
+            case HttpRequestMethod::kDelete:
+                return "DELETE";
+            case HttpRequestMethod::kConnect:
+                return "CONNECT";
+            case HttpRequestMethod::kOptions:
+                return "OPTIONS";
+            case HttpRequestMethod::kTrace:
+                return "TRACE";
+            case HttpRequestMethod::kPatch:
+                return "PATCH";
+            default:
+                return nullptr;
+        }
     }
-}
+
+}  // namespace
 
 HttpRequest::HttpRequest(const std::string& url, HttpRequestHandler& resultHandler)
     : HttpRequest(url, &resultHandler) {}
@@ -64,10 +68,8 @@ HttpRequest::HttpRequest(const std::string& url, HttpRequestHandler* result_hand
     : url_(url),
       post_content_type_("text/plain"),
       result_handler_(result_handler),
-      status_(0),
       timeout_(10L),
-      connect_timeout_(10L),
-      follow_location_(1L) {}
+      connect_timeout_(10L) {}
 
 HttpRequest::~HttpRequest() = default;
 
@@ -142,8 +144,89 @@ const std::string& HttpRequest::GetContentType() const {
 }
 
 namespace {
+    constexpr long kFollowLocation = 1L;
+    constexpr long kMaxRedirects   = 5L;
+
+    bool CurlSucceeded(CURLcode result, const char* operation) {
+        if (result == CURLE_OK) {
+            return true;
+        }
+        LOG_ERRO("{} failed: [{}]", operation, curl_easy_strerror(result));
+        return false;
+    }
+
+    template <typename Value>
+    bool SetCurlOption(CURL* curl, CURLoption option, Value value, const char* option_name) {
+        return CurlSucceeded(curl_easy_setopt(curl, option, value), option_name);
+    }
+
+    template <typename Value>
+    bool GetCurlInfo(CURL* curl, CURLINFO info, Value* value, const char* info_name) {
+        return CurlSucceeded(curl_easy_getinfo(curl, info, value), info_name);
+    }
+
+    class CurlHeaderList {
+    public:
+        CurlHeaderList() = default;
+
+        ~CurlHeaderList() {
+            curl_slist_free_all(headers_);
+        }
+
+        CurlHeaderList(const CurlHeaderList&)            = delete;
+        CurlHeaderList& operator=(const CurlHeaderList&) = delete;
+
+        bool Append(const std::string& header) {
+            auto* updated = curl_slist_append(headers_, header.c_str());
+            if (updated == nullptr) {
+                LOG_ERRO("{}", "curl_slist_append failed");
+                return false;
+            }
+            headers_ = updated;
+            return true;
+        }
+
+        curl_slist* Get() const {
+            return headers_;
+        }
+
+    private:
+        curl_slist* headers_{nullptr};
+    };
+
+    bool ConfigureRequestMethod(CURL* curl, HttpRequestMethod method, bool has_body) {
+        switch (method) {
+            case HttpRequestMethod::kUnspecified:
+                return true;
+            case HttpRequestMethod::kGet:
+                if (!has_body) {
+                    return SetCurlOption(curl, CURLOPT_HTTPGET, 1L, "CURLOPT_HTTPGET");
+                }
+                return SetCurlOption(curl, CURLOPT_CUSTOMREQUEST, "GET", "CURLOPT_CUSTOMREQUEST");
+            case HttpRequestMethod::kPost:
+                if (has_body) {
+                    return true;
+                }
+                return SetCurlOption(curl, CURLOPT_POST, 1L, "CURLOPT_POST") &&
+                       SetCurlOption(curl, CURLOPT_POSTFIELDS, "", "CURLOPT_POSTFIELDS") &&
+                       SetCurlOption(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(0),
+                                     "CURLOPT_POSTFIELDSIZE_LARGE");
+            default: {
+                const auto* method_name = GetMethodString(method);
+                if (method_name == nullptr) {
+                    LOG_ERRO("{}", "Unsupported HTTP request method");
+                    return false;
+                }
+                return SetCurlOption(curl, CURLOPT_CUSTOMREQUEST, method_name, "CURLOPT_CUSTOMREQUEST");
+            }
+        }
+    }
+
     size_t PostCallback(char* ptr, size_t size, size_t nmemb, void* data) {
-        auto len = size * nmemb;
+        if (size != 0 && nmemb > std::numeric_limits<size_t>::max() / size) {
+            return 0;
+        }
+        const auto len = size * nmemb;
         if (!data) {
             LOG_INFO("{}", "curl callback data is NULL");
             return len;
@@ -160,9 +243,9 @@ void HttpRequest::SetContentType(const std::string& contentType) {
 }
 
 long HttpRequest::Submit(HttpRequestMethod method) {
-    CURL* curl = curl_easy_init();
-    [[maybe_unused]] std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl_easy_init_ptr(
-        curl, curl_easy_cleanup);
+    result_content_type_.clear();
+    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl_handle(curl_easy_init(), curl_easy_cleanup);
+    auto* curl = curl_handle.get();
     if (!curl) {
         LOG_ERRO("{}", "curl easy init fail");
         return -1;
@@ -172,109 +255,98 @@ long HttpRequest::Submit(HttpRequestMethod method) {
         return -1;
     }
 
-    CURLcode res = curl_easy_setopt(curl, CURLOPT_URL, url_.c_str());
-    if (res != CURLE_OK) {
-        LOG_ERRO("CURLOPT_URL fail : [{}]", curl_easy_strerror(res));
+    if (!SetCurlOption(curl, CURLOPT_URL, url_.c_str(), "CURLOPT_URL") ||
+        !SetCurlOption(curl, CURLOPT_WRITEFUNCTION, PostCallback, "CURLOPT_WRITEFUNCTION") ||
+        !SetCurlOption(curl, CURLOPT_WRITEDATA, result_handler_, "CURLOPT_WRITEDATA") ||
+        !SetCurlOption(curl, CURLOPT_IPRESOLVE, static_cast<long>(CURL_IPRESOLVE_V4), "CURLOPT_IPRESOLVE") ||
+        !SetCurlOption(curl, CURLOPT_CONNECTTIMEOUT, connect_timeout_, "CURLOPT_CONNECTTIMEOUT") ||
+        !SetCurlOption(curl, CURLOPT_TIMEOUT, timeout_, "CURLOPT_TIMEOUT") ||
+        !SetCurlOption(curl, CURLOPT_VERBOSE, 0L, "CURLOPT_VERBOSE") ||
+        !SetCurlOption(curl, CURLOPT_FOLLOWLOCATION, kFollowLocation, "CURLOPT_FOLLOWLOCATION") ||
+        !SetCurlOption(curl, CURLOPT_MAXREDIRS, kMaxRedirects, "CURLOPT_MAXREDIRS") ||
+        !SetCurlOption(curl, CURLOPT_NOSIGNAL, 1L, "CURLOPT_NOSIGNAL")) {
         return -1;
     }
-
-    res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, PostCallback);
-    if (res != CURLE_OK) {
-        LOG_ERRO("CURLOPT_WRITEFUNCTION fail : [{}]", curl_easy_strerror(res));
-        return -1;
-    }
-
-    res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, result_handler_);
-    if (res != CURLE_OK) {
-        LOG_ERRO("CURLOPT_WRITEDATA fail : [{}]", curl_easy_strerror(res));
-        return -1;
-    }
-
-    auto method_str = GetMethodString(method);
-    if (method_str != nullptr) {
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method_str);
-    }
-
-    curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connect_timeout_);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_);
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, follow_location_);
-    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
 #if LIBCURL_VERSION_NUM >= 0x075500
-    res = curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-#else
-    res = curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-#endif
-    if (res != CURLE_OK) {
-        LOG_ERRO("Failed to restrict request protocols: [{}]", curl_easy_strerror(res));
+    if (!SetCurlOption(curl, CURLOPT_PROTOCOLS_STR, "http,https", "CURLOPT_PROTOCOLS_STR")) {
         return -1;
     }
-#if LIBCURL_VERSION_NUM >= 0x075500
-    res = curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
 #else
-    res = curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    if (!SetCurlOption(curl, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS),
+                       "CURLOPT_PROTOCOLS")) {
+        return -1;
+    }
 #endif
-    if (res != CURLE_OK) {
-        LOG_ERRO("Failed to restrict redirect protocols: [{}]", curl_easy_strerror(res));
+#if LIBCURL_VERSION_NUM >= 0x075500
+    if (!SetCurlOption(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https", "CURLOPT_REDIR_PROTOCOLS_STR")) {
+        return -1;
+    }
+#else
+    if (!SetCurlOption(curl, CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS),
+                       "CURLOPT_REDIR_PROTOCOLS")) {
+        return -1;
+    }
+#endif
+
+    if (!SetCurlOption(curl, CURLOPT_SSL_VERIFYPEER, 1L, "CURLOPT_SSL_VERIFYPEER") ||
+        !SetCurlOption(curl, CURLOPT_SSL_VERIFYHOST, 2L, "CURLOPT_SSL_VERIFYHOST")) {
+        return -1;
+    }
+    if (!ca_bundle_path_.empty() &&
+        !SetCurlOption(curl, CURLOPT_CAINFO, ca_bundle_path_.c_str(), "CURLOPT_CAINFO")) {
         return -1;
     }
 
-    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    if (res != CURLE_OK) {
-        LOG_ERRO("CURLOPT_SSL_VERIFYPEER fail : [{}]", curl_easy_strerror(res));
+    if (!interface_name_.empty() &&
+        !SetCurlOption(curl, CURLOPT_INTERFACE, interface_name_.c_str(), "CURLOPT_INTERFACE")) {
         return -1;
     }
-    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    if (res != CURLE_OK) {
-        LOG_ERRO("CURLOPT_SSL_VERIFYHOST fail : [{}]", curl_easy_strerror(res));
-        return -1;
+
+    std::string proxy_credentials;
+    if (!proxy_.empty()) {
+        if (!SetCurlOption(curl, CURLOPT_PROXY, proxy_.c_str(), "CURLOPT_PROXY") ||
+            !SetCurlOption(curl, CURLOPT_PROXYTYPE, static_cast<long>(CURLPROXY_HTTP), "CURLOPT_PROXYTYPE") ||
+            !SetCurlOption(curl, CURLOPT_HTTPPROXYTUNNEL, 1L, "CURLOPT_HTTPPROXYTUNNEL")) {
+            return -1;
+        }
+        if (!proxy_username_.empty()) {
+            proxy_credentials = proxy_username_ + ":" + proxy_password_;
+            if (!SetCurlOption(curl, CURLOPT_PROXYUSERPWD, proxy_credentials.c_str(),
+                               "CURLOPT_PROXYUSERPWD")) {
+                return -1;
+            }
+        }
     }
-    if (!ca_bundle_path_.empty()) {
-        res = curl_easy_setopt(curl, CURLOPT_CAINFO, ca_bundle_path_.c_str());
-        if (res != CURLE_OK) {
-            LOG_ERRO("CURLOPT_CAINFO fail : [{}]", curl_easy_strerror(res));
+
+    CurlHeaderList headers;
+    if (!data_.empty() && mime_parts_.empty()) {
+        if (!headers.Append("Content-Type: " + post_content_type_) ||
+            !headers.Append("Content-Length: " + std::to_string(data_.size()))) {
             return -1;
         }
     }
 
-    if (!interface_name_.empty()) {
-        curl_easy_setopt(curl, CURLOPT_INTERFACE, interface_name_.c_str());
-    }
-
-    if (!proxy_.empty()) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, proxy_.c_str());
-        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
-        curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
-        if (!proxy_username_.empty()) {
-            curl_easy_setopt(curl, CURLOPT_PROXYUSERPWD, (proxy_username_ + ":" + proxy_password_).c_str());
+    for (const auto& header : header_) {
+        if (!headers.Append(header)) {
+            return -1;
         }
     }
 
-    struct curl_slist* headers = nullptr;
-    if (!data_.empty() && mime_parts_.empty()) {
-        std::string type_header = "Content-Type: " + post_content_type_;
-        headers                 = curl_slist_append(headers, type_header.c_str());
-        std::string size_header = "Content-Length: " + std::to_string(data_.size());
-        headers                 = curl_slist_append(headers, size_header.c_str());
-    }
-
-    for (auto& header : header_) {
-        headers = curl_slist_append(headers, header.c_str());
-    }
-
-    [[maybe_unused]] std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> curl_header_free(
-        headers, curl_slist_free_all);
-    res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    if (res != CURLE_OK) {
-        LOG_ERRO("CURLOPT_HTTPHEADER fail : [{}]", curl_easy_strerror(res));
+    if (!SetCurlOption(curl, CURLOPT_HTTPHEADER, headers.Get(), "CURLOPT_HTTPHEADER")) {
         return -1;
     }
     if (!data_.empty()) {
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data_.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, data_.size());
+        if (static_cast<std::uintmax_t>(data_.size()) >
+            static_cast<std::uintmax_t>(std::numeric_limits<curl_off_t>::max())) {
+            LOG_ERRO("HTTP request body exceeds curl_off_t capacity: {} bytes", data_.size());
+            return -1;
+        }
+        if (!SetCurlOption(curl, CURLOPT_POSTFIELDS, data_.c_str(), "CURLOPT_POSTFIELDS") ||
+            !SetCurlOption(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(data_.size()),
+                           "CURLOPT_POSTFIELDSIZE_LARGE")) {
+            return -1;
+        }
     }
 
     std::unique_ptr<curl_mime, decltype(&curl_mime_free)> mime(nullptr, curl_mime_free);
@@ -331,50 +403,72 @@ long HttpRequest::Submit(HttpRequestMethod method) {
 
         for (const auto& part : mime_parts_) {
             curl_mimepart* curl_part = curl_mime_addpart(mime.get());
-            if (curl_part == nullptr || curl_mime_name(curl_part, part->name.c_str()) != CURLE_OK) {
+            if (curl_part == nullptr) {
+                LOG_ERRO("{}", "curl_mime_addpart failed");
+                return -1;
+            }
+            if (!CurlSucceeded(curl_mime_name(curl_part, part->name.c_str()), "curl_mime_name")) {
                 return -1;
             }
             if (part->fd >= 0) {
                 part->position = 0;
-                if (part->size > static_cast<std::uint64_t>(std::numeric_limits<curl_off_t>::max()) ||
-                    curl_mime_filename(curl_part, part->filename.c_str()) != CURLE_OK ||
-                    (!part->content_type.empty() &&
-                     curl_mime_type(curl_part, part->content_type.c_str()) != CURLE_OK) ||
-                    curl_mime_data_cb(curl_part, static_cast<curl_off_t>(part->size), read_file, seek_file,
-                                      nullptr, part.get()) != CURLE_OK) {
+                if (part->size > static_cast<std::uint64_t>(std::numeric_limits<curl_off_t>::max())) {
+                    LOG_ERRO("Multipart file exceeds curl_off_t capacity: {} bytes", part->size);
                     return -1;
                 }
-            } else if (curl_mime_data(curl_part, part->value.data(), part->value.size()) != CURLE_OK) {
+                if (!CurlSucceeded(curl_mime_filename(curl_part, part->filename.c_str()),
+                                   "curl_mime_filename") ||
+                    (!part->content_type.empty() &&
+                     !CurlSucceeded(curl_mime_type(curl_part, part->content_type.c_str()),
+                                    "curl_mime_type")) ||
+                    !CurlSucceeded(curl_mime_data_cb(curl_part, static_cast<curl_off_t>(part->size),
+                                                     read_file, seek_file, nullptr, part.get()),
+                                   "curl_mime_data_cb")) {
+                    return -1;
+                }
+            } else if (!CurlSucceeded(curl_mime_data(curl_part, part->value.data(), part->value.size()),
+                                      "curl_mime_data")) {
                 return -1;
             }
         }
-        if (curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime.get()) != CURLE_OK) {
+        if (!SetCurlOption(curl, CURLOPT_MIMEPOST, mime.get(), "CURLOPT_MIMEPOST")) {
             return -1;
         }
     }
 
-    res = curl_easy_perform(curl);
-    if (res != CURLE_OK) {
-        LOG_ERRO("curl perform fail : [{}]", curl_easy_strerror(res));
+    if (!ConfigureRequestMethod(curl, method, !data_.empty() || !mime_parts_.empty())) {
         return -1;
     }
 
-    if (result_handler_) {
-        result_handler_->Flush();
+    if (!CurlSucceeded(curl_easy_perform(curl), "curl_easy_perform")) {
+        return -1;
     }
 
-    char* ct = nullptr;
-    curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &ct);
-    if (ct) {
-        result_content_type_.assign(ct);
+    if (result_handler_ != nullptr && !result_handler_->Finalize()) {
+        LOG_ERRO("{}", "HTTP response handler finalization failed");
+        return -1;
     }
 
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status_);
-    if (method_str)
-        LOG_INFO("HTTP Submit [{}][{}]", method_str, status_);
-    else
-        LOG_INFO("HTTP Submit [{}]", status_);
-    return status_;
+    char* content_type = nullptr;
+    if (!GetCurlInfo(curl, CURLINFO_CONTENT_TYPE, &content_type, "CURLINFO_CONTENT_TYPE")) {
+        return -1;
+    }
+    if (content_type != nullptr) {
+        result_content_type_.assign(content_type);
+    }
+
+    long status = 0;
+    if (!GetCurlInfo(curl, CURLINFO_RESPONSE_CODE, &status, "CURLINFO_RESPONSE_CODE")) {
+        return -1;
+    }
+
+    const auto* method_name = GetMethodString(method);
+    if (method_name != nullptr) {
+        LOG_INFO("HTTP Submit [{}][{}]", method_name, status);
+    } else {
+        LOG_INFO("HTTP Submit [{}]", status);
+    }
+    return status;
 }
 
 void HttpRequest::SetTimeout(long seconds) {

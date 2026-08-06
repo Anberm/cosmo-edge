@@ -22,7 +22,7 @@ HttpResponse HttpClientImpl::Post(const std::string& url, const std::string& dat
     httpReq.SetTimeout(timeoutSec);
 
     HttpResponse response;
-    response.statusCode = httpReq.Submit();
+    response.statusCode = httpReq.Submit(cosmo::network::http::HttpRequestMethod::kPost);
     response.body       = handler.GetData();
     return response;
 }

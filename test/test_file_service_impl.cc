@@ -5,8 +5,6 @@
  * Strategy: Keep external platform services mocked, and use a one-shot
  * loopback HTTP server for deterministic transfer-boundary coverage.
  */
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -14,10 +12,13 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <string>
 #include <thread>
+#include <utility>
 
+#include "LoopbackHttpServer.h"
 #include "mock/MockServiceRegistry.h"
 #include "network/http/HttpRequest.h"
 #include "network/http/HttpRequestHandler.h"
@@ -29,82 +30,38 @@ using namespace cosmo::service;
 
 namespace {
 
-int OpenLoopbackServer(std::uint16_t& port) {
-    const int server = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (server < 0) {
-        return -1;
-    }
-    int reuse = 1;
-    if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
-        close(server);
-        return -1;
-    }
-    sockaddr_in address{};
-    address.sin_family      = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port        = 0;
-    if (bind(server, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
-        listen(server, 1) != 0) {
-        close(server);
-        return -1;
-    }
-    socklen_t address_size = sizeof(address);
-    if (getsockname(server, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
-        close(server);
-        return -1;
-    }
-    port = ntohs(address.sin_port);
-    return server;
-}
+class ScopedFileRemoval {
+public:
+    explicit ScopedFileRemoval(std::filesystem::path path) : path_(std::move(path)) {}
 
-bool SendAll(int socket, const char* data, std::size_t size) {
-    std::size_t sent = 0;
-    while (sent < size) {
-        const auto result = send(socket, data + sent, size - sent, MSG_NOSIGNAL);
-        if (result <= 0) {
-            return false;
-        }
-        sent += static_cast<std::size_t>(result);
+    ~ScopedFileRemoval() {
+        std::error_code error;
+        std::filesystem::remove(path_, error);
     }
-    return true;
-}
 
-bool ServeHttpBodyOnce(int server, std::size_t body_size, char fill) {
-    const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
-    if (client < 0) {
-        close(server);
+    ScopedFileRemoval(const ScopedFileRemoval&)            = delete;
+    ScopedFileRemoval& operator=(const ScopedFileRemoval&) = delete;
+
+private:
+    std::filesystem::path path_;
+};
+
+bool FileContainsOnly(const std::filesystem::path& path, char expected) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
         return false;
     }
 
-    std::string request;
-    std::array<char, 4096> request_buffer{};
-    while (request.find("\r\n\r\n") == std::string::npos && request.size() < 64 * 1024) {
-        const auto received = recv(client, request_buffer.data(), request_buffer.size(), 0);
-        if (received <= 0) {
-            close(client);
-            close(server);
+    std::array<char, 64 * 1024> buffer{};
+    while (input) {
+        input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const auto bytes = input.gcount();
+        if (!std::all_of(buffer.begin(), buffer.begin() + bytes,
+                         [expected](char value) { return value == expected; })) {
             return false;
         }
-        request.append(request_buffer.data(), static_cast<std::size_t>(received));
     }
-
-    const auto header =
-        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
-        "Content-Length: " +
-        std::to_string(body_size) + "\r\nConnection: close\r\n\r\n";
-    bool success = SendAll(client, header.data(), header.size());
-    std::array<char, 64 * 1024> body_buffer{};
-    body_buffer.fill(fill);
-    std::size_t remaining = body_size;
-    while (success && remaining > 0) {
-        const auto bytes = std::min(remaining, body_buffer.size());
-        success          = SendAll(client, body_buffer.data(), bytes);
-        remaining -= bytes;
-    }
-    shutdown(client, SHUT_RDWR);
-    close(client);
-    close(server);
-    return success;
+    return input.eof();
 }
 
 }  // namespace
@@ -262,17 +219,16 @@ TEST_CASE("FileServiceImpl: download rejects non-HTTP URLs and clears stale outp
 TEST_CASE("FileServiceImpl: resource budget permits HTTP images beyond the legacy 16 MiB cap",
           "[FileService][http][boundary]") {
     constexpr std::size_t kBodySize = 17U * 1024 * 1024 + 123;
-    std::uint16_t port              = 0;
-    const int server                = OpenLoopbackServer(port);
-    REQUIRE(server >= 0);
+    cosmo::test::LoopbackHttpServer server;
+    REQUIRE(server.Start());
+    const auto url = "http://127.0.0.1:" + std::to_string(server.Port()) + "/large-image";
 
     std::atomic<bool> served{false};
     std::thread server_thread(
-        [&]() { served.store(ServeHttpBodyOnce(server, kBodySize, 'I'), std::memory_order_release); });
+        [&]() { served.store(server.ServeOnce(kBodySize, 'I'), std::memory_order_release); });
     FileServiceImpl sut;
     std::vector<std::uint8_t> data;
-    const bool downloaded =
-        sut.DownloadFile("http://127.0.0.1:" + std::to_string(port) + "/large-image", data);
+    const bool downloaded = sut.DownloadFile(url, data);
     server_thread.join();
 
     REQUIRE(served.load(std::memory_order_acquire));
@@ -285,29 +241,71 @@ TEST_CASE("FileServiceImpl: resource budget permits HTTP images beyond the legac
 TEST_CASE("HttpFileHandler: HTTP video-sized responses stream to disk beyond 16 MiB",
           "[FileService][http][streaming]") {
     constexpr std::size_t kBodySize = 32U * 1024 * 1024 + 321;
-    std::uint16_t port              = 0;
-    const int server                = OpenLoopbackServer(port);
-    REQUIRE(server >= 0);
+    cosmo::test::LoopbackHttpServer server;
+    REQUIRE(server.Start());
+    const auto url = "http://127.0.0.1:" + std::to_string(server.Port()) + "/large-video";
 
     const auto output =
         std::filesystem::path("/tmp") / ("cosmo-http-video-" + std::to_string(getpid()) + ".mp4");
+    [[maybe_unused]] ScopedFileRemoval output_cleanup(output);
     std::error_code error;
     std::filesystem::remove(output, error);
     std::atomic<bool> served{false};
     std::thread server_thread(
-        [&]() { served.store(ServeHttpBodyOnce(server, kBodySize, 'V'), std::memory_order_release); });
+        [&]() { served.store(server.ServeOnce(kBodySize, 'V'), std::memory_order_release); });
 
     cosmo::network::http::HttpFileHandler handler(output.string());
-    cosmo::network::http::HttpRequest request("http://127.0.0.1:" + std::to_string(port) + "/large-video",
-                                              &handler);
+    cosmo::network::http::HttpRequest request(url, &handler);
     request.SetTimeout(30);
     const auto status = request.Submit(cosmo::network::http::HttpRequestMethod::kGet);
-    handler.Flush();
     server_thread.join();
 
     REQUIRE(served.load(std::memory_order_acquire));
     REQUIRE(static_cast<int>(status) == 200);
     REQUIRE(std::filesystem::file_size(output, error) == kBodySize);
     REQUIRE_FALSE(error);
-    std::filesystem::remove(output, error);
+    REQUIRE(FileContainsOnly(output, 'V'));
+}
+
+TEST_CASE("HttpFileHandler: unopened destination aborts the HTTP transfer", "[FileService][http][boundary]") {
+    const auto missing_parent =
+        std::filesystem::path("/tmp") / ("cosmo-http-missing-parent-" + std::to_string(getpid()));
+    const auto output = missing_parent / "response.bin";
+    std::error_code error;
+    std::filesystem::remove_all(missing_parent, error);
+    REQUIRE_FALSE(std::filesystem::exists(missing_parent));
+
+    cosmo::test::LoopbackHttpServer server;
+    REQUIRE(server.Start());
+    const auto url = "http://127.0.0.1:" + std::to_string(server.Port()) + "/write-failure";
+    std::atomic<bool> served{false};
+    std::thread server_thread([&]() { served.store(server.ServeOnce(1, 'F'), std::memory_order_release); });
+
+    cosmo::network::http::HttpFileHandler handler(output.string());
+    cosmo::network::http::HttpRequest request(url, &handler);
+    const auto status = request.Submit(cosmo::network::http::HttpRequestMethod::kGet);
+    server_thread.join();
+
+    REQUIRE(served.load(std::memory_order_acquire));
+    REQUIRE(status == -1);
+    REQUIRE_FALSE(std::filesystem::exists(output));
+}
+
+TEST_CASE("HttpFileHandler: final flush failure rejects an HTTP 200 response",
+          "[FileService][http][boundary]") {
+    REQUIRE(std::filesystem::exists("/dev/full"));
+
+    cosmo::test::LoopbackHttpServer server;
+    REQUIRE(server.Start());
+    const auto url = "http://127.0.0.1:" + std::to_string(server.Port()) + "/flush-failure";
+    std::atomic<bool> served{false};
+    std::thread server_thread([&]() { served.store(server.ServeOnce(1, 'F'), std::memory_order_release); });
+
+    cosmo::network::http::HttpFileHandler handler("/dev/full");
+    cosmo::network::http::HttpRequest request(url, &handler);
+    const auto status = request.Submit(cosmo::network::http::HttpRequestMethod::kGet);
+    server_thread.join();
+
+    REQUIRE(served.load(std::memory_order_acquire));
+    REQUIRE(status == -1);
 }
