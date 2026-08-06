@@ -39,11 +39,24 @@ const MONOTONIC_COUNTERS = [
 const IDENTITY_ALLOWLIST = new Set([
   'engineSourceCommit',
   'harnessCommit',
+  'sourceCommit',
+  'sourceTree',
   'engineSha256',
+  'modelSha256',
+  'scenarioSha256',
+  'videoSha256',
+  'templateSha256',
   'startedAt',
   'runnerPid',
+  'watcherPid',
+  'liveMonitorPid',
   'scenario',
   'previewClients',
+  'rknnRuntime',
+  'rknnDriver',
+  'kernel',
+  'rga',
+  'mpp',
 ]);
 
 function round(value, digits = 3) {
@@ -132,6 +145,7 @@ export function auditLongRun(runResult, options = {}) {
   const maxCpuPercent = Number(options.maxCpuPercent ?? 98);
   const maxMemoryPercent = Number(options.maxMemoryPercent ?? 98);
   const maxPoolGrowthBytes = Number(options.maxPoolGrowthBytes ?? 64 * MIB);
+  const poolGrowthWarmupSec = Number(options.poolGrowthWarmupSec ?? 0);
   const minRgaBoundUint8Frames = options.minRgaBoundUint8Frames == null
     ? null
     : Number(options.minRgaBoundUint8Frames);
@@ -148,6 +162,7 @@ export function auditLongRun(runResult, options = {}) {
     maxCpuPercent,
     maxMemoryPercent,
     maxPoolGrowthBytes,
+    poolGrowthWarmupSec,
     nowMs,
   })) {
     if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
@@ -375,16 +390,37 @@ export function auditLongRun(runResult, options = {}) {
   add('resource.memory', resources.memory.max != null && resources.memory.max < maxMemoryPercent ? 'PASS' : 'FAIL', resources.memory.max, `< ${maxMemoryPercent}%`);
   add('resource.disk', resources.disk.max != null && resources.disk.max <= diskLimit ? 'PASS' : 'FAIL', resources.disk.max, `<= ${diskLimit}%`);
 
-  const poolAllocated = numeric(holdSamples.map(
+  const poolMeasurementStartMs = firstTs == null
+    ? null
+    : firstTs + poolGrowthWarmupSec * 1000;
+  const poolSamples = poolMeasurementStartMs == null
+    ? []
+    : holdSamples.filter((sample) => Number(sample?.ts) >= poolMeasurementStartMs);
+  const coldPoolAllocated = numeric(holdSamples.map(
     (sample) => sample.hardware?.memoryPool?.totalAllocatedBytes,
   ));
-  const poolInUse = numeric(holdSamples.map(
+  const poolAllocated = numeric(poolSamples.map(
+    (sample) => sample.hardware?.memoryPool?.totalAllocatedBytes,
+  ));
+  const poolInUse = numeric(poolSamples.map(
     (sample) => sample.hardware?.memoryPool?.totalInUseBytes,
   ));
-  const poolUtilization = numeric(holdSamples.map(
+  const poolUtilization = numeric(poolSamples.map(
     (sample) => sample.hardware?.memoryPool?.utilizationPercent,
   ));
   const pool = {
+    growthWarmupSec: poolGrowthWarmupSec,
+    growthSamples: poolAllocated.length,
+    growthBaselineAt: poolSamples[0]?.iso ?? null,
+    coldStartAllocatedFirstBytes: coldPoolAllocated[0] ?? null,
+    coldStartAllocatedLastBytes: coldPoolAllocated.at(-1) ?? null,
+    coldStartAllocatedMaxBytes: coldPoolAllocated.length ? Math.max(...coldPoolAllocated) : null,
+    coldStartAllocatedNetGrowthBytes: coldPoolAllocated.length
+      ? coldPoolAllocated.at(-1) - coldPoolAllocated[0]
+      : null,
+    coldStartAllocatedPeakGrowthBytes: coldPoolAllocated.length
+      ? Math.max(...coldPoolAllocated) - coldPoolAllocated[0]
+      : null,
     allocatedFirstBytes: poolAllocated[0] ?? null,
     allocatedLastBytes: poolAllocated.at(-1) ?? null,
     allocatedMaxBytes: poolAllocated.length ? Math.max(...poolAllocated) : null,
@@ -396,14 +432,20 @@ export function auditLongRun(runResult, options = {}) {
   };
   add(
     'resource.poolGrowth',
-    pool.allocatedNetGrowthBytes != null
+    poolAllocated.length > 1
+      && pool.allocatedNetGrowthBytes != null
       && pool.allocatedPeakGrowthBytes != null
       && pool.allocatedNetGrowthBytes <= maxPoolGrowthBytes
       && pool.allocatedPeakGrowthBytes <= maxPoolGrowthBytes
       ? 'PASS'
       : 'FAIL',
-    { netBytes: pool.allocatedNetGrowthBytes, peakBytes: pool.allocatedPeakGrowthBytes },
-    `net and peak allocated growth <= ${maxPoolGrowthBytes} bytes`,
+    {
+      samples: poolAllocated.length,
+      warmupSec: poolGrowthWarmupSec,
+      netBytes: pool.allocatedNetGrowthBytes,
+      peakBytes: pool.allocatedPeakGrowthBytes,
+    },
+    `after ${poolGrowthWarmupSec}s warm-up, net and peak allocated growth <= ${maxPoolGrowthBytes} bytes`,
   );
 
   const accelerators = holdSamples.map((sample) => sample.hardware?.accelerator ?? null);

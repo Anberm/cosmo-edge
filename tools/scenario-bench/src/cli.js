@@ -116,6 +116,7 @@ checkpoint options:
   --max-gap-sec <n>    Maximum sampling gap, default 120
   --max-freshness-sec <n> Maximum age of last running sample, default 120
   --min-fps-ratio <n>  Per-binding minimum FPS / target FPS, default 0.9
+  --pool-growth-warmup-sec <n> Ignore only memory-pool growth before this hold-phase warm-up
   --expected-preview-streams <n> Required preview publishing stream count
   --expected-decoder-backend <s> Required decoder backend identifier
   --expected-encoder-backend <s> Required encoder backend identifier
@@ -748,6 +749,7 @@ async function runCheckpoint(args) {
     maxCpuPercent: optionalNumber(args, 'max-cpu-percent'),
     maxMemoryPercent: optionalNumber(args, 'max-memory-percent'),
     maxPoolGrowthBytes: optionalNumber(args, 'max-pool-growth-bytes'),
+    poolGrowthWarmupSec: optionalNumber(args, 'pool-growth-warmup-sec'),
     minRgaBoundUint8Frames: optionalNumber(args, 'min-rga-bound-uint8-frames'),
     expectedPreviewStreams: optionalNumber(args, 'expected-preview-streams'),
     expectedDecoderBackend: args['expected-decoder-backend'],

@@ -165,6 +165,32 @@ test('long-run audit fails native failure increments and unhealthy preview', () 
   assert.ok(result.failures.includes('preview.health'));
 });
 
+test('memory-pool warm-up keeps cold growth visible and gates the steady-state window', () => {
+  const input = runResult(7);
+  const base = 400 * 1024 * 1024;
+  for (const [index, item] of input.samples.entries()) {
+    item.hardware.memoryPool.totalAllocatedBytes = base + (index < 2 ? 0 : 32 * 1024 * 1024);
+  }
+  const auditOptions = {
+    ...options,
+    gateHours: 4 / 60,
+    nowMs: START + 7 * 60_000 + 10_000,
+    maxPoolGrowthBytes: 0,
+  };
+
+  const cold = auditLongRun(input, auditOptions);
+  assert.ok(cold.failures.includes('resource.poolGrowth'));
+  assert.equal(cold.memoryPool.coldStartAllocatedNetGrowthBytes, 32 * 1024 * 1024);
+
+  const steady = auditLongRun(input, { ...auditOptions, poolGrowthWarmupSec: 120 });
+  assert.equal(steady.verdict, 'PASS');
+  assert.equal(steady.memoryPool.growthWarmupSec, 120);
+  assert.equal(steady.memoryPool.growthSamples, 5);
+  assert.equal(steady.memoryPool.allocatedNetGrowthBytes, 0);
+  assert.equal(steady.memoryPool.allocatedPeakGrowthBytes, 0);
+  assert.equal(steady.memoryPool.coldStartAllocatedNetGrowthBytes, 32 * 1024 * 1024);
+});
+
 test('long-run audit fails RGA bound-input import and requantize errors', () => {
   const input = runResult();
   input.samples.at(-1).hardware.accelerator.rknnRgaBoundInputImportFailures = 1;
@@ -196,6 +222,9 @@ test('file audit binds source and allowlisted candidate identity by SHA-256', ()
     fs.writeFileSync(input, JSON.stringify(runResult()), 'utf8');
     fs.writeFileSync(identity, [
       'engineSourceCommit=88e556a1',
+      'sourceCommit=99f667b2',
+      'modelSha256=def456',
+      'rknnRuntime=2.3.2-429f97ae6b',
       'engineSha256=abc123',
       'password=must-not-be-copied',
     ].join('\n'), 'utf8');
@@ -207,6 +236,9 @@ test('file audit binds source and allowlisted candidate identity by SHA-256', ()
     assert.match(saved.source.sha256, /^[a-f0-9]{64}$/);
     assert.match(saved.identity.sha256, /^[a-f0-9]{64}$/);
     assert.equal(saved.identity.properties.engineSourceCommit, '88e556a1');
+    assert.equal(saved.identity.properties.sourceCommit, '99f667b2');
+    assert.equal(saved.identity.properties.modelSha256, 'def456');
+    assert.equal(saved.identity.properties.rknnRuntime, '2.3.2-429f97ae6b');
     assert.equal(saved.identity.properties.password, undefined);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
