@@ -77,13 +77,14 @@ class PackageProfileTests(unittest.TestCase):
             "production-release",
         )
 
-    def test_protected_accepts_plain_vllm_model(self) -> None:
+    def test_protected_rejects_plain_vllm_model(self) -> None:
         for model_type in ("qwen3vl", "qwen3_5"):
             with self.subTest(model_type=model_type):
-                verifier.verify_package(
-                    self.make_package("production-release", model_type=model_type),
-                    "production-release",
-                )
+                with self.assertRaises(verifier.PackageAuditError):
+                    verifier.verify_package(
+                        self.make_package("production-release", model_type=model_type),
+                        "production-release",
+                    )
 
     def test_channels_reject_each_others_model_format(self) -> None:
         with self.assertRaises(verifier.PackageAuditError):

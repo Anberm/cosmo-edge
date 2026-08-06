@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import pathlib
 import re
 import stat
@@ -17,7 +16,6 @@ class PackageAuditError(RuntimeError):
 
 
 PROFILES = ("public-runtime", "production-release")
-PLAINTEXT_PROTECTED_MODEL_TYPES = {"qwen3vl", "qwen3_5"}
 REQUIRED_DIRS = {"bin", "files", "font", "lib", "resource", "scripts", "web"}
 REQUIRED_EXECUTABLES = {
     "bin/cosmo-engine",
@@ -125,14 +123,7 @@ def verify_package(path: pathlib.Path, profile: str) -> None:
         if profile == "public-runtime" and encrypted:
             raise PackageAuditError(f"Open package contains an encrypted preset model: {name}")
         if profile == "production-release" and not encrypted:
-            config_name = str(pathlib.PurePosixPath(name).with_name("config.json"))
-            try:
-                config = json.loads(contents[config_name])
-                model_type = config.get("model_type", "").lower()
-            except (KeyError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
-                model_type = ""
-            if model_type not in PLAINTEXT_PROTECTED_MODEL_TYPES:
-                raise PackageAuditError(f"Protected package contains a plaintext preset model: {name}")
+            raise PackageAuditError(f"Protected package contains a plaintext preset model: {name}")
 
 
 def main() -> int:
