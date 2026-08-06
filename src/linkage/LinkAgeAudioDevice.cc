@@ -15,57 +15,56 @@ LinkAgeAudioDevice::LinkAgeAudioDevice(LinkAgeParamNode& action) : LinkAgeBase(a
     std::string audio_data;
     std::string text_data;
     for (const auto& param : action.config_object.params) {
-        if (kKeyStrageAudioDeviceId == param.key.ToString() ||
-            kKeyLinkageAudioDeviceId == param.key.ToString()) {
+        const auto& key = param.key.ToRefString();
+        if (IsAudioDeviceIdKey(key)) {
             param_.dev_id = param.value;
-        } else if (kKeyStrageAudioDeviceOperation == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceOperation == key) {
             auto value = util::ParseInt(param.value);
             if (IsValidOperation(value)) {
                 param_.operation = static_cast<LinkAgeAudioDeviceOperation>(value);
             } else {
                 LOG_WARN("{} Set {} To {} Invalid", GetFlowActionId(), param.key, param.value);
             }
-        } else if (kKeyStrageAudioDeviceData == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceData == key) {
             audio_data = param.value;
-        } else if (kKeyStrageAudioDeviceText == param.key.ToString() ||
-                   kKeyLinkageAudioDeviceText == param.key.ToString()) {
+        } else if (IsAudioTextKey(key)) {
             text_data = param.value;
-        } else if (kKeyStrageAudioDeviceTone == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceTone == key) {
             auto value = util::ParseInt(param.value);
             if (IsValidTone(value)) {
                 param_.tone = static_cast<LinkAgeAudioDeviceTone>(value);
             } else {
                 LOG_WARN("{} Set {} To {} Invalid", GetFlowActionId(), param.key, param.value);
             }
-        } else if (kKeyStrageAudioDeviceSpeed == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceSpeed == key) {
             auto value = util::ParseInt(param.value);
             if (IsValidSpeed(value)) {
                 param_.speed = value;
             } else {
                 LOG_WARN("{} Set {} To {} Invalid", GetFlowActionId(), param.key, param.value);
             }
-        } else if (kKeyStrageAudioDeviceVolume == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceVolume == key) {
             auto value = util::ParseInt(param.value);
             if (IsValidVolume(value)) {
                 param_.volume = value;
             } else {
                 LOG_WARN("{} Set {} To {} Invalid", GetFlowActionId(), param.key, param.value);
             }
-        } else if (kKeyStrageAudioDeviceDuration == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceDuration == key) {
             auto value = util::ParseInt(param.value);
             if (IsValidDuration(value)) {
                 param_.duration = value;
             } else {
                 LOG_WARN("{} Set {} To {} Invalid", GetFlowActionId(), param.key, param.value);
             }
-        } else if (kKeyStrageAudioDeviceTimes == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceTimes == key) {
             auto value = util::ParseInt(param.value);
             if (IsValidTimes(value)) {
                 param_.times = value;
             } else {
                 LOG_WARN("{} Set {} To {} Invalid", GetFlowActionId(), param.key, param.value);
             }
-        } else if (kKeyStrageAudioDeviceGap == param.key.ToString()) {
+        } else if (kKeyStrageAudioDeviceGap == key) {
             auto value = util::ParseInt(param.value);
             if (IsValidGap(value)) {
                 param_.gap = value;

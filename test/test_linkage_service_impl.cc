@@ -49,6 +49,24 @@ std::string MakeValidWorkflow(const std::string& audio_device_id = "speaker-1",
     return nlohmann::json::array({std::move(alarm), std::move(audio)}).dump();
 }
 
+std::string MakeLegacyWorkflow(const std::string& audio_device_id = "legacy-speaker",
+                               const std::string& audio_file_id   = "legacy-audio") {
+    auto workflow           = nlohmann::json::parse(MakeValidWorkflow(audio_device_id, audio_file_id));
+    workflow[0]["actionId"] = "EVT_00001";
+    workflow[0]["configObject"]["params"][0]["key"] = "strageAlgorithms";
+    workflow[1]["actionId"]                         = "DA_00001";
+    workflow[1]["configObject"]["params"][0]["key"] = "deviceSN";
+    workflow[1]["configObject"]["params"][3]["key"] = "dataText";
+    return workflow.dump();
+}
+
+std::string MakeLegacyTextWorkflow() {
+    auto workflow = nlohmann::json::parse(MakeLegacyWorkflow("legacy-text-speaker", "unused-audio"));
+    workflow[1]["configObject"]["params"][1]["value"] = "2";
+    workflow[1]["configObject"]["params"][3]["value"] = "legacy text";
+    return workflow.dump();
+}
+
 // Helper to create a temp test directory with required structure
 struct LinkageTestEnv {
     std::string baseDir;
@@ -202,6 +220,48 @@ TEST_CASE("LinkageServiceImpl: CRUD and query operations", "[linkage-service]") 
         REQUIRE(sut.Add("bound", MakeValidWorkflow("speaker-42", "audio-42"), id) == ErrorEnum::Success);
         REQUIRE(sut.IsAudioDeviceInUse("speaker-42"));
         REQUIRE(sut.IsAudioFileInUse("audio-42"));
+    }
+
+    SECTION("Legacy action and parameter IDs validate, persist, and bind to runtime tasks") {
+        std::string id;
+        REQUIRE(sut.Add("legacy", MakeLegacyWorkflow(), id) == ErrorEnum::Success);
+        REQUIRE(sut.IsAudioDeviceInUse("legacy-speaker"));
+        REQUIRE(sut.IsAudioFileInUse("legacy-audio"));
+
+        size_t total       = 0;
+        const auto results = sut.Query(1, 10, "legacy", total);
+        REQUIRE(total == 1);
+        REQUIRE(results.size() == 1);
+        const auto persisted_workflow = nlohmann::json::parse(results.front().workFlow);
+        REQUIRE(persisted_workflow[0]["actionId"] == "EVT_00001");
+        REQUIRE(persisted_workflow[1]["actionId"] == "DA_00001");
+    }
+
+    SECTION("Legacy text parameters validate and bind to a runtime task") {
+        std::string id;
+        REQUIRE(sut.Add("legacy-text", MakeLegacyTextWorkflow(), id) == ErrorEnum::Success);
+        REQUIRE(sut.IsAudioDeviceInUse("legacy-text-speaker"));
+        REQUIRE_FALSE(sut.IsAudioFileInUse("unused-audio"));
+    }
+
+    SECTION("Validation keeps the first matching compatibility parameter") {
+        auto workflow = nlohmann::json::parse(MakeValidWorkflow());
+        workflow[1]["configObject"]["params"].push_back({{"key", "deviceSN"}, {"value", ""}});
+        std::string id;
+        REQUIRE(sut.Add("first-match", workflow.dump(), id) == ErrorEnum::Success);
+        REQUIRE_FALSE(id.empty());
+        REQUIRE_FALSE(sut.IsAudioDeviceInUse("speaker-1"));
+    }
+
+    SECTION("Unknown actions are rejected without persistence") {
+        auto workflow           = nlohmann::json::parse(MakeValidWorkflow());
+        workflow[1]["actionId"] = "unsupported-action";
+        std::string id;
+        REQUIRE(sut.Add("unsupported", workflow.dump(), id) == ErrorEnum::ParameterException);
+        REQUIRE(id.empty());
+        size_t total = 0;
+        REQUIRE(sut.Query(1, 10, "unsupported", total).empty());
+        REQUIRE(total == 0);
     }
 
     SECTION("Dangling workflow nodes are rejected without persistence") {

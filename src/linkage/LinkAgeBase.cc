@@ -6,7 +6,11 @@
 
 namespace cosmo::linkage {
 
-LinkAgeBase::LinkAgeBase(LinkAgeParamNode& action) : action_(action) {}
+LinkAgeBase::LinkAgeBase(LinkAgeParamNode& action)
+    : action_id_(action.action_id),
+      action_name_(action.action_name),
+      flow_action_id_(action.flowActionId),
+      pre_flow_action_id_(action.preFlowActionId) {}
 
 bool LinkAgeBase::DoAlarm(const std::string& /*channel_id*/, const std::string& /*alg_id*/) {
     return false;
