@@ -32,9 +32,9 @@ CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编�
 
 > 以下变化面向下一版本；当前开发源码可见不等于已进入 v1.0.0 发布包。各平台可用范围以平台矩阵及其证据链接为准。
 
-- **Rockchip RK3576：**处于发布候选阶段，已集成 RKNN 推理后端和 MPP/RGA 媒体路径；绑定当前候选的容量验证仍在进行。
+- **Rockchip RK3576：**冻结工程候选已通过 1/2/4/8 路 × 5 FPS ScenarioBench，并完成 4 路 × 5 FPS、12 小时长稳；最终合并分支仍待系统验收。
 - **Sophon 模型处理：**芯片无关模型目录和 `chip_type` 校验为 BM1688、CV186X 的模型元数据与导入路径提供基础；CV186X 发布包与设备证据仍在补充。
-- **RKNN 数据路径：**加入针对性的 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 candidate 直接解码路径，并保留明确的 fallback。
+- **RKNN 数据路径：**加入针对性的 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 candidate 直接解码路径，并保留明确的 fallback；同一冻结候选的单路 Detect 平均耗时由 142.3 ms 降至 58.2 ms（下降 59.1%）。
 - **智能体辅助二开：**提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
 - **Model Guard 2.3：**为 Sophon Protected 包中的商业预置模型提供分发保护；Open 与 Protected 的应用软件能力一致，不以 SKU 解锁软件功能，区别在于模型是否加密以及是否包含设备授权工具。
 
@@ -45,7 +45,7 @@ CosmoEdge 提供统一的引擎架构与编排体验，但每次构建只选择�
 | 平台 | 状态 | 运行时 / 模型产物 | 当前范围与证据 |
 | --- | --- | --- | --- |
 | Sophon BM1688 | 主力平台 | BMRT / `.nn` | 生产部署路径，已发布 [v1.0 基线](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/) |
-| Rockchip RK3576 | 发布候选 | RKNN / `.rknn` | 首批模型为 YOLOv8 检测和安全帽分类；从 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)开始 |
+| Rockchip RK3576 | 发布候选 | RKNN / `.rknn` | 工程基线已通过 8 路 × 5 FPS；最终合并分支待复验。从 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)开始 |
 | Sophon CV186X | 候选 | BMRT / 目标芯片专用 `.nn` | 模型目录与导入兼容；发布包和设备证据正在补充 |
 | x86 Linux / Windows | 已支持 | ONNX Runtime / `.onnx` | 开发与评估路径，已有公开 x86 基线 |
 | Sophon BM1684X | 规划中 | — | 不属于当前发布范围 |
@@ -68,7 +68,7 @@ sudo docker compose -f docker-compose.x86.yml up -d --build
 # 3. 打开 http://localhost:8080
 ```
 
-启动后，按照[场景配置教程](docs/tutorials/02-scenario-config/scenario-config.md)创建第一个 AI 检测任务。使用 Docker Compose V1 时，可将 `docker compose` 替换为 `docker-compose`。
+启动后，按照[场景配置教程](https://www.cosmowander.ai/zh/docs/tutorials/02-scenario-config/scenario-config)创建第一个 AI 检测任务。使用 Docker Compose V1 时，可将 `docker compose` 替换为 `docker-compose`。
 
 ### 为 Sophon BM1688 构建
 
@@ -79,13 +79,13 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ls -lh build_output/public-runtime/
 ```
 
-默认 Open 包包含明文模型，不需要设备授权。Protected 包使用同一种 MD5 升级格式，但包含加密预置模型和授权工具；应用升级包本身不签名。安装到设备前请阅读[构建指南](docs/guide/build.md)和[部署指南](docs/guide/deployment.md)。
+默认 Open 包包含明文模型，不需要设备授权。Protected 包使用同一种 MD5 升级格式，但包含加密预置模型和授权工具；应用升级包本身不签名。安装到设备前请阅读[构建指南](https://www.cosmowander.ai/zh/docs/guide/build)和[部署指南](https://www.cosmowander.ai/zh/docs/guide/deployment)。
 
 ### 评估 RK3576 候选
 
 > RK3576 当前为发布候选，需要固定版本的 RKNN 运行时与 Rockchip 媒体环境。请从 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)开始。
 
-CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配指南](docs/tutorials/05-model-porting/model-porting.md)。
+CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配指南](https://www.cosmowander.ai/zh/docs/tutorials/05-model-porting/model-porting)。
 
 ## 你可以构建什么
 
@@ -98,12 +98,12 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 | 能力 | 能力范围 | 深入了解 |
 | --- | --- | --- |
-| 原生运行时 | 面向多路媒体、推理调度、OSD、任务和事件的 C++17 引擎 | [架构](docs/guide/architecture.md) |
-| 可视化编排 | 浏览器端流水线组合、任务绑定、参数校验和实时反馈 | [流水线教程](docs/tutorials/04-pipeline-orchestration/pipeline-orchestration.md) |
-| 推理与媒体 | Sophon、RKNN 和 x86 平台后端；平台专用构建与模型产物 | [构建指南](docs/guide/build.md) |
-| VLM 与 DINO | 提示词视觉判断、开放词汇检测，以及检测告警上报前可选的 VLM 复核 | [VLM 指南](docs/tutorials/03-vlm-guide/vlm-guide.md) |
-| 运维与集成 | 模型管理、告警、事件历史、REST、WebSocket、MQTT 和 webhook | [API 概览](docs/reference/api.md) |
-| 模型接入与保护 | 模型转换、导入、验证，以及 Open/Protected 分发边界 | [模型适配指南](docs/tutorials/05-model-porting/model-porting.md) |
+| 原生运行时 | 面向多路媒体、推理调度、OSD、任务和事件的 C++17 引擎 | [架构](https://www.cosmowander.ai/zh/docs/guide/architecture) |
+| 可视化编排 | 浏览器端流水线组合、任务绑定、参数校验和实时反馈 | [流水线教程](https://www.cosmowander.ai/zh/docs/tutorials/04-pipeline-orchestration/pipeline-orchestration) |
+| 推理与媒体 | Sophon、RKNN 和 x86 平台后端；平台专用构建与模型产物 | [构建指南](https://www.cosmowander.ai/zh/docs/guide/build) |
+| VLM 与 DINO | 提示词视觉判断、开放词汇检测，以及检测告警上报前可选的 VLM 复核 | [VLM 指南](https://www.cosmowander.ai/zh/docs/tutorials/03-vlm-guide/vlm-guide) |
+| 运维与集成 | 模型管理、告警、事件历史、REST、WebSocket、MQTT 和 webhook | [API 概览](https://www.cosmowander.ai/zh/docs/reference/api) |
+| 模型接入与保护 | 模型转换、导入、验证，以及 Open/Protected 分发边界 | [模型适配指南](https://www.cosmowander.ai/zh/docs/tutorials/05-model-porting/model-porting) |
 
 <details>
 <summary>▶ 观看演示：可视化编排一条完整 pipeline</summary>
@@ -123,7 +123,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 已经有模型适配、系统集成或界面改造任务？把业务目标、已有物料、目标设备或测试环境和验收要求交给常用编码智能体。仓库提供任务入口、示例、检查和证据边界，使结果可以包含可导入产物、范围明确的代码改动和可核验结论。
 
-从[智能体辅助二次开发](docs/development/agent-assisted-development.md)开始，再根据具体任务进入[模型适配指南](docs/tutorials/05-model-porting/model-porting.md)或[贡献者指南](docs/development/contributing.md)。
+从[智能体辅助二次开发](docs/development/agent-assisted-development.md)开始，再根据具体任务进入[模型适配指南](https://www.cosmowander.ai/zh/docs/tutorials/05-model-porting/model-porting)或[贡献者指南](docs/development/contributing.md)。
 
 ## 验证与性能
 
@@ -137,7 +137,19 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 | VLM 复核 | YY-16T01-Preview / NPU | 8 | 0.1/channel | 通过 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/vlm-55009-npu/report.zh-CN.html) |
 | 安全帽检测 x86 基线 | x86 CPU | 7 | 3/channel | 受限；8 路超过延迟阈值 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/helmet-7463-x86/report.zh-CN.html) |
 
-测试方法和发布边界见 [benchmark manifest](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/manifest.json)、[环境说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/environment)和[当前刷新说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/)。上表不代表 RK3576 或 CV186X 发布证据。
+测试方法和发布边界见 [benchmark manifest](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/manifest.json)、[环境说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/environment)和[当前刷新说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/)。上方已发布表格不代表 RK3576 或 CV186X 发布证据；RK3576 工程基线单列如下。
+
+### RK3576 工程基线
+
+这组下一版本结果绑定冻结源码候选 [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b)（tree `fd1b646f`）、engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`、RKNN Runtime `2.3.2-429f97ae6b`、driver `0.9.8`、RGA `1.10.1_[4]` 和 MPP `1.5.0-1`。
+
+| ScenarioBench 负载 | 硬件 | 最大验证路数 | 目标 FPS | 结果 |
+| --- | --- | ---: | ---: | --- |
+| 安全帽检测 | Rockchip RK3576 EVB1 V10 / RKNN | 8 | 5/路 | 通过 |
+
+1/2/4/8 路阶梯全部通过，丢帧及推理、RGA、MPP 失败均为 0；单路 Detect 平均耗时由 142.3 ms 降至 58.2 ms（下降 59.1%）。另一次 4 路 × 5 FPS、4 路算法预览的 12 小时长稳获得 720 个连续 hold 采样，CPU 平均/P95/最大值为 33.92% / 39% / 43%，丢帧及运行期/预览失败均为 0。
+
+这是工程基线，不是当前合并分支的发布证据。完成最终合并候选复跑并发布脱敏报告与 manifest 后，才能将该结果升级到发布矩阵。
 
 ## 架构
 
@@ -165,14 +177,14 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 | 入口 | 适合场景 |
 | --- | --- |
-| [文档首页](docs/index.md) | 完整文档索引和学习路径 |
-| [快速开始](docs/tutorials/01-quickstart/quickstart.md) | 首次启动和场景体验 |
-| [场景配置](docs/tutorials/02-scenario-config/scenario-config.md) | 构建场景级工作流 |
-| [VLM 指南](docs/tutorials/03-vlm-guide/vlm-guide.md) | 提示词视觉判断与事件 |
-| [模型适配指南](docs/tutorials/05-model-porting/model-porting.md) | 导入自有模型 |
+| [文档首页](https://www.cosmowander.ai/zh/docs/) | 完整文档索引和学习路径 |
+| [快速开始](https://www.cosmowander.ai/zh/docs/tutorials/01-quickstart/quickstart) | 首次启动和场景体验 |
+| [场景配置](https://www.cosmowander.ai/zh/docs/tutorials/02-scenario-config/scenario-config) | 构建场景级工作流 |
+| [VLM 指南](https://www.cosmowander.ai/zh/docs/tutorials/03-vlm-guide/vlm-guide) | 提示词视觉判断与事件 |
+| [模型适配指南](https://www.cosmowander.ai/zh/docs/tutorials/05-model-porting/model-porting) | 导入自有模型 |
 | [智能体辅助二次开发](docs/development/agent-assisted-development.md) | 委托二开任务并获得可核验结果 |
-| [构建指南](docs/guide/build.md) | x86 与 Sophon 构建、打包路径 |
-| [API 概览](docs/reference/api.md) | REST、WebSocket、MQTT 与 webhook 集成 |
+| [构建指南](https://www.cosmowander.ai/zh/docs/guide/build) | x86 与 Sophon 构建、打包路径 |
+| [API 概览](https://www.cosmowander.ai/zh/docs/reference/api) | REST、WebSocket、MQTT 与 webhook 集成 |
 
 认证设备提供预配置加速、经过验证的商业模型包和专属部署支持，但不解锁另一套软件功能。中国大陆可通过[淘宝购买认证设备](https://item.taobao.com/item.htm?id=1066672051450)；其他地区或项目部署支持请联系 <hello@cosmowander.ai>。
 
@@ -204,7 +216,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 <details>
 <summary><b>CosmoEdge 的生产就绪程度如何？</b></summary>
 
-`v1.0.0` 是当前稳定公开版本，上方提供了已发布的 BM1688 和 x86 基线。下一版本的平台结论会在安装包、设备、负载和长稳证据完成后发布；生产使用前仍需针对自有模型和部署条件完成验证。
+`v1.0.0` 是当前稳定公开版本，上方提供了已发布的 BM1688 和 x86 基线。RK3576 已有上述绑定候选的工程基线，但在最终合并候选和脱敏报告发布前仍不属于发布证据；生产使用前仍需针对自有模型和部署条件完成验证。
 
 </details>
 

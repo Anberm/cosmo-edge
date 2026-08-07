@@ -32,9 +32,9 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 
 > The items below target the next release. Availability in the current source does not mean inclusion in the v1.0.0 packages. See the platform matrix and its linked evidence for platform status.
 
-- **Rockchip RK3576:** a release-candidate RKNN backend with MPP/RGA media integration; candidate-bound capacity validation is in progress.
+- **Rockchip RK3576:** the frozen engineering candidate passed ScenarioBench at 1 / 2 / 4 / 8 channels at 5 FPS and completed a 12-hour, 4-channel run at 5 FPS; final combined-branch system validation is pending.
 - **Sophon model handling:** chip-agnostic model directories and `chip_type` validation prepare the model metadata and import path for BM1688 and CV186X; CV186X package and device evidence is still in progress.
-- **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 candidate decoding paths with explicit fallbacks.
+- **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 candidate decoding paths with explicit fallbacks; on the same frozen candidate, single-channel Detect average decreased from 142.3 ms to 58.2 ms (-59.1%).
 - **Agent-assisted development:** a repository-guided path for handing model porting, integration, and UI tasks to the coding agent you already use and receiving verifiable deliverables.
 - **Model Guard 2.3:** protects commercial preset-model distribution in Sophon Protected packages. Open and Protected expose the same application features, with no SKU-gated software functionality; they differ in model encryption and device-provisioning tooling.
 
@@ -45,7 +45,7 @@ CosmoEdge provides one engine architecture and orchestration experience, but eac
 | Platform | Status | Runtime / model artifact | Current scope and evidence |
 | --- | --- | --- | --- |
 | Sophon BM1688 | Primary | BMRT / `.nn` | Production deployment path with published [v1.0 baselines](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/) |
-| Rockchip RK3576 | Release candidate | RKNN / `.rknn` | First models: YOLOv8 detection and helmet classification; start with the [integration guide](docs/guide/rk3576-rknn-development.md) |
+| Rockchip RK3576 | Release candidate | RKNN / `.rknn` | Engineering baseline: 8 channels at 5 FPS passed; final combined-branch validation is pending. Start with the [integration guide](docs/guide/rk3576-rknn-development.md) |
 | Sophon CV186X | Candidate | BMRT / target-specific `.nn` | Model-directory and import compatibility; release package and device evidence in progress |
 | x86 Linux / Windows | Supported | ONNX Runtime / `.onnx` | Development and evaluation path with a published x86 baseline |
 | Sophon BM1684X | Planned | — | Not part of the current release scope |
@@ -68,7 +68,7 @@ sudo docker compose -f docker-compose.x86.yml up -d --build
 # 3. Open http://localhost:8080
 ```
 
-After startup, use the [Scenario Configuration tutorial](docs/en/tutorials/02-scenario-config/scenario-config.md) to create your first AI detection task. Docker Compose V1 users can replace `docker compose` with `docker-compose`.
+After startup, use the [Scenario Configuration tutorial](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) to create your first AI detection task. Docker Compose V1 users can replace `docker compose` with `docker-compose`.
 
 ### Build for Sophon BM1688
 
@@ -79,13 +79,13 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ls -lh build_output/public-runtime/
 ```
 
-The default Open package contains plaintext models and requires no device authorization. Protected packages use the same MD5 upgrade format, but contain encrypted preset models and provisioning tooling; application archives are not signed. See the [Build Guide](docs/en/guide/build.md) and [Deployment Guide](docs/en/guide/deployment.md) before installing on a device.
+The default Open package contains plaintext models and requires no device authorization. Protected packages use the same MD5 upgrade format, but contain encrypted preset models and provisioning tooling; application archives are not signed. See the [Build Guide](https://www.cosmowander.ai/docs/guide/build) and [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment) before installing on a device.
 
 ### Evaluate the RK3576 candidate
 
 > RK3576 is currently a release candidate and requires pinned RKNN runtime and Rockchip media dependencies. Start with the [RK3576 integration guide](docs/guide/rk3576-rknn-development.md).
 
-CV186X does not yet have a public Quick Start. Use the [Model Porting Guide](docs/en/tutorials/05-model-porting/model-porting.md) for the current target-specific model contract.
+CV186X does not yet have a public Quick Start. Use the [Model Porting Guide](https://www.cosmowander.ai/docs/tutorials/05-model-porting/model-porting) for the current target-specific model contract.
 
 ## What You Can Build
 
@@ -98,12 +98,12 @@ CV186X does not yet have a public Quick Start. Use the [Model Porting Guide](doc
 
 | Capability | What it covers | Go deeper |
 | --- | --- | --- |
-| Native runtime | C++17 engine for multi-channel media, inference scheduling, OSD, tasks, and events | [Architecture](docs/en/guide/architecture.md) |
-| Visual orchestration | Browser-based pipeline composition, task binding, parameter validation, and live feedback | [Pipeline tutorial](docs/en/tutorials/04-pipeline-orchestration/pipeline-orchestration.md) |
-| Inference and media | Platform backends for Sophon, RKNN, and x86; platform-specific builds and model artifacts | [Build Guide](docs/en/guide/build.md) |
-| VLM and DINO | Prompt-based judgment, open-vocabulary detection, and optional VLM review before a detection alarm is reported | [VLM Guide](docs/en/tutorials/03-vlm-guide/vlm-guide.md) |
-| Operations and integration | Model management, alarms, event history, REST, WebSocket, MQTT, and webhooks | [API Overview](docs/en/reference/api.md) |
-| Model onboarding and protection | Model conversion, import, validation, and the Open/Protected distribution boundary | [Model Porting Guide](docs/en/tutorials/05-model-porting/model-porting.md) |
+| Native runtime | C++17 engine for multi-channel media, inference scheduling, OSD, tasks, and events | [Architecture](https://www.cosmowander.ai/docs/guide/architecture) |
+| Visual orchestration | Browser-based pipeline composition, task binding, parameter validation, and live feedback | [Pipeline tutorial](https://www.cosmowander.ai/docs/tutorials/04-pipeline-orchestration/pipeline-orchestration) |
+| Inference and media | Platform backends for Sophon, RKNN, and x86; platform-specific builds and model artifacts | [Build Guide](https://www.cosmowander.ai/docs/guide/build) |
+| VLM and DINO | Prompt-based judgment, open-vocabulary detection, and optional VLM review before a detection alarm is reported | [VLM Guide](https://www.cosmowander.ai/docs/tutorials/03-vlm-guide/vlm-guide) |
+| Operations and integration | Model management, alarms, event history, REST, WebSocket, MQTT, and webhooks | [API Overview](https://www.cosmowander.ai/docs/reference/api) |
+| Model onboarding and protection | Model conversion, import, validation, and the Open/Protected distribution boundary | [Model Porting Guide](https://www.cosmowander.ai/docs/tutorials/05-model-porting/model-porting) |
 
 <details>
 <summary>▶ Watch: compose a complete visual pipeline</summary>
@@ -123,7 +123,7 @@ CV186X does not yet have a public Quick Start. Use the [Model Porting Guide](doc
 
 Already have a model-porting, integration, or UI task? Give your usual coding agent the business goal, available materials, target device or test environment, and acceptance criteria. The repository provides task entry points, examples, checks, and evidence boundaries so the result can include importable artifacts, scoped code changes, and a verifiable conclusion.
 
-Start with [Agent-Assisted Development](docs/en/development/agent-assisted-development.md), then use the [Model Porting Guide](docs/en/tutorials/05-model-porting/model-porting.md) or [Contributor Guide](docs/en/development/contributing.md) for the task at hand.
+Start with [Agent-Assisted Development](docs/en/development/agent-assisted-development.md), then use the [Model Porting Guide](https://www.cosmowander.ai/docs/tutorials/05-model-porting/model-porting) or [Contributor Guide](docs/en/development/contributing.md) for the task at hand.
 
 ## Validation
 
@@ -137,7 +137,19 @@ The table below is a **published v1.0 baseline**, not evidence for every next-re
 | VLM Review | YY-16T01-Preview / NPU | 8 | 0.1/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/vlm-55009-npu/report.html) |
 | No Safety Helmet x86 baseline | x86 CPU | 7 | 3/channel | LIMITED; 8 channels exceeded latency limits | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/helmet-7463-x86/report.html) |
 
-See the [benchmark manifest](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/manifest.json), [environment notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/environment), and [current refresh notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/) for methodology and publication boundaries. RK3576 and CV186X release evidence is not represented by the table above.
+See the [benchmark manifest](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/manifest.json), [environment notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/environment), and [current refresh notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/) for methodology and publication boundaries. The published table above does not represent RK3576 or CV186X release evidence; the separate RK3576 engineering baseline follows.
+
+### RK3576 engineering baseline
+
+This next-release result is bound to frozen source candidate [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b) (tree `fd1b646f`), engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`, RKNN Runtime `2.3.2-429f97ae6b`, driver `0.9.8`, RGA `1.10.1_[4]`, and MPP `1.5.0-1`.
+
+| ScenarioBench workload | Hardware | Max verified channels | Target FPS | Result |
+| --- | --- | ---: | ---: | --- |
+| No Safety Helmet | Rockchip RK3576 EVB1 V10 / RKNN | 8 | 5/channel | PASS |
+
+The 1 / 2 / 4 / 8-channel steps all passed with zero discarded frames or inference, RGA, or MPP failures. Single-channel Detect average decreased from 142.3 ms to 58.2 ms (-59.1%). A separate 12-hour run at 4 channels and 5 FPS, with four algorithm previews, recorded 720 continuous hold samples, CPU avg/P95/max of 33.92% / 39% / 43%, and zero discarded frames or runtime/preview failures.
+
+This is an engineering baseline, not release evidence for the current combined branch. The sanitized report and manifest must be published, and the final combined candidate rerun, before this result is promoted to the release matrix.
 
 ## Architecture
 
@@ -165,14 +177,14 @@ One build selects one inference backend. Model artifacts are generated for the t
 
 | Start here | Best for |
 | --- | --- |
-| [Documentation Home](docs/en/index.md) | Full documentation index and learning path |
-| [Quick Start Guide](docs/en/tutorials/01-quickstart/quickstart.md) | First setup and scenario run |
-| [Scenario Configuration](docs/en/tutorials/02-scenario-config/scenario-config.md) | Building scene-level workflows |
-| [VLM Guide](docs/en/tutorials/03-vlm-guide/vlm-guide.md) | Prompt-based visual judgment and events |
-| [Model Porting Guide](docs/en/tutorials/05-model-porting/model-porting.md) | Importing your own model |
+| [Documentation Home](https://www.cosmowander.ai/docs/) | Full documentation index and learning path |
+| [Quick Start Guide](https://www.cosmowander.ai/docs/tutorials/01-quickstart/quickstart) | First setup and scenario run |
+| [Scenario Configuration](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) | Building scene-level workflows |
+| [VLM Guide](https://www.cosmowander.ai/docs/tutorials/03-vlm-guide/vlm-guide) | Prompt-based visual judgment and events |
+| [Model Porting Guide](https://www.cosmowander.ai/docs/tutorials/05-model-porting/model-porting) | Importing your own model |
 | [Agent-Assisted Development](docs/en/development/agent-assisted-development.md) | Delegating an extension task with verifiable results |
-| [Build Guide](docs/en/guide/build.md) | x86 and Sophon build/package paths |
-| [API Overview](docs/en/reference/api.md) | REST, WebSocket, MQTT, and webhook integration |
+| [Build Guide](https://www.cosmowander.ai/docs/guide/build) | x86 and Sophon build/package paths |
+| [API Overview](https://www.cosmowander.ai/docs/reference/api) | REST, WebSocket, MQTT, and webhook integration |
 
 Certified devices add preconfigured acceleration, validated commercial model packages, and dedicated deployment support; they do not unlock separate software features. Devices are available in mainland China from the [Taobao store](https://item.taobao.com/item.htm?id=1066672051450); contact <hello@cosmowander.ai> for other regions or project support.
 
@@ -204,7 +216,7 @@ Yes. Use the model-porting path to validate the tensor, preprocessing, post-proc
 <details>
 <summary><b>How production-ready is CosmoEdge?</b></summary>
 
-`v1.0.0` is the current stable public release, with published BM1688 and x86 baseline reports above. Next-release platform claims remain candidate-bound until their package, device, workload, and long-run evidence is published; validate your own models and deployment conditions before production use.
+`v1.0.0` is the current stable public release, with published BM1688 and x86 baseline reports above. RK3576 now has the candidate-bound engineering baseline shown above, but it remains non-release evidence until the final combined candidate and sanitized report are published. Validate your own models and deployment conditions before production use.
 
 </details>
 
