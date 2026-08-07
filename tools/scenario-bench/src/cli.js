@@ -19,6 +19,12 @@ import { summarizeStep, runtimeStepDecision } from './step-evaluator.js';
 import { strategyForTaskType } from './task-strategies.js';
 import { PreviewLoad } from './preview-load.js';
 import { runPreviewValidation } from './preview-validator.js';
+import { auditLongRunFile, writeLongRunAudit } from './longrun-auditor.js';
+import {
+  installShutdownSignalHandlers,
+  sleepWithSignal,
+  throwIfAborted,
+} from './shutdown-signal.js';
 
 function parseArgs(argv) {
   const args = {};
@@ -28,12 +34,12 @@ function parseArgs(argv) {
       args.command = 'help';
     } else if (a.startsWith('--')) {
       const key = a.slice(2);
-      if (['verbose', 'no-reuse', 'cleanup', 'skip-import'].includes(key)) {
+      if (['verbose', 'no-reuse', 'cleanup', 'skip-import', 'password-stdin'].includes(key)) {
         args[key] = true;
       } else {
         args[key] = argv[++i];
       }
-    } else if (!args.command && ['run', 'doctor', 'preview', 'init-scenario'].includes(a)) {
+    } else if (!args.command && ['run', 'doctor', 'preview', 'init-scenario', 'checkpoint'].includes(a)) {
       args.command = a;
     }
   }
@@ -48,11 +54,13 @@ Usage:
   scenario-bench preview --device <url> (--user <u> --password <p> | --token-env <name>) --channel <id> --output <dir> [options]
   scenario-bench doctor --scenario <dir> [--device <url> --user <u> --password <p>] [--output <dir>]
   scenario-bench init-scenario --name <name> --template <algorithm-template.json> --video <file> [options]
+  scenario-bench checkpoint --input <metrics.partial.json> --output <checkpoint.json> --gate-hours <hours> [options]
 
 run required:
   --device <url>       Device base URL, e.g. http://192.168.1.10:8080
   --user <account>     Login account (use together with --password)
   --password <plain>   Login password
+  --password-stdin     Read the login password from stdin instead of process arguments
   --token-env <name>   Read an existing device token from this environment variable
   --scenario <dir>     Scenario package directory
   --output <dir>       Report output directory
@@ -65,6 +73,7 @@ run options:
   --skip-import        Skip algorithm/layout/save when the template already exists
   --no-reuse           Always create new bench channels
   --profile <mode>     capacity (default) expands to every channel count; configured keeps scenario.yml steps
+  --only-channels <n>  Run only one exact channel-count step from the effective profile
   --ramp-batch-size <n>
   --ramp-batch-delay-sec <n>
   --preview <mode>      none (default) | raw | algorithm
@@ -96,6 +105,22 @@ init-scenario options:
   --algorithm-id <id>  Defaults to algorithmCode/algorithmId from the template
   --schedule-id <id>   Defaults to default-schedule
   --target-fps <n>     Writes tasks[].targetFps when the template cannot expose it
+
+checkpoint options:
+  --input <file>       Running metrics.partial.json or completed metrics.json
+  --output <file>      Atomic JSON checkpoint output path
+  --gate-hours <n>     Required continuous runtime, e.g. 12
+  --identity <file>    Optional immutable candidate identity key=value file
+  --source-label <s>   Canonical remote/source path recorded in evidence
+  --identity-label <s> Canonical identity path recorded in evidence
+  --max-gap-sec <n>    Maximum sampling gap, default 120
+  --max-freshness-sec <n> Maximum age of last running sample, default 120
+  --min-fps-ratio <n>  Per-binding minimum FPS / target FPS, default 0.9
+  --pool-growth-warmup-sec <n> Ignore only memory-pool growth before this hold-phase warm-up
+  --expected-preview-streams <n> Required preview publishing stream count
+  --expected-decoder-backend <s> Required decoder backend identifier
+  --expected-encoder-backend <s> Required encoder backend identifier
+  --min-rga-bound-uint8-frames <n> Required fused RGA-to-RKNN UINT8 frames
 `);
 }
 
@@ -124,13 +149,16 @@ function ensureWritableDir(dir) {
 function deviceAuth(args) {
   const tokenEnv = args['token-env'];
   const token = tokenEnv ? process.env[tokenEnv] : null;
+  const stdinPassword = args['password-stdin']
+    ? fs.readFileSync(0, 'utf8').split(/\r?\n/, 1)[0]
+    : null;
   if (tokenEnv && !token) {
     throw new Error(`environment variable ${tokenEnv} is empty or unset`);
   }
-  if (!token && (!args.user || !args.password)) {
-    throw new Error('provide --user and --password together, or use --token-env');
+  if (!token && (!args.user || !(args.password || stdinPassword))) {
+    throw new Error('provide --user with --password/--password-stdin, or use --token-env');
   }
-  return { user: args.user, password: args.password, token };
+  return { user: args.user, password: args.password || stdinPassword, token };
 }
 
 async function runDoctor(args) {
@@ -341,6 +369,7 @@ async function runBenchmark(args) {
   const startedAt = new Date().toISOString();
   let pkg = null;
   let deviceInfo = {};
+  let client = null;
   let channelMgr = null;
   let previewLoad = null;
   const samples = [];
@@ -355,6 +384,14 @@ async function runBenchmark(args) {
   let currentStepIndex = -1;
   const writer = new ReportWriter(args.output);
   let effectiveLoadProfile = [];
+  const abortController = new AbortController();
+  const signal = abortController.signal;
+  const disposeSignalHandlers = installShutdownSignalHandlers(abortController, {
+    onSignal: (error) => {
+      process.exitCode = error.exitCode;
+      log.warn(`${error.message}; active tasks and preview clients will be cleaned up.`);
+    },
+  });
 
   const buildResult = (status = runError ? 'aborted' : 'completed') => ({
     scenarioName: pkg?.scenario?.displayName ?? pkg?.scenario?.name,
@@ -367,6 +404,7 @@ async function runBenchmark(args) {
       scheduleId: task.scheduleId,
       targetFps: task.targetFps,
       templateFile: task.templateFile,
+      taskConfig: task.taskConfig,
     })) ?? [],
     bindings: pkg?.bindings ?? [],
     algorithmId: pkg?.algorithmId,
@@ -414,20 +452,45 @@ async function runBenchmark(args) {
   };
 
   try {
+    throwIfAborted(signal);
     log.info(`Loading scenario package: ${args.scenario}`);
     pkg = new ScenarioPackage(args.scenario).load();
     log.info(`Scenario "${pkg.scenario.name}" | tasks=${pkg.tasks.map((t) => `${t.id}:${t.algorithmId}`).join(', ')} | mode=${pkg.videoMode}`);
     effectiveLoadProfile = buildEffectiveLoadProfile(pkg.loadProfile, args.profile ?? 'capacity');
+    if (args['only-channels'] != null) {
+      const onlyChannels = Number(args['only-channels']);
+      if (!Number.isInteger(onlyChannels) || onlyChannels <= 0) {
+        throw new Error('--only-channels must be a positive integer');
+      }
+      const exactStep = effectiveLoadProfile.find((step) => step.channels === onlyChannels);
+      if (!exactStep) {
+        throw new Error(`--only-channels ${onlyChannels} is not present in the effective load profile`);
+      }
+      effectiveLoadProfile = [exactStep];
+    }
     const maxChannels = Math.max(...effectiveLoadProfile.map((s) => s.channels));
     log.info(`Profile mode: ${args.profile ?? 'capacity'} | configured=${pkg.loadProfile.map((s) => s.channels).join(',')} | effective=${effectiveLoadProfile.map((s) => s.channels).join(',')}`);
 
-    log.info(`Connecting to device ${args.device}...`);
-    const client = new CosmoClient({
+    client = new CosmoClient({
       base: args.device,
       ...auth,
       lang: args.lang ?? 'zh-CN',
+      signal,
     });
+    previewLoad = new PreviewLoad(client, {
+      mode: args.preview ?? 'none',
+      streamLimit: args['preview-streams'] ?? 'all',
+      clientsPerStream: Number(args['preview-clients'] ?? 1),
+      mediaBase: args['media-base'],
+      srsApiBase: args['srs-api'],
+      ffmpeg: args.ffmpeg ?? 'ffmpeg',
+      logger: log,
+    });
+    await previewLoad.preflight();
+    throwIfAborted(signal);
+    log.info(`Connecting to device ${args.device}...`);
     await client.login();
+    throwIfAborted(signal);
     log.info('Login OK.');
 
     const deviceInfoRaw = await client.queryDeviceInfo().catch((e) => {
@@ -437,6 +500,7 @@ async function runBenchmark(args) {
     for (const it of deviceInfoRaw?.devInfoList ?? []) {
       if (it?.key) deviceInfo[it.key] = it.value;
     }
+    throwIfAborted(signal);
 
     if (args['skip-import']) {
       log.info('Skipping layout save (--skip-import).');
@@ -444,6 +508,7 @@ async function runBenchmark(args) {
       for (const item of pkg.layoutSavePayloads) {
         log.info(`Saving orchestration template for task "${item.taskId}" via /algorithm/layout/save...`);
         await client.layoutSave(item.payload);
+        throwIfAborted(signal);
       }
       log.info(`Layout saved for ${pkg.layoutSavePayloads.length} task(s).`);
     }
@@ -456,6 +521,7 @@ async function runBenchmark(args) {
     });
     log.info(`Ensuring ${maxChannels} channels (mode=${pkg.videoMode})...`);
     const videoChannelIds = await channelMgr.ensureChannels(pkg.videos, maxChannels);
+    throwIfAborted(signal);
     log.info(`Channels ready: ${videoChannelIds.join(', ')}`);
 
     const runner = new TaskRunner(client, {
@@ -463,18 +529,9 @@ async function runBenchmark(args) {
       bindings: pkg.bindings,
       rampBatchSize: Number(args['ramp-batch-size'] ?? 1),
       rampBatchDelaySec: Number(args['ramp-batch-delay-sec'] ?? 15),
+      signal,
     }, log);
     runner.setChannels(videoChannelIds);
-
-    previewLoad = new PreviewLoad(client, {
-      mode: args.preview ?? 'none',
-      streamLimit: args['preview-streams'] ?? 'all',
-      clientsPerStream: Number(args['preview-clients'] ?? 1),
-      mediaBase: args['media-base'],
-      srsApiBase: args['srs-api'],
-      ffmpeg: args.ffmpeg ?? 'ffmpeg',
-      logger: log,
-    });
 
     const sampler = new MetricsSampler(client, log);
     const activeEntries = () => runner.expectedTaskEntries(runner.allChannelIds.slice(0, currentChannels));
@@ -482,6 +539,7 @@ async function runBenchmark(args) {
     const DISCARD_BOTTLENECK = 0.05;
 
     const captureSample = async (phase = 'hold', targetChannels = currentChannels) => {
+      throwIfAborted(signal);
       previewLoad.assertHealthy();
       const sample = await sampler.sample(activeEntries());
       sample.preview = await previewLoad.snapshot();
@@ -490,6 +548,7 @@ async function runBenchmark(args) {
       sample.targetChannels = targetChannels;
       samples.push(sample);
       await writePartial();
+      throwIfAborted(signal);
       const ch0 = sample.channels[0];
       log.debug(`sample step=${currentStepIndex} ch=${sample.activeChannels} bindings=${sample.activeTaskBindings ?? sample.channels.length} first=${ch0?.taskKey ?? '-'} fps=${ch0?.measuredFps ?? '-'} discard=${ch0?.discardRate ?? '-'} cpu=${sample.hardware?.cpuUtilization?.usedPercent ?? '-'}%`);
       return sample;
@@ -531,11 +590,16 @@ async function runBenchmark(args) {
       const cpu98Count = lastConsecutive((s) => s.hardware?.cpuUtilization?.usedPercent, (v) => v >= 98);
       const npu98Count = lastConsecutive((s) => s.hardware?.npuUtilization?.usedPercent, (v) => v >= 98);
       const discardCount = lastConsecutive(meanChannelDiscard, (v) => v > DISCARD_BOTTLENECK);
+      const diskUsed = sample.hardware?.eMMCUtilization?.usedPercent;
+      const diskLimit = Number(pkg?.thresholds?.pass?.maxDiskUsedPercent ?? 90);
       if (mem98Count >= 3) reasons.push(`memory >= 98% for ${mem98Count} consecutive samples`);
       if (memAvg60s != null && memAvg60s >= 95) reasons.push(`memory 60s average ${memAvg60s.toFixed(1)}% >= 95%`);
       if (cpu98Count >= 3) reasons.push(`CPU >= 98% for ${cpu98Count} consecutive samples`);
       // if (npu98Count >= 3) reasons.push(`NPU >= 98% for ${npu98Count} consecutive samples`);
       if (discardCount >= 2) reasons.push(`discardRate > ${DISCARD_BOTTLENECK} for ${discardCount} consecutive samples`);
+      if (Number.isFinite(diskUsed) && Number.isFinite(diskLimit) && diskUsed >= diskLimit) {
+        reasons.push(`disk ${diskUsed}% >= ${diskLimit}%`);
+      }
       return reasons.length ? { stop: true, reason: reasons.join('; ') } : { stop: false };
     };
 
@@ -552,12 +616,13 @@ async function runBenchmark(args) {
         const hasVLM = activeEntries().some((e) => e.taskType === 'vlm');
         if (hasVLM && step.index === 0) {
           log.info(`[warmup] VLM detected in first step, waiting 30 seconds for model loading before sampling...`);
-          await new Promise((resolve) => setTimeout(resolve, 30000));
+          await sleepWithSignal(30_000, signal);
         }
         await previewLoad.sync(entries);
+        throwIfAborted(signal);
       },
       onSample: async () => {
-        await captureSample('hold', currentChannels);
+        return quickFuse(await captureSample('hold', currentChannels));
       },
       onStepEnd: async (step) => {
         const summary = summarizeStep(step, samples, pkg.thresholds, pkg.videoMode);
@@ -597,6 +662,9 @@ async function runBenchmark(args) {
     runError = err;
     log.error(`Benchmark aborted; a partial report will be written: ${err.message}`);
   } finally {
+    // The run signal cancels long in-flight work. Cleanup requests use their
+    // own bounded timeouts so an already-aborted signal cannot suppress them.
+    client?.beginCleanup();
     if (previewLoad) {
       try {
         await previewLoad.stop();
@@ -611,12 +679,17 @@ async function runBenchmark(args) {
         log.warn(`Channel cleanup failed: ${e.message}`);
       }
     }
+    if (!runError && signal.aborted) {
+      runError = signal.reason instanceof Error ? signal.reason : new Error('benchmark aborted');
+    }
+    disposeSignalHandlers();
   }
 
   if (!pkg) {
     console.error(`\nBenchmark failed: ${runError?.message ?? 'unknown error'}`);
     if (runError?.stack && process.env.BENCH_DEBUG) console.error(runError.stack);
-    process.exit(1);
+    process.exitCode = runError?.exitCode ?? 1;
+    return;
   }
 
   const result = buildResult();
@@ -625,7 +698,8 @@ async function runBenchmark(args) {
     log.warn(`Partial report written:\n  ${jsonPath}\n  ${htmlPath}`);
     console.error(`\nBenchmark aborted: ${runError.message}`);
     if (runError.stack && process.env.BENCH_DEBUG) console.error(runError.stack);
-    process.exit(1);
+    process.exitCode = runError.exitCode ?? 1;
+    return;
   }
   log.info(`Report written:\n  ${jsonPath}\n  ${htmlPath}`);
 }
@@ -658,6 +732,40 @@ async function runPreviewCommand(args) {
   log.info(`Preview validation ${report.status}: ${path.join(path.resolve(args.output), 'preview-validation.json')}`);
 }
 
+function optionalNumber(args, key) {
+  if (args[key] == null) return undefined;
+  const value = Number(args[key]);
+  if (!Number.isFinite(value)) throw new Error(`--${key} must be a number`);
+  return value;
+}
+
+async function runCheckpoint(args) {
+  requireArgs(args, ['input', 'output', 'gate-hours']);
+  const result = auditLongRunFile(args.input, {
+    gateHours: optionalNumber(args, 'gate-hours'),
+    maxGapSec: optionalNumber(args, 'max-gap-sec'),
+    maxFreshnessSec: optionalNumber(args, 'max-freshness-sec'),
+    minFpsRatio: optionalNumber(args, 'min-fps-ratio'),
+    maxCpuPercent: optionalNumber(args, 'max-cpu-percent'),
+    maxMemoryPercent: optionalNumber(args, 'max-memory-percent'),
+    maxPoolGrowthBytes: optionalNumber(args, 'max-pool-growth-bytes'),
+    poolGrowthWarmupSec: optionalNumber(args, 'pool-growth-warmup-sec'),
+    minRgaBoundUint8Frames: optionalNumber(args, 'min-rga-bound-uint8-frames'),
+    expectedPreviewStreams: optionalNumber(args, 'expected-preview-streams'),
+    expectedDecoderBackend: args['expected-decoder-backend'],
+    expectedEncoderBackend: args['expected-encoder-backend'],
+    identityPath: args.identity,
+    sourceLabel: args['source-label'],
+    identityLabel: args['identity-label'],
+  });
+  const output = writeLongRunAudit(args.output, result);
+  console.log(`Long-run ${args['gate-hours']}h checkpoint: ${result.verdict}`);
+  console.log(`  ${output}`);
+  if (result.failures.length) console.log(`  failed: ${result.failures.join(', ')}`);
+  if (result.pending.length) console.log(`  pending: ${result.pending.join(', ')}`);
+  process.exitCode = result.verdict === 'PASS' ? 0 : (result.verdict === 'IN_PROGRESS' ? 3 : 1);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.command || args.command === 'help') {
@@ -676,11 +784,15 @@ async function main() {
     await runPreviewCommand(args);
     return;
   }
+  if (args.command === 'checkpoint') {
+    await runCheckpoint(args);
+    return;
+  }
   await runBenchmark(args);
 }
 
 main().catch((err) => {
   console.error(`\nscenario-bench failed: ${err.message}`);
   if (err.stack && process.env.BENCH_DEBUG) console.error(err.stack);
-  process.exit(1);
+  process.exitCode = err.exitCode ?? 1;
 });

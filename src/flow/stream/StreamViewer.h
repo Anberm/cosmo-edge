@@ -82,6 +82,7 @@ public:
 private:
     void HandlePacket(VideoPacketPtr Frame);
     void HandleFrame(VideoFramePtr Frame);
+    bool PrepareFrameForDecode();
 
     void UpdateCtrlFps();
     bool EncoderReady() const;
@@ -106,6 +107,7 @@ private:
     util::FpsCtrl out_fps_ctl_;
     util::FpsCalc input_fps_calc_;  // Input FPS calculator
     size_t data_index_{0};
+    std::mutex frame_filter_mtx_;
 
     RtmpStreamPusherPtr video_pusher_{nullptr};
     StreamViewerOverviewPtr overviewer_{nullptr};

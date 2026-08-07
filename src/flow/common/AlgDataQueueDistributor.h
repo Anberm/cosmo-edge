@@ -26,6 +26,19 @@ struct AlgDataTask {
     std::vector<AlgTaskUnit> tasks;
 };
 
+struct AlgFrameDistributionPlan {
+    std::vector<std::shared_ptr<AlgDataQueue<AlgDataPtr>>> queues;
+    bool native_inference_eligible{true};
+
+    [[nodiscard]] bool Empty() const {
+        return queues.empty();
+    }
+
+    [[nodiscard]] bool SupportsNativeInference() const {
+        return !queues.empty() && native_inference_eligible;
+    }
+};
+
 class AlgDataQueueDistributor {
 public:
     explicit AlgDataQueueDistributor(const std::string& moduleName);
@@ -43,6 +56,17 @@ public:
     // Filter and distribute data to all registered queues, calling func for conversion after filtering
     int DistributorData(AlgDataPtr Frame, VideoFramePtr Data,
                         std::function<AlgDataPtr(AlgDataPtr, VideoFramePtr)> func);
+
+    /// Advance frame-rate control and snapshot queues that will actually
+    /// accept this frame. Queue saturation is treated as an early discard so
+    /// the Rockchip decoder can skip Host I420 materialization entirely.
+    AlgFrameDistributionPlan PrepareFrameDistribution(AlgDataPtr frame);
+
+    /// Complete a previously prepared distribution after the host frame has
+    /// been materialized exactly once.
+    int DistributorPreparedFrame(const AlgFrameDistributionPlan& plan, AlgDataPtr frame,
+                                 VideoFramePtr data,
+                                 std::function<AlgDataPtr(AlgDataPtr, VideoFramePtr)> func);
 
     // Distribute data to specific registered queues
     // Only send to the channel registered by the task. Used for detection data distribution.

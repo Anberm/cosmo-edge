@@ -95,6 +95,25 @@ TEST_CASE("AiDetectorFps DefaultReuseProfile follows tested fps gradient", "[AiD
     REQUIRE(EffectiveMaxReuseCount(24.0f, kBudget, kHardMax, profile) == 1);
 }
 
+TEST_CASE("AiDetectorFps RKNN profile isolates channels by default", "[AiDetectorFps][rknn]") {
+    using ai_detector_fps::EffectiveMaxReuseCount;
+    const auto profile = ai_detector_fps::RknnDefaultReuseProfile();
+
+    REQUIRE(EffectiveMaxReuseCount(3.0f, 36.0f, 3, profile) == 1);
+    REQUIRE(EffectiveMaxReuseCount(7.0f, 36.0f, 3, profile) == 1);
+    REQUIRE(EffectiveMaxReuseCount(24.0f, 36.0f, 3, profile) == 1);
+}
+
+TEST_CASE("AiDetectorFps drain batch never exceeds model capacity", "[AiDetectorFps][batch]") {
+    using ai_detector_fps::EffectiveDetectorDrainBatch;
+
+    REQUIRE(EffectiveDetectorDrainBatch(4, 1) == 1);
+    REQUIRE(EffectiveDetectorDrainBatch(4, 2) == 2);
+    REQUIRE(EffectiveDetectorDrainBatch(4, 8) == 4);
+    REQUIRE(EffectiveDetectorDrainBatch(0, 4) == 1);
+    REQUIRE(EffectiveDetectorDrainBatch(4, 0) == 1);
+}
+
 TEST_CASE("AiDetectorFps ChannelAssignedFps takes max not sum", "[AiDetectorFps]") {
     using ai_detector_fps::ChannelAssignedFps;
     REQUIRE(ChannelAssignedFps(makeChannel("ch", {})) == Approx(0.0f));

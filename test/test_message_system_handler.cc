@@ -14,6 +14,7 @@
 #include "mock/MockServiceRegistry.h"
 #include "mock/MockSystemOperationService.h"
 #include "mock/MockTimeService.h"
+#include "nn/core/inference_pipeline_metrics.h"
 #include "util/ErrorCode.h"
 
 using namespace cosmo;
@@ -49,19 +50,65 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     MockServiceRegistry mocks;
     auto handler = MakeHandler(mocks);
 
-    REQUIRE_CALL(mocks.deviceInfoSvc, GetHardwareResource(_)).RETURN(std::vector<service::HwResourceItem>{});
+    service::HwResourceItem system_memory{
+        "generalMemoryUtilization", "系统内存使用率", 18, "1.37 GiB", "6.36 GiB", 1, "system"};
+    REQUIRE_CALL(mocks.deviceInfoSvc, GetHardwareResource(_))
+        .RETURN(std::vector<service::HwResourceItem>{system_memory});
     MsgGpuInfo gpu;
-    gpu.gpuusage = 0.5;
+    gpu.gpuusage          = 0.5;
+    gpu.gpuusageAvailable = false;
     REQUIRE_CALL(mocks.deviceInfoSvc, GetGpuUtilization()).RETURN(gpu);
-    const auto preview = media::GetPreviewPipelineMetrics().Snapshot();
+    const auto preview   = media::GetPreviewPipelineMetrics().Snapshot();
+    const auto inference = nn::GetInferencePipelineMetrics().Snapshot();
 
     System::MsgQueryHardwareResourceRecv data{};
     std::error_condition errc;
     auto ret = handler.Handle(std::move(data), errc);
 
     CHECK(ret.resData.accelerator.gpuusage == 0.5);
+    CHECK_FALSE(ret.resData.accelerator.gpuusageAvailable);
     CHECK(ret.resData.accelerator.activePreviewStreams == preview.active_preview_streams);
     CHECK(ret.resData.accelerator.activeAlgorithmPreviewStreams == preview.active_algorithm_preview_streams);
+    CHECK_FALSE(ret.resData.accelerator.videoEncoderBackend.empty());
+    CHECK_FALSE(ret.resData.accelerator.videoEncoderDetail.empty());
+    CHECK_FALSE(ret.resData.accelerator.videoDecoderBackend.empty());
+    CHECK_FALSE(ret.resData.accelerator.videoDecoderDetail.empty());
+    CHECK(ret.resData.accelerator.rgaFrames == preview.rga_frames);
+    CHECK(ret.resData.accelerator.mppEncodedFrames == preview.mpp_encoded_frames);
+    CHECK(ret.resData.accelerator.mppDecodedFrames == preview.mpp_decoded_frames);
+    CHECK(ret.resData.accelerator.mppCopyOutFrames == preview.mpp_copy_out_frames);
+    CHECK(ret.resData.accelerator.mppEarlyDroppedFrames == preview.mpp_early_dropped_frames);
+    CHECK(ret.resData.accelerator.colorConvertFrames == inference.color_convert_frames);
+    CHECK(ret.resData.accelerator.rknnForwards == inference.rknn_forwards);
+    CHECK(ret.resData.accelerator.rknnDetectorForwards == inference.rknn_detector_forwards);
+    CHECK(ret.resData.accelerator.rknnPreprocessFastHits == inference.rknn_preprocess_fast_hits);
+    CHECK(ret.resData.accelerator.rknnOutputsReleaseCalls == inference.rknn_outputs_release_calls);
+    CHECK(ret.resData.accelerator.rknnNativeInt8Outputs == inference.rknn_native_int8_outputs);
+    CHECK(ret.resData.accelerator.rknnBoundInputBindAttempts == inference.rknn_bound_input_bind_attempts);
+    CHECK(ret.resData.accelerator.rknnBoundInputFrames == inference.rknn_bound_input_frames);
+    CHECK(ret.resData.accelerator.rknnRgaBoundInputBindAttempts ==
+          inference.rknn_rga_bound_input_bind_attempts);
+    CHECK(ret.resData.accelerator.rknnRgaBoundInputImportCalls ==
+          inference.rknn_rga_bound_input_import_calls);
+    CHECK(ret.resData.accelerator.rknnRgaBoundInputFrames == inference.rknn_rga_bound_input_frames);
+    CHECK(ret.resData.accelerator.rknnRgaBoundUint8Frames == inference.rknn_rga_bound_uint8_frames);
+    CHECK(ret.resData.accelerator.rknnRgaBoundRequantizeCalls == inference.rknn_rga_bound_requantize_calls);
+    CHECK(ret.resData.accelerator.rknnRgaBoundInputNormalizeBypasses ==
+          inference.rknn_rga_bound_input_normalize_bypasses);
+    CHECK(ret.resData.accelerator.rknnMppDmaBufImportCalls == inference.rknn_mpp_dmabuf_import_calls);
+    CHECK(ret.resData.accelerator.rknnMppDmaBufFrames == inference.rknn_mpp_dmabuf_frames);
+    CHECK(ret.resData.accelerator.rknnMppDmaBufFallbacks == inference.rknn_mpp_dmabuf_fallbacks);
+    CHECK(ret.resData.accelerator.rknnOutputCompatibilityFallbacks ==
+          inference.rknn_output_compatibility_fallbacks);
+    CHECK(ret.resData.accelerator.rknnYolov8DflCalls == inference.rknn_yolov8_dfl_calls);
+    CHECK(ret.resData.accelerator.rknnYolov8DirectCandidateCalls ==
+          inference.rknn_yolov8_direct_candidate_calls);
+    CHECK(ret.resData.accelerator.rknnYolov8ScoreSumPointsRejected ==
+          inference.rknn_yolov8_score_sum_points_rejected);
+    CHECK(ret.resData.accelerator.yolov8PostprocessCalls == inference.yolov8_postprocess_calls);
+    REQUIRE(ret.resData.itemList.size() == 1);
+    CHECK(ret.resData.itemList.front().memoryDomain == "system");
+    CHECK(ret.resData.itemList.front().usedSize == "1.37 GiB");
 }
 
 TEST_CASE("SystemHandler: QueryPictureQuality", "[system-handler]") {

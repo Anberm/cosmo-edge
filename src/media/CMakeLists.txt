@@ -47,10 +47,27 @@ set(MEDIA_CPU_SRC
     VideoFrameProcCpu.cc         VideoFrameProcCpu.h
 )
 
+# Rockchip Copy-first backend. MPP handles H.264/H.265 decode and H.264 encode,
+# RGA handles admitted color-conversion/resize operations, and FFmpeg remains a
+# deterministic fallback. No DMA-BUF zero-copy path is compiled in this phase.
+set(MEDIA_ROCKCHIP_SRC
+    VideoDecoderCpu.cc           VideoDecoderCpu.h
+    VideoDecoderCreateRockchip.cc
+    VideoDecoderRockchip.cc      VideoDecoderRockchip.h
+    VideoEncoderCpu.cc           VideoEncoderCpu.h
+    VideoEncoderCreateRockchip.cc
+    VideoEncoderRockchip.cc      VideoEncoderRockchip.h
+    VideoFrameProcCpu.cc         VideoFrameProcCpu.h
+    VideoFrameProcFactoryRockchip.cc
+    VideoFrameProcRockchip.cc    VideoFrameProcRockchip.h
+)
+
 if(COSMO_MEDIA_USE_SOPHON_BACKEND)
     add_library(cosmo_media OBJECT ${MEDIA_COMMON_SRC} ${MEDIA_SOPHON_SRC})
 elseif(COSMO_MEDIA_USE_CPU_BACKEND)
     add_library(cosmo_media OBJECT ${MEDIA_COMMON_SRC} ${MEDIA_CPU_SRC})
+elseif(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    add_library(cosmo_media OBJECT ${MEDIA_COMMON_SRC} ${MEDIA_ROCKCHIP_SRC})
 else()
     message(FATAL_ERROR "No media backend selected")
 endif()
@@ -66,4 +83,6 @@ target_link_libraries(cosmo_media PRIVATE cosmo_common
 )
 if(COSMO_MEDIA_USE_SOPHON_BACKEND)
     target_link_libraries(cosmo_media PRIVATE bmlib bmcv bmvd bmvenc)
+elseif(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    target_link_libraries(cosmo_media PRIVATE rockchip_mpp rockchip_rga)
 endif()

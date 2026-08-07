@@ -19,6 +19,18 @@ extern "C" {
 namespace cosmo {
 namespace media {
 
+    namespace {
+        AVCodecID ToAvCodecId(VideoCodecType type) {
+            if (type == VideoCodecType::kH264) {
+                return AV_CODEC_ID_H264;
+            }
+            if (type == VideoCodecType::kH265) {
+                return AV_CODEC_ID_HEVC;
+            }
+            return AV_CODEC_ID_NONE;
+        }
+    }  // namespace
+
     VideoDecoderCpu::VideoDecoderCpu(size_t name) : VideoDecoder(name) {}
 
     VideoDecoderCpu::~VideoDecoderCpu() {
@@ -29,13 +41,26 @@ namespace media {
         return opened_;
     }
 
+    VideoDecoderCapability VideoDecoderCpu::Probe(VideoCodecType type) {
+        VideoDecoderCapability capability;
+        capability.backend = "ffmpeg-software";
+        const auto codec_id = ToAvCodecId(type);
+        if (codec_id == AV_CODEC_ID_NONE) {
+            capability.detail = "unsupported codec";
+            return capability;
+        }
+        const auto* codec = avcodec_find_decoder(codec_id);
+        capability.available = codec != nullptr;
+        capability.implementation = codec ? codec->name : std::string{};
+        capability.detail = capability.available ? "FFmpeg software decoder is registered"
+                                                  : "FFmpeg software decoder is unavailable";
+        return capability;
+    }
+
     bool VideoDecoderCpu::Open() {
-        AVCodecID codec_id = AV_CODEC_ID_NONE;
-        if (codec_type_ == VideoCodecType::kH265) {
-            codec_id = AV_CODEC_ID_HEVC;
-        } else if (codec_type_ == VideoCodecType::kH264) {
-            codec_id = AV_CODEC_ID_H264;
-        } else {
+        Close();
+        const auto codec_id = ToAvCodecId(codec_type_);
+        if (codec_id == AV_CODEC_ID_NONE) {
             LOG_WARN("{} OpenDecoder unsupported codec type ({})", idx_name_, static_cast<int>(codec_type_));
             return false;
         }
@@ -75,9 +100,6 @@ namespace media {
     }
 
     bool VideoDecoderCpu::Close() {
-        if (!opened_)
-            return true;
-
         opened_ = false;
 
         if (av_frame_) {

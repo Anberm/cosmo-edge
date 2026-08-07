@@ -48,7 +48,7 @@
       >
         <div class="chart-header">
           <div class="chart-title">
-            <div class="title-icon" :style="{ background: getGradientColor(item.usedPercent) }">
+            <div class="title-icon" :style="{ background: getGradientColor(resourcePercent(item)) }">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <path v-if="item.key.includes('cpu') || item.key.includes('npu')" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                 <path v-else-if="item.key.includes('Memory')" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
@@ -58,8 +58,8 @@
             </div>
             <span>{{ resolveResourceName(item) }}</span>
           </div>
-          <div class="chart-percentage" :style="{ color: getProgressColor(item.usedPercent) }">
-            {{ item.usedPercent }}%
+          <div class="chart-percentage" :style="{ color: getProgressColor(resourcePercent(item)) }">
+            {{ isResourceAvailable(item) ? `${item.usedPercent}%` : t('resource.unavailable') }}
           </div>
         </div>
 
@@ -67,15 +67,15 @@
         <div class="progress-wrapper">
           <el-progress 
             type="circle" 
-            :percentage="item.usedPercent" 
-            :color="getProgressColor(item.usedPercent)" 
+            :percentage="resourcePercent(item)"
+            :color="getProgressColor(resourcePercent(item))"
             :width="110" 
             :stroke-width="10"
             :show-text="false"
           />
           <div class="progress-center">
-            <div class="center-value">{{ item.usedPercent }}</div>
-            <div class="center-unit">%</div>
+            <div class="center-value">{{ isResourceAvailable(item) ? item.usedPercent : '--' }}</div>
+            <div v-if="isResourceAvailable(item)" class="center-unit">%</div>
           </div>
         </div>
 
@@ -83,12 +83,12 @@
         <div class="usage-stats">
           <div class="stat-row">
             <div class="stat-label">
-              <span class="stat-dot" :style="{ background: getProgressColor(item.usedPercent) }"></span>
+              <span class="stat-dot" :style="{ background: getProgressColor(resourcePercent(item)) }"></span>
               <span v-if="item.key === 'packetDiscardUtilization'">{{ t('resource.packetLostCount') }}</span>
               <span v-else>{{ t('resource.usedLabel') }}</span>
             </div>
-            <div class="stat-value" :style="{ color: getProgressColor(item.usedPercent) }">
-              {{ item.usedSize }}
+            <div class="stat-value" :style="{ color: getProgressColor(resourcePercent(item)) }">
+              {{ isResourceAvailable(item) ? item.usedSize : '--' }}
             </div>
           </div>
           <div class="stat-row">
@@ -98,7 +98,7 @@
               <span v-else>{{ t('resource.unusedLabel') }}</span>
             </div>
             <div class="stat-value stat-value-gray">
-              {{ item.unusedSize }}
+              {{ isResourceAvailable(item) ? item.unusedSize : '--' }}
             </div>
           </div>
         </div>
@@ -134,6 +134,9 @@ const resolveResourceName = (item) => {
   const i18nKey = RESOURCE_KEY_MAP[item.key]
   return i18nKey ? t(i18nKey) : item.name
 }
+
+const isResourceAvailable = (item) => item?.available !== 0
+const resourcePercent = (item) => isResourceAvailable(item) ? Number(item.usedPercent) || 0 : 0
 
 // 查询硬件资源
 const queryHardwareResource = () => {

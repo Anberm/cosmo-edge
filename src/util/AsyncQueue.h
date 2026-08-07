@@ -63,6 +63,8 @@ public:
 
     bool IsRunning() const;
     size_t RestSize() const;
+    bool CanAccept() const;
+    void RecordDiscard();
 
     // Populates status snapshot; returns false if queue is stopped
     bool Status(AsyncQueueInfo& status);
@@ -211,6 +213,25 @@ template <typename DataType, typename QueueType>
 size_t AsyncQueue<DataType, QueueType>::RestSize() const {
     std::lock_guard<std::mutex> lock(queue_mtx_);
     return queue_.size();
+}
+
+template <typename DataType, typename QueueType>
+bool AsyncQueue<DataType, QueueType>::CanAccept() const {
+    std::lock_guard<std::mutex> lock(queue_mtx_);
+    return is_running_ && queue_.size() < max_size_;
+}
+
+template <typename DataType, typename QueueType>
+void AsyncQueue<DataType, QueueType>::RecordDiscard() {
+    std::lock_guard<std::mutex> lock(queue_mtx_);
+    status_.insertCount += 1;
+    status_.insertCountPeriod += 1;
+    status_.discardCount += 1;
+    status_.discardCountPeriod += 1;
+    status_.continuousDiscardCount += 1;
+    if (status_.continuousDiscardCount > status_.continuousDiscardCountMax) {
+        status_.continuousDiscardCountMax = status_.continuousDiscardCount;
+    }
 }
 
 template <typename DataType, typename QueueType>

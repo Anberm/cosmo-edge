@@ -54,15 +54,17 @@ void from_json(const nlohmann::json& j, MsgQueryHardwareResourceSend::Item& v) {
     JSON_OPT(j, v, usedSize);
     JSON_OPT(j, v, unusedSize);
     JSON_OPT(j, v, available);
+    JSON_OPT(j, v, memoryDomain);
 }
 
 void to_json(nlohmann::json& j, const MsgQueryHardwareResourceSend::Item& v) {
-    j["key"]         = v.key;
-    j["name"]        = v.name;
-    j["usedPercent"] = v.usedPercent;
-    j["usedSize"]    = v.usedSize;
-    j["unusedSize"]  = v.unusedSize;
-    j["available"]   = v.available;
+    j["key"]          = v.key;
+    j["name"]         = v.name;
+    j["usedPercent"]  = v.usedPercent;
+    j["usedSize"]     = v.usedSize;
+    j["unusedSize"]   = v.unusedSize;
+    j["available"]    = v.available;
+    j["memoryDomain"] = v.memoryDomain;
 }
 
 void from_json(const nlohmann::json& j, MsgQueryHardwareResourceSend::ResData& v) {

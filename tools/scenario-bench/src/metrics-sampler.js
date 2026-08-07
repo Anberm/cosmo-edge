@@ -1,5 +1,9 @@
 // metrics-sampler.js — Collect RunningDetail + HardwareResource each tick.
-import { isPrimaryThroughputAction, normalizeTaskType } from './task-strategies.js';
+import {
+  isPrimaryThroughputAction,
+  isThroughputBearingAction,
+  normalizeTaskType,
+} from './task-strategies.js';
 //
 // Response shapes (verified against source DTOs):
 //   RunningDetail: resData.status[] where each item has
@@ -53,14 +57,19 @@ export class MetricsSampler {
     const activeChannelIds = [...new Set(expected.map((entry) => entry.channelId))];
     const activeTaskIds = [...new Set(expected.map((entry) => entry.taskId))];
 
-    // Sample both endpoints in parallel; either may fail independently.
-    const [taskDetail, hwRes] = await Promise.allSettled([
+    // Sample all endpoints in parallel; each may fail independently.
+    const [taskDetail, hwRes, memoryPoolRes] = await Promise.allSettled([
       activeTaskIds.length ? this.client.taskRunningDetail(activeTaskIds) : Promise.resolve({ status: [] }),
       this.client.queryHardwareResource(),
+      typeof this.client.queryDeviceMemoryPool === 'function'
+        ? this.client.queryDeviceMemoryPool()
+        : Promise.resolve(null),
     ]);
 
     const perBinding = this._parseRunningDetail(taskDetail, expected, ts);
     const hw = this._parseHardware(hwRes);
+    const memoryPool = this._parseMemoryPool(memoryPoolRes);
+    if (memoryPool) hw.memoryPool = memoryPool;
 
     return {
       ts,
@@ -144,6 +153,7 @@ export class MetricsSampler {
       const actionName = String(a.name ?? '');
       const actionId = String(a.actionId ?? '');
       const primaryThroughputAction = isPrimaryThroughputAction(actionName, actionId, taskType);
+      const throughputBearingAction = isThroughputBearingAction(actionName, actionId, taskType);
       if (primaryAction == null && primaryThroughputAction) {
         primaryAction = a;
         primaryProcessTotal = num(a.processCount);
@@ -158,7 +168,7 @@ export class MetricsSampler {
         periodMs: actionPeriodMs,
       });
 
-      if (actionFps != null && actionProcessPeriod > 0) {
+      if (actionFps != null && actionProcessPeriod > 0 && throughputBearingAction) {
         pipelineMinFps = Math.min(pipelineMinFps, actionFps);
         if (primaryFps == null && primaryThroughputAction) {
           primaryFps = actionFps;
@@ -183,8 +193,14 @@ export class MetricsSampler {
       const firstEffective = actionSummaries.find((a) => a.fps != null && a.processPeriod > 0);
       primaryFps = firstEffective?.fps ?? null;
     }
-    const measuredFps = primaryFps ?? (isVlm ? null : 0);
     const minPipelineFps = pipelineMinFps !== Infinity ? pipelineMinFps : 0;
+    // A detector instance may be shared by several channels. Its AA_00001 counter is then the
+    // aggregate rate and is repeated in every task detail, while downstream per-channel actions
+    // retain the actual channel rate. CV throughput is therefore the slowest effective pipeline
+    // frame-throughput action. Terminal event/report actions run only when a
+    // business event fires and are intentionally excluded. Direct VLM keeps
+    // its dedicated completion-counter semantics.
+    const measuredFps = isVlm ? primaryFps : minPipelineFps;
     const discardRate = maxDiscardRate;
     const fpsRatio = targetFps && targetFps > 0 && measuredFps != null ? measuredFps / targetFps : null;
 
@@ -229,13 +245,37 @@ export class MetricsSampler {
     const byKey = new Map(itemList.map((it) => [it.key, it]));
     for (const key of HW_KEYS) {
       const it = byKey.get(key);
-      if (it) {
+      if (it && it.available !== 0) {
         hw[key] = { usedPercent: num(it.usedPercent), usedSize: it.usedSize, unusedSize: it.unusedSize };
       }
     }
     hw.customScore = hwResult.value?.customScore ?? null;
     hw.accelerator = normalizeAccelerator(hwResult.value?.accelerator);
     return hw;
+  }
+
+  _parseMemoryPool(poolResult) {
+    if (poolResult.status !== 'fulfilled') {
+      return { _error: String(poolResult.reason?.message ?? poolResult.reason) };
+    }
+    if (!poolResult.value || typeof poolResult.value !== 'object') return null;
+
+    const totalAllocatedBytes = num(poolResult.value.totalMalloc);
+    const totalInUseBytes = num(poolResult.value.totalInUsing);
+    return {
+      totalAllocatedBytes,
+      totalInUseBytes,
+      utilizationPercent: totalAllocatedBytes > 0
+        ? round((totalInUseBytes / totalAllocatedBytes) * 100, 2)
+        : 0,
+      pools: Array.isArray(poolResult.value.status)
+        ? poolResult.value.status.map((pool) => ({
+            blockSize: num(pool.poolSize),
+            usedBlocks: num(pool.mallocCnt),
+            freeBlocks: num(pool.freeCnt),
+          }))
+        : [],
+    };
   }
 }
 

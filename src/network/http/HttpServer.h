@@ -54,7 +54,8 @@ public:
         if (!cosmo::util::EncodeJson(t, strJsonRes)) {
             // log failed
         }
-        LOG_DEBUG("{}", strJsonRes);
+        LOG_DEBUG("Queue HTTP response status:{} response_bytes:{}", static_cast<int>(hcode),
+                  strJsonRes.size());
         cosmo::MsgEnvelope msg(static_cast<int>(InnerMsgId::kHttpAck),
                                std::make_unique<HttpAckTask>(static_cast<int>(hcode), request_token,
                                                              std::move(strJsonRes), req_id));

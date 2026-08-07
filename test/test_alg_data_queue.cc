@@ -129,6 +129,15 @@ TEST_CASE("AlgDataQueue RecordDiscard", "[AlgDataQueue]") {
     REQUIRE(info.status.discardCount == 1);
 }
 
+TEST_CASE("AlgDataQueue reports immediate insert capacity", "[AlgDataQueue]") {
+    AlgDataQueue<int> queue("capacity_q", 1);
+    REQUIRE(queue.CanAccept());
+    REQUIRE(queue.Insert(1));
+    CHECK_FALSE(queue.CanAccept());
+    CHECK(queue.Pop() == 1);
+    CHECK(queue.CanAccept());
+}
+
 TEST_CASE("AlgDataQueue concurrent access", "[AlgDataQueue]") {
     AlgDataQueue<int> queue("concurrent_q", 100);
     const int N  = 50;

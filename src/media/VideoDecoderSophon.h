@@ -32,6 +32,8 @@ namespace media {
 
         VideoFramePtr GetFrame() override;
 
+        static VideoDecoderCapability Probe(VideoCodecType type);
+
     private:
         bool AttachVideoFrame(bm_image* image, BMVidFrame* frame);
 

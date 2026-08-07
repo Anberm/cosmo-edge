@@ -110,27 +110,27 @@
         </el-form-item>
         <!-- 非SAM2类型：单个模型文件上传 -->
         <el-form-item v-if="addModelForm.modelType !== 'sam2'" :label="t('glossary.modelFile')" prop="modelFile">
-          <el-upload ref="uploadModelFileRef" action="#" :file-list="addModelForm.modelFileList" :limit="1" :auto-upload="false" :accept="isX86 ? '.onnx' : '.bmodel'" :on-change="handleModelFileChange" :on-remove="handleModelFileRemove">
+          <el-upload ref="uploadModelFileRef" action="#" :file-list="addModelForm.modelFileList" :limit="1" :auto-upload="false" :accept="modelFileExtension" :on-change="handleModelFileChange" :on-remove="handleModelFileRemove">
             <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
             <template #tip>
-              <div class="upload-warn">{{ t('glossary.selectModelFileTip', { ext: isX86 ? '.onnx' : '.bmodel' }) }}</div>
+              <div class="upload-warn">{{ t('glossary.selectModelFileTip', { ext: modelFileExtension }) }}</div>
             </template>
           </el-upload>
         </el-form-item>
         <!-- SAM2类型：两个模型文件上传 -->
         <el-form-item v-if="addModelForm.modelType === 'sam2'" label="Encoder" prop="encoderFile">
-          <el-upload ref="uploadEncoderFileRef" action="#" :file-list="addModelForm.encoderFileList" :limit="1" :auto-upload="false" :accept="isX86 ? '.onnx' : '.bmodel'" :on-change="handleEncoderFileChange" :on-remove="handleEncoderFileRemove">
+          <el-upload ref="uploadEncoderFileRef" action="#" :file-list="addModelForm.encoderFileList" :limit="1" :auto-upload="false" :accept="modelFileExtension" :on-change="handleEncoderFileChange" :on-remove="handleEncoderFileRemove">
             <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
             <template #tip>
-              <div class="upload-warn">{{ t('glossary.selectEncoderTip', { ext: isX86 ? '.onnx' : '.bmodel' }) }}</div>
+              <div class="upload-warn">{{ t('glossary.selectEncoderTip', { ext: modelFileExtension }) }}</div>
             </template>
           </el-upload>
         </el-form-item>
         <el-form-item v-if="addModelForm.modelType === 'sam2'" label="Decoder" prop="decoderFile">
-          <el-upload ref="uploadDecoderFileRef" action="#" :file-list="addModelForm.decoderFileList" :limit="1" :auto-upload="false" :accept="isX86 ? '.onnx' : '.bmodel'" :on-change="handleDecoderFileChange" :on-remove="handleDecoderFileRemove">
+          <el-upload ref="uploadDecoderFileRef" action="#" :file-list="addModelForm.decoderFileList" :limit="1" :auto-upload="false" :accept="modelFileExtension" :on-change="handleDecoderFileChange" :on-remove="handleDecoderFileRemove">
             <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
             <template #tip>
-              <div class="upload-warn">{{ t('glossary.selectDecoderTip', { ext: isX86 ? '.onnx' : '.bmodel' }) }}</div>
+              <div class="upload-warn">{{ t('glossary.selectDecoderTip', { ext: modelFileExtension }) }}</div>
             </template>
           </el-upload>
         </el-form-item>
@@ -308,7 +308,7 @@
             <el-button size="small">{{ t('action.browse') }}</el-button>
           </el-upload>
         </div>
-        <div class="upload-warn" style="margin-left: 20px;">{{ t('glossary.importModelTip', { modelFile: isX86 ? 'model.onnx' : 'model.nn' }) }}</div>
+        <div class="upload-warn" style="margin-left: 20px;">{{ t('glossary.importModelTip', { modelFile: importedModelFileName }) }}</div>
       </div>
       <template #footer>
         <div class="dialog-footer">
@@ -573,6 +573,9 @@ const topBarData = computed(() => ({
   ]
 }))
 const isX86 = ref(false)
+const isRknn = ref(false)
+const modelFileExtension = computed(() => isRknn.value ? '.rknn' : (isX86.value ? '.onnx' : '.bmodel'))
+const importedModelFileName = computed(() => isRknn.value ? 'model.rknn' : (isX86.value ? 'model.onnx' : 'model.nn'))
 const addModelDialogTitle = computed(() => addModelMode.value === 'edit' ? t('action.editModel') : t('action.addModel'))
 const addModelMode = ref('add')
 const isMultiple = ref(false)
@@ -609,7 +612,8 @@ const addModelForm = reactive({
   colorChannel: 'rgb'
 })
 
-const modelTypeGroups = computed(() => [
+const modelTypeGroups = computed(() => {
+  const groups = [
   {
     label: t('glossary.detectAlg'),
     value: 'detect',
@@ -652,7 +656,13 @@ const modelTypeGroups = computed(() => [
       { label: 'qwen3_5', value: 'qwen3_5' }
     ]
   }
-])
+  ]
+  if (!isRknn.value) return groups
+  const supported = new Set(['classify', 'yolov8_det'])
+  return groups
+    .map(group => ({ ...group, children: group.children.filter(item => supported.has(item.value)) }))
+    .filter(group => group.children.length > 0)
+})
 
 const currentSubModelTypes = computed(() => {
   return (
@@ -1335,7 +1345,7 @@ const sureAddModel = async () => {
         addModelForm.encoderFileList[0].raw || addModelForm.encoderFileList[0]
       const decoderFile =
         addModelForm.decoderFileList[0].raw || addModelForm.decoderFileList[0]
-      const ext = isX86.value ? '.onnx' : '.bmodel'
+      const ext = modelFileExtension.value
       if (!encoderFile.name.endsWith(ext)) {
         proxy.$message.warning(t('validate.encoderFormatError', { ext }))
         return
@@ -1354,7 +1364,7 @@ const sureAddModel = async () => {
       }
       const file =
         addModelForm.modelFileList[0].raw || addModelForm.modelFileList[0]
-      const ext = isX86.value ? '.onnx' : '.bmodel'
+      const ext = modelFileExtension.value
       if (!file.name.endsWith(ext)) {
         proxy.$message.warning(t('validate.uploadFormatError', { ext }))
         return
@@ -1495,8 +1505,10 @@ onMounted(() => {
     proxy.$API.queryDeviceInfo().then(res => {
       const devInfoList = res?.resData?.devInfoList || []
       const deviceTypeItem = devInfoList.find(item => item.key === 'deviceType')
-      if (deviceTypeItem && deviceTypeItem.value.toLowerCase().includes('x86')) {
-        isX86.value = true
+      if (deviceTypeItem) {
+        const deviceType = deviceTypeItem.value.toLowerCase()
+        isX86.value = deviceType.includes('x86')
+        isRknn.value = deviceType.includes('rk3576') || deviceType.includes('rockchip')
       }
     }).catch(() => {})
   }

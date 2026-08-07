@@ -25,6 +25,10 @@
 #ifdef COSMO_NN_USE_ONNX_BACKEND
 #include "onnxruntime_cxx_api.h"
 #endif
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+#include "nn/device/rknn/rknn_yolov8_adapter.h"
+#include "rknn_api.h"
+#endif
 
 namespace fs = std::filesystem;
 
@@ -189,6 +193,138 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
 
     return info;
 }
+#elif defined(COSMO_NN_USE_RKNN_BACKEND)
+
+namespace {
+    class RknnContextGuard {
+    public:
+        ~RknnContextGuard() {
+            if (context != 0)
+                rknn_destroy(context);
+        }
+        rknn_context context{0};
+    };
+
+    std::vector<int> RknnShape(const rknn_tensor_attr& attr) {
+        std::vector<int> shape;
+        shape.reserve(attr.n_dims);
+        for (uint32_t index = 0; index < attr.n_dims; ++index) {
+            if (attr.dims[index] > static_cast<uint32_t>(std::numeric_limits<int>::max()))
+                return {};
+            shape.push_back(static_cast<int>(attr.dims[index]));
+        }
+        return shape;
+    }
+
+    std::vector<int> RknnInputShapeNchw(const rknn_tensor_attr& attr) {
+        auto shape = RknnShape(attr);
+        if (shape.size() == 4 && attr.fmt == RKNN_TENSOR_NHWC)
+            return {shape[0], shape[3], shape[1], shape[2]};
+        return shape;
+    }
+}  // namespace
+
+BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
+    BmodelInfo info;
+    info.file_path = bmodelPath;
+    std::error_code ec;
+    const auto file_size = fs::file_size(bmodelPath, ec);
+    if (ec || file_size == 0 || file_size > std::numeric_limits<uint32_t>::max()) {
+        info.error_msg = ec ? "File does not exist or is inaccessible: " + bmodelPath
+                            : "RKNN model file has an invalid size";
+        return info;
+    }
+
+    std::vector<unsigned char> model(static_cast<size_t>(file_size));
+    std::ifstream stream(bmodelPath, std::ios::binary);
+    if (!stream.read(reinterpret_cast<char*>(model.data()), static_cast<std::streamsize>(model.size()))) {
+        info.error_msg = "Failed to read RKNN model file";
+        return info;
+    }
+
+    RknnContextGuard guard;
+    int result = rknn_init(&guard.context, model.data(), static_cast<uint32_t>(model.size()), 0, nullptr);
+    if (result != RKNN_SUCC) {
+        info.error_msg = "rknn_init failed with code " + std::to_string(result);
+        return info;
+    }
+    rknn_input_output_num count{};
+    result = rknn_query(guard.context, RKNN_QUERY_IN_OUT_NUM, &count, sizeof(count));
+    if (result != RKNN_SUCC || count.n_input == 0 || count.n_output == 0 || count.n_output > 64) {
+        info.error_msg = "Failed to query RKNN input/output count";
+        return info;
+    }
+
+    BmodelNetworkInfo network;
+    network.name = "rknn_network";
+    for (uint32_t index = 0; index < count.n_input; ++index) {
+        rknn_tensor_attr attr{};
+        attr.index = index;
+        result = rknn_query(guard.context, RKNN_QUERY_INPUT_ATTR, &attr, sizeof(attr));
+        if (result != RKNN_SUCC) {
+            info.error_msg = "Failed to query RKNN input attributes";
+            return info;
+        }
+        BmodelNodeInfo node;
+        node.name      = attr.name[0] ? attr.name : "input_" + std::to_string(index);
+        node.shape     = RknnInputShapeNchw(attr);
+        node.data_type = 0;  // Cosmo host boundary supplies float NCHW.
+        if (node.shape.empty()) {
+            info.error_msg = "RKNN input shape cannot be represented";
+            return info;
+        }
+        network.inputs.push_back(std::move(node));
+    }
+    if (!network.inputs.empty() && !network.inputs[0].shape.empty())
+        network.max_batch = network.inputs[0].shape[0];
+
+    std::vector<rknn_tensor_attr> output_attrs(count.n_output);
+    std::vector<std::vector<int>> output_shapes;
+    for (uint32_t index = 0; index < count.n_output; ++index) {
+        output_attrs[index].index = index;
+        result = rknn_query(guard.context, RKNN_QUERY_OUTPUT_ATTR, &output_attrs[index],
+                            sizeof(output_attrs[index]));
+        if (result != RKNN_SUCC) {
+            info.error_msg = "Failed to query RKNN output attributes";
+            return info;
+        }
+        auto shape = RknnShape(output_attrs[index]);
+        if (shape.empty()) {
+            info.error_msg = "RKNN output shape cannot be represented";
+            return info;
+        }
+        output_shapes.push_back(std::move(shape));
+    }
+
+    cosmo::nn::RknnOutputAdapterContract output_adapter;
+    std::string adapter_error;
+    if (!cosmo::nn::ResolveRknnOutputAdapter(output_shapes, output_adapter, adapter_error)) {
+        info.error_msg = adapter_error;
+        return info;
+    }
+    if (cosmo::nn::IsRknnYolov8DflAdapter(output_adapter.kind)) {
+        BmodelNodeInfo node;
+        node.name      = "output0";
+        node.shape     = output_adapter.logical_shape;
+        node.data_type = 0;
+        network.outputs.push_back(std::move(node));
+    } else {
+        for (uint32_t index = 0; index < count.n_output; ++index) {
+            BmodelNodeInfo node;
+            node.name = output_attrs[index].name[0] ? output_attrs[index].name
+                                                    : "output_" + std::to_string(index);
+            node.shape     = std::move(output_shapes[index]);
+            node.data_type = 0;  // rknn_outputs_get(want_float=1)
+            network.outputs.push_back(std::move(node));
+        }
+    }
+
+    info.networks.push_back(std::move(network));
+    info.valid = true;
+    LogBmodelInfo(info, "[BmodelTool][RKNN]");
+    return info;
+}
+
 #elif defined(COSMO_NN_USE_ONNX_BACKEND)
 
 static int ConvertOnnxDataType(ONNXTensorElementDataType onnxType) {
@@ -301,7 +437,7 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
     LOG_INFO("{}", "[BmodelTool] No inference backend enabled, returning SDK_NOT_AVAILABLE");
     return info;
 }
-#endif  // COSMO_NN_USE_SOPHON_BACKEND / COSMO_NN_USE_ONNX_BACKEND
+#endif  // selected inference backend
 
 std::string BmodelTool::ConvertToNn(const std::vector<std::string>& bmodelPaths,
                                     const std::string& outputPath) {

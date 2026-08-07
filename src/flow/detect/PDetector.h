@@ -24,6 +24,7 @@ public:
     ~PDetector() override;
 
     bool ActionInit() override;
+    void ActionDestroy() override;
     util::ErrorEnum HandPic(AlgDataPtr algData) override;
 
     // Modify parameters — update on top of existing parameters

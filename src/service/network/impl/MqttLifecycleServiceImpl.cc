@@ -220,12 +220,12 @@ void MqttLifecycleServiceImpl::MqttStart() {
         client_id = mqtt_param.clientId;
         user_name = mqtt_param.userName;
         passwd    = mqtt_param.passwd;
-        LOG_INFO("RunMode StandAlone {}:{}", url, port);
+        LOG_INFO("RunMode StandAlone MQTT port:{}", port);
     } else if (RunMode::RunModeIotNetwork == run_mode) {
         auto iot_param = ServiceRegistry::Instance().Get<IConfigNetworkService>().GetIotNetworkParam();
         url            = iot_param.mqttIp;
         port           = iot_param.mqttPort;
-        LOG_INFO("RunMode IOTNetwork {}:{}", url, port);
+        LOG_INFO("RunMode IOTNetwork MQTT port:{}", port);
     } else {
         LOG_ERRO("RunMode ({}) Un-Support", run_mode);
         Disconnect();
@@ -373,12 +373,12 @@ bool MqttLifecycleServiceImpl::MqttClientConnect(const std::string& sn, const st
         opts.client_id = sn;
         opts.username  = "aibox::" + sn;
     }
-    LOG_INFO("MLINK CONNECT To {}", url);
+    LOG_INFO("{}", "MLINK CONNECT requested");
     opts.device_sn = sn;
 
     LOG_INFO("Before MQTTClientCreate, MQTTClient State: [{}]", mqtt_client_->MQTTClientIsConnected());
     if (mqtt_client_->MQTTClientCreate(opts)) {
-        LOG_ERRO("MQTTClientCreate Failed, SN: [{}], serverURI: [{}]", sn, url);
+        LOG_ERRO("MQTTClientCreate Failed, SN: [{}]", sn);
         return false;
     }
     if (!connect_running_.load(std::memory_order_acquire)) {
@@ -646,9 +646,9 @@ void MqttLifecycleServiceImpl::HandleMessage(mqtt::MqttCommonMsgDl&& msg) {
     std::string res_string;
     (void)cosmo::util::EncodeJson(response, res_string);
 
-    LOG_INFO("Handle:{} With {} Ms Rsp: {:.4096}{}", msg.head.action,
-             chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - time_start).count(),
-             res_string, res_string.size() > 4096 ? " ..." : "");
+    LOG_DEBUG("Handle:{} elapsed_ms:{} response_bytes:{}", msg.head.action,
+              chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - time_start).count(),
+              res_string.size());
 
     SendAsyncData(k_device_to_platform, res_string);
 }

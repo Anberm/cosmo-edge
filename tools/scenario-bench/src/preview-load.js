@@ -43,6 +43,14 @@ export class PreviewLoad {
     };
   }
 
+  async preflight() {
+    if (this.mode === 'none' || this.clientsPerStream === 0) return;
+    if (!this.mediaBase) {
+      throw new Error('--media-base is required when preview clients are enabled');
+    }
+    await assertMediaExecutable(this.ffmpeg, 'ffmpeg');
+  }
+
   async sync(entries) {
     if (this.mode === 'none') return;
     if (!this.mediaBase && this.clientsPerStream > 0) {
@@ -195,6 +203,37 @@ export class PreviewLoad {
     });
     return child;
   }
+}
+
+export async function assertMediaExecutable(command, label, timeoutMs = 10_000) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, ['-version'], { stdio: 'ignore' });
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(reject, new Error(`${label} preflight timed out after ${timeoutMs}ms: ${command}`));
+    }, timeoutMs);
+    timer.unref?.();
+    child.once('error', (err) => {
+      const detail = err?.code === 'ENOENT' ? 'executable not found' : err.message;
+      finish(reject, new Error(`${label} preflight failed (${detail}): ${command}`));
+    });
+    child.once('exit', (code, signal) => {
+      if (code === 0) finish(resolve);
+      else {
+        finish(
+          reject,
+          new Error(`${label} preflight exited code=${code} signal=${signal ?? '-'}: ${command}`),
+        );
+      }
+    });
+  });
 }
 
 function desiredStreams(entries, mode, streamLimit) {

@@ -20,6 +20,10 @@ public:
 
     util::ErrorEnum Detect(const std::vector<VideoFramePtr>& images, std::vector<AiConfidence> conf_thres,
                            std::vector<std::vector<AiDetectRstEl>>& results);
+    util::ErrorEnum Detect(const std::vector<VideoFramePtr>& images,
+                           const std::vector<media::NativeVideoBufferPtr>& native_buffers,
+                           std::vector<AiConfidence> conf_thres,
+                           std::vector<std::vector<AiDetectRstEl>>& results);
 
     std::vector<std::string> GetLabels() {
         return labels_;
@@ -29,6 +33,7 @@ public:
 
 private:
     util::ErrorEnum Forward(const std::vector<VideoFramePtr>& images,
+                            const std::vector<media::NativeVideoBufferPtr>& native_buffers,
                             std::vector<std::vector<AiDetectRstEl>>& results);
 
     size_t max_batch_size_ = 1;

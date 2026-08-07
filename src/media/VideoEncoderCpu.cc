@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef __cplusplus
@@ -27,19 +28,19 @@ namespace media {
             return buf;
         }
 
-        const AVCodec* FindEncoder(AVCodecID codecId) {
-            if (codecId == AV_CODEC_ID_H264) {
-                if (const AVCodec* codec = avcodec_find_encoder_by_name("libopenh264")) {
-                    return codec;
-                }
+        std::string_view ApprovedEncoderName(VideoCodecType type) {
+            if (type == VideoCodecType::kH264)
+                return "libopenh264";
+            if (type == VideoCodecType::kH265)
+                return "libx265";
+            return {};
+        }
 
-            } else if (codecId == AV_CODEC_ID_HEVC) {
-                if (const AVCodec* codec = avcodec_find_encoder_by_name("libx265")) {
-                    return codec;
-                }
-            }
-
-            return avcodec_find_encoder(codecId);
+        const AVCodec* FindEncoder(VideoCodecType type) {
+            const auto name = ApprovedEncoderName(type);
+            if (name.empty())
+                return nullptr;
+            return avcodec_find_encoder_by_name(std::string(name).c_str());
         }
 
         struct H264NaluView {
@@ -128,6 +129,28 @@ namespace media {
         Clean();
     }
 
+    VideoEncoderCapability VideoEncoderCpu::Probe(VideoCodecType type) {
+        VideoEncoderCapability capability;
+        capability.backend = "ffmpeg-software";
+        const auto approved = ApprovedEncoderName(type);
+        if (approved.empty()) {
+            capability.detail = "unsupported codec";
+            return capability;
+        }
+
+        capability.implementation = std::string(approved);
+        const auto* codec          = FindEncoder(type);
+        capability.available      = codec != nullptr;
+        capability.detail = capability.available
+                                ? "approved FFmpeg encoder is registered"
+                                : "approved FFmpeg encoder is not registered; generic fallback disabled";
+        return capability;
+    }
+
+    bool VideoEncoderCpu::IsAllowedEncoderName(VideoCodecType type, std::string_view name) {
+        return name == ApprovedEncoderName(type);
+    }
+
     bool VideoEncoderCpu::Open() {
         AVCodecID codec_id = AV_CODEC_ID_NONE;
         if (codec_type_ == VideoCodecType::kH264) {
@@ -139,10 +162,12 @@ namespace media {
             return false;
         }
 
-        auto* codec = FindEncoder(codec_id);
+        const auto capability = Probe(codec_type_);
+        auto* codec           = FindEncoder(codec_type_);
         if (!codec) {
-            // H.265 encoder may not be available in all FFmpeg builds
-            LOG_WARN("CPU encoder: avcodec_find_encoder failed for codec_id {}", static_cast<int>(codec_id));
+            LOG_WARN("CPU encoder unavailable: codec_id={} backend={} implementation={} detail={}",
+                     static_cast<int>(codec_id), capability.backend, capability.implementation,
+                     capability.detail);
             return false;
         }
 
@@ -210,7 +235,8 @@ namespace media {
 
         frame_pts_ = 0;
         closed_    = false;
-        LOG_INFO("CPU encoder opened ({}x{}, codec_id={})", width_, height_, static_cast<int>(codec_id));
+        LOG_INFO("CPU encoder opened ({}x{}, codec_id={}, implementation={})", width_, height_,
+                 static_cast<int>(codec_id), capability.implementation);
         return true;
     }
 

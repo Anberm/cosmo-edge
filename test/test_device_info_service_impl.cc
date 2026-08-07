@@ -7,12 +7,15 @@
  * aarch64 device. We tag device-dependent tests with [.device].
  * Cross-platform tests focus on construction safety and basic getters.
  */
+#include <algorithm>
 #include <thread>
 
 #include "mock/MockServiceRegistry.h"
+#include "mock/MockTaskService.h"
 #include "service/system/impl/DeviceInfoServiceImpl.h"
 
 using namespace cosmo::service;
+using trompeloeil::_;
 
 TEST_CASE("DeviceInfoServiceImpl: construction and destruction", "[DeviceInfoService][.device]") {
     cosmo::test::MockServiceRegistry mocks;
@@ -56,3 +59,31 @@ TEST_CASE("DeviceInfoServiceImpl: GetGpuNum returns at least 1", "[DeviceInfoSer
 
     REQUIRE(sut.GetGpuNum() >= 1);
 }
+
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+TEST_CASE("DeviceInfoServiceImpl: RKNN shared memory is exposed once",
+          "[DeviceInfoService][.device][rknn]") {
+    cosmo::test::MockServiceRegistry mocks;
+    ALLOW_CALL(mocks.taskSvc, PacketStatus(_, _, _, _)).LR_SIDE_EFFECT(_1 = 0; _2 = 0; _3 = 0; _4 = 0);
+    DeviceInfoServiceImpl sut;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    double custom_score = 0.0;
+    const auto items     = sut.GetHardwareResource(custom_score);
+    const auto general   = std::find_if(items.begin(), items.end(), [](const auto& item) {
+        return item.key == "generalMemoryUtilization";
+    });
+    REQUIRE(general != items.end());
+    CHECK(general->memoryDomain == "system");
+    CHECK((general->usedSize.find("GiB") != std::string::npos ||
+           general->usedSize.find("MiB") != std::string::npos));
+
+    const auto accelerator_memory_count =
+        std::count_if(items.begin(), items.end(), [](const auto& item) {
+            return item.key == "specialMemoryUtilization" || item.key == "modelMemoryUtilization" ||
+                   item.key == "pictureMemoryUtilization" || item.key == "TPPMemoryUtilization";
+        });
+    CHECK(accelerator_memory_count == 0);
+    CHECK(sut.GetGpuUtilization().memoryDomain == "shared-system");
+}
+#endif

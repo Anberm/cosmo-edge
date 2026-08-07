@@ -1,5 +1,22 @@
 const DEFAULT_TYPE = 'cv';
 
+// These actions emit business events after frame processing has completed.
+// Their process rate follows the alarm/event rate rather than the video-frame
+// rate, so they must not be used as a CV throughput floor.
+const CV_TERMINAL_EVENT_ACTION_IDS = new Set([
+  'BA_00004', // event report / task alarm
+  'BA_10004', // face-feature report / face alarm
+]);
+
+const CV_TERMINAL_EVENT_NAMES = [
+  'eventreport',
+  'event report',
+  'taskalarm',
+  'facealarm',
+  '事件上报',
+  '人脸特征上报',
+];
+
 const TASK_TYPE_ALIASES = new Map([
   ['cv', 'cv'],
   ['detect', 'cv'],
@@ -155,6 +172,16 @@ export function isPrimaryThroughputAction(name, actionId, taskType) {
     || strategy.primaryActionIds.some((pattern) => pattern.test(normalizedActionId));
 }
 
+export function isThroughputBearingAction(name, actionId, taskType) {
+  if (normalizeTaskType(taskType) !== 'cv') return true;
+
+  const normalizedActionId = String(actionId ?? '').trim().toUpperCase();
+  if (CV_TERMINAL_EVENT_ACTION_IDS.has(normalizedActionId)) return false;
+
+  const normalizedName = String(name ?? '').trim().toLowerCase();
+  return !CV_TERMINAL_EVENT_NAMES.some((pattern) => normalizedName.includes(pattern));
+}
+
 export function latencyMetricsForNodes(nodes, taskType) {
   const strategy = strategyForTaskType(taskType);
   const normalizedNodes = (Array.isArray(nodes) ? nodes : [])
@@ -253,6 +280,7 @@ export function thresholdLabel(name, strategy = null) {
     avgDiscardRate: '平均丢弃率',
     maxDiscardRate: '丢弃率',
     maxPacketDiscardRate: '网络丢包率',
+    maxDiskUsedPercent: '设备磁盘使用率',
     maxPrimaryLatencyMs: s.primaryLatencyLabel,
     maxDetectorLatencyMs: '检测节点延时',
     maxAnalysisLatencyMs: '分析节点延时',

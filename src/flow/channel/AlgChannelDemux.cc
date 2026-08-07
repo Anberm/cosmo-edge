@@ -19,7 +19,7 @@ static constexpr const char* kTag = "ChannelDemux ";
 namespace cosmo {
 
 AlgChannelDemux::~AlgChannelDemux() {
-    LOG_INFO("{}:{} Url:{} Delete", kTag, channel_id_, url_);
+    LOG_INFO("{}:{} Delete", kTag, channel_id_);
     ClearLastFrame();
 }
 
@@ -33,14 +33,14 @@ AlgChannelDemux::AlgChannelDemux(const std::string& channel_id, const std::strin
     action_status_    = util::ErrorEnum::ActionReady;
     status_.status    = service::camera::AlgDemuxStatus::AlgDemuxInit;
     status_.timePoint = chrono::steady_clock::now();
-    LOG_INFO("{}:{} Url:{} Init", kTag, channel_id_, url_);
+    LOG_INFO("{}:{} Init", kTag, channel_id_);
 }
 
 bool AlgChannelDemux::SetUrl(const std::string& url) {
     if (url.empty())
         return false;
     if (url_ != url) {
-        LOG_INFO("{}:{} Url Change From {} To {}", kTag, channel_id_, url_, url);
+        LOG_INFO("{}:{} URL changed", kTag, channel_id_);
         url_              = url;
         is_url_changed_   = true;
         video_read_count_ = 0;
@@ -101,14 +101,14 @@ bool AlgChannelDemux::SetPollChannel(const std::string& channel_id) {
 void AlgChannelDemux::Start() {
     std::lock_guard<std::mutex> lock(lifecycle_mtx_);
     if (is_running_.exchange(true)) {
-        LOG_INFO("{}:{} Url:{} Already Running", kTag, channel_id_, url_);
+        LOG_INFO("{}:{} Already Running", kTag, channel_id_);
         return;
     }
     ResetDistributor();
     if (!start()) {
         is_running_    = false;
         action_status_ = util::ErrorEnum::ActionStop;
-        LOG_ERRO("{}:{} Url:{} Start failed: previous thread still joinable", kTag, channel_id_, url_);
+        LOG_ERRO("{}:{} Start failed: previous thread still joinable", kTag, channel_id_);
         return;
     }
     action_status_ = util::ErrorEnum::ActionStart;
@@ -118,7 +118,7 @@ void AlgChannelDemux::Stop() {
     std::lock_guard<std::mutex> lock(lifecycle_mtx_);
     LOG_INFO("{}:{} Wait To Stop", kTag, channel_id_);
     if (!is_running_.exchange(false)) {
-        LOG_INFO("{}:{} Url:{} Already Stopped", kTag, channel_id_, url_);
+        LOG_INFO("{}:{} Already Stopped", kTag, channel_id_);
         return;
     }
     stop();

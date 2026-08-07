@@ -3,9 +3,9 @@
 # Sourced by: inte_run_start.sh, start.sh, run_start.sh, install.sh
 
 # ── Path constants ──
-COSMO_DATA_DIR="/data/cwaiuserdata"
+COSMO_DATA_DIR="${COSMO_DATA_DIR:-/data/cwaiuserdata}"
 COSMO_LOG_DIR="${COSMO_DATA_DIR}/log/logs"
-COSMO_INSTALL_DIR="/appfs/cosmo_wander/cwai_data"
+COSMO_INSTALL_DIR="${COSMO_INSTALL_DIR:-/appfs/cosmo_wander/cwai_data}"
 COSMO_UPGRADE_DIR="${COSMO_DATA_DIR}/upgrade"
 COSMO_NGINX_TMP_DIR="${COSMO_DATA_DIR}/tmp"
 
@@ -13,14 +13,124 @@ COSMO_NGINX_TMP_DIR="${COSMO_DATA_DIR}/tmp"
 COSMO_UPGRADE_SIGN="${COSMO_DATA_DIR}/mqttUpgradeApp"
 
 # ── Log helpers ──
+# Rotate launcher/script logs independently from the application's internal
+# rotating logger. This protects redirected stdout/stderr and early-start logs.
+# Usage: rotate_external_log <logFile>
+rotate_external_log() {
+    local file="$1"
+    local max_bytes="${COSMO_SCRIPT_LOG_MAX_BYTES:-20971520}"
+    local keep_files="${COSMO_SCRIPT_LOG_KEEP_FILES:-5}"
+    local current_bytes index
+
+    [ -n "$file" ] || return 0
+    [ -f "$file" ] || return 0
+
+    case "$max_bytes" in
+        ''|*[!0-9]*) max_bytes=20971520 ;;
+    esac
+    case "$keep_files" in
+        ''|*[!0-9]*) keep_files=5 ;;
+    esac
+    if [ "$max_bytes" -lt 1 ]; then
+        max_bytes=20971520
+    fi
+    if [ "$keep_files" -lt 1 ]; then
+        keep_files=5
+    fi
+
+    current_bytes="$(wc -c < "$file" 2>/dev/null | tr -d '[:space:]' || echo 0)"
+    case "$current_bytes" in
+        ''|*[!0-9]*) current_bytes=0 ;;
+    esac
+    if [ "$current_bytes" -lt "$max_bytes" ]; then
+        return 0
+    fi
+
+    index=$((keep_files - 1))
+    while [ "$index" -ge 1 ]; do
+        if [ -e "${file}.${index}" ]; then
+            mv -f "${file}.${index}" "${file}.$((index + 1))"
+        fi
+        index=$((index - 1))
+    done
+    mv -f "$file" "${file}.1"
+}
+
 # Usage: cosmo_log <TAG> <message> [logFile]
 cosmo_log() {
     local tag="$1" msg="$2" file="${3:-}"
     local line="[${tag}] $(date '+%Y-%m-%d %H:%M:%S') ${msg}"
     echo "$line"
     if [ -n "$file" ]; then
+        rotate_external_log "$file"
         echo "$line" >> "$file"
     fi
+}
+
+# ── Network contract helpers ──
+is_valid_tcp_port() {
+    local port="$1"
+    case "$port" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$port" -ge 1 ] && [ "$port" -le 65535 ]
+}
+
+nginx_upstream_port() {
+    local config_file="$1" upstream_name="$2"
+    awk -v target="$upstream_name" '
+        $1 == "upstream" && $2 == target { in_target = 1; next }
+        in_target && $1 == "server" {
+            endpoint = $2
+            sub(/;$/, "", endpoint)
+            sub(/^.*:/, "", endpoint)
+            print endpoint
+            exit
+        }
+        in_target && /}/ { in_target = 0 }
+    ' "$config_file"
+}
+
+# Refuse startup before stopping the current service when the engine ports and
+# packaged Nginx upstreams drift apart.
+# Usage: verify_nginx_engine_port_contract <default.conf> <httpPort> <websocketPort>
+verify_nginx_engine_port_contract() {
+    local config_file="$1" http_port="$2" websocket_port="$3"
+    local nginx_http_port nginx_websocket_port
+
+    if [ ! -f "$config_file" ]; then
+        echo "Nginx upstream config is missing: ${config_file}" >&2
+        return 1
+    fi
+    if ! is_valid_tcp_port "$http_port"; then
+        echo "Invalid COSMO_HTTP_PORT: ${http_port}" >&2
+        return 1
+    fi
+    if ! is_valid_tcp_port "$websocket_port"; then
+        echo "Invalid COSMO_WEBSOCKET_PORT: ${websocket_port}" >&2
+        return 1
+    fi
+
+    nginx_http_port="$(nginx_upstream_port "$config_file" mvit)"
+    nginx_websocket_port="$(nginx_upstream_port "$config_file" mvws)"
+    if ! is_valid_tcp_port "$nginx_http_port"; then
+        echo "Nginx upstream mvit has no valid TCP port in ${config_file}" >&2
+        return 1
+    fi
+    if ! is_valid_tcp_port "$nginx_websocket_port"; then
+        echo "Nginx upstream mvws has no valid TCP port in ${config_file}" >&2
+        return 1
+    fi
+    if [ "$nginx_http_port" != "$http_port" ]; then
+        echo "HTTP port mismatch: engine=${http_port}, nginx mvit=${nginx_http_port}" >&2
+        return 1
+    fi
+    if [ "$nginx_websocket_port" != "$websocket_port" ]; then
+        echo "WebSocket port mismatch: engine=${websocket_port}, nginx mvws=${nginx_websocket_port}" >&2
+        return 1
+    fi
+
+    echo "HTTP=${http_port}, WebSocket=${websocket_port}"
 }
 
 # ── Directory setup ──

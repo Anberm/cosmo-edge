@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+import { assertMediaExecutable } from './preview-load.js';
+
 const DEFAULT_SAMPLE_WIDTH = 320;
 const DEFAULT_SAMPLE_HEIGHT = 180;
 const DEFAULT_SAMPLE_FPS = 5;
@@ -47,6 +49,8 @@ export async function runPreviewValidation(client, options) {
   };
 
   try {
+    await assertMediaExecutable(context.ffmpeg, 'ffmpeg');
+    await assertMediaExecutable(context.ffprobe, 'ffprobe');
     const baseline = await client.queryHardwareResource();
     report.acceleratorBaseline = baseline.accelerator ?? null;
 
@@ -72,13 +76,7 @@ export async function runPreviewValidation(client, options) {
       const rawPixels = report.streams.raw?.capture?.maxOverlayPixels ?? 0;
       const algorithmPixels = report.streams.algorithm.capture.maxOverlayPixels;
       const minimumDelta = nonNegativeInteger(options.minOverlayPixelDelta ?? 0, 'overlay pixel delta');
-      report.osdPixelCheck = {
-        rawMaxOverlayPixels: rawPixels,
-        algorithmMaxOverlayPixels: algorithmPixels,
-        delta: algorithmPixels - rawPixels,
-        minimumDelta,
-        pass: algorithmPixels - rawPixels >= minimumDelta,
-      };
+      report.osdPixelCheck = evaluateOsdPixelCheck(rawPixels, algorithmPixels, minimumDelta);
       if (!report.osdPixelCheck.pass) {
         throw new Error(
           `algorithm preview overlay pixel delta ${report.osdPixelCheck.delta} < ${minimumDelta}`,
@@ -412,6 +410,19 @@ function countOverlayLikePixels(rgb) {
   return count;
 }
 
+function evaluateOsdPixelCheck(rawPixels, algorithmPixels, minimumDelta) {
+  const deltaValue = algorithmPixels - rawPixels;
+  const enabled = minimumDelta > 0;
+  return {
+    rawMaxOverlayPixels: rawPixels,
+    algorithmMaxOverlayPixels: algorithmPixels,
+    delta: deltaValue,
+    minimumDelta,
+    enabled,
+    pass: !enabled || deltaValue >= minimumDelta,
+  };
+}
+
 async function probeStream(ffprobe, url) {
   const output = await runProcess(ffprobe, [
     '-v', 'error', '-rw_timeout', '5000000',
@@ -594,6 +605,7 @@ export const _previewValidatorTest = {
   captureArgs,
   captureTimeoutMs,
   countOverlayLikePixels,
+  evaluateOsdPixelCheck,
   lifecycleMetricsReady,
   streamNameFromFlvUrl,
 };

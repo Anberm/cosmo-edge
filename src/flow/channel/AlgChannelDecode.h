@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <list>
 #include <memory>
 #include <shared_mutex>
@@ -36,7 +37,9 @@ struct AlgFrameInfo {
 struct ChannelTaskViewerQueue {
     std::string alg_id;
     AsyncQueue<VideoFramePtr>* async_frame_queue{nullptr};
+    std::function<bool()> prepare_frame;
 };
+using ViewerDistributionPlan = std::vector<std::string>;
 class AlgChannelDecode : public AlgDataQueueDistributor, public util::Thread {
 public:
     AlgChannelDecode(AlgChannel& channelInst, const std::string& channelId);
@@ -72,7 +75,8 @@ public:
     // Public interface for image capture.
     VideoFramePtr CaptureImage(int timeoutMs = 3000);
 
-    void AddViewerFrameQueue(const std::string& algId, AsyncQueue<VideoFramePtr>& asyncFrameQueue);
+    void AddViewerFrameQueue(const std::string& algId, AsyncQueue<VideoFramePtr>& asyncFrameQueue,
+                             std::function<bool()> prepareFrame = {});
     void RemoveViewerFrameQueue(const std::string& algId);
 
 protected:
@@ -84,7 +88,8 @@ private:
     bool ValidateFrame(VideoPacketPtr& videoFrame, bool justNeedIFrame);
     void PrepareDecoder(VideoPacketPtr& videoFrame);
     bool NeedsResize(VideoPacketPtr& videoFrame);
-    AlgDataPtr ColorConvert(AlgDataPtr demuxData, VideoFramePtr inData);
+    AlgDataPtr ColorConvert(AlgDataPtr demuxData, VideoFramePtr inData,
+                            media::NativeVideoBufferPtr nativeBuffer = nullptr);
 
     void FrameInfoSave(VideoPacketPtr packet);
     AlgFrameInfo FrameInfoGet(int64_t index);
@@ -95,6 +100,9 @@ private:
 
     // Distribute frames to display viewers.
     void DistributeViewer(VideoFramePtr inData);
+    ViewerDistributionPlan PrepareViewerDistribution();
+    void DistributePreparedViewer(const ViewerDistributionPlan& plan, VideoFramePtr inData);
+    bool NeedsHostFrame(int64_t streamIndex);
 
 private:
     mutable std::mutex mtx_;
@@ -111,6 +119,7 @@ private:
     int64_t frame_index_{-1};
     int64_t stream_index_{-1};
     int64_t decode_count_{0};
+    uint64_t decoder_stream_reuse_count_{0};
     int64_t cap_image_stream_index_{-1};
     float fps_{0.0};
     std::atomic<bool> is_running_{false};

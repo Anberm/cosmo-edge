@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <string>
@@ -28,6 +29,23 @@ struct PUBLIC BlobDesc {
 struct PUBLIC BlobHandle {
     void* base        = nullptr;
     unsigned long phy = 0;
+
+    // Optional borrowed DMA-BUF image. The object supplying base owns the
+    // descriptor lifetime; Blob does not close fd or alter that ownership.
+    struct NativeImage {
+        int fd{-1};
+        size_t bytes{0};
+        int width{0};
+        int height{0};
+        int width_stride{0};
+        int height_stride{0};
+        ImageFormat format{IMAGE_UNKNOWN};
+
+        [[nodiscard]] bool Valid() const {
+            return fd >= 0 && bytes > 0 && width > 0 && height > 0 && width_stride >= width &&
+                   height_stride >= height && format != IMAGE_UNKNOWN;
+        }
+    } native_image;
 };
 
 class BlobImpl;

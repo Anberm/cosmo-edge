@@ -291,24 +291,23 @@ bool AlarmPushServiceImpl::Submit(std::string url, IN& rgtIn, OUT& rgtOut, int t
     AppendHeader(http_req);
     std::string json_result{};
     if (!cosmo::util::EncodeJson(rgtIn, json_result)) {
-        LOG_ERRO("Msg:{} Enc Json failed", url);
+        LOG_ERRO("{}", "Alarm HTTP request EncodeJson failed");
         return false;
     }
 
-    LOG_INFO("Msg:{} Content:{:.2048}{}", url, json_result, json_result.size() > 2048 ? " ..." : "");
+    LOG_DEBUG("Alarm HTTP request_bytes:{}", json_result.size());
     http_req.SetData(json_result);
     http_req.SetTimeout(timeout_sec);
 
     auto ret = http_req.Submit(cosmo::network::http::HttpRequestMethod::kPost);
     if (200 != ret) {
-        LOG_ERRO("Msg:{} Submit Failed, Error Code:{}, Response:{:.2048}{}", url, ret, http_handler.GetData(),
-                 http_handler.GetData().size() > 2048 ? " ..." : "");
+        LOG_ERRO("Alarm HTTP submit failed, status:{} response_bytes:{}", ret, http_handler.GetData().size());
         return false;
     }
-    LOG_INFO("Msg:{} Get Response is:{}", url, http_handler.GetData());
+    LOG_DEBUG("Alarm HTTP completed, status:{} response_bytes:{}", ret, http_handler.GetData().size());
 
     if (!cosmo::util::DecodeJson(http_handler.GetData(), rgtOut)) {
-        LOG_ERRO("Msg:{} Get Response is:{} ", url, http_handler.GetData());
+        LOG_ERRO("Alarm HTTP response DecodeJson failed, response_bytes:{}", http_handler.GetData().size());
         return false;
     }
     return true;
@@ -348,10 +347,10 @@ bool AlarmPushServiceImpl::OnEvents(cosmo::CMsgOnEventsReq&& reqEvent) {
     reqEvent.property.recognition.LibImage = ReadFileBase64(reqEvent.property.recognition.LibImage);
 
     if (!Submit(url, reqEvent, rsp)) {
-        LOG_WARN("Msg:{} recordId:{} Push To {} Failed", reqEvent.messageId, reqEvent.recordId, url);
+        LOG_WARN("Msg:{} recordId:{} alarm push failed", reqEvent.messageId, reqEvent.recordId);
         return false;
     }
-    LOG_INFO("Msg:{} recordId:{} Push To {} Ok", reqEvent.messageId, reqEvent.recordId, url);
+    LOG_INFO("Msg:{} recordId:{} alarm push OK", reqEvent.messageId, reqEvent.recordId);
     ServiceRegistry::Instance().Get<IAlarmRecordService>().UpdateAlarmReportStatus(reqEvent.messageId, true);
     return true;
 }

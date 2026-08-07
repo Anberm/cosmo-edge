@@ -11,13 +11,39 @@ test('step summary records accelerator and accelerator-memory peaks', () => {
     hardware: {
       npuUtilization: { usedPercent: 20 + index },
       specialMemoryUtilization: { usedPercent: 30 + index },
+      eMMCUtilization: { usedPercent: 40 + index },
     },
   }));
 
-  const summary = summarizeStep({ index: 0, channels: 0, holdSec: 24 }, samples);
+  const summary = summarizeStep(
+    { index: 0, channels: 0, holdSec: 24 },
+    samples,
+    { pass: { maxDiskUsedPercent: 50 } },
+  );
 
   assert.equal(summary.maxNpu, 27);
   assert.equal(summary.maxAcceleratorMem, 37);
+  assert.equal(summary.maxDiskUsedPercent, 47);
+  assert.equal(summary.perThreshold.find((item) => item.name === 'maxDiskUsedPercent')?.result, 'PASS');
+});
+
+test('step summary fails when device disk usage exceeds the configured gate', () => {
+  const samples = Array.from({ length: 4 }, (_, index) => ({
+    stepIndex: 0,
+    ts: index * 3000,
+    channels: [],
+    hardware: { eMMCUtilization: { usedPercent: 88 + index } },
+  }));
+
+  const summary = summarizeStep(
+    { index: 0, channels: 0, holdSec: 12 },
+    samples,
+    { pass: { maxDiskUsedPercent: 90 } },
+  );
+
+  assert.equal(summary.maxDiskUsedPercent, 91);
+  assert.equal(summary.pass, false);
+  assert.match(summary.reasons.join('; '), /磁盘使用率 91%/);
 });
 
 test('runtime decision stops CV tasks when steady throughput falls below half baseline', () => {
