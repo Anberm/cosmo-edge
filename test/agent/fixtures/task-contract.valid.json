@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "fixture-valid",
+  "task": "documentation",
+  "userObjective": "Add one developer-facing page.",
+  "expectedDeliverables": [
+    "Documentation source"
+  ],
+  "allowedChanges": [
+    "docs/"
+  ],
+  "requiredCapabilities": [
+    "node",
+    {
+      "tool": "npm",
+      "reason": "Run documentation checks"
+    }
+  ],
+  "acceptance": {
+    "commands": [
+      "npm run docs:verify"
+    ]
+  },
+  "authority": {
+    "workspace": "current isolated checkout",
+    "environmentChanges": false,
+    "externalSystems": false
+  },
+  "parameters": {},
+  "extensions": {
+    "fixtureOnly": true
+  },
+  "futureField": {
+    "allowed": true
+  }
+}

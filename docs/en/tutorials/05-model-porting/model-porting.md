@@ -132,28 +132,15 @@ same name but different hashes are different model candidates.
 
 ### 2.2 Pre-Conversion Checks
 
-Run ONNX checker and one zero-input inference:
+From the repository root, run the shared checker for ONNX validation and one zero-input inference:
 
 ```bash
-python - <<'PY'
-import numpy as np
-import onnx
-import onnxruntime as ort
-
-path = "yolov8n.onnx"
-model = onnx.load(path)
-onnx.checker.check_model(model)
-
-session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
-print("inputs:", [(x.name, x.shape, x.type) for x in session.get_inputs()])
-print("outputs:", [(x.name, x.shape, x.type) for x in session.get_outputs()])
-
-input_meta = session.get_inputs()[0]
-sample = np.zeros((1, 3, 640, 640), dtype=np.float32)
-outputs = session.run(None, {input_meta.name: sample})
-print("runtime output shapes:", [x.shape for x in outputs])
-PY
+python tools/check_onnx_model.py yolov8n.onnx
 ```
+
+For dynamic inputs, repeat `--shape images=1,3,640,640`. Add `--json <output-path>` for a
+machine-readable record. The script records dependency versions and the model SHA-256 without saving
+inference tensors.
 
 Pass criteria:
 
@@ -204,6 +191,43 @@ pin the model source, version, hash, I/O contract, and license. A screenshot is 
 
 Run this section only for a Sophon target. Record the conversion tool version, target chip, and model
 candidate together.
+
+When delegating the task to a coding agent, first read
+[Agent-Assisted Development](/en/development/agent-assisted-development). An ordinary user states the target
+device, model materials, business preference, and expected deliverable. The agent generates the run-local
+contract through `scripts/agent/start.sh`, which copies named materials and selects a route. It reruns
+`assess.sh` after task or authority changes, then runs `doctor.sh` in the actual Linux execution
+environment. Once admitted, `convert_model.sh` and `verify.sh` record the toolchain, commands, hashes, and
+layered evidence. Users do not hand-pick releases, images, or commands; the content below is an advanced
+manual and troubleshooting reference.
+
+When the user supplies an isolated Linux development host, account, and password and explicitly asks to
+connect, that already confirms this task's remote execution. The agent creates a sanitized record and uses
+the password only through `scripts/agent/connect.sh`'s interactive OpenSSH prompt; it does not ask again for
+an SSH key or authorization form. Installation, privilege elevation, and device writes remain separate
+decisions when they become necessary.
+
+The formal executor currently begins with ONNX. `.pt` and `.pth` may be assessed as materials, but exporting
+ONNX from the training framework is a separate requested or assessed stage. `doctor`, conversion, and the
+evidence chain remain blocked while route assessment is unresolved. Do not install Ultralytics first,
+perform one ad hoc export, and describe that as a fixed repository capability.
+
+Separate an officially supported installation route, local capability, and this run's resolved identity.
+Use the current [official TPU-MLIR installation instructions](https://github.com/sophgo/tpu-mlir#-installation)
+at execution time. Supported wheel, source, and prebuilt-Docker routes are all candidates; they need not
+match one exact release or directory layout from this page. A route becomes `READY` only when `tpu_mlir`
+imports, compiler entries are callable, runtime libraries are intact, and the actual candidate passes
+preflight. Admission then freezes package release, image ID/digest, Python, command paths, and hashes.
+
+The official Sophon compiler path executes on Linux. Windows remains suitable for agent orchestration and
+material preparation, but route this section's conversion to an isolated Linux x86_64 environment. Use a
+compatibility layer only as an experimental route with explicitly accepted risk.
+
+An official development image represents a base execution environment; capability checks determine whether
+it also contains a complete compiler. Pulling, starting, or changing it requires separate authority, and
+the resolved image identity must be recorded. The v3.2 image below is a reusable repository example, not
+the only admitted version for every task; other upstream-supported routes are assessed by callable
+capabilities.
 
 ### 3.1 Install and Verify Docker
 
@@ -267,6 +291,7 @@ Put `yolov8n.onnx` in the current directory and start the container:
 ```bash
 docker run --rm -it \
   -v "$PWD:/workspace" \
+  -w /workspace \
   sophgo/tpuc_dev:v3.2 \
   bash
 ```
@@ -312,8 +337,15 @@ model_deploy \
   --chip bm1688 \
   --model yolov8n_bm1688_f16.bmodel
 
+model_tool --info yolov8n_bm1688_f16.bmodel
 sha256sum yolov8n_bm1688_f16.bmodel
 ```
+
+Passing x86 preflight in a newer ONNX environment does not prove that the same file is accepted by the
+selected TPU-MLIR. Combine the [ONNX versioning rules](https://onnx.ai/onnx/repo-docs/Versioning.html) and
+[ONNX Runtime compatibility guidance](https://onnxruntime.ai/docs/reference/compatibility.html) with checks
+of the actual candidate's IR, opset, and operators in the frozen compiler. If incompatible, re-export a
+supported ONNX from the source weights; do not edit `ir_version` to pretend it is compatible.
 
 ![Where model_deploy is run in the earlier VisDrone example](images/img_11.webp)
 
@@ -337,8 +369,21 @@ the source framework, ONNX, and bmodel. Post-conversion evidence must include:
 - toolchain version, chip option, and full command;
 - ONNX, MLIR, and `.bmodel` hashes;
 - input shape, output tensors, and model inspection;
-- three-way results on the same input;
+- when test input exists, pre/post-conversion tensor comparison using a user override or the current tool's
+  default tolerance policy, with that policy recorded;
+- after device authorization, box, class, and score comparison across the source framework, ONNX, and
+  target device on the same image;
 - any F16 or quantization accuracy difference.
+
+The agent path writes these results to the current run's `execution-manifest.json` and `evidence.md`.
+Each rerun archives the prior manifest in the private run. A new `UNVERIFIED` result cannot erase a prior
+failure; only a new measured `PASS` or an explicitly user-confirmed waiver with a reason explains the later
+conclusion. Remote execution also records sanitized data-flow status without storing transfer credentials.
+An entry is eligible as an official example only after two real recordings with a fixed toolchain, passing
+tensor comparison, `conversion-verified` status, `active` lifecycle, and a still-valid verification seal.
+The short code is only a seal reference. A `revoked` example keeps its historical recordings and seal but
+cannot be selected or cited for compatibility. A normal candidate can still be delivered against its own
+task acceptance, but it must not borrow another example's fixed shapes or hashes as proof.
 
 The Sophon Add Model page requires a `.bmodel` file.
 

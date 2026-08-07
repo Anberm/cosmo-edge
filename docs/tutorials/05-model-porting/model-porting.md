@@ -130,28 +130,14 @@ sha256sum yolov8n.onnx
 
 ### 2.2 转换前检查
 
-使用 ONNX checker 和 ONNX Runtime 完成一次零输入加载与推理：
+在仓库根目录使用统一检查脚本，让 ONNX checker 和 ONNX Runtime 完成一次零输入加载与推理：
 
 ```bash
-python - <<'PY'
-import numpy as np
-import onnx
-import onnxruntime as ort
-
-path = "yolov8n.onnx"
-model = onnx.load(path)
-onnx.checker.check_model(model)
-
-session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
-print("inputs:", [(x.name, x.shape, x.type) for x in session.get_inputs()])
-print("outputs:", [(x.name, x.shape, x.type) for x in session.get_outputs()])
-
-input_meta = session.get_inputs()[0]
-sample = np.zeros((1, 3, 640, 640), dtype=np.float32)
-outputs = session.run(None, {input_meta.name: sample})
-print("runtime output shapes:", [x.shape for x in outputs])
-PY
+python tools/check_onnx_model.py yolov8n.onnx
 ```
+
+动态输入可重复传入 `--shape images=1,3,640,640`；需要机器可读记录时使用
+`--json <输出路径>`。脚本会记录实际依赖版本和模型 SHA-256，不保存推理张量。
 
 通过标准：
 
@@ -201,6 +187,34 @@ PY
 ## 3. Sophon 路径：把同一 ONNX 转为 bmodel
 
 仅在目标设备为 Sophon 时执行本节。转换工具版本、目标芯片和模型候选必须一起记录。
+
+如果把任务交给编码智能体，先阅读[智能体辅助二次开发](/development/agent-assisted-development)。
+普通用户只需说明目标设备、模型物料、业务偏好和期望交付。智能体应生成本次运行的任务契约，
+先执行 `scripts/agent/start.sh` 复制所指物料、生成任务记录并选择路径；任务或授权变化后重跑
+`assess.sh`，再在实际 Linux 执行环境运行 `doctor.sh`。环境满足后，
+通过 `convert_model.sh` 和 `verify.sh` 留下工具链、命令、哈希与分层证据。用户无需手工选择版本、
+镜像或命令；下面的内容仅是高级人工执行和排障参考。
+
+如果用户给出隔离 Linux 开发机的地址、账户、密码并明确要求连接，这已经是本任务的远程执行
+确认。智能体应生成脱敏记录并通过 `scripts/agent/connect.sh` 的 OpenSSH 交互提示使用密码，不重复
+要求 SSH Key 或授权表；安装、提权和设备写入仍在实际需要时单独确认。
+
+当前正式执行器从 ONNX 开始。`.pt`/`.pth` 可作为待评估物料，但训练框架导出 ONNX 必须作为独立
+阶段请求或评估；路径评估未就绪时，`doctor`、转换和证据链不会放行。不要先安装 Ultralytics、
+临时导出一次，再把该过程写成仓库已经支持的固定能力。
+
+先把“官方支持的安装路径”“本机是否具备能力”和“本次实际身份”分开。执行时应以算能
+[TPU-MLIR 官方安装说明](https://github.com/sophgo/tpu-mlir#-installation)为准：其支持的 wheel、
+源码或预构建 Docker 路径都可以进入候选，不要求与本页某个精确版本或目录布局一致。候选路径
+只有在 `tpu_mlir` 可导入、转换入口可调用、运行库完整且实际候选可预检时才是 `READY`；准入后
+再冻结包版本、镜像 ID/摘要、Python、命令路径与哈希。
+
+Sophon 转换工具链按官方路径运行在 Linux 环境。Windows 可以用于智能体编排和物料整理，但应把
+本节转换路由到隔离的 Linux x86_64 开发环境。兼容层只有在用户明确接受风险时才作为实验路径。
+
+官方开发镜像只代表基础执行环境；镜像中是否已经包含完整编译器，要以实际能力检查为准。拉取、
+启动和安装仍需单独授权，且必须记录解析后的镜像身份。下方 v3.2 镜像是仓库的可复用示例，
+不是所有任务的唯一准入版本；其他上游支持路径仍按实际可调用能力评估。
 
 ### 3.1 安装并验证 Docker
 
@@ -262,6 +276,7 @@ docker images sophgo/tpuc_dev
 ```bash
 docker run --rm -it \
   -v "$PWD:/workspace" \
+  -w /workspace \
   sophgo/tpuc_dev:v3.2 \
   bash
 ```
@@ -305,8 +320,15 @@ model_deploy \
   --chip bm1688 \
   --model yolov8n_bm1688_f16.bmodel
 
+model_tool --info yolov8n_bm1688_f16.bmodel
 sha256sum yolov8n_bm1688_f16.bmodel
 ```
+
+通过较新 ONNX 环境完成 x86 预检，不代表同一文件一定被所选 TPU-MLIR 接受。应结合
+[ONNX 版本规则](https://onnx.ai/onnx/repo-docs/Versioning.html)和
+[ONNX Runtime 兼容性说明](https://onnxruntime.ai/docs/reference/compatibility.html)，再用本次冻结的
+工具链检查实际候选的 IR、opset 和算子；不兼容时应从源权重重新导出受支持的 ONNX，不得直接
+篡改 `ir_version` 冒充兼容。
 
 ![旧版 VisDrone 示例执行 model_deploy 的命令位置](images/img_11.webp)
 
@@ -329,8 +351,18 @@ model_tool --info yolov8n_bm1688_f16.bmodel
 - 工具链版本、芯片参数和完整命令；
 - ONNX、MLIR 和 `.bmodel` 哈希；
 - 输入形状、输出张量与模型信息检查；
-- 同一输入上的三端结果对比；
+- 有测试输入时，按用户覆盖容差或当前工具默认容差完成转换前后张量比对并记录策略；
+- 获得设备授权后，同一张图片在源框架、ONNX 和目标设备上的框、类别与分数对比；
 - F16 或量化造成的精度差异。
+
+智能体执行路径会把这些结果写入当前运行的 `execution-manifest.json` 和 `evidence.md`。
+每次重跑都会把上次清单归档到私有运行目录；新一轮 `UNVERIFIED` 不会抹掉之前的失败，只有新的
+实测 `PASS` 或用户明确确认并记录理由的豁免可以解释后续结论。远程执行时还要记录脱敏的数据流
+状态，但不能保存传输凭据。
+只有使用固定工具链完成两次真实录制、通过张量比对、状态为 `conversion-verified`、生命周期为
+`active` 且印章仍然有效，记录才可作为官方实例使用。短码只是印章引用；被标记为 `revoked` 的
+实例保留历史录制和印章，但不得再用于选择或兼容性声明。普通候选仍可按自己的任务目标交付，
+但不得借用其他实例的固定形状或哈希宣称成功。
 
 Sophon 添加模型页面会要求 `.bmodel` 文件，实际页面见下一节的添加模型表单。
 

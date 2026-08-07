@@ -148,6 +148,39 @@ jobs:
       - name: Test offline accuracy comparison
         run: python -m unittest discover -s test -p 'test_offline_accuracy_compare.py'
 
+      - name: Test agent-assisted workflow safety boundaries
+        run: python -m unittest discover -s test/agent -p 'test_agent_workflow.py'
+
+      - name: Test measured model-conversion workflow
+        run: python -m unittest discover -s test/agent -p 'test_model_conversion_workflow.py'
+
+      - name: Test task-scoped interactive remote access
+        run: python -m unittest discover -s test/agent -p 'test_remote_access.py'
+
+  # ── Windows remains an orchestration, assessment, and SSH entry ───
+  agent-windows-routing:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Test read-only assessment and Linux routing
+        working-directory: test/agent
+        run: >-
+          python -m unittest
+          test_agent_workflow.AgentWorkflowTest.test_memory_probe_tolerates_windows_missing_sysconf
+          test_agent_workflow.AgentWorkflowTest.test_private_json_write_tolerates_windows_missing_fchmod
+          test_agent_workflow.AgentWorkflowTest.test_unspecified_toolchain_selects_capability_probe_without_version_pin
+          test_agent_workflow.AgentWorkflowTest.test_assessment_asks_only_for_missing_business_input
+          test_agent_workflow.AgentWorkflowTest.test_windows_assessment_routes_to_linux_without_calling_windows_unsupported
+          test_agent_workflow.AgentWorkflowTest.test_remote_linux_assessment_consolidates_missing_authority
+          test_agent_workflow.AgentWorkflowTest.test_windows_doctor_returns_linux_environment_guidance_not_traceback
+          test_agent_workflow.AgentWorkflowTest.test_remote_route_requires_explicit_grants_and_authorization_invalidates_assessment
+          test_remote_access.RemoteAccessTest
+
   # ── Documentation structure, links, build, and rendered smoke ─────
   docs:
     runs-on: ubuntu-latest

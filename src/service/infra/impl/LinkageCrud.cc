@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <initializer_list>
 #include <iterator>
 #include <string_view>
 #include <unordered_map>
@@ -30,20 +29,23 @@ namespace cosmo::service {
 using detail::NormalizeWorkflowJson;
 
 namespace {
-    std::string FindParameter(const cosmo::linkage::LinkAgeParamNode& node,
-                              std::initializer_list<std::string_view> keys) {
+    template <typename Predicate>
+    std::string FindParameter(const cosmo::linkage::LinkAgeParamNode& node, const Predicate& predicate) {
         for (const auto& parameter : node.config_object.params) {
-            const auto key = parameter.key.ToString();
-            if (std::find(keys.begin(), keys.end(), std::string_view(key)) != keys.end()) {
-                return parameter.value.ToString();
+            const auto& key = parameter.key.ToRefString();
+            if (predicate(key)) {
+                return parameter.value.ToRefString();
             }
         }
         return {};
     }
 
+    std::string FindParameter(const cosmo::linkage::LinkAgeParamNode& node, std::string_view key) {
+        return FindParameter(node, [key](std::string_view candidate) { return candidate == key; });
+    }
+
     bool HasValidAlarmBinding(const cosmo::linkage::LinkAgeParamNode& node) {
-        const auto value =
-            FindParameter(node, {cosmo::linkage::kKeyLinkageAlgs, cosmo::linkage::kKeyStrageAlgs});
+        const auto value = FindParameter(node, cosmo::linkage::IsAlarmAlgorithmsKey);
         std::vector<cosmo::linkage::LinkAgeAlarmTaskUnit> tasks;
         return !value.empty() && cosmo::util::DecodeJson(value, tasks) && !tasks.empty() &&
                std::all_of(tasks.begin(), tasks.end(), [](const auto& task) {
@@ -52,19 +54,16 @@ namespace {
     }
 
     bool HasValidAudioBinding(const cosmo::linkage::LinkAgeParamNode& node) {
-        const auto device_id = FindParameter(
-            node, {cosmo::linkage::kKeyLinkageAudioDeviceId, cosmo::linkage::kKeyStrageAudioDeviceId});
+        const auto device_id = FindParameter(node, cosmo::linkage::IsAudioDeviceIdKey);
         const auto operation =
-            cosmo::util::ParseInt(FindParameter(node, {cosmo::linkage::kKeyStrageAudioDeviceOperation}));
+            cosmo::util::ParseInt(FindParameter(node, cosmo::linkage::kKeyStrageAudioDeviceOperation));
         if (device_id.empty() || !cosmo::linkage::IsValidOperation(operation)) {
             return false;
         }
         if (operation == static_cast<int>(cosmo::linkage::LinkAgeAudioDeviceOperation::kAudioPlay)) {
-            return !FindParameter(node, {cosmo::linkage::kKeyStrageAudioDeviceData}).empty();
+            return !FindParameter(node, cosmo::linkage::kKeyStrageAudioDeviceData).empty();
         }
-        return !FindParameter(node, {cosmo::linkage::kKeyLinkageAudioDeviceText,
-                                     cosmo::linkage::kKeyStrageAudioDeviceText})
-                    .empty();
+        return !FindParameter(node, cosmo::linkage::IsAudioTextKey).empty();
     }
 }  // namespace
 
@@ -277,11 +276,10 @@ bool LinkageServiceImpl::ValidateWorkflow(const cosmo::linkage::LinkageStrategyW
     nodes.reserve(strategy.workflow.size());
     size_t root_count = 0;
     for (const auto& node : strategy.workflow) {
-        const bool is_alarm = node.action_id == cosmo::linkage::kLaAlarmDataCode ||
-                              node.action_id == cosmo::linkage::kLaAlarmDataLegacyCode;
-        const bool is_audio = node.action_id == cosmo::linkage::kLaAudioDeviceCode ||
-                              node.action_id == cosmo::linkage::kLaAudioDeviceLegacyCode;
-        if ((!is_alarm && !is_audio) || node.flowActionId.empty() ||
+        const auto action_kind = cosmo::linkage::ClassifyLinkAgeActionId(node.action_id);
+        const bool is_alarm    = action_kind == cosmo::linkage::LinkAgeActionKind::kAlarm;
+        const bool is_audio    = action_kind == cosmo::linkage::LinkAgeActionKind::kAudioDevice;
+        if (action_kind == cosmo::linkage::LinkAgeActionKind::kUnsupported || node.flowActionId.empty() ||
             node.flowActionId == cosmo::key::alg::ACTION_ROOT_VALUE ||
             !nodes.emplace(node.flowActionId, &node).second || (is_alarm && !HasValidAlarmBinding(node)) ||
             (is_audio && !HasValidAudioBinding(node))) {

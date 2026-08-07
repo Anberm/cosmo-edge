@@ -16,7 +16,6 @@
 /tools/scenario-bench/reports/
 
 CLAUDE.md
-AGENTS.md
 build
 build_linux
 build32

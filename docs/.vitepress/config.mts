@@ -21,7 +21,8 @@ const developmentZh = [
   { text: '贡献者上手路径', link: '/development/contributing' },
   { text: '前端工程', link: '/development/frontend' },
   { text: '后端开发', link: '/development/backend' },
-  { text: 'CI 与质量检查', link: '/development/ci' }
+  { text: 'CI 与质量检查', link: '/development/ci' },
+  { text: '智能体辅助二次开发', link: '/development/agent-assisted-development' }
 ]
 
 const i18nZh = [
@@ -80,7 +81,8 @@ const developmentEn = [
   { text: 'Contributor Guide', link: '/en/development/contributing' },
   { text: 'Frontend Development', link: '/en/development/frontend' },
   { text: 'Backend Development', link: '/en/development/backend' },
-  { text: 'CI and Quality Checks', link: '/en/development/ci' }
+  { text: 'CI and Quality Checks', link: '/en/development/ci' },
+  { text: 'Agent-Assisted Development', link: '/en/development/agent-assisted-development' }
 ]
 
 const tutorialsEn = [

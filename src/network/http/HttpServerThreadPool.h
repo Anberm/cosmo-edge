@@ -1,9 +1,10 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
-#include <string>
+#include <optional>
 #include <vector>
 
 #include "network/msg/MsgEnvelope.h"
@@ -20,7 +21,7 @@ public:
 
     using DispatcherFactory = std::function<std::unique_ptr<cosmo::IRequestDispatcher>()>;
 
-    // Initialize thread pool
+    // Initialize at least three workers. HttpServer serializes lifecycle calls with PutMsg().
     bool Initialize(int thread_num, HttpServer* server, DispatcherFactory factory);
 
     // Shutdown thread pool
@@ -30,13 +31,10 @@ public:
     int PutMsg(cosmo::MsgEnvelope&& msg);
 
 private:
-    int MsgInPrioIndex(cosmo::MsgEnvelope& msg);
+    std::optional<std::size_t> MsgInPrioIndex(const cosmo::MsgEnvelope& msg) const;
+
     std::vector<std::unique_ptr<MsgHanderThread>> msg_handler_threads_;
     std::atomic<bool> is_accepting_{false};
-    int thread_num_     = 4;
-    int cur_thread_idx_ = -1;
-    std::vector<std::string> prio0_interface_;
-    std::vector<std::string> prio1_interface_;
 };
 
 }  // namespace cosmo::network::http
