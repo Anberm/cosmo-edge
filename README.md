@@ -96,7 +96,7 @@ CV186X does not yet have a public Quick Start. Use the [Model Porting Guide](doc
 
 ## Core Capabilities
 
-| Capability | What stays in the README | Go deeper |
+| Capability | What it covers | Go deeper |
 | --- | --- | --- |
 | Native runtime | C++17 engine for multi-channel media, inference scheduling, OSD, tasks, and events | [Architecture](docs/en/guide/architecture.md) |
 | Visual orchestration | Browser-based pipeline composition, task binding, parameter validation, and live feedback | [Pipeline tutorial](docs/en/tutorials/04-pipeline-orchestration/pipeline-orchestration.md) |
@@ -134,7 +134,7 @@ The table below is a **published v1.0 baseline**, not evidence for every next-re
 | No Safety Helmet | YY-16T01-Preview / NPU | 16 | 3/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/helmet-7463-npu/report.html) |
 | Pedestrian Detection | YY-16T01-Preview / NPU | 16 | 5/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/pedestrian-45626-npu/report.html) |
 | Pedestrian + No Safety Helmet | YY-16T01-Preview / NPU | 16 | 3/channel/task | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/pedestrian-helmet-mixed-npu/report.html) |
-| VLM Review | YY-16T01-Preview / NPU | 8 | 0.1/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/vlm-77175-npu/report.html) |
+| VLM Review | YY-16T01-Preview / NPU | 8 | 0.1/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/vlm-55009-npu/report.html) |
 | No Safety Helmet x86 baseline | x86 CPU | 7 | 3/channel | LIMITED; 8 channels exceeded latency limits | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/helmet-7463-x86/report.html) |
 
 See the [benchmark manifest](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/manifest.json), [environment notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/environment), and [current refresh notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/) for methodology and publication boundaries. RK3576 and CV186X release evidence is not represented by the table above.
@@ -178,10 +178,6 @@ Certified devices add preconfigured acceleration, validated commercial model pac
 
 Contributions are welcome through scoped bug reports, documentation improvements, scenarios, and integration notes. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Community support is available through [GitHub Discussions](https://github.com/cosmo-wander-ai/cosmo-edge/discussions) and [Gitee Issues](https://gitee.com/cosmo-wander-ai/cosmo-edge/issues); report vulnerabilities through [SECURITY.md](SECURITY.md).
 
-### License
-
-CosmoEdge is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 CosmoEdge Contributors.
-
 ## FAQ
 
 <details>
@@ -211,6 +207,10 @@ Yes. Use the model-porting path to validate the tensor, preprocessing, post-proc
 `v1.0.0` is the current stable public release, with published BM1688 and x86 baseline reports above. Next-release platform claims remain candidate-bound until their package, device, workload, and long-run evidence is published; validate your own models and deployment conditions before production use.
 
 </details>
+
+### License
+
+CosmoEdge is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 CosmoEdge Contributors.
 
 ---
 

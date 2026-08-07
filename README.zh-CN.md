@@ -96,7 +96,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 ## 核心能力
 
-| 能力 | README 保留内容 | 深入了解 |
+| 能力 | 能力范围 | 深入了解 |
 | --- | --- | --- |
 | 原生运行时 | 面向多路媒体、推理调度、OSD、任务和事件的 C++17 引擎 | [架构](docs/guide/architecture.md) |
 | 可视化编排 | 浏览器端流水线组合、任务绑定、参数校验和实时反馈 | [流水线教程](docs/tutorials/04-pipeline-orchestration/pipeline-orchestration.md) |
@@ -134,7 +134,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 | 安全帽检测 | YY-16T01-Preview / NPU | 16 | 3/channel | 通过 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/helmet-7463-npu/report.zh-CN.html) |
 | 行人检测 | YY-16T01-Preview / NPU | 16 | 5/channel | 通过 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/pedestrian-45626-npu/report.zh-CN.html) |
 | 行人 + 安全帽双算法 | YY-16T01-Preview / NPU | 16 | 3/channel/task | 通过 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/pedestrian-helmet-mixed-npu/report.zh-CN.html) |
-| VLM 复核 | YY-16T01-Preview / NPU | 8 | 0.1/channel | 通过 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/vlm-77175-npu/report.zh-CN.html) |
+| VLM 复核 | YY-16T01-Preview / NPU | 8 | 0.1/channel | 通过 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/vlm-55009-npu/report.zh-CN.html) |
 | 安全帽检测 x86 基线 | x86 CPU | 7 | 3/channel | 受限；8 路超过延迟阈值 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/helmet-7463-x86/report.zh-CN.html) |
 
 测试方法和发布边界见 [benchmark manifest](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/manifest.json)、[环境说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/environment)和[当前刷新说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/)。上表不代表 RK3576 或 CV186X 发布证据。
@@ -178,10 +178,6 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 欢迎提交范围明确的 bug 报告、文档改进、场景示例和集成说明。提交 pull request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。社区支持入口为 [GitHub Discussions](https://github.com/cosmo-wander-ai/cosmo-edge/discussions)和 [Gitee Issues](https://gitee.com/cosmo-wander-ai/cosmo-edge/issues)；安全问题请按 [SECURITY.md](SECURITY.md) 私密报告。
 
-### License
-
-CosmoEdge 使用 [Apache License 2.0](LICENSE) 开源许可。Copyright 2026 CosmoEdge Contributors。
-
 ## FAQ
 
 <details>
@@ -211,6 +207,10 @@ CosmoEdge 使用 [Apache License 2.0](LICENSE) 开源许可。Copyright 2026 Cos
 `v1.0.0` 是当前稳定公开版本，上方提供了已发布的 BM1688 和 x86 基线。下一版本的平台结论会在安装包、设备、负载和长稳证据完成后发布；生产使用前仍需针对自有模型和部署条件完成验证。
 
 </details>
+
+### License
+
+CosmoEdge 使用 [Apache License 2.0](LICENSE) 开源许可。Copyright 2026 CosmoEdge Contributors。
 
 ---
 
