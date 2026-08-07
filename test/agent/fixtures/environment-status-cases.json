@@ -1,0 +1,59 @@
+[
+  {
+    "name": "all checks ready",
+    "checks": [
+      {
+        "id": "C1",
+        "status": "PASS"
+      },
+      {
+        "id": "C2",
+        "status": "SKIP"
+      }
+    ],
+    "expected": "READY"
+  },
+  {
+    "name": "repairable dependency",
+    "checks": [
+      {
+        "id": "C3",
+        "status": "FAIL",
+        "_outcome": "repairable"
+      }
+    ],
+    "expected": "REPAIRABLE"
+  },
+  {
+    "name": "machine replacement dominates repair",
+    "checks": [
+      {
+        "id": "C3",
+        "status": "FAIL",
+        "_outcome": "repairable"
+      },
+      {
+        "id": "C1",
+        "status": "FAIL",
+        "_outcome": "needs_environment"
+      }
+    ],
+    "expected": "NEEDS_ENVIRONMENT"
+  },
+  {
+    "name": "unsupported mapping dominates environment changes",
+    "checks": [
+      {
+        "id": "C5",
+        "status": "UNVERIFIED",
+        "_outcome": "unsupported"
+      },
+      {
+        "id": "C3",
+        "status": "FAIL",
+        "_outcome": "repairable"
+      }
+    ],
+    "expected": "UNSUPPORTED"
+  }
+]

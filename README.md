@@ -340,6 +340,7 @@ The open-source engine and all software features are available worldwide today, 
 | [VLM Guide](docs/en/tutorials/03-vlm-guide/vlm-guide.md)                                        | Developers     | Use visual state judgment with prompts    |
 | [Pipeline Orchestration](docs/en/tutorials/04-pipeline-orchestration/pipeline-orchestration.md) | Advanced users | Compose custom pipelines visually         |
 | [Model Porting Guide](docs/en/tutorials/05-model-porting/model-porting.md)                      | ML engineers   | Import ONNX or target-runtime models      |
+| [Agent-Assisted Development](docs/en/development/agent-assisted-development.md)                | Integrators    | Hand tasks like model conversion to the coding agent you already use, with verifiable results |
 | [Build Guide](docs/en/guide/build.md)                                                           | Developers     | Build x86 Docker and Sophon packages      |
 | [API Overview](docs/en/reference/api.md)                                                        | Developers     | REST, WebSocket, and MQTT API categories  |
 

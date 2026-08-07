@@ -69,10 +69,8 @@ private:
     HttpRequestHandler* result_handler_;
     std::vector<std::string> header_;
     std::vector<std::unique_ptr<MimePart>> mime_parts_;
-    long status_;
     long timeout_;
     long connect_timeout_;
-    long follow_location_;
 };
 
 }  // namespace cosmo::network::http

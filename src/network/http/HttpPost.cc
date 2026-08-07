@@ -166,7 +166,7 @@ void HttpPost::AppendData(const std::string& key, const std::string& value) {
 
 long HttpPost::Submit() {
     http_post_.SetData(data_);
-    return http_post_.Submit();
+    return http_post_.Submit(HttpRequestMethod::kPost);
 }
 
 std::string HttpPost::GetContentType() const {
@@ -228,7 +228,7 @@ void HttpPost::SetAppInfo(const std::string& app_key, const std::string& app_sec
     if (app_key.empty() || app_secret.empty()) {
         app_key_.clear();
         app_secret_.clear();
-        LOG_ERRO("platform application credentials must provide both key and secret");
+        LOG_ERRO("{}", "platform application credentials must provide both key and secret");
         return;
     }
     app_key_    = app_key;
@@ -253,7 +253,8 @@ bool HttpPost::LoadAppInfoFromRuntime() {
     app_key_.clear();
     app_secret_.clear();
     if (key_state == CredentialLoadState::kMissing && secret_state == CredentialLoadState::kMissing) {
-        LOG_INFO("platform application credentials are not configured; signed manager requests are disabled");
+        LOG_INFO("{}",
+                 "platform application credentials are not configured; signed manager requests are disabled");
     } else {
         LOG_ERRO("platform application credentials are incomplete: key={}, secret={}",
                  CredentialStateName(key_state), CredentialStateName(secret_state));
@@ -279,7 +280,8 @@ HttpRequest& HttpPost::GetHttpRequest() {
 
 bool HttpPost::AppendHeaderS(HttpRequest& hrt) {
     if (!HasAppInfo()) {
-        LOG_ERRO("signed manager request rejected because platform application credentials are unavailable");
+        LOG_ERRO("{}",
+                 "signed manager request rejected because platform application credentials are unavailable");
         return false;
     }
     hrt.SetContentType("application/json");

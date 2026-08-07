@@ -14,6 +14,7 @@
 #include <charconv>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -648,8 +649,16 @@ bool HttpServer::Initialize(const std::string& host_ip, int port, DispatcherFact
         return false;
     }
 
-    constexpr int kThreadNum = 4;
-    if (!thread_pool_.Initialize(kThreadNum, this, dispatcher_factory_)) {
+    constexpr int kThreadNum        = 4;
+    bool is_thread_pool_initialized = false;
+    try {
+        is_thread_pool_initialized = thread_pool_.Initialize(kThreadNum, this, dispatcher_factory_);
+    } catch (const std::exception& e) {
+        LOG_ERRO("Cannot initialize HTTP request thread pool: {}", e.what());
+    } catch (...) {
+        LOG_ERRO("{}", "Cannot initialize HTTP request thread pool: unknown exception");
+    }
+    if (!is_thread_pool_initialized) {
         CleanupEventResources();
         return false;
     }

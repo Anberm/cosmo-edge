@@ -46,6 +46,34 @@ namespace {
 //  Task parameter / area / strategy / switch operations
 // ============================================================
 
+util::ErrorEnum CameraServiceImpl::CheckTaskStartResource() const {
+#ifdef COSMO_NN_USE_SOPHON_BACKEND
+    if (!ServiceRegistry::Instance().Get<IConfigReadService>().GetResourceLimit()) {
+        return util::ErrorEnum::Success;
+    }
+
+    size_t packet_total = 0, packet_proc = 0, packet_discard = 0, continues_discard_sec = 0;
+    ServiceRegistry::Instance().Get<ITaskQuery>().PacketStatus(packet_total, packet_proc, packet_discard,
+                                                               continues_discard_sec);
+    double discard_percent = 0.0;
+    if (packet_total > 0) {
+        discard_percent = static_cast<double>(packet_discard) / static_cast<double>(packet_total);
+    }
+    auto gpu_info = ServiceRegistry::Instance().Get<IDeviceInfoService>().GetGpuUtilization();
+    std::vector<GpuMemSnapshot> devs;
+    devs.reserve(gpu_info.gpudevusage.size());
+    std::transform(gpu_info.gpudevusage.begin(), gpu_info.gpudevusage.end(), std::back_inserter(devs),
+                   [](const auto& d) { return GpuMemSnapshot{d.gpumemtotal, d.gpumemavailable}; });
+    auto score = CalcCustomScore(gpu_info.gpuusage, gpu_info.gpumemtotal, gpu_info.gpumemavailable, devs,
+                                 discard_percent, continues_discard_sec);
+    if (score > 100.0) {
+        LOG_WARN("Task start rejected by resource guard, score:{}", score);
+        return util::ErrorEnum::ResourceLimit;
+    }
+#endif
+    return util::ErrorEnum::Success;
+}
+
 std::string CameraServiceImpl::GetChannelName(const std::string& channelId) const {
     std::shared_lock<std::shared_mutex> lock(mtx_);
     auto it = std::find_if(cameras_.begin(), cameras_.end(), [&](const CameraEntityPtr& camera) {
@@ -56,6 +84,103 @@ std::string CameraServiceImpl::GetChannelName(const std::string& channelId) cons
     }
     LOG_INFO("{} Not Exist", channelId);
     return "";
+}
+
+util::ErrorEnum CameraServiceImpl::SaveOrUpdateTask(const std::string& cameraId,
+                                                    const std::string& algorithmId,
+                                                    const MsgTaskConfig& params,
+                                                    const std::string& scheduleId) {
+    auto camera = GetCamera(cameraId);
+    if (!camera) {
+        LOG_INFO("{} Not Exist", cameraId);
+        return util::ErrorEnum::CameraNotExist;
+    }
+
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
+        LOG_INFO("{} Is Being Deleted", cameraId);
+        return util::ErrorEnum::CameraNotExist;
+    }
+
+    std::string scheduleName;
+    if (!ServiceRegistry::Instance().Get<IScheduleService>().Exist(scheduleId, scheduleName)) {
+        return util::ErrorEnum::TimeTemplateNotExist;
+    }
+
+    bool needs_enable = true;
+    {
+        std::shared_lock<std::shared_mutex> lock(camera->task_mtx_);
+        auto it = std::find_if(camera->tasks_.begin(), camera->tasks_.end(),
+                               [&](const CameraTaskPtr& cfg) { return cfg->algorithm_code_ == algorithmId; });
+        if (it != camera->tasks_.end()) {
+            if (!(*it)->task_ || !(*it)->task_->IsReady()) {
+                LOG_WARN("[{}/{}] SaveOrUpdate skipped because task unit is not ready", cameraId,
+                         algorithmId);
+                return util::ErrorEnum::TaskCreateFailed;
+            }
+            needs_enable = !(*it)->is_enabled_.load(std::memory_order_acquire);
+        } else if (camera->tasks_.size() >= camera->max_task_count_) {
+            return util::ErrorEnum::TaskTooMuch;
+        }
+    }
+
+    if (needs_enable) {
+        auto resource_ret = CheckTaskStartResource();
+        if (util::ErrorEnum::Success != resource_ret) {
+            LOG_WARN("[{}/{}] SaveOrUpdate rejected before mutation: {}", cameraId, algorithmId,
+                     static_cast<uint32_t>(resource_ret));
+            return resource_ret;
+        }
+    }
+
+    CameraTaskPtr task;
+    bool start_task = false;
+    {
+        std::lock_guard<std::shared_mutex> lock(camera->task_mtx_);
+        auto it = std::find_if(camera->tasks_.begin(), camera->tasks_.end(),
+                               [&](const CameraTaskPtr& cfg) { return cfg->algorithm_code_ == algorithmId; });
+        if (it != camera->tasks_.end()) {
+            task = *it;
+            MsgTaskConfig previous;
+            previous.params = task->task_->GetParams();
+            task->task_->GetArea(previous.areas, previous.shieldedAreas);
+
+            auto ret = task->task_->SetParams(params);
+            if (util::ErrorEnum::Success != ret) {
+                auto rollback_ret = task->task_->SetParams(previous);
+                if (util::ErrorEnum::Success != rollback_ret) {
+                    LOG_ERRO("[{}/{}] SaveOrUpdate parameter rollback failed: {}", cameraId, algorithmId,
+                             static_cast<uint32_t>(rollback_ret));
+                }
+                return ret;
+            }
+        } else {
+            task                  = std::make_shared<CameraTask>();
+            task->algorithm_code_ = algorithmId;
+            auto ret              = MakeCameraTask(camera, task);
+            if (util::ErrorEnum::Success != ret) {
+                return ret;
+            }
+            ret = task->task_->SetParams(params);
+            if (util::ErrorEnum::Success != ret) {
+                return ret;
+            }
+            camera->tasks_.push_back(task);
+        }
+
+        const bool was_enabled = task->is_enabled_.load(std::memory_order_acquire);
+        task->data_.taskConfig = params;
+        task->schedule_id_     = scheduleId;
+        task->schedule_name_   = scheduleName;
+        task->is_enabled_.store(true, std::memory_order_release);
+        SaveCameraTaskList(camera);
+        start_task = !was_enabled;
+    }
+
+    if (start_task) {
+        SwitchCameraTaskAsync(camera, task);
+    }
+    return util::ErrorEnum::Success;
 }
 
 util::ErrorEnum CameraServiceImpl::ModifyTaskParam(const std::string& cameraId,
@@ -214,30 +339,7 @@ bool CameraServiceImpl::ScheduleInUse(const std::string& scheduleId) {
 
 util::ErrorEnum CameraServiceImpl::SwitchTask(const std::string& cameraId, const std::string& algorithmId,
                                               bool enable) {
-    // Authorization removed: no longer reject task start due to auth/expiry/limit (matches old 23461e05)
-#ifdef COSMO_NN_USE_SOPHON_BACKEND
-    if (enable) {
-        if (ServiceRegistry::Instance().Get<IConfigReadService>().GetResourceLimit()) {
-            size_t packet_total = 0, packet_proc = 0, packet_discard = 0, continues_discard_sec = 0;
-            ServiceRegistry::Instance().Get<ITaskQuery>().PacketStatus(packet_total, packet_proc,
-                                                                       packet_discard, continues_discard_sec);
-            double discard_percent = 0.0;
-            if (packet_total > 0) {
-                discard_percent = static_cast<double>(packet_discard) / static_cast<double>(packet_total);
-            }
-            auto gpu_info = ServiceRegistry::Instance().Get<IDeviceInfoService>().GetGpuUtilization();
-            std::vector<GpuMemSnapshot> devs;
-            devs.reserve(gpu_info.gpudevusage.size());
-            std::transform(gpu_info.gpudevusage.begin(), gpu_info.gpudevusage.end(), std::back_inserter(devs),
-                           [](const auto& d) { return GpuMemSnapshot{d.gpumemtotal, d.gpumemavailable}; });
-            auto score = CalcCustomScore(gpu_info.gpuusage, gpu_info.gpumemtotal, gpu_info.gpumemavailable,
-                                         devs, discard_percent, continues_discard_sec);
-            if (score > 100.0) {
-                return util::ErrorEnum::ResourceLimit;
-            }
-        }
-    }
-#endif
+    // Authorization checks were removed; resource admission remains enforced for real start transitions.
     auto camera = GetCamera(cameraId);
     if (!camera) {
         LOG_INFO("{} Not Exist", cameraId);
@@ -247,6 +349,22 @@ util::ErrorEnum CameraServiceImpl::SwitchTask(const std::string& cameraId, const
     std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
     if (camera->deleting_) {
         return util::ErrorEnum::CameraNotExist;
+    }
+
+    {
+        std::shared_lock<std::shared_mutex> lock(camera->task_mtx_);
+        auto it = std::find_if(camera->tasks_.begin(), camera->tasks_.end(),
+                               [&](const CameraTaskPtr& cfg) { return cfg->algorithm_code_ == algorithmId; });
+        if (it != camera->tasks_.end() && (*it)->is_enabled_.load(std::memory_order_acquire) == enable) {
+            return util::ErrorEnum::Success;
+        }
+    }
+
+    if (enable) {
+        auto resource_ret = CheckTaskStartResource();
+        if (util::ErrorEnum::Success != resource_ret) {
+            return resource_ret;
+        }
     }
 
     CameraTaskPtr taskToSwitch = nullptr;

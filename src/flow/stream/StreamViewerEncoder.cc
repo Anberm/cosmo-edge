@@ -2,24 +2,13 @@
 
 #include "flow/stream/StreamViewerEncoder.h"
 
-#include <algorithm>
-
 #include "media/PixelFormat.h"
-#include "media/VideoUtil.h"
 #include "mem/IDeviceContext.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/media/IVideoFrameTransform.h"
 #include "util/Log.h"
 
 namespace cosmo {
-namespace {
-    size_t MinStartupKeyFrameSize(int width, int height) {
-        const auto pixels =
-            static_cast<size_t>(std::max(width, 1)) * static_cast<size_t>(std::max(height, 1));
-        return std::max<size_t>(1024, pixels / 4096);
-    }
-}  // namespace
-
 StreamViewerEncoder::~StreamViewerEncoder() {
     async_queue_.Stop();
     if (encoder_) {
@@ -56,37 +45,7 @@ bool StreamViewerEncoder::OpenEncoder() {
         return false;
     }
 
-    startup_small_key_frame_count_ = 0;
-    startup_key_frame_accepted_    = false;
     return true;
-}
-
-bool StreamViewerEncoder::ContainsKeyFrame(const uint8_t* data, size_t size) const {
-    if (!data || size == 0) {
-        return false;
-    }
-
-    size_t offset = 0;
-    while (offset < size) {
-        const size_t nal_size = media::SeparateHVideoFrame(data + offset, size - offset);
-        if (nal_size == 0) {
-            break;
-        }
-        if (media::GetFrameType(video_type_, data + offset, nal_size) == media::HFrameType::I) {
-            return true;
-        }
-        offset += nal_size;
-    }
-
-    return false;
-}
-
-bool StreamViewerEncoder::IsSmallStartupKeyFrame(const uint8_t* data, size_t size) const {
-    if (startup_key_frame_accepted_) {
-        return false;
-    }
-
-    return ContainsKeyFrame(data, size) && size < MinStartupKeyFrameSize(width_, height_);
 }
 
 bool StreamViewerEncoder::HandFrame(VideoFramePtr frame) {
@@ -122,20 +81,7 @@ void StreamViewerEncoder::ProcFrame(VideoFramePtr frame) {
         if (!packet) {
             return;
         }
-        if (IsSmallStartupKeyFrame(packet->GetData(), packet->GetSize())) {
-            startup_small_key_frame_count_ += 1;
-            LOG_WARN("Drop small startup keyframe size:{} min:{} count:{}", packet->GetSize(),
-                     MinStartupKeyFrameSize(width_, height_), startup_small_key_frame_count_);
-            LOG_WARN("Reopen encoder after small startup keyframe, width:{} height:{}", width_, height_);
-            encoder_.reset();
-            OpenEncoder();
-            return;
-        }
-        if (packet && video_pusher_) {
-            if (ContainsKeyFrame(packet->GetData(), packet->GetSize())) {
-                startup_key_frame_accepted_ = true;
-            }
-            startup_small_key_frame_count_ = 0;
+        if (video_pusher_) {
             debug_info_.sendFrames += 1;
             video_pusher_->PushFrame(packet->GetData(), packet->GetSize());
         }

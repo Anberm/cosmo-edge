@@ -4,7 +4,9 @@ description: Entry points for documentation site, frontend, C++ formatting, stat
 prev:
   text: Backend Development
   link: /en/development/backend
-next: false
+next:
+  text: Agent-Assisted Development
+  link: /en/development/agent-assisted-development
 ---
 
 # CI and Quality Checks

@@ -4,7 +4,9 @@ description: 面向开源协作的文档站、前端、C++ 后端、静态分析
 prev:
   text: 后端开发
   link: /development/backend
-next: false
+next:
+  text: 智能体辅助二次开发
+  link: /development/agent-assisted-development
 ---
 
 # CI 与质量检查

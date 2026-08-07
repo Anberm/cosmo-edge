@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <fstream>
+#include <string>
 #include <vector>
 
 namespace cosmo::network::http {
@@ -18,6 +20,13 @@ public:
      * @return: flush buffered content
      */
     virtual void Flush() {};
+
+    /**
+     * Finalize the response sink after a completed transfer.
+     * Existing handlers remain compatible through the default Flush-based
+     * implementation.
+     */
+    virtual bool Finalize();
 };
 
 class HttpStringHandler : public HttpRequestHandler {
@@ -40,6 +49,7 @@ public:
     explicit HttpFileHandler(const std::string& filename);
     size_t AppendData(const char* data, size_t size) override;
     void Flush() override;
+    bool Finalize() override;
 
 private:
     std::ofstream file_;
