@@ -43,7 +43,9 @@ private:
         cosmo::StreamViewerPtr viewer;
         cosmo::util::ErrorEnum result{cosmo::util::ErrorEnum::NotInit};
         size_t participants{1};
+        std::string channel_id;
         bool requires_encoder{false};
+        bool channel_lease_acquired{false};
         bool finished{false};
         bool cancelled{false};
     };

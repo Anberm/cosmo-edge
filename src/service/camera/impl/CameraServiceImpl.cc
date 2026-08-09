@@ -642,7 +642,8 @@ void CameraServiceImpl::UpdateChannelState(const CameraEntityPtr& camera) {
                  camera->videoChannelId);
         ServiceRegistry::Instance().Get<ITaskLifecycle>().TaskStart(camera->videoChannelId,
                                                                     camera->channel_task_);
-    } else if (!anyTaskRunning && channelRunning && !camera->is_capturing_image_.load()) {
+    } else if (!anyTaskRunning && channelRunning && !camera->is_capturing_image_.load() &&
+               camera->preview_lease_count_.load(std::memory_order_acquire) == 0) {
         // Cache video attributes before stopping the channel
         MsgCameraAttr attr;
         if (ServiceRegistry::Instance().Get<ITaskChannel>().GetChannelAttr(camera->videoChannelId, attr)) {

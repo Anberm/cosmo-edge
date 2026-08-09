@@ -198,6 +198,9 @@ MockServiceRegistry::MockServiceRegistry()
         NAMED_ALLOW_CALL(taskSvc, SetTaskParam(trompeloeil::_, trompeloeil::_, trompeloeil::_)).RETURN(true));
     expectations.push_back(NAMED_ALLOW_CALL(taskSvc, TaskIsStart(trompeloeil::_)).RETURN(false));
     expectations.push_back(NAMED_ALLOW_CALL(taskSvc, TaskStart(trompeloeil::_, trompeloeil::_)).RETURN(true));
+    expectations.push_back(NAMED_ALLOW_CALL(cameraSvc, AcquirePreviewChannel(trompeloeil::_))
+                               .RETURN(cosmo::util::ErrorEnum::Success));
+    expectations.push_back(NAMED_ALLOW_CALL(cameraSvc, ReleasePreviewChannel(trompeloeil::_)));
     expectations.push_back(NAMED_ALLOW_CALL(taskSvc, RecordClearTaskData(trompeloeil::_)));
     expectations.push_back(NAMED_ALLOW_CALL(taskSvc, RecordTaskAction(trompeloeil::_, trompeloeil::_)));
 }

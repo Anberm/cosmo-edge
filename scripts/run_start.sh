@@ -112,11 +112,13 @@ fi
 
 cd "${BINPATH}" || exit 1
 
-# SRS streaming environment
-export COSMO_STREAM_PLAY_MODE=srs
-export COSMO_STREAM_RTMP_BASE=rtmp://127.0.0.1:1936/live
-export COSMO_STREAM_RTC_API_PORT=1985
-export COSMO_STREAM_HTTP_PORT=18088
+# SRS streaming environment. Deployment-specific values (for example the
+# deterministic HTTP-FLV path used by the macOS Preview) take precedence over
+# these defaults.
+export COSMO_STREAM_PLAY_MODE="${COSMO_STREAM_PLAY_MODE:-srs}"
+export COSMO_STREAM_RTMP_BASE="${COSMO_STREAM_RTMP_BASE:-rtmp://127.0.0.1:1936/live}"
+export COSMO_STREAM_RTC_API_PORT="${COSMO_STREAM_RTC_API_PORT:-1985}"
+export COSMO_STREAM_HTTP_PORT="${COSMO_STREAM_HTTP_PORT:-18088}"
 
 # Start nginx
 cosmo_log "$logTag" "Starting nginx..." "$logFile"

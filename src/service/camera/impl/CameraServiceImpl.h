@@ -64,6 +64,7 @@ public:
     std::string channel_url_{};   // Stream URL
 
     std::atomic<bool> is_capturing_image_{false};
+    std::atomic<size_t> preview_lease_count_{0};
     std::atomic<ChannelStatus> probed_status_{ChannelStatus::ChannelStatusOffline};
 
     mutable std::mutex attr_mtx_;
@@ -130,6 +131,8 @@ public:
     bool IsAlgorithmInUse(const std::string& algorithmId) const override;
 
     bool ScheduleInUse(const std::string& scheduleId) override;
+    util::ErrorEnum AcquirePreviewChannel(const std::string& cameraId) override;
+    void ReleasePreviewChannel(const std::string& cameraId) override;
     VideoFramePtr CaptureImage(const std::string& channelId, int timeOutMs = 3000) override;
     util::ErrorEnum BindTaskLibPara(const std::string& cameraId, const std::string& algorithmCode,
                                     const std::vector<std::string>& bindLibs,

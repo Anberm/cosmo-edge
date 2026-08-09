@@ -499,6 +499,15 @@ const handleVideoFullScreen = (index) => {
   }
 }
 
+const getDefaultOverlayAlgorithmId = (taskList) => {
+  const enabledTasks = Array.isArray(taskList)
+    ? taskList.filter((task) => task.enableStatus == 1)
+    : []
+  return enabledTasks.length === 1
+    ? String(enabledTasks[0].algorithmId || '')
+    : ''
+}
+
 const handleCameraNodeClick = (node) => {
   if (node.labelI18nKey === 'common.all' || node.label === '全部') return
   if (node.channelType == 0 && node.status == 0)
@@ -508,7 +517,9 @@ const handleCameraNodeClick = (node) => {
     id: node.id,
     name: node.label,
     taskList: node.taskList,
-    runAlgorithmId: ''
+    // A single enabled task is unambiguous: request its OSD stream directly
+    // instead of opening a raw player only to tear it down immediately.
+    runAlgorithmId: getDefaultOverlayAlgorithmId(node.taskList)
   }
 
   if (screenType.value == 1) return
@@ -643,7 +654,8 @@ const initPlayedCamera = (childCameras) => {
       ? requestedCamera.taskList
       : []
     const requestedTask = taskList.find(
-      (task) => String(task.algorithmId) === String(requestedAlgorithmId || '')
+      (task) => task.enableStatus == 1 &&
+        String(task.algorithmId) === String(requestedAlgorithmId || '')
     )
 
     playedCameraList.value[0] = {
