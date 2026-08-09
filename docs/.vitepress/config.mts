@@ -2,6 +2,7 @@ import { defineConfig } from 'vitepress'
 
 const guideZh = [
   { text: '构建指南', link: '/guide/build' },
+  { text: 'macOS Docker Preview', link: '/guide/macos-docker-preview' },
   { text: '部署指南', link: '/guide/deployment' },
   { text: '运行配置', link: '/guide/configuration' },
   { text: '故障排查', link: '/guide/troubleshooting' },
@@ -62,6 +63,7 @@ const communityZh = [
 
 const guideEn = [
   { text: 'Build Guide', link: '/en/guide/build' },
+  { text: 'macOS Docker Preview', link: '/en/guide/macos-docker-preview' },
   { text: 'Deployment Guide', link: '/en/guide/deployment' },
   { text: 'Runtime Configuration', link: '/en/guide/configuration' },
   { text: 'Troubleshooting', link: '/en/guide/troubleshooting' },

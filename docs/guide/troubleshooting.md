@@ -35,6 +35,12 @@ http://127.0.0.1:8080
   docker compose -f docker-compose.x86.windows.yml ps
   ```
 
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh status
+  ```
+
 查看日志：
 
 - **Linux**:
@@ -47,6 +53,12 @@ http://127.0.0.1:8080
 
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## 端口冲突
@@ -75,6 +87,15 @@ docker compose -f docker-compose.x86.windows.yml up -d --build
 ```
 
 随后访问 `http://127.0.0.1:8280`。不设置该变量时仍默认使用 `8080`。
+
+Mac Preview 使用相同的 Web 端口变量，但仍只绑定本机：
+
+```bash
+COSMO_X86_WEB_PORT=8280 ./scripts/macos-docker-preview.sh up
+```
+
+Mac 上若构建速度异常慢，请同时检查 Docker Desktop 的 VMM 与 Rosetta 设置；
+完整边界见 [macOS Docker Preview](./macos-docker-preview.md)。
 
 ## Windows 构建脚本提示 `No such file or directory`
 

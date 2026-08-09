@@ -37,6 +37,7 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 - **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 candidate decoding paths with explicit fallbacks; on the same frozen candidate, single-channel Detect average decreased from 142.3 ms to 58.2 ms (-59.1%).
 - **Agent-assisted development:** a repository-guided path for handing model porting, integration, and UI tasks to the coding agent you already use and receiving verifiable deliverables.
 - **Model Guard 2.3:** protects commercial preset-model distribution in Sophon Protected packages. Open and Protected expose the same application features, with no SKU-gated software functionality; they differ in model encryption and device-provisioning tooling.
+- **macOS Docker Preview:** an isolated `linux/amd64` candidate for one local-video workflow on Apple Silicon. Two consecutive end-to-end acceptance runs are still required before publication; it does not enable Model Guard or represent native/NPU performance.
 
 ## Choose a Platform
 
@@ -47,7 +48,7 @@ CosmoEdge provides one engine architecture and orchestration experience, but eac
 | Sophon BM1688 | Primary | BMRT / `.nn` | Production deployment path with published [v1.0 baselines](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/) |
 | Rockchip RK3576 | Release candidate | RKNN / `.rknn` | Engineering baseline: 8 channels at 5 FPS passed; final combined-branch validation is pending. Start with the [integration guide](docs/guide/rk3576-rknn-development.md) |
 | Sophon CV186X | Candidate | BMRT / target-specific `.nn` | Model-directory and import compatibility; release package and device evidence in progress |
-| x86 Linux / Windows | Supported | ONNX Runtime / `.onnx` | Development and evaluation path with a published x86 baseline |
+| x86 Linux / Windows; Apple Silicon macOS | Linux / Windows supported; macOS Preview | ONNX Runtime / `.onnx` | Mac uses amd64 emulation for one local-video developer workflow, not native performance evidence |
 | Sophon BM1684X | Planned | — | Not part of the current release scope |
 
 ## Quick Start
@@ -64,11 +65,12 @@ cd cosmo-edge
 # 2. Start on Linux
 sudo docker compose -f docker-compose.x86.yml up -d --build
 # Windows: docker compose -f docker-compose.x86.windows.yml up -d --build
+# Apple Silicon macOS (Preview): ./scripts/macos-docker-preview.sh up
 
 # 3. Open http://localhost:8080
 ```
 
-After startup, use the [Scenario Configuration tutorial](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) to create your first AI detection task. Docker Compose V1 users can replace `docker compose` with `docker-compose`.
+After startup, use the [Scenario Configuration tutorial](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) to create your first AI detection task. Mac users should first read the licensing, environment, and capability boundaries in [macOS Docker Preview](docs/en/guide/macos-docker-preview.md). Docker Compose V1 users can replace `docker compose` with `docker-compose`.
 
 ### Build for Sophon BM1688
 
@@ -195,7 +197,7 @@ Contributions are welcome through scoped bug reports, documentation improvements
 <details>
 <summary><b>Can I try CosmoEdge without Sophon or Rockchip hardware?</b></summary>
 
-Yes. Use x86 developer mode on Linux or Windows to try the console, pipeline workflow, model management, and integration path. Edge NPU hardware is needed for target-platform acceleration and capacity validation.
+Yes. Use x86 developer mode on Linux or Windows. Apple Silicon Macs can use the Docker Preview for the console, pipeline, model-management, and integration workflow with one local video. The Mac path uses amd64 emulation and does not enable Model Guard. Edge NPU hardware is still required for target-platform acceleration and capacity validation.
 
 </details>
 

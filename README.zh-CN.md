@@ -37,6 +37,7 @@ CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编�
 - **RKNN 数据路径：**加入针对性的 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 candidate 直接解码路径，并保留明确的 fallback；同一冻结候选的单路 Detect 平均耗时由 142.3 ms 降至 58.2 ms（下降 59.1%）。
 - **智能体辅助二开：**提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
 - **Model Guard 2.3：**为 Sophon Protected 包中的商业预置模型提供分发保护；Open 与 Protected 的应用软件能力一致，不以 SKU 解锁软件功能，区别在于模型是否加密以及是否包含设备授权工具。
+- **macOS Docker Preview：**为 Apple Silicon 提供隔离的 `linux/amd64` 单路本地视频体验候选；发布前仍需完成连续两轮端到端验收。它不启用 Model Guard，也不代表 NPU 或原生性能。
 
 ## 选择平台
 
@@ -47,7 +48,7 @@ CosmoEdge 提供统一的引擎架构与编排体验，但每次构建只选择�
 | Sophon BM1688 | 主力平台 | BMRT / `.nn` | 生产部署路径，已发布 [v1.0 基线](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/) |
 | Rockchip RK3576 | 发布候选 | RKNN / `.rknn` | 工程基线已通过 8 路 × 5 FPS；最终合并分支待复验。从 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)开始 |
 | Sophon CV186X | 候选 | BMRT / 目标芯片专用 `.nn` | 模型目录与导入兼容；发布包和设备证据正在补充 |
-| x86 Linux / Windows | 已支持 | ONNX Runtime / `.onnx` | 开发与评估路径，已有公开 x86 基线 |
+| x86 Linux / Windows；Apple Silicon macOS | Linux / Windows 已支持；macOS Preview | ONNX Runtime / `.onnx` | Mac 通过 amd64 仿真覆盖单路本地视频开发体验，不代表原生性能 |
 | Sophon BM1684X | 规划中 | — | 不属于当前发布范围 |
 
 ## 快速开始
@@ -64,11 +65,12 @@ cd cosmo-edge
 # 2. 在 Linux 启动
 sudo docker compose -f docker-compose.x86.yml up -d --build
 # Windows：docker compose -f docker-compose.x86.windows.yml up -d --build
+# Apple Silicon macOS（Preview）：./scripts/macos-docker-preview.sh up
 
 # 3. 打开 http://localhost:8080
 ```
 
-启动后，按照[场景配置教程](https://www.cosmowander.ai/zh/docs/tutorials/02-scenario-config/scenario-config)创建第一个 AI 检测任务。使用 Docker Compose V1 时，可将 `docker compose` 替换为 `docker-compose`。
+启动后，按照[场景配置教程](https://www.cosmowander.ai/zh/docs/tutorials/02-scenario-config/scenario-config)创建第一个 AI 检测任务。Mac 用户先阅读 [macOS Docker Preview](docs/guide/macos-docker-preview.md) 的许可、环境和能力边界。使用 Docker Compose V1 时，可将 `docker compose` 替换为 `docker-compose`。
 
 ### 为 Sophon BM1688 构建
 
@@ -195,7 +197,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 <details>
 <summary><b>没有 Sophon 或 Rockchip 设备可以试用吗？</b></summary>
 
-可以。在 Linux 或 Windows 上使用 x86 开发模式即可体验控制台、流水线、模型管理和集成路径。目标平台的 NPU 加速和容量验证仍需要对应边缘硬件。
+可以。在 Linux 或 Windows 上使用 x86 开发模式；Apple Silicon Mac 可以使用 Docker Preview 体验单路本地视频下的控制台、流水线、模型管理和集成路径。Mac 路径运行 amd64 仿真且不启用 Model Guard。目标平台的 NPU 加速和容量验证仍需要对应边缘硬件。
 
 </details>
 

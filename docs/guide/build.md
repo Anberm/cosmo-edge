@@ -5,8 +5,8 @@ prev:
   text: 文档首页
   link: /
 next:
-  text: 部署指南
-  link: /guide/deployment
+  text: macOS Docker Preview
+  link: /guide/macos-docker-preview
 ---
 
 # 构建指南
@@ -21,6 +21,7 @@ next:
 | 路径 | 用途 | 是否启动服务 | 输出 |
 | --- | --- | --- | --- |
 | x86 Docker 开发运行环境 | 首次体验、开发评估、生成 x86 发布包 | 是 | `build_output/` |
+| macOS Docker Preview | Apple Silicon 上体验单路 x86 工作流 | 是 | `build_output/macos-x86/` |
 | Sophon SOURCE 构建 | 交叉编译可安装的源码构建包 | 否 | `build_output/public-runtime/` |
 | CPU 测试构建 | 构建 `cosmo-tests` | 否 | `build_cpu/cosmo-tests` |
 
@@ -38,10 +39,22 @@ Windows (PowerShell/CMD):
 docker compose -f docker-compose.x86.windows.yml up -d --build
 ```
 
+Apple Silicon macOS (Preview):
+
+```bash
+./scripts/macos-docker-preview.sh doctor
+./scripts/macos-docker-preview.sh up
+```
+
+Mac 路径显式运行 `linux/amd64`，使用独立卷并只绑定回环地址。它不启用
+Model Guard，也不构成原生 arm64 或 NPU 性能证据。完整说明和验收范围见
+[macOS Docker Preview](./macos-docker-preview.md)。
+
 该路径来自：
 
 - `docker-compose.x86.yml` (Linux)
 - `docker-compose.x86.windows.yml` (Windows)
+- `docker-compose.x86.macos.yml` (Apple Silicon macOS Preview)
 - `Dockerfile.x86`
 - `scripts/build_cpu.sh`
 

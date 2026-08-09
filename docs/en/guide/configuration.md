@@ -19,6 +19,7 @@ x86 development runtime:
 
 - Linux: `docker-compose.x86.yml`
 - Windows: `docker-compose.x86.windows.yml`
+- Apple Silicon macOS Preview: `docker-compose.x86.macos.yml`
 
 Sophon release package build:
 

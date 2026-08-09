@@ -19,6 +19,7 @@ x86 开发运行环境：
 
 - Linux: `docker-compose.x86.yml`
 - Windows: `docker-compose.x86.windows.yml`
+- Apple Silicon macOS Preview: `docker-compose.x86.macos.yml`
 
 Sophon 发布包构建：
 

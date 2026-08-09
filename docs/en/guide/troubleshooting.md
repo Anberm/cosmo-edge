@@ -35,6 +35,12 @@ Check container status:
   docker compose -f docker-compose.x86.windows.yml ps
   ```
 
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh status
+  ```
+
 View logs:
 
 - **Linux**:
@@ -47,6 +53,12 @@ View logs:
 
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## Port Conflicts
@@ -75,6 +87,15 @@ docker compose -f docker-compose.x86.windows.yml up -d --build
 ```
 
 Then open `http://127.0.0.1:8280`. The default remains `8080` when the variable is unset.
+
+The Mac Preview accepts the same web-port variable while retaining its host-only binding:
+
+```bash
+COSMO_X86_WEB_PORT=8280 ./scripts/macos-docker-preview.sh up
+```
+
+If Mac builds are unexpectedly slow, inspect Docker Desktop's VMM and Rosetta
+settings. See [macOS Docker Preview](./macos-docker-preview.md) for the full boundary.
 
 ## Windows Build Scripts Report `No such file or directory`
 

@@ -2,8 +2,8 @@
 title: Deployment Guide
 description: Runtime directories, service processes, ports, upgrade packages, and systemd behavior.
 prev:
-  text: Build Guide
-  link: /en/guide/build
+  text: macOS Docker Preview
+  link: /en/guide/macos-docker-preview
 next:
   text: Runtime Configuration
   link: /en/guide/configuration
@@ -30,6 +30,10 @@ Start:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh up
+  ```
 
 Stop:
 
@@ -41,6 +45,10 @@ Stop:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml down
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh down
+  ```
 
 View logs:
 
@@ -51,6 +59,10 @@ View logs:
 - **Windows (PowerShell/CMD)**:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## Runtime Directories
@@ -86,7 +98,7 @@ ${INSTALLPATH}/bin/cosmo-engine
 
 | Port | Source | Purpose |
 | --- | --- | --- |
-| `8080 -> 80` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | x86 Docker web console |
+| `8080 -> 80` | x86 Compose files; the Mac Preview binds only to `127.0.0.1` | x86 Docker web console |
 | `1936` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | RTMP |
 | `1985` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | SRS API |
 | `18088` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | HTTP stream |

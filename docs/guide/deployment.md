@@ -2,8 +2,8 @@
 title: 部署指南
 description: 当前运行目录、服务进程、端口、升级包和 systemd 行为。
 prev:
-  text: 构建指南
-  link: /guide/build
+  text: macOS Docker Preview
+  link: /guide/macos-docker-preview
 next:
   text: 架构概览
   link: /guide/architecture
@@ -30,6 +30,10 @@ next:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh up
+  ```
 
 停止：
 
@@ -41,6 +45,10 @@ next:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml down
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh down
+  ```
 
 查看日志：
 
@@ -51,6 +59,10 @@ next:
 - **Windows (PowerShell/CMD)**:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## 运行目录
@@ -86,7 +98,7 @@ ${INSTALLPATH}/bin/cosmo-engine
 
 | 端口 | 来源 | 用途 |
 | --- | --- | --- |
-| `8080 -> 80` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | x86 Docker Web 控制台 |
+| `8080 -> 80` | x86 Compose 文件；Mac Preview 仅绑定 `127.0.0.1` | x86 Docker Web 控制台 |
 | `1936` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | RTMP |
 | `1985` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | SRS API |
 | `18088` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | HTTP stream |

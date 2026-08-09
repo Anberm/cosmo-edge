@@ -5,8 +5,8 @@ prev:
   text: Documentation Home
   link: /en/
 next:
-  text: Deployment Guide
-  link: /en/guide/deployment
+  text: macOS Docker Preview
+  link: /en/guide/macos-docker-preview
 ---
 
 # Build Guide
@@ -21,6 +21,7 @@ This page documents build paths that are confirmed and available in the reposito
 | Target | Entry Point | Notes |
 | --- | --- | --- |
 | x86 Docker runtime | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | Starts the containerized development/runtime environment. |
+| macOS Docker Preview | `scripts/macos-docker-preview.sh` | Runs the one-video x86 workflow under amd64 emulation on Apple Silicon. |
 | Sophon SOURCE package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Cross-compiles the installable source-build package. |
 | CPU test build | `scripts/build_cpu_test.sh` | Builds `cosmo-tests` for x86 CPU validation. |
 | Documentation site | `npm ci` and `npm run docs:build` | Builds this VitePress site. |
@@ -31,6 +32,7 @@ These entry points are from:
 
 - `docker-compose.x86.yml` (Linux)
 - `docker-compose.x86.windows.yml` (Windows)
+- `docker-compose.x86.macos.yml` (Apple Silicon macOS Preview)
 - `Dockerfile.x86`
 - `scripts/build_cpu.sh`
 
@@ -58,6 +60,18 @@ Windows (PowerShell/CMD):
 docker compose -f docker-compose.x86.windows.yml up -d --build
 docker compose -f docker-compose.x86.windows.yml ps
 ```
+
+Apple Silicon macOS (Preview):
+
+```bash
+./scripts/macos-docker-preview.sh doctor
+./scripts/macos-docker-preview.sh up
+```
+
+The Mac path explicitly runs `linux/amd64`, uses isolated volumes, and publishes
+only on loopback. It does not enable Model Guard and is not native arm64 or NPU
+performance evidence. See [macOS Docker Preview](./macos-docker-preview.md) for
+the complete setup and acceptance boundary.
 
 After build:
 
