@@ -149,55 +149,24 @@ Web 控制台的本地升级流程如下：
 
 页面等待恢复的 15 分钟是交互超时，不会中止设备端已经开始的升级。超时后应保持供电，并通过设备网络和 systemd 日志确认状态。重新登录后还应核对软件版本与本次发布包；页面恢复只证明重启与服务恢复，不替代版本验收。
 
-## SOURCE 直接安装
+## 安装边界
 
-SOURCE 用于部署自行修改并重新构建的 CosmoEdge。它不是正式签名发布包，也不包含
-设备证书签发工具。在已配置设备上，复制并解压 SOURCE 归档后执行：
+公开仓库生成的 Sophon 包用于升级已经运行 CosmoEdge 的设备。使用上面的 Web 控制台
+本地升级流程；不要把升级包解压后当作离线安装器直接执行。
 
-```bash
-sudo ./install-device.sh install
-sudo ./install-device.sh status
-```
-
-空白设备应先通过独立的受控流程安装
-`/data/cwaiuserdata/model-guard/device-certificate.bin`。一张与本机绑定的证书
-授权当前及以后使用同一产品模型密钥发布的全部 preset，不需要逐模型 license。
-
-`install` 会创建缺失的 `/appfs/cosmo_wander`，停止 `cosmo.service`，删除原
-`/appfs/cosmo_wander/cwai_data`，安装新应用和 SOURCE systemd 单元，然后执行
-服务及 HTTP 健康检查。它不备份旧应用，不提供回滚或恢复命令；健康检查失败时
-保留新应用树供排查。SOURCE 安装器不会访问 Guard 证书。
-
-`status` 是只读命令，输出 `mode`、`edge_commit`、`version`、
-`build_identity`、`service_active` 和 `service_enabled`。
+仓库当前不提供空白设备的公开工厂首装流程。空白设备涉及系统镜像、服务单元、磁盘布局
+和设备初始化，不能从已有设备的升级流程推断。
 
 ## systemd 服务
 
-SOURCE 安装器使用：
-
-```text
-share/cosmo-source/cosmo.service
-    -> /etc/systemd/system/cosmo.service
-
-ExecStart=/appfs/cosmo_wander/cwai_data/scripts/source_run_start.sh
-```
-
-空机首装时，从正式 `FACTORY-BASE` 安装：
-
-```text
-share/cosmo-factory/cosmo.service
-    -> /etc/systemd/system/cosmo.service
-```
-
-服务启动命令：
+已配置设备的服务启动命令为：
 
 ```text
 ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh
 ```
 
-当前 `scripts/install.sh` 只负责已签名发布事务，不创建 systemd unit。应在设备
-绑定证书和首个签名发布包都就位后再启用服务；不存在逐模型 license。服务以
-`root` 运行并使用 `Restart=on-failure`。
+`scripts/install.sh`负责升级事务，不创建空白设备的systemd unit。服务以`root`
+运行并使用`Restart=on-failure`。
 
 部分 Sophon 系统会在启动时把持久化数据树的属主恢复为设备管理账户。上传暂存服务允许 `sessions` 目录继承一个不可被 group/other 写入的直接父目录属主，同时继续要求：
 

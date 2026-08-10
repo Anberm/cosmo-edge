@@ -149,62 +149,27 @@ The web console performs a local upgrade as follows:
 
 The 15-minute recovery wait is a UI timeout; it does not cancel an upgrade already running on the device. Keep power connected and inspect device networking and systemd logs if it expires. After signing in again, verify the software version against the release package; UI recovery proves reboot and service recovery, not version acceptance.
 
-## Direct SOURCE Installation
+## Installation Boundary
 
-SOURCE deploys a locally modified and rebuilt CosmoEdge. It is not a signed
-production release and does not contain the device-certificate provisioning
-tool. On a configured device, copy and extract the SOURCE archive, then run:
+Sophon packages produced by the public repository upgrade devices that already
+run CosmoEdge. Use the web-console local-upgrade flow above; do not extract and
+run the upgrade archive as an offline installer.
 
-```bash
-sudo ./install-device.sh install
-sudo ./install-device.sh status
-```
-
-A blank device first needs
-`/data/cwaiuserdata/model-guard/device-certificate.bin`, installed through the
-separate controlled workflow. One device-bound certificate authorizes every
-current and future preset published under the same product model key; there are
-no per-model licenses.
-
-`install` creates `/appfs/cosmo_wander` when needed, stops `cosmo.service`,
-deletes the old `/appfs/cosmo_wander/cwai_data`, installs the new application
-and SOURCE systemd unit, and then checks service and HTTP health. It creates no
-application backup and exposes no rollback or restore command. A failed health
-check leaves the new application tree in place for diagnosis. The SOURCE
-installer never accesses the Guard certificate.
-
-`status` is read-only and prints `mode`, `edge_commit`, `version`,
-`build_identity`, `service_active`, and `service_enabled`.
+The repository does not currently publish a blank-device factory-install
+procedure. Blank-device setup includes the system image, service unit, storage
+layout, and device initialization and cannot be inferred from the upgrade flow.
 
 ## systemd Service
 
-The SOURCE installer uses:
-
-```text
-share/cosmo-source/cosmo.service
-    -> /etc/systemd/system/cosmo.service
-
-ExecStart=/appfs/cosmo_wander/cwai_data/scripts/source_run_start.sh
-```
-
-During blank-device setup, install this file from the controlled
-`FACTORY-BASE`:
-
-```text
-share/cosmo-factory/cosmo.service
-    -> /etc/systemd/system/cosmo.service
-```
-
-Service start command:
+The configured device uses this service start command:
 
 ```text
 ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh
 ```
 
-`scripts/install.sh` implements the permanent MD5 package installation contract
-used by both Open and Protected editions. Model authorization is independent of
-application installation. There are no per-model licenses. The service runs as
-`root` with `Restart=on-failure`.
+`scripts/install.sh` implements the upgrade transaction; it does not create the
+systemd unit for a blank device. The service runs as `root` with
+`Restart=on-failure`.
 
 Some Sophon images restore the persistent data tree to the appliance administrator at boot. The upload staging service therefore allows `sessions` to inherit the owner of an immediate parent that is not writable by group/other, while still requiring:
 

@@ -107,32 +107,19 @@ can be uploaded through the management page on a main-branch installation and
 on every later version. Application archives are not signed. The profiles differ
 only in model protection and availability of `cosmo-model-provision`.
 
-### Install a SOURCE Build on a Device
+### Install a Build on an Existing Device
 
-Verify the outer archive SHA-256 against the digest in its filename before
-extracting it. Then change to the single extracted package directory and run:
+Sign in to the web console of a device that already runs CosmoEdge, open
+**System Management → System Maintenance → Software Upgrade**, select the
+`cosmo-V<version>-<32-char-md5>.tar.gz` from the matching output directory, and
+confirm. Keep the device powered and connected during upload, validation,
+installation, and reboot. After signing in again, verify that **Software
+Version** matches the package version.
 
-```bash
-sudo ./install-device.sh install
-sudo ./install-device.sh status
-```
-
-The installer creates `/appfs/cosmo_wander` when needed, validates the
-extracted payload, stops `cosmo.service`, deletes the existing `cwai_data`,
-installs the new tree, and starts the SOURCE service. It does not create an
-application backup and provides no rollback command. If the final health check
-fails, the command reports failure and leaves the newly installed tree in
-place for direct diagnosis or reinstall. `status` reports the active mode,
-build ID, base Edge commit, package version, and service state.
-
-On a configured device, the existing
-`/data/cwaiuserdata/model-guard/device-certificate.bin` remains in place. That
-single device-bound certificate authorizes all current and future preset models
-published under the product model key; no per-model licenses exist. On a blank
-device, SOURCE can install the application and service, but protected presets
-remain unavailable until the separate authorized Guard workflow installs the
-certificate. SOURCE `install` and `status` do not access
-`/data/cwaiuserdata/model-guard`.
+This public workflow covers upgrades of an existing CosmoEdge installation.
+The repository does not currently publish a blank-device factory-install
+procedure. The upgrade archive is not a user-invoked offline installer to be
+extracted and run directly.
 
 Maintainers use one command in a controlled environment containing the complete
 Guard SDK and provisioning tool:

@@ -65,12 +65,24 @@ cd cosmo-edge
 # 2. Start on Linux
 sudo docker compose -f docker-compose.x86.yml up -d --build
 # Windows: docker compose -f docker-compose.x86.windows.yml up -d --build
-# Apple Silicon macOS (Preview): ./scripts/macos-docker-preview.sh up
 
 # 3. Open http://localhost:8080
 ```
 
-After startup, use the [Scenario Configuration tutorial](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) to create your first AI detection task. Mac users should first read the licensing, environment, and capability boundaries in [macOS Docker Preview](docs/en/guide/macos-docker-preview.md). Docker Compose V1 users can replace `docker compose` with `docker-compose`.
+Apple Silicon macOS uses a separate amd64-emulation Preview path:
+
+```bash
+./scripts/macos-docker-preview.sh doctor
+./scripts/macos-docker-preview.sh up
+./scripts/macos-docker-preview.sh status
+# Open http://127.0.0.1:8080
+```
+
+The Mac Preview is for local, single-video evaluation. It is not a native macOS
+binary, an NPU deployment, or production performance evidence. Read the full
+[macOS Docker Preview](docs/en/guide/macos-docker-preview.md) boundaries first.
+
+After startup, use the [Scenario Configuration tutorial](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) to create your first AI detection task. Docker Compose V1 users can replace `docker compose` with `docker-compose`.
 
 ### Build for Sophon BM1688
 
@@ -81,7 +93,20 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ls -lh build_output/public-runtime/
 ```
 
-The default Open package contains plaintext models and requires no device authorization. Protected packages use the same MD5 upgrade format, but contain encrypted preset models and provisioning tooling; application archives are not signed. See the [Build Guide](https://www.cosmowander.ai/docs/guide/build) and [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment) before installing on a device.
+The default Open package contains plaintext models and requires no device
+authorization. To install it on an existing CosmoEdge device, sign in to the web
+console, open **System Management → System Maintenance → Software Upgrade**,
+select the generated `cosmo-V<version>-<md5>.tar.gz`, and confirm the upgrade.
+Keep power connected while the device uploads, validates, installs, and reboots.
+After signing in again, verify that **Software Version** matches the package
+version.
+
+This public workflow covers upgrades of an already provisioned device. The
+repository does not currently publish a blank-device factory-install procedure.
+Protected packages use the same web upgrade flow but contain encrypted preset
+models and provisioning tooling. See the [Build Guide](https://www.cosmowander.ai/docs/guide/build)
+and [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment) for the
+full validation and recovery boundaries.
 
 ### Evaluate the RK3576 candidate
 

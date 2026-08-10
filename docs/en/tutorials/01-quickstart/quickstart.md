@@ -17,12 +17,12 @@ next:
 | What you will accomplish | Deploy or connect to the system, configure device network and time, add video, assign an algorithm, and verify its output |
 | Prerequisites | Docker is installed on an x86 host, an Apple Silicon Mac has the Docker Desktop Preview environment, or a CosmoEdge edge device is provisioned |
 | Estimated time | About 15–30 minutes for a native x86 first build; Mac amd64 emulation can take longer; about 15–25 minutes for a provisioned device |
-| Device required | Choose either an x86 Docker host or a provisioned edge device; a camera is not required for the first test |
+| Device required | Choose an x86 Docker host, an Apple Silicon Mac Preview, or a provisioned edge device; a camera is not required for the first test |
 | Final acceptance result | The channel is running, Live Display shows the algorithm overlay, and Event Center contains a matching event or count result |
 
 The goal is not merely to open the UI. It is to complete a **verifiable first detection**:
 
-1. Make CosmoEdge reachable through either the x86 Docker path or the edge-device path.
+1. Make CosmoEdge reachable through the x86 Docker, macOS Preview, or edge-device path.
 2. For an edge device at its default static address, configure the computer first, then sign in and set the device network and time.
 3. Add an offline test video.
 4. Assign a scenario task and start analysis.
@@ -35,9 +35,8 @@ Changing the default password, setting the device network, and correcting device
 ### 1.1 Path A: Docker on an x86 Host
 
 Use this path on a Linux x86_64 host. On Windows, use
-`docker-compose.x86.windows.yml`. Apple Silicon Macs can use the isolated
-`docker-compose.x86.macos.yml` Preview after reading its
-[admission, licensing, and capability boundaries](/en/guide/macos-docker-preview).
+`docker-compose.x86.windows.yml`. Apple Silicon Macs use the separate Preview
+path in the next section.
 
 An earlier validated setup used Ubuntu 22.04.2, an Intel Core i9-13900F, 64 GB of memory,
 Docker 29.1.3, and Docker Compose v5.1.4. This is a recorded validation environment, not a minimum requirement. Use the root README, the current Compose files, and the resource requirements of your selected models as the current source of truth.
@@ -67,14 +66,6 @@ docker compose -f docker-compose.x86.windows.yml up -d --build
 docker compose -f docker-compose.x86.windows.yml ps
 ```
 
-Apple Silicon macOS (Preview):
-
-```bash
-./scripts/macos-docker-preview.sh doctor
-./scripts/macos-docker-preview.sh up
-./scripts/macos-docker-preview.sh status
-```
-
 The first build downloads dependencies and compiles the project. Duration depends on the network and host.
 
 ![Docker building the CosmoEdge service images](images/build.webp)
@@ -83,13 +74,44 @@ Success conditions:
 
 - `docker compose ... ps` reports the services as `Up` or `running`;
 - `http://127.0.0.1:8080` opens on the host;
-- for Linux / Windows remote access, replace `127.0.0.1` with the host IP and allow TCP 8080 through the host firewall; the Mac Preview intentionally binds only to host loopback and is outside that remote-access guidance.
+- for remote access, replace `127.0.0.1` with the x86 host IP and allow TCP 8080 through the host firewall.
 
 ![CosmoEdge containers in the running state](images/container.webp)
 
-### 1.2 Path B: A Provisioned Edge Device
+### 1.2 Path B: Apple Silicon macOS Preview
+
+The Mac path uses an isolated `linux/amd64` Docker Preview. Read its
+[admission, licensing, and capability boundaries](/en/guide/macos-docker-preview),
+then run:
+
+```bash
+./scripts/macos-docker-preview.sh doctor
+./scripts/macos-docker-preview.sh up
+./scripts/macos-docker-preview.sh status
+```
+
+When healthy, open `http://127.0.0.1:8080` on the same Mac. This path is for
+single-video local evaluation; it is not a native macOS binary, a Sophon or
+Rockchip NPU deployment, or production performance evidence.
+
+### 1.3 Path C: A Provisioned Edge Device
 
 CosmoEdge currently supports the Sophon BM1688 platform. The following images show the BM1688 dual-Ethernet device used in the earlier walkthrough. Enclosures, labels, and specifications can differ by shipment; use the label and delivery manifest for the actual unit.
+
+To build an upgrade package from source, run this at the repository root:
+
+```bash
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+ls -lh build_output/public-runtime/
+```
+
+On a device that already runs CosmoEdge, sign in to the web console, open
+**System Management → System Maintenance → Software Upgrade**, select the
+generated `cosmo-V<version>-<32-char-md5>.tar.gz`, and confirm. Keep power
+connected during upload, validation, installation, and reboot. After signing in
+again, verify that **Software Version** matches the package version. This public
+workflow covers upgrades of an existing installation; the repository does not
+currently publish a blank-device factory-install procedure.
 
 ![Example BM1688 edge-device connector panel](images/img_01.webp)
 
