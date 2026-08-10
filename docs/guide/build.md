@@ -104,15 +104,25 @@ Windows PowerShell：
 分支部署的管理页面升级，也可以在后续任意版本继续升级。应用包不签名；两种配置
 只在模型是否加密以及是否包含 `cosmo-model-provision` 上有区别。
 
-### 在已有设备上安装构建包
+### 在Sophon设备上安装构建包
 
-构建完成后，在已有 CosmoEdge 的设备上登录管理页面，进入
-**系统管理 → 系统维护 → 软件升级**，选择对应输出目录中的
-`cosmo-V<版本号>-<32位md5>.tar.gz` 并确认。升级期间保持设备供电和网络连接。
-设备重启、页面恢复并重新登录后，在设备信息中核对 **软件版本** 与安装包版本一致。
+包内的`scripts/install.sh`由CMake从兼容迁移安装器生成，用于把应用安装到已准备好的
+Sophon Linux设备并创建、启用`cosmo.service`。将构建输出中的唯一包名代入占位符：
 
-这个公开流程只覆盖已有 CosmoEdge 系统的升级。仓库当前不提供空白设备的公开工厂
-首装流程；升级包也不是供用户解压后直接安装的离线安装器。
+```bash
+scp build_output/public-runtime/<安装包>.tar.gz root@<设备IP>:/tmp/
+ssh root@<设备IP>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <安装包>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+已有CosmoEdge正常运行时，也可以在 **系统管理 → 系统维护 → 软件升级** 上传同一个包。
+两条路径完成后都要重新登录，并核对 **软件版本** 与安装包版本一致。SSH安装器安装应用和
+服务，但不是任意空白硬件的操作系统镜像安装器。
 
 维护人员在包含完整 Guard SDK 和授权工具的受控环境中使用一条命令构建：
 

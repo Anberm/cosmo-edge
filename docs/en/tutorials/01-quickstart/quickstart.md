@@ -105,13 +105,29 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ls -lh build_output/public-runtime/
 ```
 
-On a device that already runs CosmoEdge, sign in to the web console, open
-**System Management → System Maintenance → Software Upgrade**, select the
-generated `cosmo-V<version>-<32-char-md5>.tar.gz`, and confirm. Keep power
-connected during upload, validation, installation, and reboot. After signing in
-again, verify that **Software Version** matches the package version. This public
-workflow covers upgrades of an existing installation; the repository does not
-currently publish a blank-device factory-install procedure.
+Substitute the one package name reported by the build for `<package>` and install
+it on a prepared Sophon Linux device over SSH:
+
+```bash
+# Build host
+scp build_output/public-runtime/<package>.tar.gz root@<device_ip>:/tmp/
+
+# Device
+ssh root@<device_ip>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <package>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+When CosmoEdge is already running, you can instead open **System Management →
+System Maintenance → Software Upgrade** and upload the same package. Keep power
+connected during installation. After reboot and sign-in, verify that **Software
+Version** matches the package version. The SSH installer targets a Sophon device
+with its base Linux system already prepared; it is not an OS-image installer for
+arbitrary blank hardware.
 
 ![Example BM1688 edge-device connector panel](images/img_01.webp)
 

@@ -107,19 +107,29 @@ can be uploaded through the management page on a main-branch installation and
 on every later version. Application archives are not signed. The profiles differ
 only in model protection and availability of `cosmo-model-provision`.
 
-### Install a Build on an Existing Device
+### Install a Build on a Sophon Device
 
-Sign in to the web console of a device that already runs CosmoEdge, open
-**System Management → System Maintenance → Software Upgrade**, select the
-`cosmo-V<version>-<32-char-md5>.tar.gz` from the matching output directory, and
-confirm. Keep the device powered and connected during upload, validation,
-installation, and reboot. After signing in again, verify that **Software
-Version** matches the package version.
+CMake generates the packaged `scripts/install.sh` from the compatibility
+migration installer. It installs the application on a prepared Sophon Linux
+device and creates and enables `cosmo.service`. Substitute the one package name
+reported by the build:
 
-This public workflow covers upgrades of an existing CosmoEdge installation.
-The repository does not currently publish a blank-device factory-install
-procedure. The upgrade archive is not a user-invoked offline installer to be
-extracted and run directly.
+```bash
+scp build_output/public-runtime/<package>.tar.gz root@<device_ip>:/tmp/
+ssh root@<device_ip>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <package>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+When CosmoEdge is already running, you can instead upload the same package from
+**System Management → System Maintenance → Software Upgrade**. After either
+path, sign in again and verify **Software Version** against the package. The SSH
+installer installs the application and service; it is not an OS-image installer
+for arbitrary blank hardware.
 
 Maintainers use one command in a controlled environment containing the complete
 Guard SDK and provisioning tool:

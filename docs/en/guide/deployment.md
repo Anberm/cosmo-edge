@@ -149,15 +149,28 @@ The web console performs a local upgrade as follows:
 
 The 15-minute recovery wait is a UI timeout; it does not cancel an upgrade already running on the device. Keep power connected and inspect device networking and systemd logs if it expires. After signing in again, verify the software version against the release package; UI recovery proves reboot and service recovery, not version acceptance.
 
-## Installation Boundary
+## SSH Installation Path
 
-Sophon packages produced by the public repository upgrade devices that already
-run CosmoEdge. Use the web-console local-upgrade flow above; do not extract and
-run the upgrade archive as an offline installer.
+In addition to web upgrade, packaged `scripts/install.sh` is the SSH entry point
+for migration from main and later compatible installations. It installs the
+application, replaces and enables `cosmo.service`, and relies on reboot to start
+the service:
 
-The repository does not currently publish a blank-device factory-install
-procedure. Blank-device setup includes the system image, service unit, storage
-layout, and device initialization and cannot be inferred from the upgrade flow.
+```bash
+scp build_output/public-runtime/<package>.tar.gz root@<device_ip>:/tmp/
+ssh root@<device_ip>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <package>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+This path assumes that the Sophon Linux base system and runtime dependencies are
+already prepared. It is not an OS-image installation procedure for arbitrary
+blank hardware. Record the current version and recovery plan first; the
+installer replaces the active application tree.
 
 ## systemd Service
 

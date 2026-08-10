@@ -104,10 +104,26 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ls -lh build_output/public-runtime/
 ```
 
-在已有 CosmoEdge 的设备上，登录管理页面，进入 **系统管理 → 系统维护 → 软件升级**，
-选择生成的 `cosmo-V<版本号>-<32位md5>.tar.gz` 并确认升级。升级期间保持供电；设备重启并
-重新登录后，在设备信息中核对 **软件版本** 与安装包版本一致。该公开流程只覆盖已有系统的
-升级；仓库当前不提供空白设备的公开工厂首装流程。
+把构建日志列出的唯一包名代入`<安装包>`，可以通过SSH安装到已准备好的Sophon Linux设备：
+
+```bash
+# 构建主机
+scp build_output/public-runtime/<安装包>.tar.gz root@<设备IP>:/tmp/
+
+# 设备
+ssh root@<设备IP>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <安装包>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+已有 CosmoEdge 正常运行时，也可以登录管理页面，进入
+**系统管理 → 系统维护 → 软件升级**，选择同一个安装包并确认。升级期间保持供电；设备重启并
+重新登录后，在设备信息中核对 **软件版本** 与安装包版本一致。SSH安装器面向已经准备好基础
+系统的Sophon设备，并不是任意空白硬件的操作系统镜像安装器。
 
 ![BM1688 边缘设备接口面板示例](images/img_01.webp)
 

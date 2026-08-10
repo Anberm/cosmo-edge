@@ -149,13 +149,24 @@ Web 控制台的本地升级流程如下：
 
 页面等待恢复的 15 分钟是交互超时，不会中止设备端已经开始的升级。超时后应保持供电，并通过设备网络和 systemd 日志确认状态。重新登录后还应核对软件版本与本次发布包；页面恢复只证明重启与服务恢复，不替代版本验收。
 
-## 安装边界
+## SSH安装路径
 
-公开仓库生成的 Sophon 包用于升级已经运行 CosmoEdge 的设备。使用上面的 Web 控制台
-本地升级流程；不要把升级包解压后当作离线安装器直接执行。
+除了Web升级，包内`scripts/install.sh`还提供从main版本迁移及后续兼容安装的SSH入口。
+它会安装应用、替换并启用`cosmo.service`，然后由重启启动服务：
 
-仓库当前不提供空白设备的公开工厂首装流程。空白设备涉及系统镜像、服务单元、磁盘布局
-和设备初始化，不能从已有设备的升级流程推断。
+```bash
+scp build_output/public-runtime/<安装包>.tar.gz root@<设备IP>:/tmp/
+ssh root@<设备IP>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <安装包>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+该路径假设Sophon Linux基础系统和运行依赖已经准备好，不是任意空白硬件的操作系统
+镜像安装流程。安装前记录当前版本和恢复方案；安装器会替换当前应用树。
 
 ## systemd 服务
 

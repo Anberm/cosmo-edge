@@ -94,17 +94,36 @@ ls -lh build_output/public-runtime/
 ```
 
 The default Open package contains plaintext models and requires no device
-authorization. To install it on an existing CosmoEdge device, sign in to the web
-console, open **System Management → System Maintenance → Software Upgrade**,
-select the generated `cosmo-V<version>-<md5>.tar.gz`, and confirm the upgrade.
-Keep power connected while the device uploads, validates, installs, and reboots.
-After signing in again, verify that **Software Version** matches the package
-version.
+authorization. Copy the one generated package to a Sophon device, extract it,
+enter its single top-level directory, and run the packaged compatibility
+installer:
 
-This public workflow covers upgrades of an already provisioned device. The
-repository does not currently publish a blank-device factory-install procedure.
-Protected packages use the same web upgrade flow but contain encrypted preset
-models and provisioning tooling. See the [Build Guide](https://www.cosmowander.ai/docs/guide/build)
+```bash
+# Host: replace both placeholders with the values reported by the build.
+scp build_output/public-runtime/<cosmo-package>.tar.gz \
+  root@<device_ip>:/tmp/
+
+# Device
+ssh root@<device_ip>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <cosmo-package>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+For an already running CosmoEdge system, the web console provides the same
+upgrade lifecycle under **System Management → System Maintenance → Software
+Upgrade**. Keep power connected during installation. After reboot, open
+`http://192.168.100.1` by default and verify **Software Version** against the
+package. The initial web credentials are `admin` / `admin`; change the password
+after the first sign-in.
+
+The SSH installer targets a prepared Sophon Linux device and installs the
+application plus `cosmo.service`; it is not a generic OS-image installer for
+arbitrary blank hardware. Protected packages contain encrypted preset models
+and provisioning tooling. See the [Build Guide](https://www.cosmowander.ai/docs/guide/build)
 and [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment) for the
 full validation and recovery boundaries.
 
