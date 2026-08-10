@@ -8,7 +8,7 @@
 ## 启动
 
 ```bash
-cd scripts/push-test-service
+cd test/push-test-service
 npm install
 npm start
 ```

@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cosmo-wander-ai/cosmo-edge/test/agent/schemas/evidence-v1.schema.json",
+  "title": "CosmoEdge task evidence v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "task",
+    "userObjective",
+    "commit",
+    "timestamp",
+    "routeAssessment",
+    "routeAssessmentSha256",
+    "environmentReport",
+    "authorityGrants",
+    "stages",
+    "deliverables",
+    "developmentVerdict",
+    "promotionVerdict",
+    "deviceVerdict",
+    "commands"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1
+    },
+    "userObjective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 1
+    },
+    "routeAssessment": {
+      "const": "route-assessment.json"
+    },
+    "routeAssessmentSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "environmentReport": {
+      "const": "environment-report.json"
+    },
+    "authorityGrants": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "environment-change",
+          "remote-execution",
+          "model-transfer",
+          "device-deployment"
+        ]
+      }
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "SKIP",
+              "UNVERIFIED"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "deliverables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "developmentVerdict": {
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "FAILED",
+        "UNVERIFIED"
+      ]
+    },
+    "promotionVerdict": {
+      "enum": [
+        "NOT_REQUESTED",
+        "READY",
+        "NOT_READY"
+      ]
+    },
+    "deviceVerdict": {
+      "enum": [
+        "PASS",
+        "NOT_RUN",
+        "UNVERIFIED"
+      ]
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

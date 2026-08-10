@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include "linkage/LinkAgeAudioDevice.h"
+#include "util/JsonFieldOpt.h"
 #include "util/JsonStructUtil.h"
 #include "util/Keys.h"
 #include "util/LimitedTypeJson.h"
@@ -13,7 +14,8 @@
 namespace cosmo::linkage {
 LinkAgeAlarm::LinkAgeAlarm(LinkAgeParamNode& action) : LinkAgeBase(action) {
     for (const auto& param : action.config_object.params) {
-        if (kKeyStrageAlgs == param.key.ToString() || kKeyLinkageAlgs == param.key.ToString()) {
+        const auto& key = param.key.ToRefString();
+        if (IsAlarmAlgorithmsKey(key)) {
             AnalysisTasks(param.value);
         }
     }
@@ -50,10 +52,8 @@ bool LinkAgeAlarm::DoAlarm(const std::string& channel_id, const std::string& alg
 // Auto-generated JSON serialization
 namespace cosmo::linkage {
 void from_json(const nlohmann::json& j, LinkAgeAlarmTaskUnit& v) {
-    if (j.contains("channelId") && !j["channelId"].is_null())
-        j.at("channelId").get_to(v.channel_id);
-    if (j.contains("algorithmId") && !j["algorithmId"].is_null())
-        j.at("algorithmId").get_to(v.algorithm_id);
+    JSON_OPT_KEY(j, v, "channelId", channel_id);
+    JSON_OPT_KEY(j, v, "algorithmId", algorithm_id);
 }
 
 void to_json(nlohmann::json& j, const LinkAgeAlarmTaskUnit& v) {
