@@ -36,6 +36,24 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Keep the existing numeric version formats while deriving a unique patch
+# number from the nearest vX.Y.Z tag and the number of commits after it.
+# Source archives without Git metadata retain the historical fallback version.
+include("${CMAKE_SOURCE_DIR}/cmake/CosmoVersion.cmake")
+cosmo_resolve_version("${CMAKE_SOURCE_DIR}" 1 1 0 0)
+set(VER_MAJOR "${COSMO_VERSION_MAJOR}")
+set(VER_MINOR "${COSMO_VERSION_MINOR}")
+set(VER_PATCH "${COSMO_VERSION_PATCH}")
+add_compile_definitions(
+    COSMO_VERSION_MAJOR=${COSMO_VERSION_MAJOR}
+    COSMO_VERSION_MINOR=${COSMO_VERSION_MINOR}
+    COSMO_VERSION_PATCH=${COSMO_VERSION_PATCH}
+    COSMO_VERSION_BUILD=${COSMO_VERSION_BUILD}
+)
+message(STATUS
+    "Cosmo version: V${COSMO_VERSION_MAJOR}.${COSMO_VERSION_MINOR}."
+    "${COSMO_VERSION_PATCH}.${COSMO_VERSION_BUILD} (${COSMO_VERSION_SOURCE})")
+
 #Generate compile_commands.json for static analysis tools(clang - tidy, IDE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -745,13 +763,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/netplan/
 ##########################################################
 # Packaging
 ##########################################################
-file(STRINGS "${CMAKE_SOURCE_DIR}/src/util/Version.h" _ver_major REGEX "kVersionMajor")
-file(STRINGS "${CMAKE_SOURCE_DIR}/src/util/Version.h" _ver_minor REGEX "kVersionMinor")
-file(STRINGS "${CMAKE_SOURCE_DIR}/src/util/Version.h" _ver_patch REGEX "kVersionPatch")
-string(REGEX REPLACE ".*kVersionMajor = ([0-9]+).*" "\\1" VER_MAJOR "${_ver_major}")
-string(REGEX REPLACE ".*kVersionMinor = ([0-9]+).*" "\\1" VER_MINOR "${_ver_minor}")
-string(REGEX REPLACE ".*kVersionPatch = ([0-9]+).*" "\\1" VER_PATCH "${_ver_patch}")
-
 set(PACKAGE_PREFIX  "cosmo")
 set(PACKAGE_VERSION "V${VER_MAJOR}.${VER_MINOR}.${VER_PATCH}")
 set(PACKAGE_NAME    "${PACKAGE_PREFIX}-${PACKAGE_VERSION}")

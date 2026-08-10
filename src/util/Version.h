@@ -4,10 +4,23 @@
 
 namespace cosmo::util {
 
-constexpr int kVersionMajor = 1;
-constexpr int kVersionMinor = 0;
-constexpr int kVersionPatch = 0;
-constexpr int kVersionBuild = 0;
+#ifndef COSMO_VERSION_MAJOR
+#define COSMO_VERSION_MAJOR 1
+#endif
+#ifndef COSMO_VERSION_MINOR
+#define COSMO_VERSION_MINOR 1
+#endif
+#ifndef COSMO_VERSION_PATCH
+#define COSMO_VERSION_PATCH 0
+#endif
+#ifndef COSMO_VERSION_BUILD
+#define COSMO_VERSION_BUILD 0
+#endif
+
+constexpr int kVersionMajor = COSMO_VERSION_MAJOR;
+constexpr int kVersionMinor = COSMO_VERSION_MINOR;
+constexpr int kVersionPatch = COSMO_VERSION_PATCH;
+constexpr int kVersionBuild = COSMO_VERSION_BUILD;
 
 // Returns the application description string.
 constexpr const char* GetProgramDesc() {
