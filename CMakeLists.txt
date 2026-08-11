@@ -359,6 +359,7 @@ if(COSMO_NN_USE_CPU_BACKEND)
 endif()
 if(COSMO_NN_USE_RKNN_BACKEND)
     include(cmake/rknn.cmake)
+    include(cmake/rkllm.cmake)
 endif()
 if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
     include(cmake/rockchip_media.cmake)
@@ -475,7 +476,7 @@ if(COSMO_NN_USE_CPU_BACKEND)
     list(APPEND COMMON_LIBS onnxruntime)
 endif()
 if(COSMO_NN_USE_RKNN_BACKEND)
-    list(APPEND COMMON_LIBS rknnrt)
+    list(APPEND COMMON_LIBS rknnrt rkllmrt)
 endif()
 if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
     list(APPEND COMMON_LIBS rockchip_mpp rockchip_rga)
@@ -711,6 +712,10 @@ endif()
 
 if(COSMO_NN_USE_RKNN_BACKEND)
     install(FILES "${RKNN_RUNTIME_LIBRARY}"
+        DESTINATION lib
+        PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+    )
+    install(FILES "${RKLLM_RUNTIME_LIBRARY}"
         DESTINATION lib
         PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
     )

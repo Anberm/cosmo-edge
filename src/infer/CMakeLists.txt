@@ -42,7 +42,8 @@ if(COSMO_NN_USE_CPU_BACKEND)
 endif()
 
 if(COSMO_NN_USE_RKNN_BACKEND)
-    target_link_libraries(cosmo_infer PRIVATE rknnrt)
+    target_sources(cosmo_infer PRIVATE RkllmVlmBackend.cc RkllmVlmBackend.h)
+    target_link_libraries(cosmo_infer PRIVATE rknnrt rkllmrt)
     target_compile_definitions(cosmo_infer PRIVATE
         COSMO_NN_USE_RKNN_BACKEND
         COSMO_NN_USE_HOST_BACKEND
