@@ -129,7 +129,14 @@ full validation and recovery boundaries.
 
 ### Evaluate the RK3576 candidate
 
-> RK3576 is currently a release candidate and requires pinned RKNN runtime and Rockchip media dependencies. Start with the [RK3576 integration guide](docs/guide/rk3576-rknn-development.md).
+```bash
+docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+ls -lh build_output/rk3576/
+```
+
+The public builder is pinned by digest and includes the RKNN, MPP, and RGA build
+dependencies. See the [RK3576 integration guide](docs/guide/rk3576-rknn-development.md)
+for the target runtime and device-validation boundary.
 
 CV186X does not yet have a public Quick Start. Use the [Model Porting Guide](https://www.cosmowander.ai/docs/tutorials/05-model-porting/model-porting) for the current target-specific model contract.
 

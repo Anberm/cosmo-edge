@@ -105,18 +105,25 @@ labeled precision/recall/F1 acceptance set.
 
 ## Build and deployment
 
-Build against a pinned RKNN runtime root. The base resource directory supplies
-common actions, layouts and fonts; the RKNN resource directory supplies the
-RK3576 algorithms and models.
+The public builder image is pinned by digest in `docker-compose.rk3576.yml` and
+contains the aarch64 toolchain, RKNN Runtime, MPP and RGA development files. The
+base resource directory supplies common actions, layouts and fonts; the RKNN
+resource directory supplies the RK3576 algorithms and models.
 
 ```bash
-docker run --rm \
-  -v "$COSMO_EDGE_ROOT:/workspace" \
-  -v "$RKNN_RUNTIME_ROOT:/opt/rknn:ro" \
-  -w /workspace cosmo_dev:latest \
-  bash -lc './scripts/build_rknn.sh \
-    -r /opt/rknn -m data/resource/aiboxresource_x86 -t -T'
+docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
+docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
+
+The image is public and does not require `docker login`. Docker Compose V1 users
+can replace `docker compose` with `docker-compose`. This command builds a Release
+package with the Rockchip media backend and also leaves the aarch64 test binary
+at `build_rknn/cosmo-tests`; it does not enable `COSMO_DEV_MODE`. The formal
+entry removes the previous `build_rknn` directory before building so a partial
+cross-compilation cache cannot be reused as release evidence. It uses host
+networking for build-time dependency resolution; the one-shot build service does
+not publish or listen on application ports.
 
 Keep mutable and packaged roots separate at runtime:
 

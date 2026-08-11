@@ -1,0 +1,31 @@
+services:
+  cosmo-rk3576-package:
+    image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:0dbb35f5a4336777c311b5f881886cd9b284371d61ceffff55a8216c01d2b076
+    platform: linux/amd64
+    network_mode: host
+    volumes:
+      - .:/workspace
+      - ./build_output:/build_output
+    working_dir: /workspace
+    environment:
+      RKNN_ROOT: /opt/rknn
+      ROCKCHIP_MEDIA_ROOT: /opt/rockchip-media
+    command: >
+      bash -lc "
+      set -euo pipefail;
+      echo 'Starting RK3576 Release cross-compilation...';
+      rm -rf -- build_rknn;
+      ./scripts/build_rknn.sh -T;
+      output_dir=/build_output/rk3576;
+      rm -rf -- \"$${output_dir}\";
+      mkdir -p -- \"$${output_dir}\";
+      set -- build_rknn/packages/*.tar.gz;
+      if [ \"$${#}\" -ne 1 ] || [ ! -f \"$${1}\" ]; then
+        echo 'ERROR: expected exactly one RK3576 package artifact' >&2;
+        exit 1;
+      fi;
+      cp -f -- \"$${1}\" \"$${output_dir}/\";
+      sha256sum -- \"$${output_dir}/\"*.tar.gz;
+      ls -lh \"$${output_dir}\";
+      echo 'RK3576 build finished.'
+      "

@@ -85,7 +85,13 @@ ls -lh build_output/public-runtime/
 
 ### 评估 RK3576 候选
 
-> RK3576 当前为发布候选，需要固定版本的 RKNN 运行时与 Rockchip 媒体环境。请从 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)开始。
+```bash
+docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+ls -lh build_output/rk3576/
+```
+
+公开构建镜像已固定 digest，并包含 RKNN、MPP 和 RGA 构建依赖。目标运行时与
+设备验证边界请参阅 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)。
 
 CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配指南](https://www.cosmowander.ai/zh/docs/tutorials/05-model-porting/model-porting)。
 
