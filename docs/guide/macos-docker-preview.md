@@ -2,8 +2,8 @@
 title: macOS Docker Preview
 description: 在 Apple Silicon Mac 上通过隔离的 linux/amd64 Docker 环境体验 CosmoEdge x86 工作流。
 prev:
-  text: 构建指南
-  link: /guide/build
+  text: RK3576 / RKNN 集成
+  link: /guide/rk3576-rknn-development
 next:
   text: 部署指南
   link: /guide/deployment

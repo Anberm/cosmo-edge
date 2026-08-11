@@ -2,8 +2,8 @@
 title: macOS Docker Preview
 description: Run the CosmoEdge x86 workflow on Apple Silicon through an isolated linux/amd64 Docker environment.
 prev:
-  text: Build Guide
-  link: /en/guide/build
+  text: RK3576 / RKNN Integration
+  link: /en/guide/rk3576-rknn-development
 next:
   text: Deployment Guide
   link: /en/guide/deployment

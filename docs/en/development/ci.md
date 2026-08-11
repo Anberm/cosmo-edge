@@ -1,6 +1,6 @@
 ---
 title: CI and Quality Checks
-description: Entry points for documentation site, frontend, C++ formatting, static analysis, and release build quality checks for open-source collaboration.
+description: Entry points for documentation, frontend, C++, static analysis, and platform release-build checks.
 prev:
   text: Backend Development
   link: /en/development/backend
@@ -24,6 +24,7 @@ This page collects the quality-check entry points that already exist in the repo
 | CPU test build | `scripts/build_cpu_test.sh`, `build_cpu/cosmo-tests` | Pull request / manual |
 | x86 Docker | `docker compose -f docker-compose.x86.yml up -d --build` (use `docker-compose.x86.windows.yml` on Windows) | Manual / before release |
 | Sophon release package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Manual / self-hosted |
+| RK3576 release package | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | Daily at 02:12 Beijing Time / manual |
 
 ## Documentation Site Checks
 
@@ -183,3 +184,34 @@ Windows PowerShell:
 ```
 
 The Sophon release package build depends on the cross-compilation environment and the Sophon SDK. The package exported into `build_output/` is named in the form `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`.
+
+## RK3576 Nightly Cross-Build
+
+`.github/workflows/ci-build-rk3576.yml` uses the formal RK3576 Compose entry
+every day at 02:12 Beijing Time (18:12 UTC on the previous day) and also supports
+manual dispatch. A scheduled workflow becomes active only after it reaches the
+GitHub default branch.
+
+CI uses the public, digest-pinned builder image without a registry login:
+
+```bash
+docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
+docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+```
+
+The workflow applies these release-candidate checks:
+
+1. Validates the Compose configuration and pulls the public image.
+2. Cross-compiles, builds validation programs, and packages from a clean
+   `build_rknn/` directory.
+3. Requires exactly one regular package file under `build_output/rk3576/` and
+   records its SHA-256.
+4. Confirms that `cosmo-tests`, `cosmo-rknn-backend-smoke`, and
+   `cosmo-rknn-fastpath-qualify` are ARM aarch64 programs.
+5. Audits package contents with the `public-runtime` profile inside the build
+   container.
+6. Uploads the package, checksum, and three validation programs for 7 days.
+
+The workflow has only `contents: read` permission and cancels an older
+overlapping run on the same branch. It cross-compiles and inspects artifacts;
+it does not execute aarch64 programs on the GitHub-hosted x86 runner.

@@ -7,6 +7,7 @@
 Build and operate video analytics, VLM, and event workflows through a consistent orchestration experience. Each platform uses its own runtime, build, and model artifacts.
 
 [![Nightly Sophon Build and Test](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/nightly-build-test-sophon.yml/badge.svg?branch=main)](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/nightly-build-test-sophon.yml)
+[![Nightly RK3576 Cross Build](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rk3576.yml/badge.svg?branch=main)](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rk3576.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
 [![Runtime](https://img.shields.io/badge/runtime-C%2B%2B17-orange?style=flat-square)](#core-capabilities)
 [![Release](https://img.shields.io/badge/release-v1.0.0-green?style=flat-square)](https://github.com/cosmo-wander-ai/cosmo-edge/releases)
@@ -32,7 +33,7 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 
 > The items below target the next release. Availability in the current source does not mean inclusion in the v1.0.0 packages. See the platform matrix and its linked evidence for platform status.
 
-- **Rockchip RK3576:** the frozen engineering candidate passed ScenarioBench at 1 / 2 / 4 / 8 channels at 5 FPS and completed a 12-hour, 4-channel run at 5 FPS; final combined-branch system validation is pending.
+- **Rockchip RK3576:** final combined-source board validation is complete. The stable-release operating profile is four channels at 5 FPS per channel; the 1 / 2 / 4 / 8-channel ScenarioBench ladder records engineering headroom rather than an 8-channel capacity guarantee.
 - **Sophon model handling:** chip-agnostic model directories and `chip_type` validation prepare the model metadata and import path for BM1688 and CV186X; CV186X package and device evidence is still in progress.
 - **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 candidate decoding paths with explicit fallbacks; on the same frozen candidate, single-channel Detect average decreased from 142.3 ms to 58.2 ms (-59.1%).
 - **Agent-assisted development:** a repository-guided path for handing model porting, integration, and UI tasks to the coding agent you already use and receiving verifiable deliverables.
@@ -46,7 +47,7 @@ CosmoEdge provides one engine architecture and orchestration experience, but eac
 | Platform | Status | Runtime / model artifact | Current scope and evidence |
 | --- | --- | --- | --- |
 | Sophon BM1688 | Primary | BMRT / `.nn` | Production deployment path with published [v1.0 baselines](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/) |
-| Rockchip RK3576 | Release candidate | RKNN / `.rknn` | Engineering baseline: 8 channels at 5 FPS passed; final combined-branch validation is pending. Start with the [integration guide](docs/guide/rk3576-rknn-development.md) |
+| Rockchip RK3576 | Stable-release ready | RKNN / `.rknn` | Formal Docker cross-build and final board path validated. Supported baseline: 4 channels at 5 FPS/channel; the 8-channel result is engineering headroom. Start with the [integration guide](docs/en/guide/rk3576-rknn-development.md) |
 | Sophon CV186X | Candidate | BMRT / target-specific `.nn` | Model-directory and import compatibility; release package and device evidence in progress |
 | x86 Linux / Windows; Apple Silicon macOS | Linux / Windows supported; macOS Preview | ONNX Runtime / `.onnx` | Mac uses amd64 emulation for one local-video developer workflow, not native performance evidence |
 | Sophon BM1684X | Planned | — | Not part of the current release scope |
@@ -127,7 +128,7 @@ and provisioning tooling. See the [Build Guide](https://www.cosmowander.ai/docs/
 and [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment) for the
 full validation and recovery boundaries.
 
-### Evaluate the RK3576 candidate
+### Build for RK3576
 
 ```bash
 docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
@@ -135,7 +136,7 @@ ls -lh build_output/rk3576/
 ```
 
 The public builder is pinned by digest and includes the RKNN, MPP, and RGA build
-dependencies. See the [RK3576 integration guide](docs/guide/rk3576-rknn-development.md)
+dependencies. See the [RK3576 integration guide](docs/en/guide/rk3576-rknn-development.md)
 for the target runtime and device-validation boundary.
 
 CV186X does not yet have a public Quick Start. Use the [Model Porting Guide](https://www.cosmowander.ai/docs/tutorials/05-model-porting/model-porting) for the current target-specific model contract.
@@ -190,9 +191,9 @@ The table below is a **published v1.0 baseline**, not evidence for every next-re
 | VLM Review | YY-16T01-Preview / NPU | 8 | 0.1/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/vlm-55009-npu/report.html) |
 | No Safety Helmet x86 baseline | x86 CPU | 7 | 3/channel | LIMITED; 8 channels exceeded latency limits | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/helmet-7463-x86/report.html) |
 
-See the [benchmark manifest](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/manifest.json), [environment notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/environment), and [current refresh notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/) for methodology and publication boundaries. The published table above does not represent RK3576 or CV186X release evidence; the separate RK3576 engineering baseline follows.
+See the [benchmark manifest](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/manifest.json), [environment notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/environment), and [current refresh notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/) for methodology and publication boundaries. The published v1.0 table above does not represent RK3576 or CV186X; the separate candidate-bound RK3576 performance baseline follows.
 
-### RK3576 engineering baseline
+### RK3576 validation baseline
 
 This next-release result is bound to frozen source candidate [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b) (tree `fd1b646f`), engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`, RKNN Runtime `2.3.2-429f97ae6b`, driver `0.9.8`, RGA `1.10.1_[4]`, and MPP `1.5.0-1`.
 
@@ -202,7 +203,7 @@ This next-release result is bound to frozen source candidate [`8f8b4b8e`](https:
 
 The 1 / 2 / 4 / 8-channel steps all passed with zero discarded frames or inference, RGA, or MPP failures. Single-channel Detect average decreased from 142.3 ms to 58.2 ms (-59.1%). A separate 12-hour run at 4 channels and 5 FPS, with four algorithm previews, recorded 720 continuous hold samples, CPU avg/P95/max of 33.92% / 39% / 43%, and zero discarded frames or runtime/preview failures.
 
-This is an engineering baseline, not release evidence for the current combined branch. The sanitized report and manifest must be published, and the final combined candidate rerun, before this result is promoted to the release matrix.
+Final combined-source board validation for stable-release support is complete. The supported operating profile is four channels at 5 FPS per channel. The 8-channel step records engineering headroom and is not a release capacity guarantee. The performance values above remain bound to the identified candidate; each release artifact must retain its own source and package manifest.
 
 ## Architecture
 
@@ -236,7 +237,7 @@ One build selects one inference backend. Model artifacts are generated for the t
 | [VLM Guide](https://www.cosmowander.ai/docs/tutorials/03-vlm-guide/vlm-guide) | Prompt-based visual judgment and events |
 | [Model Porting Guide](https://www.cosmowander.ai/docs/tutorials/05-model-porting/model-porting) | Importing your own model |
 | [Agent-Assisted Development](docs/en/development/agent-assisted-development.md) | Delegating an extension task with verifiable results |
-| [Build Guide](https://www.cosmowander.ai/docs/guide/build) | x86 and Sophon build/package paths |
+| [Build Guide](https://www.cosmowander.ai/docs/guide/build) | x86, Sophon, and RK3576 build/package paths |
 | [API Overview](https://www.cosmowander.ai/docs/reference/api) | REST, WebSocket, MQTT, and webhook integration |
 
 Certified devices add preconfigured acceleration, validated commercial model packages, and dedicated deployment support; they do not unlock separate software features. Devices are available in mainland China from the [Taobao store](https://item.taobao.com/item.htm?id=1066672051450); contact <hello@cosmowander.ai> for other regions or project support.
@@ -269,7 +270,7 @@ Yes. Use the model-porting path to validate the tensor, preprocessing, post-proc
 <details>
 <summary><b>How production-ready is CosmoEdge?</b></summary>
 
-`v1.0.0` is the current stable public release, with published BM1688 and x86 baseline reports above. RK3576 now has the candidate-bound engineering baseline shown above, but it remains non-release evidence until the final combined candidate and sanitized report are published. Validate your own models and deployment conditions before production use.
+`v1.0.0` is the current stable public release, with published BM1688 and x86 baseline reports above. RK3576 has completed the formal cross-build and final board-validation path for the next stable release, with a supported baseline of four channels at 5 FPS per channel. The performance snapshot above remains candidate-bound; validate your own models and deployment conditions before production use.
 
 </details>
 

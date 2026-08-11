@@ -1,6 +1,6 @@
 ---
 title: CI 与质量检查
-description: 面向开源协作的文档站、前端、C++ 后端、静态分析和发布构建检查入口。
+description: 面向开源协作的文档站、前端、C++ 后端、静态分析和平台发布构建检查入口。
 prev:
   text: 后端开发
   link: /development/backend
@@ -24,6 +24,7 @@ next:
 | CPU 测试构建 | `scripts/build_cpu_test.sh`、`build_cpu/cosmo-tests` | Pull request / 手动 |
 | x86 Docker | `docker compose -f docker-compose.x86.yml up -d --build` (Windows 下为 `docker-compose.x86.windows.yml`) | 手动 / release 前 |
 | Sophon 发布包 | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | 手动 / self-hosted |
+| RK3576 发布包 | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | 每日 02:12（北京时间）/ 手动 |
 
 ## 文档站检查
 
@@ -182,3 +183,29 @@ Windows PowerShell：
 ```
 
 Sophon 发布包构建依赖交叉编译环境和 Sophon SDK。`build_output/` 中导出的包名格式为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
+
+## RK3576 夜间交叉编译
+
+`.github/workflows/ci-build-rk3576.yml` 使用正式 RK3576 Compose 入口，每日
+北京时间 02:12（UTC 前一日 18:12）在默认分支运行，同时保留手动触发。定时工作流
+只有进入 GitHub 默认分支后才会生效。
+
+CI 使用公开、固定 digest 的构建镜像，无需 registry 登录：
+
+```bash
+docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
+docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+```
+
+工作流执行以下发布候选检查：
+
+1. 验证 Compose 配置并拉取公开镜像。
+2. 从干净的 `build_rknn/` 完成交叉编译、测试程序构建和打包。
+3. 要求 `build_output/rk3576/` 中只存在一个普通文件类型的发布包，并记录 SHA-256。
+4. 确认 `cosmo-tests`、`cosmo-rknn-backend-smoke` 和
+   `cosmo-rknn-fastpath-qualify` 都是 ARM aarch64 程序。
+5. 在构建容器内以 `public-runtime` 配置审计安装包内容。
+6. 上传发布包、校验和及三个验证程序，保留 7 天。
+
+工作流只授予 `contents: read` 权限；同一分支出现重叠运行时取消旧任务。该任务完成
+交叉编译与产物检查，不在 GitHub 托管的 x86 runner 上执行 aarch64 程序。

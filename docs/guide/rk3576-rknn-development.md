@@ -1,86 +1,86 @@
-# RK3576 / RKNN integration guide
+---
+title: RK3576 / RKNN 集成指南
+description: Rockchip RK3576 稳定版的构建、运行时、模型和验证边界。
+prev:
+  text: 构建指南
+  link: /guide/build
+next:
+  text: macOS Docker Preview
+  link: /guide/macos-docker-preview
+---
 
-## Scope
+# RK3576 / RKNN 集成指南
 
-This integration adds the RK3576 CV backend without changing the behavior of
-the CPU, CUDA or Sophon backends:
+## 能力范围
 
-- RKNN Runtime 2.3.2 executes the static-batch detector and classifier models.
-- Rockchip MPP performs H.264/H.265 decode and encode.
-- The decoder uses delayed Copy-out: frames are sampled or discarded before a
-  host I420 copy is requested.
-- RGA performs the Rockchip frame-processing operations required by preview and
-  OSD paths.
-- Full DMA-BUF zero-copy is not part of this engineering integration.
+RK3576 集成增加了面向生产的 CV 后端，不改变 CPU、CUDA 或 Sophon 后端的行为：
 
-The currently validated engineering envelope is four channels at 5 FPS per
-channel. It is not a release-capacity claim.
+- RKNN Runtime 2.3.2 执行静态 batch 的检测和分类模型。
+- Rockchip MPP 执行 H.264/H.265 解码与编码。
+- 解码器使用延迟 Copy-out：先对帧进行采样或丢弃，再按需复制宿主机 I420 数据。
+- RGA 执行预览与 OSD 路径所需的 Rockchip 图像处理操作。
+- 完整 DMA-BUF 零拷贝不属于当前稳定版支持边界。
 
-## Repository and evidence boundary
+稳定版支持的运行范围为 4 路、每路 5 FPS。1/2/4/8 路 ScenarioBench 阶梯用于
+记录工程余量；8 路结果不作为发布容量承诺。
 
-The repository owns product code, build definitions, unit tests, reproducible
-model tooling, deployable RKNN resources and two reusable acceptance scenarios:
+## 仓库与证据边界
+
+仓库负责产品代码、构建定义、单元测试、可复现模型工具、可部署 RKNN 资源以及
+两个可复用验收场景：
 
 - `tools/scenario-bench/scenarios/rk3576-no-helmet-customer-journey`
 - `tools/scenario-bench/scenarios/rk3576-no-helmet-longrun-4x5fps`
 
-Raw device logs, metrics streams, screenshots, exported events and generated
-HTML/XML/JSON reports are external validation artifacts and must not be added to
-the source tree. An external evidence manifest must bind results to the source
-commit and tree, final package SHA-256, device/firmware/runtime versions, model
-and dataset hashes, thresholds, cleanup status and measured values.
+板端原始日志、指标流、截图、导出事件以及生成的 HTML/XML/JSON 报告属于外部
+验证产物，不应加入源码树。发布证据 manifest 应绑定源码 commit 与 tree、最终
+安装包 SHA-256、设备/固件/运行时版本、模型与数据集哈希、阈值、清理状态和实测值。
 
-Device addresses, account data, local backup paths and reusable credentials do
-not belong in source-controlled configuration or evidence.
+设备地址、账号数据、本地备份路径和可复用凭据不得进入版本控制配置或证据。
 
-## Frozen toolchain identities
+## 固定工具链标识
 
-The machine-readable toolchain and model-input lock is
-`config/rknn/toolchain-lock.json`. The current integration is based on:
+机器可读的工具链与模型输入锁文件为 `config/rknn/toolchain-lock.json`。当前支持
+的集成基于：
 
 - RKNN-Toolkit2 2.3.2
 - RKNN Model Zoo 2.3.2
-- Ubuntu 22.04 x86_64 conversion host with Python 3.10
-- RK3576 Ubuntu 22.04 aarch64 target with kernel 6.1.118 and RKNPU driver 0.9.8
+- Ubuntu 22.04 x86_64 转换主机与 Python 3.10
+- RK3576 Ubuntu 22.04 aarch64 目标机、内核 6.1.118、RKNPU 驱动 0.9.8
 
-Changing a locked SDK, runtime, input model or preprocessing contract requires
-new conversion and device evidence.
+修改已锁定的 SDK、运行时、输入模型或预处理约定后，必须重新生成转换和板端证据。
 
-## Runtime safety boundary
+## 运行时安全边界
 
-Keep the board's system RKNN runtime as the rollback baseline. Package RKNN
-Runtime 2.3.2 beside CosmoEdge and select it with executable RPATH or a
-task-local `LD_LIBRARY_PATH`; do not overwrite `/usr/lib/librknnrt.so` during
-development or acceptance. Production inference uses the native C API and does
-not depend on `rknn_server`.
+保留板端系统 RKNN 运行时作为回滚基线。将 RKNN Runtime 2.3.2 与 CosmoEdge 一起
+打包，通过可执行文件 RPATH 或任务局部 `LD_LIBRARY_PATH` 选择它；不要覆盖
+`/usr/lib/librknnrt.so`。生产推理使用原生 C API，不依赖 `rknn_server`。
 
-## Model and preprocessing contract
+## 模型与预处理约定
 
-The first supported models are:
+首批支持的模型为：
 
-1. Helmet classification: `1x3x224x224`, ONNX opset 19.
-2. YOLOv8 detection: `1x3x640x640`, converted to ONNX opset 19 / IR 9.
+1. 安全帽分类：`1x3x224x224`，ONNX opset 19。
+2. YOLOv8 检测：`1x3x640x640`，转换为 ONNX opset 19 / IR 9。
 
-CosmoEdge owns resize, channel order and normalization. Conversion must not
-bake in a second mean/std transform. CosmoEdge supplies float32 NCHW tensors;
-the RKNN boundary performs one explicit NCHW-to-NHWC copy because Runtime 2.3.2
-rejects NCHW on this input-conversion path. Outputs are requested as float32 so
-the existing postprocessors remain authoritative.
+CosmoEdge 负责 resize、通道顺序和归一化。转换过程不得再次固化 mean/std 变换。
+CosmoEdge 提供 float32 NCHW 张量；由于 Runtime 2.3.2 在该输入转换路径拒绝 NCHW，
+RKNN 边界执行一次显式 NCHW 到 NHWC 拷贝。输出请求为 float32，以现有后处理器
+为最终行为基准。
 
-The production YOLO candidate exposes three box/class head pairs. The
-`yolov8_dfl_v1` host adapter applies DFL and sigmoid, then reconstructs the
-logical `[1,84,8400]` contract. A single quantized output is not supported
-because its shared scale collapses confidence precision.
+生产 YOLO 模型提供三组 box/class head。`yolov8_dfl_v1` 宿主适配器执行 DFL 和
+sigmoid，再重建逻辑 `[1,84,8400]` 约定。不支持单个量化输出，因为共享 scale
+会压缩置信度精度。
 
-## Reproducible conversion
+## 可复现转换
 
-Prepare the verified offline bundle at an operator-selected path:
+在操作人员选定的路径准备已验证离线包：
 
 ```bash
 ./scripts/rknn/prepare_offline_env.sh "$RKNN_OFFLINE_BUNDLE"
 ```
 
-The locked YOLO conversion sequence is:
+锁定的 YOLO 转换顺序为：
 
 ```bash
 python tools/rknn/convert_onnx_opset.py \
@@ -100,15 +100,13 @@ python tools/rknn/convert_model.py \
   --dataset yolov8-calibration/dataset.txt
 ```
 
-Calibration and numerical-parity samples are unlabeled. They do not replace a
-labeled precision/recall/F1 acceptance set.
+校准样本和数值一致性样本没有标签，不能替代带标签的 precision/recall/F1 验收集。
 
-## Build and deployment
+## 构建与部署
 
-The public builder image is pinned by digest in `docker-compose.rk3576.yml` and
-contains the aarch64 toolchain, RKNN Runtime, MPP and RGA development files. The
-base resource directory supplies common actions, layouts and fonts; the RKNN
-resource directory supplies the RK3576 algorithms and models.
+公开构建镜像以 digest 固定在 `docker-compose.rk3576.yml` 中，包含 aarch64 工具链、
+RKNN Runtime、MPP 和 RGA 开发文件。基础资源目录提供通用动作、布局和字体；RKNN
+资源目录提供 RK3576 算法与模型。
 
 ```bash
 docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
@@ -116,16 +114,14 @@ docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
 
-The image is public and does not require `docker login`. Docker Compose V1 users
-can replace `docker compose` with `docker-compose`. This command builds a Release
-package with the Rockchip media backend and also leaves the aarch64 test binary
-at `build_rknn/cosmo-tests`; it does not enable `COSMO_DEV_MODE`. The formal
-entry removes the previous `build_rknn` directory before building so a partial
-cross-compilation cache cannot be reused as release evidence. It uses host
-networking for build-time dependency resolution; the one-shot build service does
-not publish or listen on application ports.
+镜像公开，无需 `docker login`。Docker Compose V1 用户可将 `docker compose` 替换为
+`docker-compose`。该命令使用 Rockchip 媒体后端构建 Release 包，并在
+`build_rknn/cosmo-tests` 保留 aarch64 测试程序；不会启用 `COSMO_DEV_MODE`。
 
-Keep mutable and packaged roots separate at runtime:
+正式入口在构建前删除旧的 `build_rknn`，避免将部分交叉编译缓存误作发布证据。
+构建时依赖解析使用宿主机网络；一次性构建服务不发布或监听应用端口。
+
+运行时应隔离可变数据目录和包内应用目录：
 
 ```bash
 export COSMO_DATA_DIR=/data/cwaiuserdata
@@ -133,46 +129,35 @@ export COSMO_APP_DATA_DIR=/appfs/cosmo_wander/cwai_data
 export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-`COSMO_DATA_DIR` contains configuration, databases, uploads and events.
-`COSMO_APP_DATA_DIR` contains packaged resources, models, libraries and
-binaries. Use the packaged launcher so transitive shared-library dependencies
-resolve from the candidate being tested.
+`COSMO_DATA_DIR` 保存配置、数据库、上传内容和事件；`COSMO_APP_DATA_DIR` 保存包内
+资源、模型、库和可执行文件。使用包内启动器，确保传递依赖从正在验证的产物解析。
 
-## Reusable acceptance scenarios
+## 可复用验收场景
 
-The customer-journey scenario runs one channel at 5 FPS for a bounded window.
-Acceptance includes login, model/task/channel visibility, real raw and
-algorithm HTTP-FLV playback, OSD difference, events, reconnect, stop/start
-recovery and cleanup.
+客户旅程场景在有界时间内运行 1 路 × 5 FPS。验收范围包括登录、模型/任务/通道
+可见性、真实原始与算法 HTTP-FLV 播放、OSD 差异、事件、重连、停止/启动恢复和清理。
 
-The long-run scenario holds four channels at 5 FPS for 12 hours. Run it with
-algorithm-preview clients enabled and audit it with `--gate-hours 12`. The
-runner stops when the configured disk fuse is reached. Use `--password-stdin`
-so credentials do not enter process arguments.
+长稳场景保持 4 路 × 5 FPS 运行 12 小时。运行时启用算法预览客户端，并使用
+`--gate-hours 12` 审计。达到配置的磁盘熔断线后 runner 会停止。使用
+`--password-stdin`，避免凭据进入进程参数。
 
-Preview validation requires real `ffmpeg` and `ffprobe` executables. The tool
-preflights them before mutating device configuration.
+预览验证需要真实的 `ffmpeg` 和 `ffprobe` 可执行文件。工具会在修改设备配置前
+完成环境预检。
 
-## Current engineering boundary
+## 已验证发布边界
 
-- Four channels at 5 FPS completed the 12-hour gate with CPU p95 of 54 percent,
-  zero media failure/fallback deltas and stable memory-pool accounting.
-- Real raw and algorithm playback, hardware decode/encode, OSD, reconnect and
-  task restart recovery passed on the tested candidate.
-- Delayed Copy-out discarded frames before host copies and is the selected
-  optimization for this phase.
-- Eight-channel operation is not an accepted capacity profile.
-- RK3576 NPU telemetry uses the vendor busy-time counter from
-  `/sys/kernel/debug/rknpu/load`, reports the busiest core on the health card,
-  and retains every core in the accelerator payload. The startup script exposes
-  only this read-only file at `/run/cosmo-edge/metrics/rknpu-load`; the devfreq
-  governor signal is never treated as NPU load.
-- RK3576 NPU and media allocations share system DDR. Accelerator telemetry
-  marks this as `memoryDomain=shared-system`; the dashboard emits one system
-  memory capacity instead of adding the same pool again as dedicated VRAM.
+- 4 路 × 5 FPS 完成 12 小时门禁，媒体失败/fallback 增量为 0，内存池统计稳定；
+  候选专属的 CPU 实测值保留在对应证据记录中。
+- 真实原始与算法播放、硬件解码/编码、OSD、重连和任务重启恢复在被测产物上通过。
+- 延迟 Copy-out 会在宿主拷贝前丢弃无需处理的帧，是本版本选定的优化方案。
+- 8 路 ScenarioBench 阶梯已作为工程余量证据通过，但不属于正式容量配置。
+- RK3576 NPU 指标使用 `/sys/kernel/debug/rknpu/load` 的厂商忙碌时间计数器；健康卡片
+  展示最忙核心，加速器 payload 保留所有核心。启动脚本仅将该只读文件暴露到
+  `/run/cosmo-edge/metrics/rknpu-load`；devfreq governor 信号不会被当作 NPU 负载。
+- RK3576 NPU 和媒体分配共享系统 DDR。加速器指标标记为
+  `memoryDomain=shared-system`；面板只显示一次系统内存容量，不再将同一内存池重复
+  计为独立显存。
 
-These observations are candidate-bound and must be rerun after source, model,
-runtime or package changes. Before a release claim, additionally require an
-immutable package, labeled business-accuracy results, credential-safe rotated
-logs, event-retention acceptance and a corrected or disabled NPU utilization
-collector.
+这些结论与产物绑定；源码、模型、运行时或安装包变化后必须重新验证。已接受的发布
+记录应保留不可变安装包 SHA-256、业务精度结果、凭据安全日志、事件留存结果、清理
+状态和实测值。原始验证产物继续保留在源码树之外。

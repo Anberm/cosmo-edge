@@ -1,12 +1,12 @@
 ---
 title: Build Guide
-description: Confirmed build paths for x86 Docker, Sophon artifacts, CPU test builds, and docs.
+description: Confirmed build paths for x86 Docker, Sophon, RK3576, CPU tests, and docs.
 prev:
   text: Documentation Home
   link: /en/
 next:
-  text: macOS Docker Preview
-  link: /en/guide/macos-docker-preview
+  text: RK3576 / RKNN Integration
+  link: /en/guide/rk3576-rknn-development
 ---
 
 # Build Guide
@@ -23,6 +23,7 @@ This page documents build paths that are confirmed and available in the reposito
 | x86 Docker runtime | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | Starts the containerized development/runtime environment. |
 | macOS Docker Preview | `scripts/macos-docker-preview.sh` | Runs the one-video x86 workflow under amd64 emulation on Apple Silicon. |
 | Sophon SOURCE package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Cross-compiles the installable source-build package. |
+| RK3576 release package | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | Cross-compiles the RKNN/MPP/RGA package and aarch64 validation programs. |
 | CPU test build | `scripts/build_cpu_test.sh` | Builds `cosmo-tests` for x86 CPU validation. |
 | Documentation site | `npm ci` and `npm run docs:build` | Builds this VitePress site. |
 
@@ -163,6 +164,33 @@ Confirmed behavior:
 - Builds the package and `cosmo-tests` with `scripts/build.sh -T -m data/resource/aiboxresource`.
 - Exports build artifacts only (does not start services).
 - Keeps profile outputs separate under `build_output/<profile>/`.
+
+## RK3576 Artifacts
+
+The public RK3576 entry uses a digest-pinned GHCR image containing the aarch64
+toolchain, RKNN Runtime, MPP, and RGA development files. The image can be pulled
+without authentication:
+
+```bash
+docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
+docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+sha256sum build_output/rk3576/cosmo-*.tar.gz
+```
+
+Confirmed behavior:
+
+- Runs the aarch64 cross-build in a `linux/amd64` build container.
+- Removes `build_rknn/` before calling `scripts/build_rknn.sh -T`, preventing a
+  partial cache from being reused.
+- Exports the single release package to `build_output/rk3576/` without starting
+  application services.
+- Also builds the aarch64 `build_rknn/cosmo-tests`,
+  `cosmo-rknn-backend-smoke`, and `cosmo-rknn-fastpath-qualify` programs.
+- Uses host networking to resolve build dependencies but publishes no
+  application ports.
+
+See [RK3576 / RKNN Integration](./rk3576-rknn-development.md) for the supported
+release profile, runtime selection, model contract, and device-evidence boundary.
 
 ## CPU Test Build
 
