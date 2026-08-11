@@ -1,0 +1,73 @@
+name: Nightly RK3576 Cross Build
+
+on:
+  # Run daily at 02:12 Beijing Time (18:12 UTC on the previous day).
+  schedule:
+    - cron: '12 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-rk3576:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Validate RK3576 Compose entry
+        run: docker compose -f docker-compose.rk3576.yml config --quiet
+
+      - name: Pull public RK3576 builder
+        run: docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
+
+      - name: Build RK3576 package and tests
+        run: docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+
+      - name: Verify RK3576 artifacts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(build_output/rk3576/cosmo-*.tar.gz)
+          if (( ${#packages[@]} != 1 )) || [[ ! -f "${packages[0]:-}" || -L "${packages[0]:-}" ]]; then
+            echo "Expected exactly one regular RK3576 package artifact." >&2
+            exit 1
+          fi
+          package="${packages[0]}"
+          package_name="${package##*/}"
+          digest="$(sha256sum -- "$package")"
+          digest="${digest%% *}"
+          printf '%s  %s\n' "$digest" "$package" | tee rk3576-package.sha256
+          for binary in build_rknn/cosmo-tests build_rknn/cosmo-rknn-backend-smoke build_rknn/cosmo-rknn-fastpath-qualify; do
+            binary_info="$(file "$binary")"
+            printf '%s\n' "$binary_info"
+            grep -Fq 'ARM aarch64' <<< "$binary_info"
+          done
+          docker compose -f docker-compose.rk3576.yml run --rm --entrypoint /usr/bin/python3 \
+            cosmo-rk3576-package -I -B scripts/verify_package_contents.py \
+            --archive "/build_output/rk3576/$package_name" --build-profile public-runtime
+          printf '## RK3576 candidate\n\n- Package: `%s`\n- SHA-256: `%s`\n' \
+            "$package_name" "$digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload RK3576 candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: rk3576-candidate-${{ github.sha }}
+          path: |
+            build_output/rk3576/*.tar.gz
+            rk3576-package.sha256
+            build_rknn/cosmo-tests
+            build_rknn/cosmo-rknn-backend-smoke
+            build_rknn/cosmo-rknn-fastpath-qualify
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
