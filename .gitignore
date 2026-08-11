@@ -21,6 +21,7 @@ build_linux
 build32
 build64
 build_cpu
+build_rknn
 build_cpu_windows
 release
 tags
