@@ -6,6 +6,7 @@
 
 #include "catch_amalgamated.hpp"
 #include "mock/MockServiceRegistry.h"
+#include "platform/SystemReboot.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/system/impl/PacketUpgrade.h"
 #include "service/system/impl/SystemOperationServiceImpl.h"
@@ -43,6 +44,24 @@ fs::path AddUpgradeChecksumToName(const fs::path& archive, const fs::path& desti
 }
 
 }  // namespace
+
+TEST_CASE("Factory reset preserves model authorization data", "[system][reset]") {
+    const auto root        = fs::temp_directory_path() / "cosmo_factory_reset_test";
+    const auto certificate = root / "model-guard" / "device-certificate.bin";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(certificate.parent_path());
+    fs::create_directories(root / "conf");
+    std::ofstream(certificate) << "certificate";
+    std::ofstream(root / "conf" / "config.json") << "{}";
+    std::ofstream(root / "temporary-file") << "temporary";
+
+    CHECK_FALSE(cosmo::platform::ClearFactoryResetData(root.string()));
+    CHECK(fs::is_regular_file(certificate));
+    CHECK_FALSE(fs::exists(root / "conf"));
+    CHECK_FALSE(fs::exists(root / "temporary-file"));
+    fs::remove_all(root, ec);
+}
 
 TEST_CASE("SystemOperationServiceImpl: System operations", "[system][service]") {
     cosmo::test::MockServiceRegistry mocks;

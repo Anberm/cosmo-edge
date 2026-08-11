@@ -7,9 +7,13 @@
 
 #include <mutex>
 #include <string>
+#include <system_error>
 #include <thread>
 
 namespace cosmo::platform {
+
+// Remove factory-resettable data while retaining the top-level model-guard directory.
+std::error_code ClearFactoryResetData(const std::string& baseDir);
 
 // Manages system reboot and factory-reset operations.
 // Thread-safe: all public methods serialize on an internal mutex to prevent
@@ -26,9 +30,9 @@ public:
     // reason: Human-readable reason for the reboot (logged).
     void Reboot(const std::string& reason);
 
-    // Schedule a factory reset (delete baseDir then reboot).
+    // Schedule a factory reset (clear resettable entries in baseDir then reboot).
     // reason:  Human-readable reason for the reset (logged).
-    // baseDir: Absolute path to the data directory to remove.
+    // baseDir: Absolute path containing resettable data.
     void Reset(const std::string& reason, const std::string& baseDir);
 
 private:
