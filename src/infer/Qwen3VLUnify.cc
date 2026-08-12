@@ -6,7 +6,7 @@
 #include <cstring>
 
 #include "infer/AiComponment.h"
-#ifdef COSMO_NN_USE_RKNN_BACKEND
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
 #include "infer/RkllmVlmBackend.h"
 #endif
 #include "util/Log.h"
@@ -22,7 +22,7 @@ Qwen3VLUnify::~Qwen3VLUnify() {
 }
 
 util::ErrorEnum Qwen3VLUnify::Init() {
-#ifdef COSMO_NN_USE_RKNN_BACKEND
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
     if (rkllm_backend_) {
         return util::ErrorEnum::Created;
     }
@@ -74,7 +74,7 @@ util::ErrorEnum Qwen3VLUnify::Generate(const std::vector<VideoFramePtr>& images,
                                        const Qwen3VLGenerationParam& gen_param,
                                        std::vector<Qwen3VLResult>& results) {
     auto start = std::chrono::high_resolution_clock::now();
-#ifdef COSMO_NN_USE_RKNN_BACKEND
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
     if (!rkllm_backend_) {
 #else
     if (!generator_) {
@@ -128,7 +128,7 @@ util::ErrorEnum Qwen3VLUnify::Forward(const std::vector<VideoFramePtr>& images,
                                       const std::vector<std::string>& prompts,
                                       const Qwen3VLGenerationParam& gen_param,
                                       std::vector<Qwen3VLResult>& results) {
-#ifdef COSMO_NN_USE_RKNN_BACKEND
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
     return rkllm_backend_->Generate(images, prompts, gen_param, results);
 #else
     // Qwen3VL uses host-memory BGR blobs (VideoFrame is decoded host memory)
@@ -234,7 +234,7 @@ util::ErrorEnum Qwen3VLUnify::Forward(const std::vector<VideoFramePtr>& images,
 }
 
 util::ErrorEnum Qwen3VLUnify::GetMaxBatchSize(size_t* value) const {
-#ifdef COSMO_NN_USE_RKNN_BACKEND
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
     if (!rkllm_backend_) {
 #else
     if (!generator_) {

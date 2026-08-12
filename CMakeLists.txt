@@ -476,7 +476,10 @@ if(COSMO_NN_USE_CPU_BACKEND)
     list(APPEND COMMON_LIBS onnxruntime)
 endif()
 if(COSMO_NN_USE_RKNN_BACKEND)
-    list(APPEND COMMON_LIBS rknnrt rkllmrt)
+    list(APPEND COMMON_LIBS rknnrt)
+endif()
+if(COSMO_NN_USE_RKLLM_BACKEND)
+    list(APPEND COMMON_LIBS rkllmrt)
 endif()
 if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
     list(APPEND COMMON_LIBS rockchip_mpp rockchip_rga)
@@ -715,10 +718,12 @@ if(COSMO_NN_USE_RKNN_BACKEND)
         DESTINATION lib
         PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
     )
-    install(FILES "${RKLLM_RUNTIME_LIBRARY}"
-        DESTINATION lib
-        PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-    )
+    if(COSMO_NN_USE_RKLLM_BACKEND)
+        install(FILES "${RKLLM_RUNTIME_LIBRARY}"
+            DESTINATION lib
+            PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+        )
+    endif()
 endif()
 
 # Scripts (exclude dev-only tools from device deployment)

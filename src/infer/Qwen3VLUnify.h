@@ -12,7 +12,7 @@
 #include "nn/utils/default_component.h"
 
 namespace cosmo {
-#ifdef COSMO_NN_USE_RKNN_BACKEND
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
 class RkllmVlmBackend;
 #endif
 struct Qwen3VLGenerationParam {
@@ -52,7 +52,7 @@ private:
     std::string cfg_path_;
     std::string model_path_;
     std::string tokenizer_path_;
-#ifdef COSMO_NN_USE_RKNN_BACKEND
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
     std::unique_ptr<RkllmVlmBackend> rkllm_backend_;
 #else
     std::unique_ptr<cosmo::nn::DefaultComponent> generator_;

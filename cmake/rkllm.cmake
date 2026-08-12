@@ -8,15 +8,25 @@ endif()
 
 set(RKLLM_RUNTIME_HEADER "${COSMO_RKLLM_ROOT}/include/rkllm.h")
 set(RKLLM_RUNTIME_LIBRARY "${COSMO_RKLLM_ROOT}/lib/librkllmrt.so")
-if(NOT EXISTS "${RKLLM_RUNTIME_HEADER}")
-    message(FATAL_ERROR "RKLLM header not found: ${RKLLM_RUNTIME_HEADER}")
-endif()
-if(NOT EXISTS "${RKLLM_RUNTIME_LIBRARY}")
-    message(FATAL_ERROR "RKLLM runtime not found: ${RKLLM_RUNTIME_LIBRARY}")
-endif()
 
-add_library(rkllmrt SHARED IMPORTED GLOBAL)
-set_target_properties(rkllmrt PROPERTIES
-    IMPORTED_LOCATION "${RKLLM_RUNTIME_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${COSMO_RKLLM_ROOT}/include"
-)
+option(COSMO_RKLLM_REQUIRED "Fail configuration when the RKLLM SDK is unavailable" OFF)
+set(COSMO_NN_USE_RKLLM_BACKEND OFF)
+
+if(EXISTS "${RKLLM_RUNTIME_HEADER}" AND EXISTS "${RKLLM_RUNTIME_LIBRARY}")
+    add_library(rkllmrt SHARED IMPORTED GLOBAL)
+    set_target_properties(rkllmrt PROPERTIES
+        IMPORTED_LOCATION "${RKLLM_RUNTIME_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${COSMO_RKLLM_ROOT}/include"
+    )
+    set(COSMO_NN_USE_RKLLM_BACKEND ON)
+    add_compile_definitions(COSMO_NN_USE_RKLLM_BACKEND)
+    message(STATUS "RKLLM multimodal backend enabled: ${COSMO_RKLLM_ROOT}")
+elseif(COSMO_RKLLM_REQUIRED)
+    message(FATAL_ERROR
+        "RKLLM SDK is required but incomplete under ${COSMO_RKLLM_ROOT} "
+        "(expected include/rkllm.h and lib/librkllmrt.so)")
+else()
+    message(STATUS
+        "RKLLM SDK not found under ${COSMO_RKLLM_ROOT}; "
+        "building the RKNN runtime without Qwen3.5 VLM support")
+endif()
