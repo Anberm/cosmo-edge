@@ -181,7 +181,10 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
 
 #ifdef COSMO_NN_USE_RKNN_BACKEND
     static const std::vector<std::string> kSupportedRknnModelTypes = {
-        "yolov8_det", "classify", "keypoints", "feature", "ocr", "dino", "qwen3_5"};
+        // Expose only model types verified end-to-end on a real RK3576 device.
+        // Keypoints, feature extraction, OCR and Grounding DINO remain disabled
+        // until their matching RKNN models pass runtime validation.
+        "yolov8_det", "classify", "qwen3_5"};
     if (std::find(kSupportedRknnModelTypes.begin(), kSupportedRknnModelTypes.end(), modelType) ==
         kSupportedRknnModelTypes.end()) {
         LOG_WARN("[AddModel] Unsupported RK3576 model type: {}", modelType);

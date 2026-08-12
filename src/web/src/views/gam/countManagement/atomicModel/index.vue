@@ -675,7 +675,9 @@ const modelTypeGroups = computed(() => {
   ]
   if (!isRknn.value) return groups
   const supported = new Set([
-    'yolov8_det', 'classify', 'keypoints', 'feature', 'ocr', 'dino', 'qwen3_5'
+    // RK3576 capabilities are exposed only after end-to-end validation with a
+    // real model on the device. Keep code-only integrations hidden for now.
+    'yolov8_det', 'classify', 'qwen3_5'
   ])
   return groups
     .map(group => ({ ...group, children: group.children.filter(item => supported.has(item.value)) }))
