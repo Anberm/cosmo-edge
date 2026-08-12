@@ -75,8 +75,8 @@ cosmo::util::ErrorEnum LinkageServiceImpl::Add(const std::string& name, const st
     if (!cosmo::util::DecodeJson(normalized_workflow, storage.workflow)) {
         return cosmo::util::ErrorEnum::Failed;
     }
-    auto task = MakeTask(name, storage);
-    if (!task) {
+    auto task = storage.workflow.empty() ? nullptr : MakeTask(name, storage);
+    if (!storage.workflow.empty() && !task) {
         return cosmo::util::ErrorEnum::ParameterException;
     }
     const std::string new_id = cosmo::util::GenerateUUID();
