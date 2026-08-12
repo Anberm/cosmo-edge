@@ -1,11 +1,20 @@
 <template>
   <div class="page">
     <main class="page-main" :style="{ width: `${width}px`, height: `${height}px` }">
-      <VueFlow v-model:nodes="nodes" v-model:edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes">
+      <VueFlow v-model:nodes="nodes" v-model:edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-edge-options="defaultEdgeOptions" @node-click="handleNodeClick" @pane-click="closeDetailPanel">
         <Background pattern-color="#e5e7eb" gap="16" />
         <Controls :show-interactive="false" />
         <!-- <MiniMap /> -->
       </VueFlow>
+      <NodeDetailPanel
+        v-if="detailPanelNodeId"
+        ref="detailPanelRef"
+        :node-id="detailPanelNodeId"
+        :node-data="detailPanelNodeData"
+        :position="detailPanelPosition"
+        @close="closeDetailPanel"
+        @config-change="handlePanelConfigChange"
+      />
     </main>
 
     <teleport to="body">
@@ -39,6 +48,7 @@ import CustomFormNode from '@/views/gam/countManagement/arrangeDetail/flow/Custo
 import StartNode from '@/views/gam/countManagement/arrangeDetail/flow/StartNode.vue'
 import EndNode from '@/views/gam/countManagement/arrangeDetail/flow/EndNode.vue'
 import ActionEdge from '@/views/gam/countManagement/arrangeDetail/flow/ActionEdge.vue'
+import NodeDetailPanel from '@/views/gam/countManagement/arrangeDetail/flow/NodeDetailPanel.vue'
 
 const props = defineProps({
   width: {
@@ -75,13 +85,18 @@ const nodeTypes = {
 const edgeTypes = {
   action: markRaw(ActionEdge)
 }
+const defaultEdgeOptions = {
+  data: { pathType: 'smoothstep' }
+}
 
 const { setNodes, setEdges, addNodes, onPaneReady, getEdges } = useVueFlow()
 const flowInstance = ref(null)
 onPaneReady((instance) => {
   flowInstance.value = instance
-  // 设置默认视口，不使用自动适应
-  instance.setViewport({ x: 100, y: 200, zoom: 0.6 })
+  requestAnimationFrame(() => {
+    centerView()
+    centeredStrategyId.value = String(props.strategyId || '')
+  })
 })
 
 const addDialogVisible = ref(false)
@@ -96,6 +111,11 @@ const nodeHeight = 160
 const layoutDirection = 'LR'
 const newFlowData = ref([])
 const atomicList = ref([])
+const centeredStrategyId = ref(null)
+const detailPanelRef = ref(null)
+const detailPanelNodeId = ref(null)
+const detailPanelNodeData = ref(null)
+const detailPanelPosition = ref({ x: 0, y: 0 })
 const parseArray = (val) => {
   if (Array.isArray(val)) return val
   if (typeof val === 'string' && val.trim()) {
@@ -154,12 +174,17 @@ const applyLayout = () => {
     }
   })
 
+  nodes.value = positioned
   setNodes(positioned)
 
-  // 布局完成后居中显示
-  // requestAnimationFrame(() => {
-  //   centerView()
-  // })
+  const strategyId = String(props.strategyId || '')
+  if (centeredStrategyId.value !== strategyId) {
+    requestAnimationFrame(() => {
+      if (!flowInstance.value) return
+      centerView()
+      centeredStrategyId.value = strategyId
+    })
+  }
 }
 
 const focusNode = (nodeId) => {
@@ -207,6 +232,62 @@ const centerView = () => {
   ) {
     flowInstance.value.setCenter(cx, cy, { zoom: 0.8, duration: 300 })
   }
+}
+
+const updateNodeConfig = (nodeId, config) => {
+  if (!nodeId || !config) return
+  nodes.value = nodes.value.map((node) => {
+    if (String(node.id) !== String(nodeId)) return node
+    const flowData = {
+      ...(node.data?.flowData || {}),
+      configObject: config
+    }
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        flowData,
+        actionDetail: {
+          ...(node.data?.actionDetail || {}),
+          configObject: config
+        }
+      }
+    }
+  })
+  setNodes(nodes.value)
+  detailPanelNodeData.value =
+    nodes.value.find((node) => String(node.id) === String(nodeId))?.data || null
+}
+
+const collectCurrentPanelConfig = () => {
+  if (!detailPanelNodeId.value || !detailPanelRef.value) return
+  updateNodeConfig(
+    detailPanelNodeId.value,
+    detailPanelRef.value.submitForm?.()
+  )
+}
+
+const handlePanelConfigChange = (config) => {
+  updateNodeConfig(detailPanelNodeId.value, config)
+}
+
+const handleNodeClick = ({ node } = {}) => {
+  if (!node || node.type === 'start' || node.type === 'end') return
+  if (detailPanelNodeId.value && detailPanelNodeId.value !== String(node.id)) {
+    collectCurrentPanelConfig()
+  }
+  detailPanelNodeId.value = String(node.id)
+  detailPanelNodeData.value = node.data
+  detailPanelPosition.value = {
+    x: Math.max(20, props.width - 380),
+    y: 20
+  }
+}
+
+const closeDetailPanel = () => {
+  collectCurrentPanelConfig()
+  detailPanelNodeId.value = null
+  detailPanelNodeData.value = null
 }
 
 EventBus.$on('edgeMenu:focus', (nodeId) => {
@@ -344,7 +425,7 @@ const addComponentFromDialog = (type, label, action) => {
       actionName: action?.actionName,
       actionType: action?.actionType,
       // businessCategory: action?.businessCategory,
-      description: action?.description,
+      description: action?.description ?? action?.remark,
       atomicList: atomicList.value || [],
       flowData: flowItem || {},
       actionDetail: {
@@ -584,6 +665,7 @@ const saveMetaDataParams = () => {
 }
 
 const saveFlowData = () => {
+  collectCurrentPanelConfig()
   EventBus.$emit('flow:collectConfigs')
   const incomingMap = new Map()
   edges.value.forEach((e) => {
@@ -656,6 +738,8 @@ const saveFlowData = () => {
 
 // Expose functions to parent component
 const clearFlow = () => {
+  detailPanelNodeId.value = null
+  detailPanelNodeData.value = null
   setNodes([])
   setEdges([])
   nodes.value = []
@@ -686,6 +770,8 @@ const branchInputParamConfig = ref(
 watch(
   [() => props.strategyId, () => props.workFlow],
   ([, newVal]) => {
+    detailPanelNodeId.value = null
+    detailPanelNodeData.value = null
     newFlowData.value = parseArray(newVal)
     atomicList.value = []
     if (newFlowData.value) {
@@ -740,6 +826,7 @@ watch(
   flex: none;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .page-main :deep(.vue-flow) {

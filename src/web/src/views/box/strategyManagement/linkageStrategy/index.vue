@@ -121,7 +121,10 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   // 加载可编排动作
   $API.boxActionList({}).then((res) => {
-    actionList.value = res?.resData?.strages || []
+    actionList.value = (res?.resData?.strages || []).map((item) => ({
+      ...item,
+      actionType: item.actionType || item.businessCategory
+    }))
     queryStrategyList()
   })
 })

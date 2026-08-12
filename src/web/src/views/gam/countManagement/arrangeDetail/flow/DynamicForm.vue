@@ -481,7 +481,9 @@ onMounted(() => {
     }
 
     item.key === 'data' && getAudioFile(index)
-    item.key === 'deviceSN' && getAudioDevice(index)
+    if (item.key === 'deviceSN' || item.key === 'audioDeviceId') {
+      getAudioDevice(index)
+    }
   })
 
   if (isAreaAlarmAction.value) {
