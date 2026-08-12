@@ -49,6 +49,10 @@ const props = defineProps({
     type: Number,
     default: 0
   },
+  strategyId: {
+    type: [String, Number],
+    default: ''
+  },
   actionList: {
     type: Array,
     default: () => []
@@ -680,8 +684,8 @@ const branchInputParamConfig = ref(
   '[{"type":"condition","defaultValue":"","description":"配置条件使其结果为真，并运行下面的动作","failedTip":"请选择","key":"condition","name":"条件配置","level":"1","regexpr":""}]'
 )
 watch(
-  () => props.workFlow,
-  (newVal) => {
+  [() => props.strategyId, () => props.workFlow],
+  ([, newVal]) => {
     newFlowData.value = parseArray(newVal)
     atomicList.value = []
     if (newFlowData.value) {
