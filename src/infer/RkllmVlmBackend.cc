@@ -1,6 +1,7 @@
 #include "infer/RkllmVlmBackend.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -135,12 +136,13 @@ bool InitImageEncoder(const std::string& path, ImageEncoderContext& encoder) {
     return true;
 }
 
-std::vector<uint8_t> ResizeFrameToRgb(const VideoFramePtr& frame, int dst_width, int dst_height) {
+bool ResizeFrameToRgb(const VideoFramePtr& frame, int dst_width, int dst_height,
+                      std::vector<uint8_t>& output) {
     const int src_width  = static_cast<int>(frame->GetWidth());
     const int src_height = static_cast<int>(frame->GetHeight());
     auto* src = frame->GetHostData() ? frame->GetHostData() : frame->GetData();
     if (!src || src_width <= 0 || src_height <= 0 || dst_width <= 0 || dst_height <= 0) {
-        return {};
+        return false;
     }
 
     const int square_size = std::max(src_width, src_height);
@@ -149,10 +151,11 @@ std::vector<uint8_t> ResizeFrameToRgb(const VideoFramePtr& frame, int dst_width,
     const bool input_bgr  = frame->GetPixelFormat() == media::PixelFormat::PIXEL_BGR8;
     const bool input_rgb  = frame->GetPixelFormat() == media::PixelFormat::PIXEL_RGB8;
     if (!input_bgr && !input_rgb) {
-        return {};
+        return false;
     }
 
-    std::vector<uint8_t> output(static_cast<size_t>(dst_width) * dst_height * 3, 128);
+    output.resize(static_cast<size_t>(dst_width) * dst_height * 3);
+    std::fill(output.begin(), output.end(), 128);
     auto channel = [&](int x, int y, int c) -> float {
         if (x < x_offset || x >= x_offset + src_width || y < y_offset ||
             y >= y_offset + src_height) {
@@ -191,7 +194,7 @@ std::vector<uint8_t> ResizeFrameToRgb(const VideoFramePtr& frame, int dst_width,
             }
         }
     }
-    return output;
+    return true;
 }
 
 bool EncodeImage(ImageEncoderContext& encoder, const std::vector<uint8_t>& image,
@@ -220,7 +223,7 @@ bool EncodeImage(ImageEncoderContext& encoder, const std::vector<uint8_t>& image
     }
 
     const size_t per_output = static_cast<size_t>(encoder.image_tokens) * encoder.embed_size;
-    embedding.assign(per_output * encoder.io_num.n_output, 0.0F);
+    embedding.resize(per_output * encoder.io_num.n_output);
     if (encoder.io_num.n_output == 1) {
         const size_t available = outputs[0].size / sizeof(float);
         std::memcpy(embedding.data(), outputs[0].buf,
@@ -291,8 +294,11 @@ util::ErrorEnum RkllmVlmBackend::Init() {
     RKLLMParam param                 = rkllm_createDefaultParam();
     param.model_path                 = model_path_.c_str();
     param.top_k                      = 1;
-    param.max_new_tokens             = 16;
-    param.max_context_len            = 4096;
+    // This backend is used for short visual judgements. 64 image tokens plus the
+    // prompt and answer fit comfortably in 512 tokens, avoiding an oversized KV
+    // cache and generation budget on the edge device.
+    param.max_new_tokens             = 2;
+    param.max_context_len            = 512;
     param.skip_special_token         = true;
     param.extend_param.base_domain_id = 1;
     candidate->callback.result_callback = RkllmResultCallback;
@@ -323,21 +329,27 @@ util::ErrorEnum RkllmVlmBackend::Generate(const std::vector<VideoFramePtr>& imag
         return util::ErrorEnum::InvalidParam;
     }
 
+    // The worker repeatedly calls Generate on the same thread. Keep the two large
+    // scratch buffers thread-local so they retain capacity without sharing mutable
+    // memory between camera workers.
+    thread_local std::vector<uint8_t> rgb;
+    thread_local std::vector<float> embedding;
     for (size_t i = 0; i < images.size(); ++i) {
         if (!images[i] || !VideoFrameValid(images[i])) {
             return util::ErrorEnum::InvalidParam;
         }
-        auto rgb = ResizeFrameToRgb(images[i], impl_->encoder.width, impl_->encoder.height);
-        if (rgb.empty()) {
+        const auto preprocess_start = std::chrono::steady_clock::now();
+        if (!ResizeFrameToRgb(images[i], impl_->encoder.width, impl_->encoder.height, rgb)) {
             LOG_ERRO("RKLLM unsupported or empty frame. format:{} dims:{}x{}",
                      static_cast<int>(images[i]->GetPixelFormat()), images[i]->GetWidth(),
                      images[i]->GetHeight());
             return util::ErrorEnum::InvalidParam;
         }
-        std::vector<float> embedding;
+        const auto vision_start = std::chrono::steady_clock::now();
         if (!EncodeImage(impl_->encoder, rgb, embedding)) {
             return util::ErrorEnum::AI_FORWARD_FAILED;
         }
+        const auto prefill_start = std::chrono::steady_clock::now();
 
         std::string prompt = prompts[i];
         if (prompt.find("<image>") == std::string::npos) {
@@ -365,9 +377,10 @@ util::ErrorEnum RkllmVlmBackend::Generate(const std::vector<VideoFramePtr>& imag
         RKLLMInferParam infer{};
         infer.mode            = RKLLM_INFER_GENERATE;
         infer.keep_history    = 0;
-        infer.max_new_tokens  = 16;
+        infer.max_new_tokens  = 2;
         infer.sampling_params = &sampling;
         RunContext run;
+        run.text.reserve(8);
         const int ret = rkllm_run(impl_->llm, &input, &infer, &run);
         if (ret != 0 || run.failed) {
             LOG_ERRO("RKLLM multimodal inference failed. ret:{} callbackError:{}", ret, run.failed);
@@ -378,6 +391,20 @@ util::ErrorEnum RkllmVlmBackend::Generate(const std::vector<VideoFramePtr>& imag
         result.text        = std::move(run.text);
         result.frame_index = static_cast<int64_t>(images[i]->GetFrameIndex());
         result.timestamp   = images[i]->GetTimestamp();
+        const auto finish = std::chrono::steady_clock::now();
+        const auto preprocess_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       vision_start - preprocess_start)
+                                       .count();
+        const auto vision_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   prefill_start - vision_start)
+                                   .count();
+        const auto llm_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                finish - prefill_start)
+                                .count();
+        LOG_INFO("[Qwen3VL][RKLLM][Timing] preprocess:{}ms vision:{}ms llm:{}ms total:{}ms "
+                 "tokens:{}",
+                 preprocess_ms, vision_ms, llm_ms, preprocess_ms + vision_ms + llm_ms,
+                 impl_->encoder.image_tokens);
         LOG_INFO("[Qwen3VL][RKLLM] frameIndex:{} result:{}", result.frame_index, result.text);
         results.push_back(std::move(result));
     }
