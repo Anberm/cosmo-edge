@@ -74,7 +74,7 @@ namespace Audio {
     };
     // Audio device modify
     struct MsgModifyAudioDeviceRecv : public MsgRecvHead {
-        util::RangeInt<1, 2> devOperation{0};
+        util::RangeInt<1, 2> devOperation{1};
         MsgBaseAudioDeviceInfo audioDev;
     };
 
@@ -140,7 +140,7 @@ namespace Audio {
 
     // Audio device test
     struct MsgTestAudioDeviceRecv : public MsgRecvHead {
-        util::RangeInt<1, 2> operation{0};      // 1: File test, 2: Text test
+        util::RangeInt<1, 2> operation{1};      // 1: File test, 2: Text test
         std::string devSn;                      // Audio device ID
         std::string data;                       // Text or file ID
         util::RangeInt<0, 100> volume{50};      // Volume
