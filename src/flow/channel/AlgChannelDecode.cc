@@ -29,20 +29,20 @@ static constexpr const char* kTag = "ALGCHANNEL ";
 namespace cosmo {
 namespace {
 
-bool NativeInferenceBufferEnabled() {
+    bool NativeInferenceBufferEnabled() {
 #if defined(COSMO_NN_USE_RKNN_BACKEND) && defined(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
-    const char* raw = std::getenv("COSMO_RKNN_MPP_DMABUF");
-    if (!raw || *raw == '\0') {
-        return true;
-    }
-    std::string value(raw);
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return value != "0" && value != "false" && value != "off" && value != "no";
+        const char* raw = std::getenv("COSMO_RKNN_MPP_DMABUF");
+        if (!raw || *raw == '\0') {
+            return true;
+        }
+        std::string value(raw);
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        return value != "0" && value != "false" && value != "off" && value != "no";
 #else
-    return false;
+        return false;
 #endif
-}
+    }
 
 }  // namespace
 
@@ -169,10 +169,9 @@ void AlgChannelDecode::PrepareDecoder(VideoPacketPtr& video_frame) {
         decoder_           = media::VideoDecoder::Create(static_cast<size_t>(device_id_), media_handle);
     }
     const bool needs_resize = NeedsResize(video_frame);
-    const int decoder_width = needs_resize ? media::kVideoDefaultWidth
-                                           : static_cast<int>(video_frame->width);
-    const int decoder_height = needs_resize ? media::kVideoDefaultHeight
-                                            : static_cast<int>(video_frame->height);
+    const int decoder_width = needs_resize ? media::kVideoDefaultWidth : static_cast<int>(video_frame->width);
+    const int decoder_height =
+        needs_resize ? media::kVideoDefaultHeight : static_cast<int>(video_frame->height);
     const bool stream_restarted = stream_index_ != video_frame->stream_idx;
 
     // A backend may retain a compatible hardware context across a clean
@@ -180,13 +179,13 @@ void AlgChannelDecode::PrepareDecoder(VideoPacketPtr& video_frame) {
     if (stream_restarted && !codec_reset_sign_ &&
         decoder_->ReuseForStreamRestart(video_frame->codec_type, decoder_width, decoder_height)) {
         frame_info_.clear();
-        stream_index_     = video_frame->stream_idx;
-        decode_count_     = 0;
-        frame_index_      = -1;
+        stream_index_ = video_frame->stream_idx;
+        decode_count_ = 0;
+        frame_index_  = -1;
         ++decoder_stream_reuse_count_;
         if (decoder_stream_reuse_count_ == 1 || decoder_stream_reuse_count_ % 240 == 0) {
-            LOG_INFO("{} reused decoder across stream restart: stream={} codec={} size={}x{} count={}",
-                     name_, stream_index_, video_frame->codec_type, decoder_width, decoder_height,
+            LOG_INFO("{} reused decoder across stream restart: stream={} codec={} size={}x{} count={}", name_,
+                     stream_index_, video_frame->codec_type, decoder_width, decoder_height,
                      decoder_stream_reuse_count_);
         }
         return;
@@ -202,10 +201,10 @@ void AlgChannelDecode::PrepareDecoder(VideoPacketPtr& video_frame) {
     }
     if (!decoder_->IsOpened()) {
         frame_info_.clear();
-        stream_index_     = video_frame->stream_idx;
-        codec_reset_sign_ = false;
-        decode_count_     = 0;
-        frame_index_      = -1;
+        stream_index_               = video_frame->stream_idx;
+        codec_reset_sign_           = false;
+        decode_count_               = 0;
+        frame_index_                = -1;
         decoder_stream_reuse_count_ = 0;
         LOG_INFO("{} streamIndex:{} videoType:{} Changed, dumux video width:{}, height:{}", name_,
                  stream_index_, video_frame->codec_type, video_frame->width, video_frame->height);
@@ -311,13 +310,11 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
     }
 
     const auto decoded_frame_index = decoded_frame.GetFrameIndex();
-    const auto frame_info = FrameInfoGet(static_cast<int64_t>(decoded_frame_index));
+    const auto frame_info          = FrameInfoGet(static_cast<int64_t>(decoded_frame_index));
     const bool matched_frame_info =
         frame_info.index >= 0 && static_cast<uint64_t>(frame_info.index) == decoded_frame_index;
-    const int64_t output_timestamp =
-        matched_frame_info ? frame_info.timestamp : util::GetMilliseconds();
-    const int64_t output_stream_index =
-        matched_frame_info ? frame_info.streamIndex : video_frame->stream_idx;
+    const int64_t output_timestamp    = matched_frame_info ? frame_info.timestamp : util::GetMilliseconds();
+    const int64_t output_stream_index = matched_frame_info ? frame_info.streamIndex : video_frame->stream_idx;
 
     AlgFrameDistributionPlan task_plan;
     const bool prepared_task_distribution = decoded_frame.IsDeferred();
@@ -334,7 +331,7 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
 #ifdef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
     // Rockchip viewers move their existing FPS filter ahead of Copy-out. The
     // callback also rejects a saturated preview queue before host allocation.
-    viewer_plan = PrepareViewerDistribution();
+    viewer_plan                                 = PrepareViewerDistribution();
     constexpr bool prepared_viewer_distribution = true;
 #else
     constexpr bool prepared_viewer_distribution = false;
@@ -345,7 +342,7 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
     if (!host_frame_required) {
         decoded_frame.Discard();
         duration_stat_.EndSample();
-        frame_index_                 = video_frame->index;
+        frame_index_ = video_frame->index;
         decode_count_ += 1;
         consecutive_decode_failures_ = 0;
         action_status_               = util::ErrorEnum::Success;
@@ -356,8 +353,8 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
     duration_stat_.EndSample();
     if (!frame_data || !frame_data->Active()) {
         action_status_ = util::ErrorEnum::DecoderFrameFailed;
-        LOG_WARN("{} decoded frame materialization failed at frame:{} stream:{}", name_,
-                 video_frame->index, video_frame->stream_idx);
+        LOG_WARN("{} decoded frame materialization failed at frame:{} stream:{}", name_, video_frame->index,
+                 video_frame->stream_idx);
         return;
     }
     frame_data->SetTimestamp(output_timestamp);
@@ -405,8 +402,7 @@ void AlgChannelDecode::HandFrame(AlgDataPtr demux_data) {
     }
     DoCaptureImage(output_frame);
     CaptureJpeg(output_frame);
-    const auto color_convert = [this, native_inference_buffer](AlgDataPtr frame,
-                                                               VideoFramePtr in_data) {
+    const auto color_convert = [this, native_inference_buffer](AlgDataPtr frame, VideoFramePtr in_data) {
         return ColorConvert(frame, in_data, native_inference_buffer);
     };
     if (prepared_task_distribution) {
@@ -487,13 +483,13 @@ AlgDataPtr AlgChannelDecode::ColorConvert(AlgDataPtr demux_data, VideoFramePtr i
     ai_frame->SetTimestamp(in_data->GetTimestamp());
     ai_frame->SetStreamIndex(in_data->GetStreamIndex());
 
-    AlgDataPtr data           = std::make_shared<AlgData>();
-    data->chanDataOrig.packet = demux_data->chanDataOrig.packet;
-    data->chanDataOrig.fps    = demux_data->chanDataOrig.fps;
-    data->dataType            = AlgDataType::ChannelDataDec;
-    data->chanDataDec.frame   = ai_frame;
+    AlgDataPtr data                 = std::make_shared<AlgData>();
+    data->chanDataOrig.packet       = demux_data->chanDataOrig.packet;
+    data->chanDataOrig.fps          = demux_data->chanDataOrig.fps;
+    data->dataType                  = AlgDataType::ChannelDataDec;
+    data->chanDataDec.frame         = ai_frame;
     data->chanDataDec.native_buffer = std::move(native_buffer);
-    data->channelId           = channel_id_;
+    data->channelId                 = channel_id_;
 
     data->firstTimePoint = demux_data->firstTimePoint;
     action_status_       = util::ErrorEnum::Success;

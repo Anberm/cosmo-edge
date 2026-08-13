@@ -94,16 +94,14 @@ struct RknnYolov8CandidateScratch {
 
 using RknnYolov8Layout = RknnOutputAdapterContract;
 
-bool DetectRknnYolov8Layout(const std::vector<std::vector<int>>& shapes,
-                            RknnYolov8Layout& layout, std::string& error);
+bool DetectRknnYolov8Layout(const std::vector<std::vector<int>>& shapes, RknnYolov8Layout& layout,
+                            std::string& error);
 
-bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_height,
-                           int input_width, float* output, size_t output_count,
-                           std::string& error);
+bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_height, int input_width,
+                           float* output, size_t output_count, std::string& error);
 
-bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& heads,
-                                    int input_height, int input_width, float* output,
-                                    size_t output_count, std::string& error,
+bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& heads, int input_height,
+                                    int input_width, float* output, size_t output_count, std::string& error,
                                     RknnYolov8TransformTiming* timing = nullptr);
 
 bool DecodeRknnYolov8QuantizedCandidates(const std::vector<RknnYolov8QuantizedHead>& heads, int input_height,

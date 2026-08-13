@@ -21,8 +21,12 @@ public:
             rknn_destroy(context_);
         }
     }
-    rknn_context* Out() { return &context_; }
-    rknn_context Get() const { return context_; }
+    rknn_context* Out() {
+        return &context_;
+    }
+    rknn_context Get() const {
+        return context_;
+    }
 
 private:
     rknn_context context_{0};
@@ -96,7 +100,7 @@ std::string Shape(const rknn_tensor_attr& attr) {
 }
 
 void PrintTiming(const char* name, const std::vector<double>& values) {
-    const auto sum = std::accumulate(values.begin(), values.end(), 0.0);
+    const auto sum    = std::accumulate(values.begin(), values.end(), 0.0);
     const auto minmax = std::minmax_element(values.begin(), values.end());
     std::cout << name << "_mean_ms=" << sum / values.size() << '\n';
     std::cout << name << "_min_ms=" << *minmax.first << '\n';
@@ -107,17 +111,17 @@ std::vector<float> NchwToNhwc(const std::vector<float>& source, const rknn_tenso
     if (attr.n_dims != 4) {
         throw std::runtime_error("validation runner requires a four-dimensional image input");
     }
-    std::size_t batch = attr.dims[0];
+    std::size_t batch    = attr.dims[0];
     std::size_t channels = 0;
-    std::size_t height = 0;
-    std::size_t width = 0;
+    std::size_t height   = 0;
+    std::size_t width    = 0;
     if (attr.fmt == RKNN_TENSOR_NCHW) {
         channels = attr.dims[1];
-        height = attr.dims[2];
-        width = attr.dims[3];
+        height   = attr.dims[2];
+        width    = attr.dims[3];
     } else if (attr.fmt == RKNN_TENSOR_NHWC) {
-        height = attr.dims[1];
-        width = attr.dims[2];
+        height   = attr.dims[1];
+        width    = attr.dims[2];
         channels = attr.dims[3];
     } else {
         throw std::runtime_error("validation runner supports only NCHW/NHWC native inputs");
@@ -129,7 +133,7 @@ std::vector<float> NchwToNhwc(const std::vector<float>& source, const rknn_tenso
                 for (std::size_t w = 0; w < width; ++w) {
                     const auto source_index = ((n * channels + c) * height + h) * width + w;
                     const auto target_index = ((n * height + h) * width + w) * channels + c;
-                    result[target_index] = source[source_index];
+                    result[target_index]    = source[source_index];
                 }
             }
         }
@@ -150,9 +154,9 @@ int main(int argc, char** argv) {
     try {
         const auto model = ReadFile<std::uint8_t>(argv[1]);
         const std::filesystem::path output_dir(argv[3]);
-        const int iterations = argc >= 5 ? std::stoi(argv[4]) : 1;
-        const int warmup = argc >= 6 ? std::stoi(argv[5]) : 1;
-        const auto core_mask = ParseCoreMask(argc >= 7 ? argv[6] : "auto");
+        const int iterations          = argc >= 5 ? std::stoi(argv[4]) : 1;
+        const int warmup              = argc >= 6 ? std::stoi(argv[5]) : 1;
+        const auto core_mask          = ParseCoreMask(argc >= 7 ? argv[6] : "auto");
         const std::string source_type = argc >= 8 ? argv[7] : "float32";
         const std::string output_type = argc >= 9 ? argv[8] : "float32";
         if (source_type != "float32" && source_type != "uint8" && source_type != "int8") {
@@ -161,12 +165,11 @@ int main(int argc, char** argv) {
         if (output_type != "float32" && output_type != "native") {
             throw std::runtime_error("output type must be float32 or native");
         }
-        const auto input_f32 = source_type == "float32" ? ReadFile<float>(argv[2])
-                                                         : std::vector<float>{};
-        const auto input_u8 = source_type == "uint8" ? ReadFile<std::uint8_t>(argv[2])
-                                                       : std::vector<std::uint8_t>{};
-        const auto input_i8 = source_type == "int8" ? ReadFile<std::int8_t>(argv[2])
-                                                     : std::vector<std::int8_t>{};
+        const auto input_f32 = source_type == "float32" ? ReadFile<float>(argv[2]) : std::vector<float>{};
+        const auto input_u8 =
+            source_type == "uint8" ? ReadFile<std::uint8_t>(argv[2]) : std::vector<std::uint8_t>{};
+        const auto input_i8 =
+            source_type == "int8" ? ReadFile<std::int8_t>(argv[2]) : std::vector<std::int8_t>{};
         if (iterations <= 0 || warmup < 0) {
             throw std::runtime_error("iterations must be positive and warmup must be non-negative");
         }
@@ -213,8 +216,7 @@ int main(int argc, char** argv) {
         } else {
             const auto input_count = source_type == "uint8" ? input_u8.size() : input_i8.size();
             if (input_count != element_count) {
-                throw std::runtime_error("input " + source_type + " count " +
-                                         std::to_string(input_count) +
+                throw std::runtime_error("input " + source_type + " count " + std::to_string(input_count) +
                                          " does not match model element count " +
                                          std::to_string(element_count));
             }
@@ -222,26 +224,24 @@ int main(int argc, char** argv) {
 
         rknn_input input{};
         input.index = 0;
-        input.buf = source_type == "float32"
-                        ? static_cast<void*>(input_nhwc.data())
-                        : (source_type == "uint8"
-                               ? static_cast<void*>(const_cast<std::uint8_t*>(input_u8.data()))
-                               : static_cast<void*>(const_cast<std::int8_t*>(input_i8.data())));
-        input.size = static_cast<std::uint32_t>(source_type == "float32"
-                                                    ? input_nhwc.size() * sizeof(float)
-                                                    : element_count);
+        input.buf =
+            source_type == "float32"
+                ? static_cast<void*>(input_nhwc.data())
+                : (source_type == "uint8" ? static_cast<void*>(const_cast<std::uint8_t*>(input_u8.data()))
+                                          : static_cast<void*>(const_cast<std::int8_t*>(input_i8.data())));
+        input.size = static_cast<std::uint32_t>(source_type == "float32" ? input_nhwc.size() * sizeof(float)
+                                                                         : element_count);
         input.pass_through = source_type == "int8" ? 1 : 0;
-        input.type = source_type == "float32"
-                         ? RKNN_TENSOR_FLOAT32
-                         : (source_type == "uint8" ? RKNN_TENSOR_UINT8 : RKNN_TENSOR_INT8);
+        input.type         = source_type == "float32"
+                                 ? RKNN_TENSOR_FLOAT32
+                                 : (source_type == "uint8" ? RKNN_TENSOR_UINT8 : RKNN_TENSOR_INT8);
         // RKNN Runtime 2.3.2 only accepts NHWC source layout on its input
         // conversion path. CosmoEdge supplies NCHW, so make the boundary copy
         // explicit rather than relying on a silently rejected NCHW request.
         input.fmt = RKNN_TENSOR_NHWC;
         Check(rknn_inputs_set(context.Get(), 1, &input), "rknn_inputs_set");
 
-        const auto collect_outputs = [&](bool write_outputs, double* get_ms,
-                                         double* release_ms) {
+        const auto collect_outputs = [&](bool write_outputs, double* get_ms, double* release_ms) {
             std::vector<rknn_output> outputs(counts.n_output);
             for (std::uint32_t index = 0; index < counts.n_output; ++index) {
                 outputs[index].index       = index;
@@ -253,14 +253,12 @@ int main(int argc, char** argv) {
                   "rknn_outputs_get");
             const auto get_finished = std::chrono::steady_clock::now();
             if (get_ms) {
-                *get_ms = std::chrono::duration<double, std::milli>(get_finished - get_started)
-                              .count();
+                *get_ms = std::chrono::duration<double, std::milli>(get_finished - get_started).count();
             }
             if (write_outputs) {
                 const auto suffix = output_type == "float32" ? ".f32.bin" : ".native.bin";
                 for (std::uint32_t index = 0; index < counts.n_output; ++index) {
-                    const auto path =
-                        output_dir / ("output-" + std::to_string(index) + suffix);
+                    const auto path = output_dir / ("output-" + std::to_string(index) + suffix);
                     WriteFile(path, outputs[index].buf, outputs[index].size);
                     std::cout << "output_" << index << "_path=" << path << '\n';
                     std::cout << "output_" << index << "_bytes=" << outputs[index].size << '\n';
@@ -272,8 +270,7 @@ int main(int argc, char** argv) {
             const auto release_finished = std::chrono::steady_clock::now();
             if (release_ms) {
                 *release_ms =
-                    std::chrono::duration<double, std::milli>(release_finished - release_started)
-                        .count();
+                    std::chrono::duration<double, std::milli>(release_finished - release_started).count();
             }
         };
 
@@ -292,9 +289,8 @@ int main(int argc, char** argv) {
             const auto run_started = std::chrono::steady_clock::now();
             Check(rknn_run(context.Get(), nullptr), "rknn_run");
             const auto run_finished = std::chrono::steady_clock::now();
-            run_ms.push_back(
-                std::chrono::duration<double, std::milli>(run_finished - run_started).count());
-            double get_ms = 0.0;
+            run_ms.push_back(std::chrono::duration<double, std::milli>(run_finished - run_started).count());
+            double get_ms     = 0.0;
             double release_ms = 0.0;
             collect_outputs(index + 1 == iterations, &get_ms, &release_ms);
             outputs_get_ms.push_back(get_ms);
@@ -312,12 +308,9 @@ int main(int argc, char** argv) {
         for (std::uint32_t index = 0; index < output_attrs.size(); ++index) {
             const auto& attr = output_attrs[index];
             std::cout << "output_" << index << "_shape=" << Shape(attr) << '\n';
-            std::cout << "output_" << index << "_native_type=" << get_type_string(attr.type)
-                      << '\n';
-            std::cout << "output_" << index << "_native_format=" << get_format_string(attr.fmt)
-                      << '\n';
-            std::cout << "output_" << index << "_quant="
-                      << get_qnt_type_string(attr.qnt_type) << '\n';
+            std::cout << "output_" << index << "_native_type=" << get_type_string(attr.type) << '\n';
+            std::cout << "output_" << index << "_native_format=" << get_format_string(attr.fmt) << '\n';
+            std::cout << "output_" << index << "_quant=" << get_qnt_type_string(attr.qnt_type) << '\n';
             std::cout << "output_" << index << "_zero_point=" << attr.zp << '\n';
             std::cout << "output_" << index << "_scale=" << std::setprecision(9) << attr.scale
                       << std::setprecision(4) << '\n';

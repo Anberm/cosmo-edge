@@ -223,18 +223,18 @@ bool AiDetector::AiSdkInit() {
                  init_retry_count_);
         return false;
     }
-    init_retry_count_ = 0;
-    action_status     = util::ErrorEnum::AI_INST_CREATED;
-    labels_           = detector_->GetLabels();
-    size_t model_max_batch = 1;
+    init_retry_count_       = 0;
+    action_status           = util::ErrorEnum::AI_INST_CREATED;
+    labels_                 = detector_->GetLabels();
+    size_t model_max_batch  = 1;
     const auto batch_status = detector_->GetMaxBatchSize(model_max_batch);
     if (batch_status != util::ErrorEnum::Success || model_max_batch == 0) {
         LOG_WARN("{}[{} {}] {} invalid model max batch:{}, keep single-frame drain", kTag, name_, uuid,
                  alg_code_, model_max_batch);
         model_max_batch = 1;
     }
-    batch_count_ = ai_detector_fps::EffectiveDetectorDrainBatch(
-        ai_detector_fps::kMaxDetectorDrainBatch, model_max_batch);
+    batch_count_ = ai_detector_fps::EffectiveDetectorDrainBatch(ai_detector_fps::kMaxDetectorDrainBatch,
+                                                                model_max_batch);
     LOG_INFO("{}[{} {}] {} Init Sdk ModelMaxBatch:{} DrainBatch:{}", kTag, name_, uuid, alg_code_,
              model_max_batch, batch_count_);
     is_detector_inst_initialized_ = true;

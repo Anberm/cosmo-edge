@@ -60,9 +60,9 @@ namespace media {
         VideoDecoderCapability capability;
         capability.backend        = "sophon-vpu";
         capability.implementation = "bmvpu-decoder";
-        capability.available = type == VideoCodecType::kH264 || type == VideoCodecType::kH265;
-        capability.detail = capability.available ? "Sophon VPU decoder supports the requested codec"
-                                                  : "unsupported codec";
+        capability.available      = type == VideoCodecType::kH264 || type == VideoCodecType::kH265;
+        capability.detail =
+            capability.available ? "Sophon VPU decoder supports the requested codec" : "unsupported codec";
         return capability;
     }
 

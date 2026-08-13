@@ -132,7 +132,7 @@ TEST_CASE("LinkageServiceImpl: CRUD and query operations", "[linkage-service]") 
         REQUIRE(ret == ErrorEnum::Success);
         REQUIRE_FALSE(id.empty());
 
-        size_t total = 0;
+        size_t total       = 0;
         const auto results = sut.Query(1, 10, "test_strategy", total);
         REQUIRE(total == 1);
         REQUIRE(results.size() == 1);

@@ -148,8 +148,7 @@ TEST_CASE("ApiRouter: Basic Routing and Dispatch", "[ApiRouter]") {
                                       ("model-authorization-request-" + suffix + ".cmpr");
         std::ofstream(request_path, std::ios::binary) << std::string(48, '\x01');
 
-        REQUIRE_CALL(mocks.modelAuthorizationSvc,
-                     CreateDeviceRequest(trompeloeil::_, trompeloeil::_))
+        REQUIRE_CALL(mocks.modelAuthorizationSvc, CreateDeviceRequest(trompeloeil::_, trompeloeil::_))
             .SIDE_EFFECT(_1 = request_path.string())
             .SIDE_EFFECT(_2 = "device-request.cmpr")
             .RETURN(util::ErrorEnum::Success);

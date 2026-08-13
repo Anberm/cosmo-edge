@@ -19,8 +19,7 @@ TEST_CASE("RKNN YOLOv8 adapter reconstructs the logical tensor", "[nn][rknn][yol
     using namespace cosmo::nn;
 
     const std::vector<std::vector<int>> shapes{
-        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 2, 2},
-        {1, 3, 2, 2},  {1, 64, 1, 1}, {1, 3, 1, 1},
+        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 2, 2}, {1, 3, 2, 2}, {1, 64, 1, 1}, {1, 3, 1, 1},
     };
     RknnYolov8Layout layout;
     std::string error;
@@ -51,8 +50,7 @@ TEST_CASE("RKNN YOLOv8 adapter reconstructs the logical tensor", "[nn][rknn][yol
 TEST_CASE("RKNN YOLOv8 adapter rejects malformed head order", "[nn][rknn][yolov8]") {
     using namespace cosmo::nn;
     const std::vector<std::vector<int>> shapes{
-        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 4, 4},
-        {1, 3, 4, 4},  {1, 64, 1, 1}, {1, 3, 1, 1},
+        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 1, 1}, {1, 3, 1, 1},
     };
     RknnYolov8Layout layout;
     std::string error;
@@ -182,28 +180,24 @@ TEST_CASE("RKNN YOLOv8 quantized adapter matches dequantized float heads",
     using namespace cosmo::nn;
 
     const std::vector<std::vector<int>> shapes{
-        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 2, 2},
-        {1, 3, 2, 2},  {1, 64, 1, 1}, {1, 3, 1, 1},
+        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 2, 2}, {1, 3, 2, 2}, {1, 64, 1, 1}, {1, 3, 1, 1},
     };
     std::vector<std::vector<int8_t>> quantized_values;
     std::vector<std::vector<float>> float_values;
     std::vector<RknnYolov8QuantizedHead> quantized_heads;
     std::vector<RknnYolov8Head> float_heads;
     for (size_t head = 0; head < shapes.size(); ++head) {
-        const size_t count =
-            static_cast<size_t>(shapes[head][1] * shapes[head][2] * shapes[head][3]);
+        const size_t count       = static_cast<size_t>(shapes[head][1] * shapes[head][2] * shapes[head][3]);
         const int32_t zero_point = head % 2 == 0 ? -61 : 114;
-        const float scale       = head % 2 == 0 ? 0.11488f : 0.113557f;
+        const float scale        = head % 2 == 0 ? 0.11488f : 0.113557f;
         quantized_values.emplace_back(count);
         float_values.emplace_back(count);
         for (size_t index = 0; index < count; ++index) {
-            const auto value = static_cast<int8_t>(static_cast<int>(index % 97) - 48);
+            const auto value               = static_cast<int8_t>(static_cast<int>(index % 97) - 48);
             quantized_values.back()[index] = value;
-            float_values.back()[index] =
-                (static_cast<float>(value) - static_cast<float>(zero_point)) * scale;
+            float_values.back()[index] = (static_cast<float>(value) - static_cast<float>(zero_point)) * scale;
         }
-        quantized_heads.push_back({quantized_values.back().data(), count, shapes[head], zero_point,
-                                   scale});
+        quantized_heads.push_back({quantized_values.back().data(), count, shapes[head], zero_point, scale});
         float_heads.push_back({float_values.back().data(), count, shapes[head]});
     }
 
@@ -212,18 +206,16 @@ TEST_CASE("RKNN YOLOv8 quantized adapter matches dequantized float heads",
     std::string error;
     REQUIRE(ReconstructRknnYolov8(float_heads, 32, 32, expected.data(), expected.size(), error));
     RknnYolov8TransformTiming timing;
-    REQUIRE(ReconstructRknnYolov8Quantized(quantized_heads, 32, 32, actual.data(), actual.size(),
-                                           error, &timing));
+    REQUIRE(ReconstructRknnYolov8Quantized(quantized_heads, 32, 32, actual.data(), actual.size(), error,
+                                           &timing));
     for (size_t index = 0; index < expected.size(); ++index)
         CHECK(actual[index] == Catch::Approx(expected[index]).margin(1e-4f));
 }
 
-TEST_CASE("RKNN YOLOv8 quantized adapter rejects invalid quantization",
-          "[nn][rknn][yolov8][fast-output]") {
+TEST_CASE("RKNN YOLOv8 quantized adapter rejects invalid quantization", "[nn][rknn][yolov8][fast-output]") {
     using namespace cosmo::nn;
     const std::vector<std::vector<int>> shapes{
-        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 2, 2},
-        {1, 3, 2, 2},  {1, 64, 1, 1}, {1, 3, 1, 1},
+        {1, 64, 4, 4}, {1, 3, 4, 4}, {1, 64, 2, 2}, {1, 3, 2, 2}, {1, 64, 1, 1}, {1, 3, 1, 1},
     };
     std::vector<std::vector<int8_t>> values;
     std::vector<RknnYolov8QuantizedHead> heads;
@@ -331,8 +323,7 @@ TEST_CASE("RKNN YOLOv8 direct candidates match the logical tensor decoder",
         CHECK(actual[index] == Catch::Approx(expected[index]).margin(1e-5f));
 }
 
-TEST_CASE("RKNN YOLOv8 class-major capability preserves decode results",
-          "[nn][rknn][yolov8][fast-output]") {
+TEST_CASE("RKNN YOLOv8 class-major capability preserves decode results", "[nn][rknn][yolov8][fast-output]") {
     using namespace cosmo::nn;
 
     SharedResource resource;

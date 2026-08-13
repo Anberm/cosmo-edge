@@ -101,7 +101,7 @@ TEST_CASE("AlgDataQueueDistributor plans before host frame materialization", "[D
     for (size_t index = 0; index < task.que->GetMaxSize(); ++index) {
         REQUIRE(task.que->Insert(std::make_shared<AlgData>()));
     }
-    input->firstTimePoint = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    input->firstTimePoint     = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     const auto saturated_plan = dist.PrepareFrameDistribution(input);
     CHECK(saturated_plan.Empty());
 
@@ -115,8 +115,8 @@ TEST_CASE("Only regular detector queue plans advertise native inference", "[Dist
     auto detector = makeTask("ch1", "detector", std::string(AADetect_Code), -1.0f);
     REQUIRE(detector_dist.RegistProcQueue(detector));
 
-    auto input            = std::make_shared<AlgData>();
-    input->firstTimePoint = std::chrono::steady_clock::now();
+    auto input               = std::make_shared<AlgData>();
+    input->firstTimePoint    = std::chrono::steady_clock::now();
     const auto detector_plan = detector_dist.PrepareFrameDistribution(input);
     CHECK(detector_plan.SupportsNativeInference());
 
@@ -143,14 +143,14 @@ TEST_CASE("Native inference descriptors are isolated across detector queues", "[
     REQUIRE(plan.queues.size() == 2);
 
     auto native           = std::make_shared<media::NativeVideoBuffer>();
-    native->fd             = 7;
-    native->bytes          = 24;
-    native->width          = 4;
-    native->height         = 4;
-    native->width_stride   = 4;
-    native->height_stride  = 4;
-    native->format         = media::NativeVideoBufferFormat::NV12;
-    native->owner          = std::make_shared<int>(1);
+    native->fd            = 7;
+    native->bytes         = 24;
+    native->width         = 4;
+    native->height        = 4;
+    native->width_stride  = 4;
+    native->height_stride = 4;
+    native->format        = media::NativeVideoBufferFormat::NV12;
+    native->owner         = std::make_shared<int>(1);
 
     constexpr int pool_size = 4 * 4 * 3 / 2;
     mem::MemoryPoolMng memory_pool(std::make_unique<mem::AllocatorCpu>(), {pool_size});
@@ -162,14 +162,13 @@ TEST_CASE("Native inference descriptors are isolated across detector queues", "[
     } pool_reset;
     auto frame = std::make_shared<media::VideoFrame>(4, 4, media::PixelFormat::PIXEL_I420);
 
-    REQUIRE(dist.DistributorPreparedFrame(
-                plan, input, frame,
-                [native](AlgDataPtr source, VideoFramePtr converted_frame) {
-                    auto converted                        = AlgDataCopy(source);
-                    converted->chanDataDec.frame          = std::move(converted_frame);
-                    converted->chanDataDec.native_buffer  = native;
-                    return converted;
-                }) == 2);
+    REQUIRE(dist.DistributorPreparedFrame(plan, input, frame,
+                                          [native](AlgDataPtr source, VideoFramePtr converted_frame) {
+                                              auto converted               = AlgDataCopy(source);
+                                              converted->chanDataDec.frame = std::move(converted_frame);
+                                              converted->chanDataDec.native_buffer = native;
+                                              return converted;
+                                          }) == 2);
 
     auto queued_a = detector_a.que->Pop();
     auto queued_b = detector_b.que->Pop();

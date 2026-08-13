@@ -263,8 +263,8 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
             const auto gpu_mem_usage = GetCapacityUsage(gpu_utl.gpumemtotal, gpu_utl.gpumemavailable);
             items.push_back({"specialMemoryUtilization", "芯片内存使用率", gpu_mem_usage.percent,
                              FormatBinaryMebibytes(gpu_mem_usage.used),
-                             FormatBinaryMebibytes(gpu_mem_usage.available),
-                             gpu_mem_usage.valid ? 1 : 0, "accelerator"});
+                             FormatBinaryMebibytes(gpu_mem_usage.available), gpu_mem_usage.valid ? 1 : 0,
+                             "accelerator"});
         }
     }
 

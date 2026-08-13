@@ -93,8 +93,7 @@ private:
 
 }  // namespace
 
-TEST_CASE("Rockchip MPP encodes compact I420 as Annex-B H264",
-          "[media][rockchip][encoder][.device]") {
+TEST_CASE("Rockchip MPP encodes compact I420 as Annex-B H264", "[media][rockchip][encoder][.device]") {
     constexpr int width  = 640;
     constexpr int height = 360;
     std::vector<uint8_t> i420(static_cast<size_t>(width) * height * 3 / 2, 128);
@@ -129,8 +128,8 @@ TEST_CASE("Rockchip RGA performs admitted host-buffer conversions and resize",
     {
         StubOsdTextRenderer osd;
         cosmo::media::VideoFrameProcRockchip processor(osd);
-        auto bgr = std::make_shared<cosmo::media::VideoFrame>(
-            width, height, cosmo::media::PixelFormat::PIXEL_BGR8);
+        auto bgr =
+            std::make_shared<cosmo::media::VideoFrame>(width, height, cosmo::media::PixelFormat::PIXEL_BGR8);
         REQUIRE(VideoFrameValid(bgr, true));
         std::fill_n(bgr->GetData(), bgr->GetSize(), 96);
 
@@ -194,8 +193,8 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     bool discarded_deferred_output = false;
     for (size_t index = 0; index < packets.size(); ++index) {
         bool accepted = false;
-        auto output = decoder->DecodeFrame(packets[index]->data.data(), packets[index]->data.size(),
-                                           static_cast<int64_t>(index + 1), accepted);
+        auto output   = decoder->DecodeFrame(packets[index]->data.data(), packets[index]->data.size(),
+                                             static_cast<int64_t>(index + 1), accepted);
         CHECK(accepted);
         if (output.IsDeferred() && !discarded_deferred_output) {
             output.Discard();
@@ -204,7 +203,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
         }
         if (output.HasFrame()) {
             native_buffer = output.ExportNativeBuffer();
-            decoded = output.Materialize();
+            decoded       = output.Materialize();
         }
         if (decoded) {
             break;
@@ -248,7 +247,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     source_handle.native_image.width_stride  = native_buffer->width_stride;
     source_handle.native_image.height_stride = native_buffer->height_stride;
     source_handle.native_image.format        = cosmo::nn::IMAGE_NV12;
-    auto source_blob = std::make_shared<cosmo::nn::Blob>(source_desc, source_handle);
+    auto source_blob                         = std::make_shared<cosmo::nn::Blob>(source_desc, source_handle);
 
     cosmo::nn::Resize resize;
     resize.dsize   = {640, 640};
@@ -265,7 +264,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     target_desc.data_format  = cosmo::nn::DATA_FORMAT_NHWC;
     target_desc.image_format = cosmo::nn::IMAGE_RGB;
     target_desc.dims         = {1, 640, 640, 3};
-    auto target = std::make_shared<cosmo::nn::Blob>(target_desc, true);
+    auto target              = std::make_shared<cosmo::nn::Blob>(target_desc, true);
     REQUIRE(target->GetHandle().base);
     std::vector<std::shared_ptr<cosmo::nn::Blob>> bottoms{source_blob};
     std::vector<std::shared_ptr<cosmo::nn::Blob>> tops{target};
@@ -282,8 +281,8 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
         ScopedEnvValue enabled("COSMO_RKNN_MPP_DMABUF", "1");
         REQUIRE(bool(resize_node.Forward(bottoms, tops)));
     }
-    const auto inference_after = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
-    const auto* native_result  = static_cast<const uint8_t*>(target->GetHandle().base);
+    const auto inference_after  = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
+    const auto* native_result   = static_cast<const uint8_t*>(target->GetHandle().base);
     uint64_t absolute_error_sum = 0;
     int max_absolute_error      = 0;
     for (size_t index = 0; index < host_result.size(); ++index) {
@@ -295,8 +294,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
         static_cast<double>(absolute_error_sum) / static_cast<double>(host_result.size());
     CHECK(mean_absolute_error <= 2.0);
     CHECK(max_absolute_error <= 12);
-    CHECK(inference_after.rknn_mpp_dmabuf_frames ==
-          inference_before.rknn_mpp_dmabuf_frames + 1);
+    CHECK(inference_after.rknn_mpp_dmabuf_frames == inference_before.rknn_mpp_dmabuf_frames + 1);
     CHECK(inference_after.rknn_mpp_dmabuf_import_failures ==
           inference_before.rknn_mpp_dmabuf_import_failures);
 
@@ -309,8 +307,7 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     const auto fallback_after = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
     CHECK(std::equal(host_result.begin(), host_result.end(),
                      static_cast<const uint8_t*>(target->GetHandle().base)));
-    CHECK(fallback_after.rknn_mpp_dmabuf_fallbacks ==
-          fallback_before.rknn_mpp_dmabuf_fallbacks + 1);
+    CHECK(fallback_after.rknn_mpp_dmabuf_fallbacks == fallback_before.rknn_mpp_dmabuf_fallbacks + 1);
 #endif
 
     const auto after = cosmo::media::GetPreviewPipelineMetrics().Snapshot();
@@ -329,24 +326,20 @@ TEST_CASE("Rockchip MPP decodes its H264 output through the Copy-out boundary",
     // RK3576 MPP context alive while exporting its DMA-BUF through RGA, then
     // require the warmed frame-group FD count to remain bounded.
     REQUIRE(decoder->Open());
-    CHECK_FALSE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH264,
-                                               width + 2, height));
-    CHECK_FALSE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH265,
-                                               width, height));
+    CHECK_FALSE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH264, width + 2, height));
+    CHECK_FALSE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH265, width, height));
     size_t dmabuf_fds_after_warmup = 0;
-    size_t reused_stream_frames = 0;
+    size_t reused_stream_frames    = 0;
     for (int cycle = 0; cycle < 17; ++cycle) {
         if (cycle > 0) {
-            REQUIRE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH264,
-                                                   width, height));
+            REQUIRE(decoder->ReuseForStreamRestart(cosmo::media::VideoCodecType::kH264, width, height));
         }
         bool got_frame = false;
-        for (size_t packet_index = 0; packet_index < packets.size() && !got_frame;
-             ++packet_index) {
+        for (size_t packet_index = 0; packet_index < packets.size() && !got_frame; ++packet_index) {
             bool accepted = false;
-            auto output = decoder->DecodeFrame(packets[packet_index]->data.data(),
-                                               packets[packet_index]->data.size(),
-                                               1000 + cycle * 100 + packet_index, accepted);
+            auto output =
+                decoder->DecodeFrame(packets[packet_index]->data.data(), packets[packet_index]->data.size(),
+                                     1000 + cycle * 100 + packet_index, accepted);
             REQUIRE(accepted);
             if (!output.HasFrame())
                 continue;

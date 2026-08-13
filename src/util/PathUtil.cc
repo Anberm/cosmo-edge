@@ -188,8 +188,7 @@ void Init() {
 void OverrideRootPaths(const std::string& dataPath, const std::string& appDataPath) {
     const fs::path data_root(dataPath);
     const fs::path app_data_root(appDataPath);
-    if (dataPath.empty() || appDataPath.empty() || !data_root.is_absolute() ||
-        !app_data_root.is_absolute()) {
+    if (dataPath.empty() || appDataPath.empty() || !data_root.is_absolute() || !app_data_root.is_absolute()) {
         throw std::invalid_argument("Cosmo data roots must be non-empty absolute paths");
     }
     g_dataPath    = data_root.lexically_normal().string();

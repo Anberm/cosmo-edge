@@ -110,17 +110,14 @@ ViewerDistributionPlan AlgChannelDecode::PrepareViewerDistribution() {
     return plan;
 }
 
-void AlgChannelDecode::DistributePreparedViewer(const ViewerDistributionPlan& plan,
-                                                VideoFramePtr in_data) {
+void AlgChannelDecode::DistributePreparedViewer(const ViewerDistributionPlan& plan, VideoFramePtr in_data) {
     if (!in_data || plan.empty()) {
         return;
     }
     std::lock_guard<std::mutex> lock(mtx_);
     for (const auto& alg_id : plan) {
         auto it = std::find_if(viewer_queue_.begin(), viewer_queue_.end(),
-                               [&](const ChannelTaskViewerQueue& viewer) {
-                                   return viewer.alg_id == alg_id;
-                               });
+                               [&](const ChannelTaskViewerQueue& viewer) { return viewer.alg_id == alg_id; });
         if (it != viewer_queue_.end() && it->async_frame_queue) {
             it->async_frame_queue->Insert(in_data);
         }

@@ -186,8 +186,7 @@ TEST_CASE("Algorithm layout queries accept only the managed algorithm and templa
 
     SECTION("portable logical roots resolve under the configured app-data directory") {
         cosmo::service::algorithm::LayoutDetailResult algorithm_detail;
-        REQUIRE(service.GetLayoutDetail("101", "", algorithm_detail) ==
-                cosmo::util::ErrorEnum::Success);
+        REQUIRE(service.GetLayoutDetail("101", "", algorithm_detail) == cosmo::util::ErrorEnum::Success);
         REQUIRE(algorithm_detail.algorithmName == "Managed");
 
         cosmo::service::algorithm::LayoutDetailResult template_detail;

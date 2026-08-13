@@ -5,8 +5,7 @@
 
 namespace cosmo::media {
 
-std::unique_ptr<IVideoFrameProc> CreateVideoFrameProc(mem::IDeviceContext& ctx,
-                                                       IOsdTextRenderer& osd) {
+std::unique_ptr<IVideoFrameProc> CreateVideoFrameProc(mem::IDeviceContext& ctx, IOsdTextRenderer& osd) {
     static_cast<void>(ctx);
     return std::make_unique<VideoFrameProcRockchip>(osd);
 }
