@@ -94,13 +94,15 @@ See `models/` for artifact identities, I/O contracts, platform-scoped repository
 
 The public pack contains the methodology, sanitized scenarios, machine-readable results, environment templates, and checksums. Device serial numbers, internal channel IDs, internal algorithm IDs, local absolute paths, customer media, and full debugging logs remain in the private evidence archive.
 
+GitHub's Code view displays checked-in HTML as source. The `open` links below use the same rendered documentation-site pattern as v1.0; they open as standalone reports after the documentation site is deployed and are expected to return 404 before that publication step.
+
 The release material includes separate `summary.json`, `metrics.json`, `command.txt`, sanitized log, and HTML attachments for single-detector, dual-detector, and VLM workloads. Before execution, resolve the public model references to device-local identifiers as described in `methodology.md`; device addresses, credentials, and internal identifiers are intentionally absent.
 
 | Platform | Single-detector staircase | Dual-detector staircase | VLM observation | Machine-readable summary |
 | --- | --- | --- | --- | --- |
-| BM1688 | [open](results/bm1688/single-detector/report.html) | [open](results/bm1688/dual-detector/report.html) | [open](results/bm1688/vlm-observation/report.html) | [summary.json](results/bm1688/summary.json) |
-| CV186X | [open](results/cv186x/single-detector/report.html) | [open](results/cv186x/dual-detector/report.html) | [open](results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
-| RK3576 | [open](results/rk3576/single-detector/report.html) | [open](results/rk3576/dual-detector/report.html) | [open](results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
+| BM1688 | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-detector/report.html) | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/dual-detector/report.html) | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html) | [summary.json](results/bm1688/summary.json) |
+| CV186X | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-detector/report.html) | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/dual-detector/report.html) | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
+| RK3576 | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-detector/report.html) | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/dual-detector/report.html) | [open](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
 
 ## Product-release evidence boundary
 

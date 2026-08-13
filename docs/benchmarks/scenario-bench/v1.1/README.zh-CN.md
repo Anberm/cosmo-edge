@@ -96,11 +96,13 @@ BM1688 与 CV186X 的实测设备使用同一 Open 安装包，SHA-256 为 `8aee
 
 本发布材料已经生成单算法、双算法与 VLM 的独立 `summary.json`、`metrics.json`、`command.txt`、脱敏日志和 HTML。执行前需按 `methodology.md` 将公开模型引用解析为设备本地编号；公开包不会携带设备地址、凭据或内部编号。
 
+GitHub 的 Code 页面只显示仓库中的 HTML 源码。下表的“打开”链接使用与 v1.0 相同的官网静态报告入口；合并并部署文档站后会直接打开报告页面，正式部署前返回 404 属于预期状态。
+
 | 平台 | 单算法逐路报告 | 双算法逐路报告 | VLM 观测报告 | 机器可读汇总 |
 | --- | --- | --- | --- | --- |
-| BM1688 | [打开](results/bm1688/single-detector/report.html) | [打开](results/bm1688/dual-detector/report.html) | [打开](results/bm1688/vlm-observation/report.html) | [summary.json](results/bm1688/summary.json) |
-| CV186X | [打开](results/cv186x/single-detector/report.html) | [打开](results/cv186x/dual-detector/report.html) | [打开](results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
-| RK3576 | [打开](results/rk3576/single-detector/report.html) | [打开](results/rk3576/dual-detector/report.html) | [打开](results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
+| BM1688 | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/dual-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html) | [summary.json](results/bm1688/summary.json) |
+| CV186X | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/dual-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
+| RK3576 | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/dual-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
 
 ## 产品发版证据边界
 

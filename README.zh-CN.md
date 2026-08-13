@@ -144,7 +144,7 @@ CV186X 请按照 [CV186X 快速开始](docs/guide/cv186x-quick-start.md)完成�
 
 - [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
-- [中文主报告](docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
+- [中文主报告（官网渲染版）](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
 - [方法与复现](docs/benchmarks/scenario-bench/v1.1/methodology.md)
 
 源码基线为 `feat/model-guard-v2.3` commit `c0e77f22c3d9cf57545123d2db90409c28c1acab`、tree `4cfa8cae62062ebb53a1481afa51ff3f88977f88`。BM1688 与 CV186X 已绑定到记录的 Open 安装包和运行引擎；RK3576 包哈希与 Protected 包构建来源不在公开 benchmark 中，因此报告不对它们作 package-qualified 声明。精确证据边界见 [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json)。

@@ -22,7 +22,12 @@ const required = [
 ];
 
 for (const platform of ['bm1688', 'cv186x', 'rk3576']) {
-  required.push(`environments/${platform}.json`, `models/${platform}.json`, `results/${platform}/summary.json`);
+  required.push(
+    `environments/${platform}.json`,
+    `models/${platform}.json`,
+    `results/${platform}/summary.json`,
+    `results/${platform}/report.html`,
+  );
   for (const workload of ['single-detector', 'dual-detector', 'vlm-observation']) {
     for (const file of ['summary.json', 'metrics.json', 'command.txt', 'test.log', 'report.html']) {
       required.push(`results/${platform}/${workload}/${file}`);
