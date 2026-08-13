@@ -72,11 +72,11 @@ private:
     std::string audio_file_path_;
     size_t max_audio_count_{1000};
     std::vector<cosmo::AlarmAudioInfo> audio_info_list_;
-    std::string audio_relative_path_     = "/audioMng/";
-    std::string default_audio_name_      = "默认";                    // Default audio (business label)
-    std::string default_audio_id_        = "1234567890";              // Default audio ID
-    std::string default_audio_file_name_;                              // Packaged default audio file
-    std::string default_audio_web_file_  = "/audioMng/beep.ogg";
+    std::string audio_relative_path_ = "/audioMng/";
+    std::string default_audio_name_  = "默认";        // Default audio (business label)
+    std::string default_audio_id_    = "1234567890";  // Default audio ID
+    std::string default_audio_file_name_;             // Packaged default audio file
+    std::string default_audio_web_file_ = "/audioMng/beep.ogg";
 
     // :: AudioDevice state
     mutable std::shared_mutex device_mtx_;

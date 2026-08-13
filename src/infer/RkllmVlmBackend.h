@@ -24,8 +24,7 @@ public:
 
     util::ErrorEnum Init();
     util::ErrorEnum Generate(const std::vector<VideoFramePtr>& images,
-                             const std::vector<std::string>& prompts,
-                             const Qwen3VLGenerationParam& gen_param,
+                             const std::vector<std::string>& prompts, const Qwen3VLGenerationParam& gen_param,
                              std::vector<Qwen3VLResult>& results);
 
 private:

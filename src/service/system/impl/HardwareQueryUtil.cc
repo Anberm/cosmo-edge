@@ -12,8 +12,8 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <climits>
 #include <cmath>
 #include <cstring>

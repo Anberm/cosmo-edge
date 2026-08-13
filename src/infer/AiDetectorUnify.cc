@@ -17,9 +17,8 @@ namespace {
     using MetricsClock = std::chrono::steady_clock;
 
     uint64_t ElapsedNanoseconds(MetricsClock::time_point started_at) {
-        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                         MetricsClock::now() - started_at)
-                                         .count());
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(MetricsClock::now() - started_at).count());
     }
 }  // namespace
 
@@ -68,10 +67,10 @@ util::ErrorEnum AiDetectorUnify::Detect(const std::vector<VideoFramePtr>& images
     return Detect(images, {}, std::move(conf_thres), results);
 }
 
-util::ErrorEnum AiDetectorUnify::Detect(
-    const std::vector<VideoFramePtr>& images,
-    const std::vector<media::NativeVideoBufferPtr>& native_buffers,
-    std::vector<AiConfidence> conf_thres, std::vector<std::vector<AiDetectRstEl>>& results) {
+util::ErrorEnum AiDetectorUnify::Detect(const std::vector<VideoFramePtr>& images,
+                                        const std::vector<media::NativeVideoBufferPtr>& native_buffers,
+                                        std::vector<AiConfidence> conf_thres,
+                                        std::vector<std::vector<AiDetectRstEl>>& results) {
     if (!detector_) {
         LOG_WARN("{}", "SDK Detector Not Init");
         return util::ErrorEnum::NotInit;
@@ -119,15 +118,14 @@ util::ErrorEnum AiDetectorUnify::Detect(
     return util::ErrorEnum::Success;
 }
 
-util::ErrorEnum AiDetectorUnify::Forward(
-    const std::vector<VideoFramePtr>& images,
-    const std::vector<media::NativeVideoBufferPtr>& native_buffers,
+util::ErrorEnum AiDetectorUnify::Forward(const std::vector<VideoFramePtr>& images,
+                                         const std::vector<media::NativeVideoBufferPtr>& native_buffers,
                                          std::vector<std::vector<AiDetectRstEl>>& results) {
     std::vector<std::shared_ptr<cosmo::nn::Blob>> image_blobs{};
     const auto blob_convert_started = MetricsClock::now();
-    auto ret = ConvertImagesToBlobs(images, native_buffers, image_blobs);
-    cosmo::nn::GetInferencePipelineMetrics().RecordBlobConvert(
-        ElapsedNanoseconds(blob_convert_started), static_cast<uint64_t>(image_blobs.size()));
+    auto ret                        = ConvertImagesToBlobs(images, native_buffers, image_blobs);
+    cosmo::nn::GetInferencePipelineMetrics().RecordBlobConvert(ElapsedNanoseconds(blob_convert_started),
+                                                               static_cast<uint64_t>(image_blobs.size()));
     if (util::ErrorEnum::Success != ret) {
         LOG_ERRO("ConvertImagesToBlobs Failed. Ret:{}", ret);
         return ret;
@@ -137,8 +135,7 @@ util::ErrorEnum AiDetectorUnify::Forward(
         auto status = detector_->Forward({image_blobs});
         if (!bool(status)) {
             cosmo::nn::GetInferencePipelineMetrics().RecordGraphForward(
-                ElapsedNanoseconds(graph_forward_started), static_cast<uint64_t>(image_blobs.size()),
-                false);
+                ElapsedNanoseconds(graph_forward_started), static_cast<uint64_t>(image_blobs.size()), false);
             LOG_ERRO("Forward Failed.({})", status.description());
             return util::ErrorEnum::AI_FORWARD_FAILED;
         }
@@ -164,8 +161,7 @@ util::ErrorEnum AiDetectorUnify::Forward(
         auto status = detector_->ParseOutput<cosmo::nn::ObjectInfoV1>(outputs);
         if (!bool(status)) {
             cosmo::nn::GetInferencePipelineMetrics().RecordResultParse(
-                ElapsedNanoseconds(result_parse_started), static_cast<uint64_t>(image_blobs.size()),
-                false);
+                ElapsedNanoseconds(result_parse_started), static_cast<uint64_t>(image_blobs.size()), false);
             LOG_ERRO("ParseOutput Failed.({})", status.description());
             return util::ErrorEnum::AI_PARSE_OUTPUT_FAILED;
         }

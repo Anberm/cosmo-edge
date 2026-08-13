@@ -64,8 +64,7 @@ public:
 
     /// Complete a previously prepared distribution after the host frame has
     /// been materialized exactly once.
-    int DistributorPreparedFrame(const AlgFrameDistributionPlan& plan, AlgDataPtr frame,
-                                 VideoFramePtr data,
+    int DistributorPreparedFrame(const AlgFrameDistributionPlan& plan, AlgDataPtr frame, VideoFramePtr data,
                                  std::function<AlgDataPtr(AlgDataPtr, VideoFramePtr)> func);
 
     // Distribute data to specific registered queues

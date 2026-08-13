@@ -54,7 +54,7 @@ static constexpr const char* kPlatformDirPrefix = "prod_RK3576_";
 static constexpr const char* kNewDirPrefix      = "prod_RK3576_";
 static constexpr const char* kPlatformDirRegex  = "prod_[A-Z0-9]+_([0-9]+)_.*";
 static constexpr const char* kEngineType        = "RK3576";
-static constexpr const char* kModelFileExt       = ".rknn";
+static constexpr const char* kModelFileExt      = ".rknn";
 static constexpr const char* kSupportedChips[]  = {"RK3576"};
 
 #elif defined(COSMO_NN_USE_CPU_BACKEND)

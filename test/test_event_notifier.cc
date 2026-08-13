@@ -56,7 +56,8 @@ std::string GetOrdinaryHttpResponse(int port) {
             char buffer[512];
             while (true) {
                 const auto count = recv(fd, buffer, sizeof(buffer), 0);
-                if (count <= 0) break;
+                if (count <= 0)
+                    break;
                 response.append(buffer, static_cast<size_t>(count));
             }
             close(fd);

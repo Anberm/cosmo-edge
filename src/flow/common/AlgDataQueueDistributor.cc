@@ -251,9 +251,8 @@ AlgFrameDistributionPlan AlgDataQueueDistributor::PrepareFrameDistribution(AlgDa
     for (auto& task_group : tasks_) {
         const bool metadata_only_group =
             !task_group.tasks.empty() &&
-            std::all_of(task_group.tasks.begin(), task_group.tasks.end(), [](const AlgTaskUnit& task) {
-                return task.actionId == BAStreamChannel_Code.data();
-            });
+            std::all_of(task_group.tasks.begin(), task_group.tasks.end(),
+                        [](const AlgTaskUnit& task) { return task.actionId == BAStreamChannel_Code.data(); });
         if (metadata_only_group) {
             // The camera-owned BA_00001 ChannelTask inherits an empty
             // AlgActionBase::HandFrame. It keeps channel lifecycle/FPS status
@@ -279,9 +278,8 @@ AlgFrameDistributionPlan AlgDataQueueDistributor::PrepareFrameDistribution(AlgDa
         }
         const bool detector_group =
             !task_group.tasks.empty() &&
-            std::all_of(task_group.tasks.begin(), task_group.tasks.end(), [](const AlgTaskUnit& task) {
-                return task.actionId == AADetect_Code.data();
-            });
+            std::all_of(task_group.tasks.begin(), task_group.tasks.end(),
+                        [](const AlgTaskUnit& task) { return task.actionId == AADetect_Code.data(); });
         plan.native_inference_eligible = plan.native_inference_eligible && detector_group;
         plan.queues.push_back(task_group.que);
     }

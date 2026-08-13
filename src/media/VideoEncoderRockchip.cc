@@ -1,13 +1,13 @@
 #include "media/VideoEncoderRockchip.h"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <limits>
 #include <string>
 #include <vector>
-
-#include <unistd.h>
 
 #define MODULE_TAG "cosmo_mpp_encoder"
 #include <rockchip/mpp_buffer.h>
@@ -25,66 +25,66 @@
 namespace cosmo::media {
 namespace {
 
-constexpr size_t kMppAlignment = 16;
-constexpr RK_S32 kFrameRate    = 25;
-constexpr RK_S32 kGopLength    = 10;
-constexpr RK_S32 kBitRate      = 4'000'000;
+    constexpr size_t kMppAlignment = 16;
+    constexpr RK_S32 kFrameRate    = 25;
+    constexpr RK_S32 kGopLength    = 10;
+    constexpr RK_S32 kBitRate      = 4'000'000;
 
-MppCodingType ToMppCoding(VideoCodecType type) {
-    return type == VideoCodecType::kH264 ? MPP_VIDEO_CodingAVC : MPP_VIDEO_CodingUnused;
-}
+    MppCodingType ToMppCoding(VideoCodecType type) {
+        return type == VideoCodecType::kH264 ? MPP_VIDEO_CodingAVC : MPP_VIDEO_CodingUnused;
+    }
 
-size_t AlignUp(size_t value, size_t alignment) {
-    return (value + alignment - 1) / alignment * alignment;
-}
+    size_t AlignUp(size_t value, size_t alignment) {
+        return (value + alignment - 1) / alignment * alignment;
+    }
 
-bool ContainsH264ParameterSet(const uint8_t* data, size_t size) {
-    if (!data || size < 5) {
+    bool ContainsH264ParameterSet(const uint8_t* data, size_t size) {
+        if (!data || size < 5) {
+            return false;
+        }
+        bool has_sps = false;
+        bool has_pps = false;
+        for (size_t pos = 0; pos + 4 < size; ++pos) {
+            size_t prefix = 0;
+            if (data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 1) {
+                prefix = 3;
+            } else if (pos + 4 < size && data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 0 &&
+                       data[pos + 3] == 1) {
+                prefix = 4;
+            }
+            if (prefix != 0 && pos + prefix < size) {
+                const auto type = static_cast<uint8_t>(data[pos + prefix] & 0x1f);
+                has_sps         = has_sps || type == 7;
+                has_pps         = has_pps || type == 8;
+            }
+        }
+        return has_sps && has_pps;
+    }
+
+    bool ContainsH264Idr(const uint8_t* data, size_t size) {
+        if (!data || size < 5) {
+            return false;
+        }
+        for (size_t pos = 0; pos + 4 < size; ++pos) {
+            size_t prefix = 0;
+            if (data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 1) {
+                prefix = 3;
+            } else if (pos + 4 < size && data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 0 &&
+                       data[pos + 3] == 1) {
+                prefix = 4;
+            }
+            if (prefix != 0 && pos + prefix < size && (data[pos + prefix] & 0x1f) == 5) {
+                return true;
+            }
+        }
         return false;
     }
-    bool has_sps = false;
-    bool has_pps = false;
-    for (size_t pos = 0; pos + 4 < size; ++pos) {
-        size_t prefix = 0;
-        if (data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 1) {
-            prefix = 3;
-        } else if (pos + 4 < size && data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 0 &&
-                   data[pos + 3] == 1) {
-            prefix = 4;
-        }
-        if (prefix != 0 && pos + prefix < size) {
-            const auto type = static_cast<uint8_t>(data[pos + prefix] & 0x1f);
-            has_sps         = has_sps || type == 7;
-            has_pps         = has_pps || type == 8;
-        }
-    }
-    return has_sps && has_pps;
-}
 
-bool ContainsH264Idr(const uint8_t* data, size_t size) {
-    if (!data || size < 5) {
-        return false;
+    uint64_t ElapsedNanoseconds(std::chrono::steady_clock::time_point started) {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started)
+                .count());
     }
-    for (size_t pos = 0; pos + 4 < size; ++pos) {
-        size_t prefix = 0;
-        if (data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 1) {
-            prefix = 3;
-        } else if (pos + 4 < size && data[pos] == 0 && data[pos + 1] == 0 && data[pos + 2] == 0 &&
-                   data[pos + 3] == 1) {
-            prefix = 4;
-        }
-        if (prefix != 0 && pos + prefix < size && (data[pos + prefix] & 0x1f) == 5) {
-            return true;
-        }
-    }
-    return false;
-}
-
-uint64_t ElapsedNanoseconds(std::chrono::steady_clock::time_point started) {
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started)
-            .count());
-}
 
 }  // namespace
 
@@ -116,13 +116,13 @@ VideoEncoderCapability VideoEncoderRockchip::Probe(VideoCodecType type) {
 
     const auto coding = ToMppCoding(type);
     if (coding == MPP_VIDEO_CodingUnused) {
-        const auto cpu = VideoEncoderCpu::Probe(type);
+        const auto cpu            = VideoEncoderCpu::Probe(type);
         capability.available      = cpu.available;
         capability.backend        = cpu.available ? "ffmpeg-software-fallback" : capability.backend;
         capability.implementation = cpu.available ? cpu.implementation : std::string{};
-        capability.detail = cpu.available
-                                ? "Rockchip MPP qualification is H264-only; approved FFmpeg fallback is available"
-                                : "Rockchip MPP qualification is H264-only; approved FFmpeg fallback unavailable";
+        capability.detail =
+            cpu.available ? "Rockchip MPP qualification is H264-only; approved FFmpeg fallback is available"
+                          : "Rockchip MPP qualification is H264-only; approved FFmpeg fallback unavailable";
         return capability;
     }
 
@@ -130,8 +130,9 @@ VideoEncoderCapability VideoEncoderRockchip::Probe(VideoCodecType type) {
     const bool format_supported  = mpp_check_support_format(MPP_CTX_ENC, coding) == MPP_OK;
     if (device_accessible && format_supported) {
         capability.available = true;
-        capability.detail = "MPP encoder device and codec are available; compact I420 is copied into a "
-                            "stride-aligned MPP buffer";
+        capability.detail =
+            "MPP encoder device and codec are available; compact I420 is copied into a "
+            "stride-aligned MPP buffer";
         return capability;
     }
 
@@ -140,7 +141,7 @@ VideoEncoderCapability VideoEncoderRockchip::Probe(VideoCodecType type) {
         capability.available      = true;
         capability.backend        = "ffmpeg-software-fallback";
         capability.implementation = cpu.implementation;
-        capability.detail = "MPP unavailable; deterministic approved FFmpeg fallback is available";
+        capability.detail         = "MPP unavailable; deterministic approved FFmpeg fallback is available";
         return capability;
     }
 
@@ -205,8 +206,7 @@ bool VideoEncoderRockchip::OpenMpp() {
     state_->frame_buffer_size = y_plane * 3 / 2;
 
     auto ret = mpp_buffer_group_get_internal(
-        &state_->buffer_group,
-        static_cast<MppBufferType>(MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE));
+        &state_->buffer_group, static_cast<MppBufferType>(MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE));
     if (ret != MPP_OK) {
         LOG_WARN("MPP buffer group allocation failed: {}", ret);
         CleanMpp();
@@ -232,7 +232,7 @@ bool VideoEncoderRockchip::OpenMpp() {
         return false;
     }
     MppPollType timeout = MPP_POLL_BLOCK;
-    ret = state_->api->control(state_->context, MPP_SET_OUTPUT_TIMEOUT, &timeout);
+    ret                 = state_->api->control(state_->context, MPP_SET_OUTPUT_TIMEOUT, &timeout);
     if (ret != MPP_OK) {
         LOG_WARN("MPP output timeout configuration failed: {}", ret);
         CleanMpp();
@@ -257,7 +257,7 @@ bool VideoEncoderRockchip::OpenMpp() {
         return false;
     }
 
-    bool config_ok = true;
+    bool config_ok     = true;
     const auto set_s32 = [&](const char* name, RK_S32 value) {
         const auto result = mpp_enc_cfg_set_s32(state_->config, name, value);
         if (result != MPP_OK) {
@@ -338,7 +338,7 @@ VideoPacketPtr VideoEncoderRockchip::SendYUVFrame(void* data) {
         return fallback_->SendYUVFrame(data);
     }
     const auto started = std::chrono::steady_clock::now();
-    const auto fail = [&]() -> VideoPacketPtr {
+    const auto fail    = [&]() -> VideoPacketPtr {
         GetPreviewPipelineMetrics().RecordMppEncode(false, ElapsedNanoseconds(started));
         return nullptr;
     };
@@ -350,7 +350,7 @@ VideoPacketPtr VideoEncoderRockchip::SendYUVFrame(void* data) {
     if (!destination) {
         return fail();
     }
-    const auto* source = static_cast<const uint8_t*>(data);
+    const auto* source           = static_cast<const uint8_t*>(data);
     const size_t compact_y_size  = width_ * height_;
     const size_t compact_uv_size = compact_y_size / 4;
     const size_t mpp_y_size      = state_->horizontal_stride * state_->vertical_stride;
@@ -363,8 +363,8 @@ VideoPacketPtr VideoEncoderRockchip::SendYUVFrame(void* data) {
     for (size_t row = 0; row < height_; ++row) {
         std::memcpy(destination + row * state_->horizontal_stride, source + row * width_, width_);
     }
-    auto* destination_u = destination + mpp_y_size;
-    auto* destination_v = destination_u + mpp_uv_stride * mpp_uv_height;
+    auto* destination_u  = destination + mpp_y_size;
+    auto* destination_v  = destination_u + mpp_uv_stride * mpp_uv_height;
     const auto* source_u = source + compact_y_size;
     const auto* source_v = source_u + compact_uv_size;
     for (size_t row = 0; row < height_ / 2; ++row) {
@@ -412,25 +412,24 @@ VideoPacketPtr VideoEncoderRockchip::SendYUVFrame(void* data) {
         return fail();
     }
 
-    const auto* bytes = static_cast<const uint8_t*>(mpp_packet_get_pos(packet));
-    const auto length = mpp_packet_get_length(packet);
-    RK_S32 output_intra = 0;
+    const auto* bytes      = static_cast<const uint8_t*>(mpp_packet_get_pos(packet));
+    const auto length      = mpp_packet_get_length(packet);
+    RK_S32 output_intra    = 0;
     const auto packet_meta = mpp_packet_has_meta(packet) ? mpp_packet_get_meta(packet) : nullptr;
     if (packet_meta) {
         mpp_meta_get_s32(packet_meta, KEY_OUTPUT_INTRA, &output_intra);
     }
-    const bool is_intra = output_intra != 0 ||
-                          (codec_type_ == VideoCodecType::kH264 && ContainsH264Idr(bytes, length));
+    const bool is_intra =
+        output_intra != 0 || (codec_type_ == VideoCodecType::kH264 && ContainsH264Idr(bytes, length));
     if (!bytes || length == 0) {
         mpp_packet_deinit(&packet);
         return fail();
     }
 
-    auto output       = std::make_shared<VideoPacket>();
+    auto output        = std::make_shared<VideoPacket>();
     output->is_i_frame = is_intra;
     output->pts        = mpp_packet_get_pts(packet);
-    if (is_intra && codec_type_ == VideoCodecType::kH264 &&
-        !ContainsH264ParameterSet(bytes, length)) {
+    if (is_intra && codec_type_ == VideoCodecType::kH264 && !ContainsH264ParameterSet(bytes, length)) {
         output->data.reserve(state_->codec_header.size() + length);
         output->data.insert(output->data.end(), state_->codec_header.begin(), state_->codec_header.end());
     } else {

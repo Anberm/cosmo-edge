@@ -131,7 +131,7 @@ namespace media {
 
     VideoEncoderCapability VideoEncoderCpu::Probe(VideoCodecType type) {
         VideoEncoderCapability capability;
-        capability.backend = "ffmpeg-software";
+        capability.backend  = "ffmpeg-software";
         const auto approved = ApprovedEncoderName(type);
         if (approved.empty()) {
             capability.detail = "unsupported codec";
@@ -139,11 +139,11 @@ namespace media {
         }
 
         capability.implementation = std::string(approved);
-        const auto* codec          = FindEncoder(type);
+        const auto* codec         = FindEncoder(type);
         capability.available      = codec != nullptr;
-        capability.detail = capability.available
-                                ? "approved FFmpeg encoder is registered"
-                                : "approved FFmpeg encoder is not registered; generic fallback disabled";
+        capability.detail         = capability.available
+                                        ? "approved FFmpeg encoder is registered"
+                                        : "approved FFmpeg encoder is not registered; generic fallback disabled";
         return capability;
     }
 

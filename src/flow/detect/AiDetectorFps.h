@@ -84,8 +84,8 @@ namespace ai_detector_fps {
             return false;
         }
 
-        char* end = nullptr;
-        errno     = 0;
+        char* end          = nullptr;
+        errno              = 0;
         const float result = std::strtof(trimmed.c_str(), &end);
         if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE || !HasConfiguredFps(result)) {
             return false;
@@ -100,8 +100,8 @@ namespace ai_detector_fps {
             return false;
         }
 
-        char* end = nullptr;
-        errno     = 0;
+        char* end                       = nullptr;
+        errno                           = 0;
         const unsigned long long result = std::strtoull(trimmed.c_str(), &end, 10);
         if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE || result == 0 ||
             result > std::numeric_limits<size_t>::max()) {

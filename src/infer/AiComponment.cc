@@ -35,10 +35,9 @@ util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
     return ConvertImagesToBlobs(images, {}, blobs);
 }
 
-util::ErrorEnum ConvertImagesToBlobs(
-    const std::vector<VideoFramePtr>& images,
-    const std::vector<media::NativeVideoBufferPtr>& native_buffers,
-    std::vector<std::shared_ptr<cosmo::nn::Blob>>& blobs) {
+util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
+                                     const std::vector<media::NativeVideoBufferPtr>& native_buffers,
+                                     std::vector<std::shared_ptr<cosmo::nn::Blob>>& blobs) {
     if (images.empty()) {
         LOG_INFO("{}", "Input Images Is Empty.");
         return util::ErrorEnum::InvalidParam;
@@ -119,11 +118,11 @@ util::ErrorEnum ConvertImagesToBlobs(
         if (i < native_buffers.size() && native_buffers[i] && native_buffers[i]->Valid() &&
             native_buffers[i]->width == static_cast<int>(image->GetWidth()) &&
             native_buffers[i]->height == static_cast<int>(image->GetHeight())) {
-            const auto& native              = *native_buffers[i];
-            handle.native_image.fd          = native.fd;
-            handle.native_image.bytes       = native.bytes;
-            handle.native_image.width       = native.width;
-            handle.native_image.height      = native.height;
+            const auto& native                = *native_buffers[i];
+            handle.native_image.fd            = native.fd;
+            handle.native_image.bytes         = native.bytes;
+            handle.native_image.width         = native.width;
+            handle.native_image.height        = native.height;
             handle.native_image.width_stride  = native.width_stride;
             handle.native_image.height_stride = native.height_stride;
             if (native.format == media::NativeVideoBufferFormat::NV12) {
