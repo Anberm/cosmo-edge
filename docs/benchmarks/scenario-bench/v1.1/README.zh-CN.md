@@ -6,7 +6,7 @@
 
 ## 摘要
 
-> **状态：最终公开性能材料。当前仅完成仓库与 PR 收口，尚未对外发布。**
+> **状态：待发布公开性能材料。当前已完成仓库与 PR 收口，尚未对外发布。**
 
 我们在三类边缘 AI 平台上验证了 CosmoEdge 1.1 的多路视频分析能力。在本报告指定的模型、视频、设备和运行时条件下，BM1688 短时阶梯测试完成了 16 路双算法 × 5 FPS，CV186X 与 RK3576 完成了 8 路双算法 × 5 FPS。结果代表指定配置下的实测工作负载，不代表芯片理论峰值。
 
@@ -100,9 +100,9 @@ GitHub 的 Code 页面只显示仓库中的 HTML 源码。下表的“打开”�
 
 | 平台 | 单算法逐路报告 | 双算法逐路报告 | VLM 观测报告 | 机器可读汇总 |
 | --- | --- | --- | --- | --- |
-| BM1688 | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/dual-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html) | [summary.json](results/bm1688/summary.json) |
-| CV186X | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/dual-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
-| RK3576 | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/dual-detector/report.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
+| BM1688 | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-detector/report.zh-CN.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/dual-detector/report.zh-CN.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.zh-CN.html) | [summary.json](results/bm1688/summary.json) |
+| CV186X | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-detector/report.zh-CN.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/dual-detector/report.zh-CN.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.zh-CN.html) | [summary.json](results/cv186x/summary.json) |
+| RK3576 | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-detector/report.zh-CN.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/dual-detector/report.zh-CN.html) | [打开](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.zh-CN.html) | [summary.json](results/rk3576/summary.json) |
 
 ## 产品发版证据边界
 

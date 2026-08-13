@@ -23,7 +23,7 @@ RK3576 集成增加了面向生产的 CV 后端，不改变 CPU、CUDA 或 Sopho
 
 推荐部署起点为已完成 12 小时验证的 4 路 × 5 FPS 单算法配置。最新短时阶梯中，
 单算法覆盖到 16 路 × 5 FPS，双算法覆盖到 8 路 × 每任务 5 FPS；这些是指定模型与
-门禁下的实测边界，不直接替代推荐配置。详见 [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/README)。
+门禁下的实测边界，不直接替代推荐配置。详见 [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/report.zh-CN.html)。
 
 ## 仓库与证据边界
 

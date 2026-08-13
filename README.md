@@ -192,7 +192,7 @@ The publication-ready v1.1 material covers BM1688, CV186X, and RK3576 with a con
 - [English primary report (rendered documentation site)](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.html)
 - [Methodology and reproduction](docs/benchmarks/scenario-bench/v1.1/methodology.md)
 
-The source baseline is `feat/model-guard-v2.3` commit `c0e77f22c3d9cf57545123d2db90409c28c1acab`, tree `4cfa8cae62062ebb53a1481afa51ff3f88977f88`. BM1688 and CV186X are byte-bound to the recorded Open package and running engine. The RK3576 package digest and Protected-package provenance are not distributed in this public benchmark, so the report does not make package-qualified claims for them. See the [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json) for the exact evidence boundary.
+The release-branch preparation baseline is `feat/model-guard-v2.3` commit `209bc2b52849864a15bdad91beb61f5bc982c17f`, tree `f64a98bce05b9ee8dc64dda8e56ad50f9d15687f`. BM1688 and CV186X are byte-bound to the recorded Open package and running engine; that package does not embed a source commit and therefore is not claimed as a reproducible build of the preparation baseline. The RK3576 package digest and Protected-package provenance are not distributed in this public benchmark, so the report does not make package-qualified claims for them. See the [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json) for the exact evidence boundary.
 
 The following table preserves the previously published **v1.0 baseline** for historical comparison:
 

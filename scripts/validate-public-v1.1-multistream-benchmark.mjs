@@ -27,9 +27,10 @@ for (const platform of ['bm1688', 'cv186x', 'rk3576']) {
     `models/${platform}.json`,
     `results/${platform}/summary.json`,
     `results/${platform}/report.html`,
+    `results/${platform}/report.zh-CN.html`,
   );
   for (const workload of ['single-detector', 'dual-detector', 'vlm-observation']) {
-    for (const file of ['summary.json', 'metrics.json', 'command.txt', 'test.log', 'report.html']) {
+    for (const file of ['summary.json', 'metrics.json', 'command.txt', 'test.log', 'report.html', 'report.zh-CN.html']) {
       required.push(`results/${platform}/${workload}/${file}`);
     }
   }
@@ -47,6 +48,8 @@ if (manifest.qualification?.benchmarkReadyToPublish !== true) errors.push('bench
 if (manifest.qualification?.productReleaseQualificationComplete !== false) errors.push('productReleaseQualificationComplete must remain false while declared product evidence is outstanding');
 if (!/^[0-9a-f]{40}$/.test(manifest.sourceBaseline?.commit ?? '')) errors.push('source commit is not frozen');
 if (!/^[0-9a-f]{40}$/.test(manifest.sourceBaseline?.tree ?? '')) errors.push('source tree is not frozen');
+if (manifest.repositoryIntegration?.targetCommitAtPreparation !== manifest.sourceBaseline?.commit) errors.push('release-branch preparation commit does not match source baseline');
+if (manifest.repositoryIntegration?.targetTreeAtPreparation !== manifest.sourceBaseline?.tree) errors.push('release-branch preparation tree does not match source baseline');
 if (!/^[0-9a-f]{64}$/.test(manifest.dataset?.sha256 ?? '')) errors.push('dataset SHA-256 is missing');
 if (!/^[0-9a-f]{64}$/.test(manifest.packageArtifacts?.open?.sha256 ?? '')) errors.push('BM1688/CV186X Open package SHA-256 is missing');
 if (!/^[0-9a-f]{64}$/.test(manifest.packageArtifacts?.open?.engineSha256 ?? '')) errors.push('BM1688/CV186X running engine SHA-256 is missing');
@@ -128,10 +131,27 @@ for (const file of walk(root).filter((entry) => entry.endsWith('.html'))) {
 }
 
 const zh = fs.readFileSync(path.join(root, 'report.zh-CN.html'), 'utf8');
-for (const marker of ['方法与复现', '测试环境', '单算法容量矩阵', '实验结果：VLM 运行观测', '关联附件', 'results/bm1688/single-detector/report.html', 'results/cv186x/dual-detector/report.html', 'results/rk3576/vlm-observation/report.html', 'assets/capacity-overview.zh-CN.svg', 'assets/throughput-curves.zh-CN.svg', 'assets/resource-peaks.zh-CN.svg']) {
+for (const marker of ['方法与复现', '测试环境', '单算法容量矩阵', '实验结果：VLM 运行观测', '关联附件', 'assets/capacity-overview.zh-CN.svg', 'assets/throughput-curves.zh-CN.svg', 'assets/resource-peaks.zh-CN.svg']) {
   if (!zh.includes(marker)) errors.push(`Chinese report missing marker: ${marker}`);
 }
 if (!zh.includes('<html lang="zh-CN">')) errors.push('Chinese report lang attribute is incorrect');
+for (const marker of ['results/bm1688/single-detector/report.zh-CN.html', 'results/cv186x/dual-detector/report.zh-CN.html', 'results/rk3576/vlm-observation/report.zh-CN.html', '<th>平台</th><th>板卡</th><th>操作系统</th><th>运行时 / 媒体链路</th>']) {
+  if (!zh.includes(marker)) errors.push(`Chinese report missing localized marker: ${marker}`);
+}
+
+for (const file of walk(root).filter((entry) => entry.endsWith('.html'))) {
+  const html = fs.readFileSync(file, 'utf8');
+  const tables = html.match(/<table\b/giu)?.length ?? 0;
+  const wrappers = html.match(/<div class="table"/giu)?.length ?? 0;
+  if (tables !== wrappers) errors.push(`responsive table wrapper mismatch in ${relative(file)}: ${tables} table(s), ${wrappers} wrapper(s)`);
+  if (!html.includes('class="report-nav"')) errors.push(`report navigation is missing in ${relative(file)}`);
+  if (!html.includes('td[data-status="PASS"]')) errors.push(`status styling is missing in ${relative(file)}`);
+}
+
+for (const file of walk(root).filter((entry) => entry.endsWith('.zh-CN.html'))) {
+  const html = fs.readFileSync(file, 'utf8');
+  if (!html.includes('<html lang="zh-CN">')) errors.push(`Chinese attachment lang attribute is incorrect in ${relative(file)}`);
+}
 
 const packageJson = readJson(path.join(workspace, 'package.json'));
 if (!fs.existsSync(staticAssetCopier)) errors.push('static benchmark asset copier is missing');

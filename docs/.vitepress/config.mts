@@ -34,7 +34,7 @@ const i18nZh = [
 ]
 
 const benchmarksZh = [
-  { text: 'ScenarioBench v1.1', link: '/benchmarks/scenario-bench/v1.1/' },
+  { text: 'ScenarioBench v1.1', link: '/benchmarks/scenario-bench/v1.1/report.zh-CN.html' },
   { text: 'ScenarioBench v1.0', link: '/benchmarks/scenario-bench/v1.0/' },
   { text: '当前滚动刷新', link: '/benchmarks/scenario-bench/current/' }
 ]
@@ -122,7 +122,7 @@ const tutorialsEn = [
 ]
 
 const benchmarksEn = [
-  { text: 'ScenarioBench v1.1', link: '/benchmarks/scenario-bench/v1.1/README' },
+  { text: 'ScenarioBench v1.1', link: '/benchmarks/scenario-bench/v1.1/report.html' },
   { text: 'ScenarioBench v1.0', link: '/benchmarks/scenario-bench/v1.0/README' },
   { text: 'Current Rolling Refresh', link: '/benchmarks/scenario-bench/current/README' }
 ]
@@ -144,6 +144,7 @@ export default defineConfig({
   ignoreDeadLinks: [
     /^(?:\.\/)?(?:(?:\.\.\/)?current\/)?(vlm-77175-npu|vlm-55009-npu|helmet-7463-npu|pedestrian-45626-npu|pedestrian-helmet-mixed-npu|helmet-7463-x86)\/report(?:\.zh-CN)?$/,
     /^\.\/report(?:\.zh-CN)?$/,
+    /^\/benchmarks\/scenario-bench\/v1\.1\/report(?:\.zh-CN)?$/,
     /^\.\/results\/(bm1688|cv186x|rk3576)\/(single-detector|dual-detector|vlm-observation)\/report$/
   ],
 
@@ -158,7 +159,7 @@ export default defineConfig({
           { text: '系统使用', link: '/tutorials/' },
           { text: '指南', link: '/guide/build' },
           { text: '社区', link: '/community/' },
-          { text: '性能报告', link: '/benchmarks/scenario-bench/v1.1/' },
+          { text: '性能报告', link: '/benchmarks/scenario-bench/v1.1/report.zh-CN.html' },
           { text: '参考', link: '/reference/api' },
           { text: '开发', link: '/development/frontend' },
           { text: 'GitHub', link: 'https://github.com/cosmo-wander-ai/cosmo-edge' }
@@ -206,7 +207,7 @@ export default defineConfig({
           { text: 'Using CosmoEdge', link: '/en/tutorials/' },
           { text: 'Guide', link: '/en/guide/build' },
           { text: 'Community', link: '/en/community/' },
-          { text: 'Benchmarks', link: '/benchmarks/scenario-bench/v1.1/README' },
+          { text: 'Benchmarks', link: '/benchmarks/scenario-bench/v1.1/report.html' },
           { text: 'Reference', link: '/en/reference/api' },
           { text: 'Development', link: '/en/development/frontend' },
           { text: 'GitHub', link: 'https://github.com/cosmo-wander-ai/cosmo-edge' }

@@ -6,7 +6,7 @@ Entry points: [English report](report.html) · [中文报告](report.zh-CN.html)
 
 ## Summary
 
-> **Status: final public performance material. Repository and PR preparation are complete; external publication has not started.**
+> **Status: release-candidate public performance material. Repository and PR preparation are complete; external publication has not started.**
 
 We validated CosmoEdge 1.1 multi-stream video analytics on three edge-AI platforms. Under the model, video, device, and runtime conditions defined by this report, the short staircase runs completed 16 channels with two detectors at 5 FPS on BM1688, and 8 channels with two detectors at 5 FPS on CV186X and RK3576. These are measured workload results for the stated configurations, not theoretical chip limits.
 

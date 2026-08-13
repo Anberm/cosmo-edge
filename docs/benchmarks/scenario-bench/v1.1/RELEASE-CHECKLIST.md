@@ -30,10 +30,12 @@ Do not copy `private-evidence/` into a release artifact.
 
 ## Website publication handoff
 
-- [x] Local documentation build contains the bilingual main reports, three platform indexes, and nine standalone workload reports.
+- [x] Local documentation build contains bilingual main reports, six bilingual platform-index pages, and eighteen bilingual standalone workload pages.
 - [x] Local smoke test resolves every main-report attachment link to a generated file.
+- [x] Platform indexes and all standalone workload attachments provide Chinese and English rendered pages with return navigation.
+- [x] Desktop and 390 px mobile layouts keep wide tables inside local horizontal-scroll regions without page-level overflow.
 - [ ] Deploy the documentation build containing `benchmarks/scenario-bench/v1.1/`.
 - [ ] Confirm the Chinese and English primary report URLs return HTTP 200.
-- [ ] Confirm all nine standalone workload report URLs return HTTP 200 and render as HTML rather than GitHub source.
+- [ ] Confirm all eighteen bilingual standalone workload report URLs return HTTP 200 and render as HTML rather than GitHub source.
 
 The last three checks remain intentionally open while this PR is prepared but not published.

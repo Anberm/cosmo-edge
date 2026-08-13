@@ -28,7 +28,7 @@ The recommended deployment starting point is the single-detector profile that co
 12-hour run at four channels and 5 FPS per channel. The latest short staircases reached 16
 channels at 5 FPS for a single detector and 8 channels at 5 FPS per task for two detectors.
 These are measured boundaries for the stated models and gates, not replacements for a recommended
-profile. See [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/README).
+profile. See [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/report.html).
 
 ## Repository and Evidence Boundary
 

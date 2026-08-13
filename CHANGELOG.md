@@ -6,7 +6,7 @@ This project follows a release-note style inspired by Keep a Changelog.
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-08-13
+### 1.1.0 release candidate
 
 Multi-platform release for BM1688, CV186X, RK3576, and x86. Capacity claims remain bound to the
 models, packages, environments, thresholds, and durations recorded in their linked evidence.
