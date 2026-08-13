@@ -50,8 +50,8 @@ import EndNode from '@/views/gam/countManagement/arrangeDetail/flow/EndNode.vue'
 import ActionEdge from '@/views/gam/countManagement/arrangeDetail/flow/ActionEdge.vue'
 import NodeDetailPanel from '@/views/gam/countManagement/arrangeDetail/flow/NodeDetailPanel.vue'
 import {
-  DETAIL_PANEL_SIZE,
   getDetailPanelAnchor,
+  getDetailPanelSize,
   getFlowLayoutSpacing,
   getFlowNodeDimensions
 } from '@/views/gam/countManagement/arrangeDetail/flow/layoutGeometry.js'
@@ -328,9 +328,14 @@ const handleNodeClick = ({ node } = {}) => {
     collectCurrentPanelConfig()
   }
   const dimensions = getNodeDimensions(node)
-  const panelWidth = DETAIL_PANEL_SIZE.width
-  const panelHeight = DETAIL_PANEL_SIZE.height
-  const { x: panelX, y: panelY } = getDetailPanelAnchor(node, dimensions)
+  const panelSize = getDetailPanelSize(node.data?.actionId)
+  const panelWidth = panelSize.width
+  const panelHeight = panelSize.height
+  const { x: panelX, y: panelY } = getDetailPanelAnchor(
+    node,
+    dimensions,
+    panelSize
+  )
   detailPanelNodeId.value = String(node.id)
   detailPanelNodeData.value = node.data
   detailPanelPosition.value = {

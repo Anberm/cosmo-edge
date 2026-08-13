@@ -64,8 +64,8 @@ import ActionEdge from './ActionEdge.vue'
 import StageGroupNode from './StageGroupNode.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import {
-  DETAIL_PANEL_SIZE,
   getDetailPanelAnchor,
+  getDetailPanelSize,
   getFlowLayoutSpacing,
   getFlowNodeDimensions
 } from './layoutGeometry.js'
@@ -364,11 +364,12 @@ const openDetailPanel = (nodeId) => {
   }
 
   const dim = getNodeDimensions(node)
-  const panelW = DETAIL_PANEL_SIZE.width
-  const panelH = DETAIL_PANEL_SIZE.height
+  const panelSize = getDetailPanelSize(node.data?.actionId)
+  const panelW = panelSize.width
+  const panelH = panelSize.height
 
   // 面板顶部对齐选中节点的底部，X 居中对齐节点
-  const { x: panelX, y: panelY } = getDetailPanelAnchor(node, dim)
+  const { x: panelX, y: panelY } = getDetailPanelAnchor(node, dim, panelSize)
 
   detailPanelNodeId.value = nodeId
   detailPanelNodeData.value = node.data

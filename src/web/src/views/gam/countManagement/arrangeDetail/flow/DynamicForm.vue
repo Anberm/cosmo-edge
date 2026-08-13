@@ -303,6 +303,10 @@ import {
   mergeMetaParamsPreservingUnknown,
   mergeParamsPreservingUnknown
 } from './areaRuleCompatibility.js'
+import {
+  collectAlarmAlgorithms,
+  isAlarmAlgorithmsKey
+} from './linkageFormCompatibility.js'
 
 // Props
 const props = defineProps({
@@ -801,35 +805,21 @@ const countLeafNodes = (data) => {
   return count
 }
 
-const collectToSelection = () => {
-  const result = []
-  const walk = (nodes) => {
-    ;(nodes || []).forEach((n) => {
-      if (n.children && n.children.length) {
-        walk(n.children)
-      } else if (n.algorithmId && n.channelId) {
-        result.push({
-          channelId: String(n.channelId),
-          algorithmId: String(n.algorithmId)
-        })
-      }
-    })
-  }
-  walk(toData.value || [])
-  return result
-}
-
 const handleAdd = () => {
-  const list = collectToSelection()
-  const param = _.find(paramConfigs.value, { key: 'strageAlgorithms' })
+  const list = collectAlarmAlgorithms(toData.value)
+  const param = _.find(paramConfigs.value, (item) =>
+    isAlarmAlgorithmsKey(item?.key)
+  )
   if (param) {
     param.value = JSON.stringify(list)
   }
 }
 
 const handleremove = () => {
-  const list = collectToSelection()
-  const param = _.find(paramConfigs.value, { key: 'strageAlgorithms' })
+  const list = collectAlarmAlgorithms(toData.value)
+  const param = _.find(paramConfigs.value, (item) =>
+    isAlarmAlgorithmsKey(item?.key)
+  )
   if (param) {
     param.value = JSON.stringify(list)
   }
@@ -1293,19 +1283,10 @@ const submitForm = ({ persist = true } = {}) => {
           targetLabelArr.value = []
         }
       } else {
-        if (item.key === 'strageAlgorithms') {
-          const strageAlgorithms = []
-          toData.value.forEach((item) => {
-            item.children.forEach((subItem) => {
-              strageAlgorithms.push({
-                channelId: item.id,
-                algorithmId: subItem.algorithmId
-              })
-            })
-          })
+        if (isAlarmAlgorithmsKey(item.key)) {
           configObject.params.push({
             key: item.key,
-            value: JSON.stringify(strageAlgorithms)
+            value: JSON.stringify(collectAlarmAlgorithms(toData.value))
           })
         } else {
           configObject.params.push({ key: item.key, value: item.value })
