@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "platform": "RK3576",
+  "artifactFormat": ".rknn for CV; RKLLM-specific artifact for VLM",
+  "models": [
+    {
+      "publicId": "person-detector",
+      "name": "YOLOv8 detector",
+      "version": "V1.0.0",
+      "input": "1x3x640x640 RGB, scale 1/255, letterbox 114",
+      "output": "1x84x8400 candidate tensor",
+      "precision": "not recorded by device catalog; do not infer INT8/FP16",
+      "sha256": "26ed82e076b06bf0bd757286cafd2bff7ae957366640d96559bf3215a6d541e0",
+      "sizeBytes": 6305107,
+      "verification": "hash from the frozen release-candidate resource; model code and dimensions match the tested device catalog",
+      "redistribution": "not included pending model-license decision"
+    },
+    {
+      "publicId": "safety-helmet-classifier",
+      "name": "Helmet classifier",
+      "version": "V1.0.0",
+      "input": "1x3x224x224 RGB, scale 1/255",
+      "output": "1x2 classification tensor",
+      "precision": "not recorded by device catalog; do not infer INT8/FP16",
+      "sha256": "471d1de315fd142d696066093eaf13e9657b61789c802cfe880606e209cd67ea",
+      "sizeBytes": 3024125,
+      "verification": "hash from the frozen release-candidate resource; model code and dimensions match the tested device catalog",
+      "redistribution": "not included pending model-license decision"
+    },
+    {
+      "publicId": "vlm-0.8b-rkllm",
+      "name": "Qwen 0.8B RKLLM VLM",
+      "version": "V1.0.0",
+      "input": "catalog contract 1x3x224x224 plus text prompt/tokenizer",
+      "output": "catalog contract 1x1; semantic text result handled by the runtime",
+      "precision": "not recorded by device catalog",
+      "sha256": null,
+      "verification": "device catalog identity verified; model bytes unavailable for hashing",
+      "redistribution": "not included"
+    }
+  ]
+}

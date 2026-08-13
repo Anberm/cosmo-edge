@@ -148,6 +148,16 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 测试方法和发布边界见 [benchmark manifest](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/manifest.json)、[环境说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/environment)和[当前刷新说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/)。上方已发布的 v1.0 表格不代表 RK3576 或 CV186X；RK3576 的候选绑定性能基线单列如下。
 
+### CosmoEdge 1.1 多平台 benchmark 候选
+
+`feat/model-guard-v2.3` 分支现已接入 BM1688、CV186X 与 RK3576 的**未发布脱敏材料候选**，包含精简公开主报告，以及关联的单算法、双算法和 Experimental VLM 逐路附件。当前结果属于短时工作负载证据，不是官方推荐配置，也不是芯片理论上限。
+
+- [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
+- [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
+- [中文主报告](docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
+
+现有证据早于该分支最新 RK3576 VLM 改动，最终 Open/Protected 安装包哈希和测试来源绑定也尚未补齐。因此材料仍明确标记为 `doNotPublish`，正式发布前必须重新绑定最终候选。
+
 ### RK3576 验证基线
 
 这组下一版本结果绑定冻结源码候选 [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b)（tree `fd1b646f`）、engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`、RKNN Runtime `2.3.2-429f97ae6b`、driver `0.9.8`、RGA `1.10.1_[4]` 和 MPP `1.5.0-1`。

@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "manifestStatus": "frozen-unpublished-candidate",
+  "doNotPublish": true,
+  "release": {
+    "version": "1.1.0",
+    "tag": "v1.1.0",
+    "publicationState": "not-published",
+    "frozenAt": "2026-08-12T17:33:43+08:00"
+  },
+  "sourceCandidate": {
+    "repository": "https://github.com/cosmo-wander-ai/cosmo-edge",
+    "branch": "feat/model-guard-v2.3",
+    "commit": "1f1014809e3fa08d478c1f51626c8da4566ada47",
+    "tree": "e72d9159a3d6677fd0e2fe7a8f830fe1716426b4",
+    "commitTime": "2026-08-12T17:28:01+08:00",
+    "commitSubject": "fix(web): restore linkage editor interactions",
+    "tagAtFreeze": null
+  },
+  "repositoryIntegration": {
+    "targetBranch": "feat/model-guard-v2.3",
+    "targetCommitAtPreparation": "e2d61700ae16bb946eed53841455f827a4174be1",
+    "targetTreeAtPreparation": "adf048602f37d9d2d46079b5f0906013bfdff364",
+    "evidenceRebindingRequired": true,
+    "reason": "The target branch added RK3576 VLM inference and performance changes after the benchmark evidence freeze. Existing measurements must not be represented as validation of the integration commit."
+  },
+  "packageArtifacts": {
+    "open": {
+      "sha256": null,
+      "status": "not-provided"
+    },
+    "protected": {
+      "sha256": null,
+      "status": "not-provided"
+    },
+    "evidenceBinding": {
+      "installedVersion": "V1.1.0.0",
+      "sourceCommitVerified": false,
+      "packageSha256Verified": false,
+      "status": "unverified-candidate-binding",
+      "reason": "The installed devices expose the product version but not the original Open/Protected package bytes or their SHA-256 values. Benchmark evidence must not be represented as package-qualified until those artifacts are supplied."
+    }
+  },
+  "benchmarkTool": {
+    "name": "ScenarioBench",
+    "version": "0.1.0",
+    "nodeRequirement": ">=20",
+    "cliSha256": "49d462975fb536eebe9c43436d1d72d725bff9b045523bfdc719a7cabb0e9f86",
+    "evaluatorSha256": "d3a73a2ca784ad0db9d79a8f3b87c697210e5925ffc28eea2177fe1814185f60",
+    "lockfileSha256": "8da33a2d1e27df0aac4e9ba5ec279f9d85ef7be1eb398cb555a0e3b45ca1a6a7"
+  },
+  "dataset": {
+    "id": "cosmoedge-safety-helmet-sample-v1",
+    "file": "Safety Helmet.mp4",
+    "sha256": "ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2",
+    "sizeBytes": 20049063,
+    "durationSeconds": 15.018667,
+    "video": {
+      "codec": "H.264",
+      "width": 1920,
+      "height": 1080,
+      "pixelFormat": "yuv420p",
+      "sourceFps": 24
+    },
+    "audio": {
+      "codec": "AAC"
+    },
+    "repositoryBlob": "88cfb35d0c7fc2be45ecc2ad4324e2470ab3c979",
+    "repositoryCommit": "daeda95ccaf0119d384ff90d5d20c3e90fde8ccb",
+    "licenseStatus": "repository-level Apache-2.0; asset provenance confirmation required before publication"
+  },
+  "platforms": [
+    {
+      "id": "bm1688",
+      "environment": "environments/bm1688.json",
+      "models": "models/bm1688.json",
+      "results": "results/bm1688/"
+    },
+    {
+      "id": "cv186x",
+      "environment": "environments/cv186x.json",
+      "models": "models/cv186x.json",
+      "results": "results/cv186x/"
+    },
+    {
+      "id": "rk3576",
+      "environment": "environments/rk3576.json",
+      "models": "models/rk3576.json",
+      "results": "results/rk3576/"
+    }
+  ],
+  "workloads": {
+    "dualDetector": "scenarios/dual-detector/scenario.public.yml",
+    "singleDetector": "scenarios/single-detector/",
+    "vlmObservation": "scenarios/vlm-observation/scenario.public.yml"
+  },
+  "qualification": {
+    "benchmarkPackComplete": true,
+    "publicPackageIdentityComplete": false,
+    "assetLicenseReviewComplete": false,
+    "readyToPublish": false,
+    "remainingReleaseInputs": [
+      "Open package SHA-256",
+      "Protected package SHA-256",
+      "proof that the tested installation was produced from the frozen source candidate",
+      "rebind existing evidence to the final feat/model-guard-v2.3 release candidate",
+      "final redistribution decision for model artifacts and the sample video",
+      "RK3576 VLM model file SHA-256 from the tested device or final package"
+    ]
+  }
+}

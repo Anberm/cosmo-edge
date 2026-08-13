@@ -1,0 +1,114 @@
+# CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark
+
+> Person detection, safety-helmet detection, and concurrent multi-task workloads on BM1688, CV186X, and RK3576
+
+Entry points: [English report](report.html) · [中文报告](report.zh-CN.html) · [methodology](methodology.md) · [machine-readable results index](results/index.json)
+
+## Summary
+
+> **Status: local unpublished candidate. Do not publish before final package identity, provenance binding, and license approval are complete.**
+
+We validated CosmoEdge 1.1 multi-stream video analytics on three edge-AI platforms. Under the model, video, device, and runtime conditions defined by this report, the short staircase runs completed 16 channels with two detectors at 5 FPS on BM1688, and 8 channels with two detectors at 5 FPS on CV186X and RK3576. These are measured workload results for the stated configurations, not theoretical chip limits.
+
+## Recommended profiles and observed boundaries
+
+| Platform | Recommended profile | Short-run observed boundary | Hold per step | Status |
+| --- | --- | --- | ---: | --- |
+| BM1688 reference device | Pending repeat and soak validation | 16 channels, two detectors, 5 FPS each | 15 s | Preliminary |
+| CV186X reference device | Pending repeat and soak validation | 8 channels, two detectors, 5 FPS each | 30 s | Preliminary |
+| RK3576 EVB | Pending repeat and soak validation | 8 channels, two detectors, 5 FPS each | 15 s | Preliminary |
+
+An observed boundary is the highest tested channel count that passed the configured gates. It is neither an official recommended profile nor proof of the absolute platform limit.
+
+## Public workload
+
+- Each channel runs person detection and safety-helmet detection concurrently.
+- Each task targets 5 analysis FPS per channel.
+- Input is a fixed local 1080p, 24 FPS video sample.
+- Channels are added one at a time from one channel upward.
+- Pass gates: minimum FPS ratio at least 80% for each task, zero missing telemetry, and average discard rate no greater than 5%.
+- No preview client load was enabled; results represent background video analysis.
+
+## Last passing points
+
+| Platform | Channels | Person minimum FPS | Helmet minimum FPS | Average discard | Accelerator peak | CPU peak | Memory peak |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| BM1688 reference device | 16 | 4.92 | 4.90 | 0% | 60% | 61% | 46% |
+| CV186X reference device | 8 | 5.00 | 5.00 | 0% | 60% | 19% | 42% |
+| RK3576 EVB | 8 | 5.15 | 5.11 | 0% | 41% | 47% | 30% |
+
+## Single-detector capacity matrix
+
+Values are the last passing channel counts in short-run staircases. “≥” means the highest configured point passed. “*” means the next step was blocked by task binding and is not a measured performance limit.
+
+| Platform | Single-detector workload | 24 FPS | 10 FPS | 7 FPS | 5 FPS | Status |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| BM1688 | Person detection | 7 | 15 | ≥16 | ≥16 | Preliminary |
+| BM1688 | Safety-helmet detection | 7 | ≥12* | ≥16 | ≥16 | Preliminary |
+| CV186X | Person detection | ≥3* | ≥8* | ≥11* | ≥15* | Preliminary |
+| CV186X | Safety-helmet detection | ≥3* | ≥8* | ≥11* | ≥15* | Preliminary |
+| RK3576 | Person detection | 6 | 12 | 15 | ≥16 | Preliminary |
+| RK3576 | Safety-helmet detection | 5 | 10 | 12 | 15 | Preliminary |
+
+## Comparability statement
+
+The three platforms used platform-specific converted and validated artifacts. Internal algorithm identifiers are not public model identities and do not support a chip-performance ranking. Until model source and version, input shape, quantization, preprocessing, postprocessing, video, codec configuration, warm-up, steady-state duration, and repetition count are fully aligned, these results describe representative workloads per platform rather than a cross-chip benchmark ranking.
+
+## Experimental VLM results
+
+VLM results are excluded from the primary capacity claims. All three platforms used a 1→8 channel staircase with 120 seconds per step and a target of 0.1 FPS per channel. Analysis FPS was observed but excluded from PASS/FAIL; passing refers only to non-FPS gates such as discard rate, telemetry completeness, and system protection.
+
+| Platform | Last non-FPS pass | Equivalent FPS/channel at that point | First stop | Status |
+| --- | ---: | ---: | --- | --- |
+| BM1688 | ≥8 | 0.040 | Highest configured point observed | Experimental |
+| CV186X | ≥8 | 0.080 | Highest configured point observed | Experimental |
+| RK3576 | 7 | 0.063 | Channel 8 average discard reached 22.75% | Experimental |
+
+BM1688 and CV186X use device-provided per-channel observations. RK3576 exposes a shared task counter, so its attachment freezes the reviewed one-to-eight-channel equivalent series: `0.100 / 0.120 / 0.116 / 0.115 / 0.091 / 0.076 / 0.063 / 0.057`. VLM remains outside the formal capacity table until target-FPS, completion-count, missing-rate, and latency gates are enabled and passed.
+
+## Test environment
+
+The local unpublished candidate is frozen to the source identity recorded with the benchmark evidence: commit `1f1014809e3fa08d478c1f51626c8da4566ada47` and tree `e72d9159a3d6677fd0e2fe7a8f830fe1716426b4`. Every device reports installed version `V1.1.0.0`, but the final Open/Protected packages were not supplied, so the installed systems cannot yet be proven to originate from that source freeze.
+
+This material is being integrated into `feat/model-guard-v2.3` at `e2d61700ae16bb946eed53841455f827a4174be1`. That branch added the RK3576 VLM inference path and performance changes after the evidence freeze, so these measurements do not validate `e2d61700`; final release qualification must rebind the evidence to the final candidate and packages.
+
+| Platform | Public device | OS | Runtime / media | Memory and storage |
+| --- | --- | --- | --- | --- |
+| BM1688 | BM1688 reference device | Ubuntu 22.04.5 LTS | libsophon/BMRT 0.4.12; Sophon FFmpeg/GStreamer 2.0.0 | 2,160,271,360 B system; 1,536 + 4,096 MiB accelerator heaps; 9,260,003,328 / 49,366,970,368 B system/data filesystems |
+| CV186X | CV186X reference device | Ubuntu 22.04.5 LTS | libsophon/BMRT 0.4.12; Sophon FFmpeg/GStreamer 2.0.0 | 2,160,451,584 B system; 1,536 + 4,096 MiB accelerator heaps; 9,260,003,328 / 49,375,051,776 B system/data filesystems |
+| RK3576 | Rockchip RK3576 EVB1 V10 | distribution not exposed by the read-only API | exact RKNN/Driver/RGA/MPP versions not exposed; Rockchip MPP/RGA media paths confirmed | 7,917 MiB shared system memory; device API reported 11.56 GB used and 2.13 GB available storage |
+
+See `models/` for artifact identities, I/O contracts, and available SHA-256 values. The video SHA-256 is `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`; ScenarioBench version and source-file hashes are in `release-manifest.json`. Unknown RKNN/Driver/RGA/MPP versions and the RK VLM artifact hash remain explicit unknowns rather than inferred values.
+
+## Limitations
+
+- Results apply only to the bound models, video, device, runtime, and package.
+- The multi-task staircases are short runs; they are not official recommended channel counts until repeat and soak validation passes.
+- Results are not theoretical chip compute limits.
+- Different model artifacts cannot be compared directly.
+- A metric with a disabled gate does not count as a performance pass.
+- A task-binding failure is a blocked test, not a performance limit.
+- Any environment, model, media-path, or package change requires revalidation.
+
+## Reproduction
+
+The public pack contains the methodology, sanitized scenarios, machine-readable results, environment templates, and checksums. Device serial numbers, internal channel IDs, internal algorithm IDs, local absolute paths, customer media, and full debugging logs remain in the private evidence archive.
+
+The candidate includes separate `summary.json`, `metrics.json`, `command.txt`, sanitized log, and HTML attachments for single-detector, dual-detector, and VLM workloads. Before execution, resolve the public model references to device-local identifiers as described in `methodology.md`; device addresses, credentials, and internal identifiers are intentionally absent.
+
+| Platform | Single-detector staircase | Dual-detector staircase | VLM observation | Machine-readable summary |
+| --- | --- | --- | --- | --- |
+| BM1688 | [open](results/bm1688/single-detector/report.html) | [open](results/bm1688/dual-detector/report.html) | [open](results/bm1688/vlm-observation/report.html) | [summary.json](results/bm1688/summary.json) |
+| CV186X | [open](results/cv186x/single-detector/report.html) | [open](results/cv186x/dual-detector/report.html) | [open](results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
+| RK3576 | [open](results/rk3576/single-detector/report.html) | [open](results/rk3576/dual-detector/report.html) | [open](results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
+
+## Current publication blockers
+
+- final Open and Protected package files and SHA-256 values;
+- build provenance tying those packages to the frozen source commit/tree;
+- rebind the existing evidence to the final `feat/model-guard-v2.3` release candidate;
+- final redistribution approval for model artifacts and the sample video;
+- SHA-256 for the final RK3576 VLM model artifact;
+- repeated, soak, and accuracy qualification required for recommended profiles.
+
+This directory is therefore a complete unpublished material candidate, not a final release qualification claim.

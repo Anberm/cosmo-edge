@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "contracts": [
+    {
+      "publicId": "person-detector",
+      "taskType": "cv",
+      "input": {
+        "layout": "NCHW",
+        "shape": [1, 3, 640, 640],
+        "color": "RGB",
+        "scale": 0.00392157,
+        "mean": [0, 0, 0],
+        "letterboxColor": [114, 114, 114]
+      },
+      "output": {
+        "semantic": "YOLOv8 candidate tensor",
+        "referenceShape": [1, 84, 8400]
+      },
+      "postprocess": {
+        "confidenceThreshold": 0.25,
+        "nmsThreshold": 0.7,
+        "topK": 1000,
+        "publishedClass": "person"
+      }
+    },
+    {
+      "publicId": "safety-helmet-classifier",
+      "taskType": "cv",
+      "input": {
+        "layout": "NCHW",
+        "shape": [1, 3, 224, 224],
+        "color": "RGB",
+        "scale": 0.00392157,
+        "mean": [0, 0, 0],
+        "source": "person crop from the detector/tracker pipeline"
+      },
+      "output": {
+        "semantic": "helmet/no-helmet classification",
+        "referenceShape": [1, 2]
+      },
+      "postprocess": {
+        "threshold": 0.5,
+        "publishedClasses": ["helmet", "no-helmet"]
+      }
+    },
+    {
+      "publicId": "vlm-0.8b",
+      "taskType": "vlm",
+      "input": {
+        "imageCatalogShape": [1, 3, 224, 224],
+        "additionalInputs": ["text prompt", "tokenizer"]
+      },
+      "output": {
+        "semantic": "runtime-managed text judgment"
+      },
+      "benchmarkInterpretation": "analysis FPS is an observation only in this candidate; it is not a PASS/FAIL gate"
+    }
+  ]
+}

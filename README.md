@@ -193,6 +193,16 @@ The table below is a **published v1.0 baseline**, not evidence for every next-re
 
 See the [benchmark manifest](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/manifest.json), [environment notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/environment), and [current refresh notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/) for methodology and publication boundaries. The published v1.0 table above does not represent RK3576 or CV186X; the separate candidate-bound RK3576 performance baseline follows.
 
+### CosmoEdge 1.1 multi-platform benchmark candidate
+
+The `feat/model-guard-v2.3` branch now carries an **unpublished, sanitized benchmark material candidate** for BM1688, CV186X, and RK3576. It includes the concise public report plus linked per-channel single-detector, dual-detector, and Experimental VLM attachments. The observed points are short-run workload evidence, not official recommended profiles or theoretical chip limits.
+
+- [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
+- [中文基准报告索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
+- [English primary report](docs/benchmarks/scenario-bench/v1.1/report.html)
+
+The recorded evidence predates the latest RK3576 VLM changes on this branch. Final Open/Protected package hashes and tested-source binding are also incomplete, so this material remains explicitly marked `doNotPublish` and must be rebound to the final candidate before release.
+
 ### RK3576 validation baseline
 
 This next-release result is bound to frozen source candidate [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b) (tree `fd1b646f`), engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`, RKNN Runtime `2.3.2-429f97ae6b`, driver `0.9.8`, RGA `1.10.1_[4]`, and MPP `1.5.0-1`.

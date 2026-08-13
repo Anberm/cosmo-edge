@@ -13,12 +13,13 @@
   "type": "module",
   "scripts": {
     "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
+    "docs:build": "vitepress build docs && node scripts/copy-static-benchmark-assets.mjs",
     "docs:preview": "vitepress preview docs",
     "macos:check": "node scripts/check-macos-docker-preview.mjs",
     "docs:check": "node scripts/check-tutorial-docs.mjs",
     "docs:smoke": "node scripts/smoke-tutorial-pages.mjs",
-    "docs:verify": "npm run macos:check && npm run docs:check && npm run docs:build && npm run docs:smoke"
+    "benchmarks:v1.1:validate": "node scripts/validate-public-v1.1-multistream-benchmark.mjs",
+    "docs:verify": "npm run benchmarks:v1.1:validate && npm run macos:check && npm run docs:check && npm run docs:build && npm run docs:smoke"
   },
   "devDependencies": {
     "vitepress": "^1.6.4"

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "platform": "CV186X",
+  "artifactFormat": ".nn",
+  "models": [
+    {
+      "publicId": "person-detector",
+      "name": "Pedestrian detector",
+      "version": "V8.0.1",
+      "input": "1x3x640x640",
+      "output": "1x84x8400 candidate tensor",
+      "precision": "target artifact precision not exposed by the device catalog",
+      "sha256": "50dfb31d9f5f2d347a919facd47256fa9594401e4d572d1e366f4f828533f080",
+      "redistribution": "not included; preset model"
+    },
+    {
+      "publicId": "safety-helmet-classifier",
+      "name": "Pedestrian helmet classifier",
+      "version": "V6.0.1",
+      "input": "1x3x224x224",
+      "output": "target model classification tensor; device catalog labels include helmet and no-helmet classes",
+      "precision": "target artifact precision not exposed by the device catalog",
+      "sha256": "851a7467b8c0bbeb1b0c7feee0258f2c5f48c8c897e1c54638c9a9958bc68810",
+      "redistribution": "not included; preset model"
+    },
+    {
+      "publicId": "vlm-0.8b",
+      "name": "Qwen 0.8B device VLM",
+      "version": "V1.0.0",
+      "input": "catalog contract 1x3x224x224 plus text prompt/tokenizer",
+      "output": "catalog contract 1x1; semantic text result handled by the runtime",
+      "precision": "target artifact precision not exposed by the device catalog",
+      "sha256": "8d258ab0d16bb8836fe8de4e66b241890d71e64f016961e7d63588b6f7f76f1b",
+      "tokenizerSha256": "cb16258a9df7062f4c4d291a1501b07fb0750c9a8b247c5639dba0369e42f0cb",
+      "sizeBytes": 980885504,
+      "redistribution": "not included; user-installed model"
+    }
+  ]
+}

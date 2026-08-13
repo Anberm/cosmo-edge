@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "platform": "BM1688",
+  "deviceDescription": "BM1688 reference device",
+  "boardModel": "Sophon BM1688 reference design; commercial enclosure name withheld",
+  "memory": {
+    "systemBytes": 2160271360,
+    "acceleratorHeap0MiB": 1536,
+    "acceleratorHeap1MiB": 4096
+  },
+  "storage": {
+    "systemFilesystemBytes": 9260003328,
+    "dataFilesystemBytes": 49366970368
+  },
+  "os": "Ubuntu 22.04.5 LTS",
+  "architecture": "aarch64",
+  "bsp": "BSP package identity is not published in this benchmark",
+  "runtime": {
+    "inference": "libsophon/BMRT 0.4.12",
+    "media": "Sophon FFmpeg 2.0.0 / Sophon GStreamer 2.0.0",
+    "decoder": "bmvpu-decoder",
+    "encoder": "bmvpu-h264"
+  },
+  "cosmoEdgeInstalledVersion": "V1.1.0.0",
+  "sourceCandidateCommit": "1f1014809e3fa08d478c1f51626c8da4566ada47",
+  "sourceCandidateTree": "e72d9159a3d6677fd0e2fe7a8f830fe1716426b4",
+  "packageSha256": null,
+  "candidateBinding": "unverified: original tested package bytes were not supplied",
+  "capturedAt": "2026-08-12T16:10:00+08:00"
+}
