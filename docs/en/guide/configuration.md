@@ -72,7 +72,8 @@ When both variables are absent, signed manager requests remain disabled. A parti
 | Build Path | Resource Directory |
 | --- | --- |
 | x86 Docker | `data/resource/aiboxresource_x86` |
-| Sophon package | `data/resource/aiboxresource` |
+| Sophon BM1688 package | `data/resource/aiboxresource_bm1688` |
+| Sophon CV186X package | `data/resource/aiboxresource_cv186x` |
 
 CMake installs resources via `RESOURCE_DIR`.
 

@@ -36,7 +36,7 @@ if [ -z "${PROJECT_ROOT_PATH:-}" ]; then
 fi
 
 if [ -z "${RESOURCE_DIR}" ]; then
-    RESOURCE_DIR="${PROJECT_ROOT_PATH}/data/resource/aiboxresource"
+    RESOURCE_DIR="${PROJECT_ROOT_PATH}/data/resource/aiboxresource_bm1688"
 elif [ "${RESOURCE_DIR#/}" = "${RESOURCE_DIR}" ]; then
     RESOURCE_DIR="${PROJECT_ROOT_PATH}/${RESOURCE_DIR}"
 fi

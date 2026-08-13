@@ -14,7 +14,7 @@ Status: **PUBLICATION-READY PERFORMANCE REPORT — PREPARED, NOT YET PUBLISHED**
 - [x] Bilingual HTML includes scope, method, reproduction, comparability, and limitations.
 - [x] Capacity heatmap, throughput/latency curves, and resource-peak chart regenerated.
 - [x] Public package and generator checked for device addresses, credentials, local paths, serial numbers, and internal IDs.
-- [x] The two approved Open Sophon model assets are distributed once from the repository resource tree; the benchmark directory contains no duplicate model bytes or video sample.
+- [x] The two approved Open Sophon models are present in both platform-scoped resource sets; the benchmark directory contains no model bytes or video sample.
 - [x] `SHA256SUMS` regenerated after all output files.
 
 ## Product-release evidence outside this benchmark

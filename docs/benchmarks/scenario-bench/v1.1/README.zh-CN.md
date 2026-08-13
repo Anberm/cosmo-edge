@@ -78,7 +78,7 @@ BM1688 与 CV186X 的实测设备使用同一 Open 安装包，SHA-256 为 `8aee
 | CV186X | CV186X reference device | Ubuntu 22.04.5 LTS | libsophon/BMRT 0.4.12；Sophon FFmpeg/GStreamer 2.0.0 | 系统 2,160,451,584 B；加速器 heap 1,536 + 4,096 MiB；system/data 文件系统 9,260,003,328 / 49,375,051,776 B |
 | RK3576 | Rockchip RK3576 EVB1 V10 | Linux 发行版未由只读接口暴露 | RKNN/Driver/RGA/MPP 精确版本未由只读接口暴露；已确认 Rockchip MPP/RGA 媒体路径 | 7,917 MiB 共享系统内存；设备 API 报告存储已用 11.56 GB、可用 2.13 GB |
 
-模型身份、输入输出合同、仓库路径与可用 SHA-256 见 `models/`。与压测字节一致的 BM1688、CV186X 检测和分类模型已放入 `data/resource/aiboxresource/models/`，默认 Sophon Open 构建会随包安装。视频 SHA-256 为 `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`；ScenarioBench 版本及关键文件哈希见 `release-manifest.json`。没有证据的 RKNN/Driver/RGA/MPP 版本和 RK VLM 文件 SHA-256 均保持为空，不使用推测值。
+模型身份、输入输出合同、平台专属仓库路径与可用 SHA-256 见 `models/`。与压测字节一致的 BM1688、CV186X 检测和分类模型分别放入 `data/resource/aiboxresource_bm1688/models/` 与 `data/resource/aiboxresource_cv186x/models/`。视频 SHA-256 为 `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`；ScenarioBench 版本及关键文件哈希见 `release-manifest.json`。没有证据的 RKNN/Driver/RGA/MPP 版本和 RK VLM 文件 SHA-256 均保持为空，不使用推测值。
 
 ## 限制说明
 
@@ -109,4 +109,4 @@ BM1688 与 CV186X 的实测设备使用同一 Open 安装包，SHA-256 为 `8aee
 - RK3576 VLM 最终模型文件 SHA-256；
 - 正式推荐配置所需的重复测试、长稳、客户旅程与精度资格材料。
 
-这些项目不阻止公开本性能报告，但阻止把短时边界包装成官方推荐配置，也意味着本报告不能代替完整产品资格报告。BM1688、CV186X 的开源检测和分类模型只在仓库资源树中分发一份；样例视频和其他模型二进制不随本 benchmark 分发。已记录的 SHA-256 用于确认精确产物身份。
+这些项目不阻止公开本性能报告，但阻止把短时边界包装成官方推荐配置，也意味着本报告不能代替完整产品资格报告。开源检测和分类文件分别保存在 BM1688、CV186X 平台资源目录；样例视频和其他模型二进制不随本 benchmark 分发。已记录的 SHA-256 用于确认精确产物身份。

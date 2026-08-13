@@ -37,7 +37,7 @@ jobs:
       - name: Build package and tests
         run: |
           chmod +x scripts/build.sh
-          ./scripts/build.sh -T
+          ./scripts/build.sh -T -m data/resource/aiboxresource_bm1688
 
       # Upload the build artifacts for deployment or download
       - name: Upload Artifacts

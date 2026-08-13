@@ -14,7 +14,8 @@ models, packages, environments, thresholds, and durations recorded in their link
 ### Added
 
 - CV186X benchmark bindings for the open Sophon YOLOV8n detector and helmet classifier, including
-  byte-identical device/repository hashes, runtime contracts, and default Open-package paths.
+  byte-identical device/repository hashes, runtime contracts, and a dedicated CV186X Open-package
+  resource set.
 - Rockchip RK3576 integration with an RKNN inference backend, native MPP/RGA media pipeline,
   cross-compilation toolchain, accelerator telemetry, integration assets, and
   qualification fixtures.

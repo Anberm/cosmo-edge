@@ -72,7 +72,8 @@ ${INSTALLPATH}/scripts/run_start.sh start ${DATADIR}/log/logs/INTE_RUN_container
 | 构建路径 | 资源目录 |
 | --- | --- |
 | x86 Docker | `data/resource/aiboxresource_x86` |
-| Sophon package | `data/resource/aiboxresource` |
+| Sophon BM1688 包 | `data/resource/aiboxresource_bm1688` |
+| Sophon CV186X 包 | `data/resource/aiboxresource_cv186x` |
 
 CMake 通过 `RESOURCE_DIR` 安装资源。
 

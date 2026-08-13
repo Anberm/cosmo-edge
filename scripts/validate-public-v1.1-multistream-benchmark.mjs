@@ -7,7 +7,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workspace = path.resolve(here, '..');
 const root = path.join(workspace, 'docs', 'benchmarks', 'scenario-bench', 'v1.1');
 const staticAssetCopier = path.join(workspace, 'scripts', 'copy-static-benchmark-assets.mjs');
-const repositoryModelRoot = path.join(workspace, 'data', 'resource', 'aiboxresource', 'models');
+const repositoryModelRoots = {
+  bm1688: path.join(workspace, 'data', 'resource', 'aiboxresource_bm1688', 'models'),
+  cv186x: path.join(workspace, 'data', 'resource', 'aiboxresource_cv186x', 'models'),
+};
 
 const errors = [];
 const required = [
@@ -55,8 +58,9 @@ for (const platform of ['bm1688', 'cv186x']) {
     if (!identity) { errors.push(`${platform} model identity is missing: ${publicId}`); continue; }
     const repositoryPath = identity.repositoryPath ?? '';
     const modelPath = path.resolve(workspace, ...repositoryPath.split('/'), 'model.nn');
-    const modelPrefix = `${path.resolve(repositoryModelRoot)}${path.sep}`;
-    if (!repositoryPath.startsWith('data/resource/aiboxresource/models/') || !modelPath.startsWith(modelPrefix)) {
+    const expectedRepositoryPrefix = `data/resource/aiboxresource_${platform}/models/`;
+    const modelPrefix = `${path.resolve(repositoryModelRoots[platform])}${path.sep}`;
+    if (!repositoryPath.startsWith(expectedRepositoryPrefix) || !modelPath.startsWith(modelPrefix)) {
       errors.push(`${platform} repository model path is invalid: ${publicId}`);
       continue;
     }

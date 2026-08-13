@@ -43,18 +43,18 @@ Management → System Maintenance → Software Upgrade**.
 
 ## 3. Create the first event with the bundled open models
 
-The default Sophon Open package includes the two shared Sophon models used by the public CV186X
-benchmark:
+The CV186X Sophon Open package is built from `data/resource/aiboxresource_cv186x` and includes the
+two models used by the public CV186X benchmark:
 
 - `YOLOV8n V1.0.0`: person detector, `1x3x640x640`, 7,023,600-byte model file;
 - `helmet V1.0.0`: safety-helmet classifier, `1x3x224x224`, 6,001,416-byte model file.
 
 Their repository directories, input/output contracts, and SHA-256 identities are recorded in the
 [ScenarioBench v1.1 model identity record](/benchmarks/scenario-bench/v1.1/models/cv186x.json).
-The repository directories retain the legacy `prod_BM1688_` compatibility prefix; that token is a
-readable label, not a runtime gate. CV186X qualification is based on an exact SHA-256 match between
-the files loaded by the CV186X benchmark device and the repository files. It does not imply that
-other BM1688 artifacts are interchangeable.
+The model subdirectories retain the legacy `prod_BM1688_` compatibility prefix because the files
+were copied from the CV186X benchmark device without modification. CV186X qualification is based
+on an exact SHA-256 match between the device-loaded files and the copies under the CV186X resource
+set. It does not imply that other BM1688 artifacts are interchangeable.
 
 1. Sign in to the Web console, open **Model Repository**, and confirm that both models are present.
 2. Add one test stream under **Video Input**, then create and bind a task with the person detector.

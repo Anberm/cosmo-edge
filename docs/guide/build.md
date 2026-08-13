@@ -149,7 +149,10 @@ Guard 设备证书和模型加密秘密仍属于受控输入，不得写入公�
 已确认行为：
 
 - 基础镜像使用预先构建的 GHCR 镜像：`ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_sophon:v1`（统一的编译环境，加速了本地启动时间）。
-- 使用 `scripts/build.sh -T -m data/resource/aiboxresource` 构建发布候选产物和 `cosmo-tests`（不启用 dev mode，故不传 `-t`）。
+- 默认使用 `scripts/build.sh -T -m data/resource/aiboxresource_bm1688` 构建 BM1688 发布候选；
+  CV186X 使用 `scripts/build.sh -T -m data/resource/aiboxresource_cv186x`（不启用 dev mode，故不传 `-t`）。
+- 使用 Docker Compose 时，默认目标为 BM1688；构建 CV186X 前设置
+  `COSMO_SOPHON_RESOURCE_DIR=data/resource/aiboxresource_cv186x`。
 - 只导出构建产物，不启动服务。
 - 各配置的输出隔离到 `build_output/<profile>/`。
 

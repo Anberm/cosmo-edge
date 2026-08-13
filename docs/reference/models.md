@@ -17,7 +17,8 @@ next:
 
 | 目录 | 用途 |
 | --- | --- |
-| `data/resource/aiboxresource` | Sophon 发布包资源 |
+| `data/resource/aiboxresource_bm1688` | Sophon BM1688 发布包资源 |
+| `data/resource/aiboxresource_cv186x` | Sophon CV186X 发布包资源 |
 | `data/resource/aiboxresource_x86` | x86 Docker/CPU 后端资源 |
 
 构建时通过 `RESOURCE_DIR` 选择资源目录。
@@ -41,7 +42,7 @@ data/resource/*/model_template
 - 视觉语言模型：`qwen3vl`、`qwen3_5`
 - 文字识别：`ocr`
 
-> 完整清单以 `data/resource/aiboxresource/model_template/` 与 `data/resource/aiboxresource_x86/model_template/` 目录下的实际文件为准。
+> 完整清单以各 `data/resource/aiboxresource_*/model_template/` 目录下的实际文件为准。
 
 ## 车牌 OCR 模型包
 
@@ -94,7 +95,8 @@ data/resource/aiboxresource_x86
 Sophon 路径：
 
 ```text
-data/resource/aiboxresource
+data/resource/aiboxresource_bm1688
+data/resource/aiboxresource_cv186x
 ```
 
 代码中可见 x86 ONNX 文件和 Sophon model package 的处理差异。完整模型移植流程应结合当前可发布模型包重新验证。

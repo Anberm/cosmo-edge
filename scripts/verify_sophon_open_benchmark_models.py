@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the shared open Sophon models bound to BM1688 and CV186X evidence."""
+"""Verify platform-scoped copies of the open Sophon benchmark models."""
 
 from __future__ import annotations
 
@@ -9,8 +9,11 @@ import pathlib
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-MODEL_ROOT = ROOT / "data" / "resource" / "aiboxresource" / "models"
 IDENTITY_ROOT = ROOT / "docs" / "benchmarks" / "scenario-bench" / "v1.1" / "models"
+RESOURCE_SETS = {
+    "bm1688": ROOT / "data" / "resource" / "aiboxresource_bm1688" / "models",
+    "cv186x": ROOT / "data" / "resource" / "aiboxresource_cv186x" / "models",
+}
 EXPECTED = {
     "prod_BM1688_6047042_YOLOV8n_V1.0.0": {
         "public_id": "person-detector",
@@ -37,39 +40,38 @@ def fail(message: str) -> None:
 
 identities = {
     platform: json.loads((IDENTITY_ROOT / f"{platform}.json").read_text(encoding="utf-8"))["models"]
-    for platform in ("bm1688", "cv186x")
+    for platform in RESOURCE_SETS
 }
 
-for directory, expected in EXPECTED.items():
-    root = MODEL_ROOT / directory
-    model = root / "model.nn"
-    config_path = root / "config.json"
-    for path in (model, config_path):
-        if not path.is_file():
-            fail(f"missing {path.relative_to(ROOT)}")
+for platform, model_root in RESOURCE_SETS.items():
+    for directory, expected in EXPECTED.items():
+        root = model_root / directory
+        model = root / "model.nn"
+        config_path = root / "config.json"
+        for path in (model, config_path):
+            if not path.is_file():
+                fail(f"missing {path.relative_to(ROOT)}")
 
-    model_bytes = model.read_bytes()
-    if not model_bytes.startswith(b"CENN"):
-        fail(f"{model.relative_to(ROOT)} is not a plaintext Open artifact")
-    if len(model_bytes) != expected["size_bytes"]:
-        fail(f"size mismatch for {model.relative_to(ROOT)}")
-    actual_sha256 = hashlib.sha256(model_bytes).hexdigest()
-    if actual_sha256 != expected["sha256"]:
-        fail(f"SHA-256 mismatch for {model.relative_to(ROOT)}")
+        model_bytes = model.read_bytes()
+        if not model_bytes.startswith(b"CENN"):
+            fail(f"{model.relative_to(ROOT)} is not a plaintext Open artifact")
+        if len(model_bytes) != expected["size_bytes"]:
+            fail(f"size mismatch for {model.relative_to(ROOT)}")
+        actual_sha256 = hashlib.sha256(model_bytes).hexdigest()
+        if actual_sha256 != expected["sha256"]:
+            fail(f"SHA-256 mismatch for {model.relative_to(ROOT)}")
 
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    if config.get("model_type") != expected["model_type"]:
-        fail(f"model_type mismatch in {directory}")
-    if config.get("algorithm_code") != expected["algorithm_code"]:
-        fail(f"algorithm_code mismatch in {directory}")
-    models = config.get("models") or []
-    if len(models) != 1 or models[0].get("params", {}).get("input_size") != expected["input_size"]:
-        fail(f"input_size mismatch in {directory}")
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if config.get("model_type") != expected["model_type"]:
+            fail(f"model_type mismatch in {platform}/{directory}")
+        if config.get("algorithm_code") != expected["algorithm_code"]:
+            fail(f"algorithm_code mismatch in {platform}/{directory}")
+        models = config.get("models") or []
+        if len(models) != 1 or models[0].get("params", {}).get("input_size") != expected["input_size"]:
+            fail(f"input_size mismatch in {platform}/{directory}")
 
-    repository_path = model.parent.relative_to(ROOT).as_posix()
-    for platform, entries in identities.items():
         identity = next(
-            (entry for entry in entries if entry.get("publicId") == expected["public_id"]),
+            (entry for entry in identities[platform] if entry.get("publicId") == expected["public_id"]),
             None,
         )
         if identity is None:
@@ -78,7 +80,8 @@ for directory, expected in EXPECTED.items():
             fail(f"{platform} identity hash mismatch for {expected['public_id']}")
         if identity.get("sizeBytes") != len(model_bytes):
             fail(f"{platform} identity size mismatch for {expected['public_id']}")
+        repository_path = model.parent.relative_to(ROOT).as_posix()
         if identity.get("repositoryPath") != repository_path:
             fail(f"{platform} repository path mismatch for {expected['public_id']}")
 
-print("Verified 2 shared Open Sophon models and byte-identical BM1688/CV186X evidence bindings.")
+print("Verified 4 platform-scoped Open Sophon model copies and BM1688/CV186X evidence bindings.")

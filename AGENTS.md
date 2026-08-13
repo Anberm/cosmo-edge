@@ -16,8 +16,9 @@ workflow.
   implemented task-specific executors.
 - `tools/` — Python and Node validation utilities.
 - `test/` — Catch2 tests and the HTTP/MQTT push test service.
-- `data/resource/aiboxresource/` and `data/resource/aiboxresource_x86/` —
-  Sophon and x86 model resources and templates.
+- `data/resource/aiboxresource_bm1688/`, `data/resource/aiboxresource_cv186x/`,
+  and `data/resource/aiboxresource_x86/` — platform-scoped Sophon and x86 model
+  resources and templates.
 - `3rd/` and `prebuild/` — third-party and prebuilt dependencies; do not edit.
 
 ## Mandatory agent-assistance trigger

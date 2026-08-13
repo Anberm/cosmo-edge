@@ -9,7 +9,7 @@ set(WEB_STAMP     ${WEB_BUILD_DIR}/web_unified.stamp)
 if(DEFINED RESOURCE_DIR AND NOT "${RESOURCE_DIR}" STREQUAL "")
     set(WEB_RESOURCE_DIR ${RESOURCE_DIR})
 else()
-    set(WEB_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data/resource/aiboxresource)
+    set(WEB_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data/resource/aiboxresource_bm1688)
 endif()
 
 file(GLOB_RECURSE WEB_SRC_FILES CONFIGURE_DEPENDS

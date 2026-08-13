@@ -161,7 +161,10 @@ This path is from:
 Confirmed behavior:
 
 - Base image uses the pre-built GHCR image: `ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_sophon:v1` (unified build environment, speeding up local start time).
-- Builds the package and `cosmo-tests` with `scripts/build.sh -T -m data/resource/aiboxresource`.
+- Builds the BM1688 package and `cosmo-tests` with `scripts/build.sh -T -m data/resource/aiboxresource_bm1688`;
+  use `scripts/build.sh -T -m data/resource/aiboxresource_cv186x` for CV186X.
+- Docker Compose defaults to BM1688; set
+  `COSMO_SOPHON_RESOURCE_DIR=data/resource/aiboxresource_cv186x` before building CV186X.
 - Exports build artifacts only (does not start services).
 - Keeps profile outputs separate under `build_output/<profile>/`.
 

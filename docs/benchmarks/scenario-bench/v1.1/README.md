@@ -78,7 +78,7 @@ BM1688 and CV186X were tested with the same Open package, SHA-256 `8aee0bdb146d8
 | CV186X | CV186X reference device | Ubuntu 22.04.5 LTS | libsophon/BMRT 0.4.12; Sophon FFmpeg/GStreamer 2.0.0 | 2,160,451,584 B system; 1,536 + 4,096 MiB accelerator heaps; 9,260,003,328 / 49,375,051,776 B system/data filesystems |
 | RK3576 | Rockchip RK3576 EVB1 V10 | distribution not exposed by the read-only API | exact RKNN/Driver/RGA/MPP versions not exposed; Rockchip MPP/RGA media paths confirmed | 7,917 MiB shared system memory; device API reported 11.56 GB used and 2.13 GB available storage |
 
-See `models/` for artifact identities, I/O contracts, repository paths, and available SHA-256 values. The byte-identical BM1688 and CV186X detector/classifier models are distributed from `data/resource/aiboxresource/models/` and included by the default Sophon Open build. The video SHA-256 is `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`; ScenarioBench version and source-file hashes are in `release-manifest.json`. Unknown RKNN/Driver/RGA/MPP versions and the RK VLM artifact hash remain explicit unknowns rather than inferred values.
+See `models/` for artifact identities, I/O contracts, platform-scoped repository paths, and available SHA-256 values. The byte-identical BM1688 and CV186X detector/classifier files are distributed under `data/resource/aiboxresource_bm1688/models/` and `data/resource/aiboxresource_cv186x/models/` respectively. The video SHA-256 is `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`; ScenarioBench version and source-file hashes are in `release-manifest.json`. Unknown RKNN/Driver/RGA/MPP versions and the RK VLM artifact hash remain explicit unknowns rather than inferred values.
 
 ## Limitations
 
@@ -109,4 +109,4 @@ The release material includes separate `summary.json`, `metrics.json`, `command.
 - SHA-256 for the final RK3576 VLM artifact;
 - repeat, soak, customer-journey, and accuracy qualification before any recommended-profile claim.
 
-These items do not block publication of this performance report. They do prevent the short-run boundary from being marketed as a recommended profile, and this report does not replace a complete product qualification report. The open BM1688 and CV186X detector/classifier models are distributed once from the repository resource tree; the sample video and all other model binaries are not redistributed by this benchmark. Recorded SHA-256 values identify the exact artifacts.
+These items do not block publication of this performance report. They do prevent the short-run boundary from being marketed as a recommended profile, and this report does not replace a complete product qualification report. The open detector/classifier files are present in the BM1688 and CV186X platform resource sets; the sample video and all other model binaries are not redistributed by this benchmark. Recorded SHA-256 values identify the exact artifacts.
