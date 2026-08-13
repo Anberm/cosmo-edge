@@ -160,7 +160,9 @@ const finishUpgradeRecovery = async (loading) => {
   await delay(400)
   localStorage.removeItem('token')
   localStorage.removeItem('mtk')
-  window.location.replace('/#/boxLogin')
+  // A hash-only navigation keeps the old document and its module graph alive.
+  // Changing the query forces a fresh index.html request after the upgrade.
+  window.location.replace(`/?upgrade=${Date.now()}#/boxLogin`)
 }
 
 watch(activeTab, (newVal) => {

@@ -63,6 +63,12 @@ import EndNode from './EndNode.vue'
 import ActionEdge from './ActionEdge.vue'
 import StageGroupNode from './StageGroupNode.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
+import {
+  DETAIL_PANEL_SIZE,
+  getDetailPanelAnchor,
+  getFlowLayoutSpacing,
+  getFlowNodeDimensions
+} from './layoutGeometry.js'
 
 const props = defineProps({
   width: {
@@ -146,7 +152,7 @@ const getNodeDimensions = (node) => {
     }
   }
   // 所有业务节点均为固定尺寸卡片（不再有展开态）
-  return { width: 76, height: 96 }
+  return getFlowNodeDimensions(node)
 }
 
 const getLayoutSpacing = () => {
@@ -159,9 +165,7 @@ const getLayoutSpacing = () => {
     if (d.height > maxH) maxH = d.height
   })
   // LR 布局下：nodesep 控制纵向间距，ranksep 控制横向间距
-  const nodesep = Math.max(40, Math.min(240, Math.round(maxH * 0.5)))
-  const ranksep = Math.max(50, Math.min(320, Math.round(maxW * 0.4)))
-  return { nodesep, ranksep }
+  return getFlowLayoutSpacing({ width: maxW, height: maxH })
 }
 
 const applyLayout = () => {
@@ -360,13 +364,11 @@ const openDetailPanel = (nodeId) => {
   }
 
   const dim = getNodeDimensions(node)
-  const panelGap = 12     // 节点底部与面板顶部之间的间距
-  const panelW = 360      // 面板宽度（与 NodeDetailPanel.vue 保持一致）
-  const panelH = 350      // 面板最大高度
+  const panelW = DETAIL_PANEL_SIZE.width
+  const panelH = DETAIL_PANEL_SIZE.height
 
   // 面板顶部对齐选中节点的底部，X 居中对齐节点
-  const panelX = node.position.x + dim.width / 2 - panelW / 2
-  const panelY = node.position.y + dim.height + panelGap
+  const { x: panelX, y: panelY } = getDetailPanelAnchor(node, dim)
 
   detailPanelNodeId.value = nodeId
   detailPanelNodeData.value = node.data
