@@ -9,26 +9,7 @@ services:
     environment:
       COSMO_MODEL_GUARD_BUILD_PROFILE: "${COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"
       COSMO_PACKAGE_MODELS: "${COSMO_PACKAGE_MODELS:-include}"
-      COSMO_SOPHON_RESOURCE_DIR: "${COSMO_SOPHON_RESOURCE_DIR:-data/resource/aiboxresource_bm1688}"
-    command: >
-      bash -lc "
-      set -e;
-      if [ \"$${COSMO_MODEL_GUARD_BUILD_PROFILE}\" = public-runtime ]; then
-        package_variant=Open;
-      else
-        package_variant=Protected;
-      fi;
-      echo \"Starting $${package_variant} cross-compilation...\";
-      ./scripts/build.sh -T -m "$${COSMO_SOPHON_RESOURCE_DIR}";
-      output_dir=/build_output/$${COSMO_MODEL_GUARD_BUILD_PROFILE};
-      rm -rf -- \"$${output_dir}\";
-      mkdir -p \"$${output_dir}\";
-      set -- build/packages/*.tar.gz;
-      if [ \"$${#}\" -ne 1 ] || [ ! -f \"$${1}\" ]; then
-        echo 'ERROR: expected exactly one package artifact' >&2;
-        exit 1;
-      fi;
-      cp -f -- \"$${1}\" \"$${output_dir}/\";
-      ls -lh \"$${output_dir}\";
-      echo 'Build finished.'
-      "
+    entrypoint:
+      - /bin/bash
+      - /workspace/scripts/build_sophon_package.sh
+    command: []

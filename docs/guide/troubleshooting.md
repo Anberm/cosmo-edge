@@ -128,6 +128,7 @@ git check-attr text eol -- 3rd/mp4v2-2.0.0/configure 3rd/openssl-3.5.3/config 3r
 Sophon 路径使用：
 
 ```bash
+# 省略型号时默认 bm1688；CV186X 在命令末尾添加 --chip cv186x
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ls -lh build_output/public-runtime/
 ```
@@ -152,8 +153,10 @@ Sophon 构建使用自包含的 `Dockerfile.sophon`（基于 `ubuntu:22.04`）�
 如果构建失败，请检查 Docker 构建日志：
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package 2>&1 | tail -50
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
 ```
+
+检查 BM1688 构建时把末尾型号改为 `bm1688`，或省略型号。
 
 常见问题：
 
@@ -161,6 +164,7 @@ docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package 2>&1 |
 - 磁盘空间不足 — 构建过程需要约 3GB 空间。
 - `COSMO_MODEL_GUARD_BUILD_PROFILE` 取值不受支持——只接受
   `public-runtime` 和 `production-release`。
+- 芯片型号不受支持——只接受 `bm1688` 和 `cv186x`；省略时默认 `bm1688`。
 - 在非受控发布环境选择 `production-release`——缺少正式 SDK、设备初始化、
   信任身份、签发者或发布引导输入时按设计拒绝构建。普通源码修改应使用
   SOURCE，不要绕过正式发布检查。

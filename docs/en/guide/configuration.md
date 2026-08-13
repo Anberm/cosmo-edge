@@ -59,6 +59,10 @@ When both variables are absent, signed manager requests remain disabled. A parti
 
 `docker-compose.sophon.yml` supports the following build arguments:
 
+Pass the chip model as `--chip <model>` after the Compose service name.
+Supported values are `bm1688` and `cv186x`; omitting `--chip` defaults to
+`bm1688`. The build script automatically selects the matching resource directory.
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SOPHON_APT_MIRROR` | `https://mirrors.aliyun.com/ubuntu` | apt mirror |

@@ -17,8 +17,18 @@ Sophon 模型与 BM1688 压测产物字节一致；其他模型是否可复用�
 
 ## 1. 获取并核对安装包
 
-从 [GitHub Release](https://github.com/cosmo-wander-ai/cosmo-edge/releases) 获取 CosmoEdge
-1.1 Sophon Open 包和发布页列出的 SHA-256，然后在构建机上核对：
+可以从源码构建 CV186X 包：
+
+```bash
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+ls -lh build_output/public-runtime/
+```
+
+型号参数只让构建脚本选择 CV186X 资源目录，不改变输出位置和包名；产物仍位于
+`build_output/public-runtime/`，并使用 `cosmo-V<version>-<md5>.tar.gz` 命名。
+
+也可以从 [GitHub Release](https://github.com/cosmo-wander-ai/cosmo-edge/releases) 获取明确标注
+适用于 CV186X 的 CosmoEdge 1.1 Sophon Open 包和发布页列出的 SHA-256，然后在构建机上核对：
 
 ```bash
 sha256sum cosmo-V1.1.0-*.tar.gz
@@ -41,8 +51,8 @@ reboot
 
 ## 3. 使用内置开源模型创建首个事件
 
-CV186X Sophon Open 包使用 `data/resource/aiboxresource_cv186x` 构建，已包含本次公开压测
-使用的两份模型：
+CV186X Sophon Open 包由构建脚本根据 `cv186x` 型号自动选择对应资源目录，已包含本次公开压测
+使用的两份模型；用户无需传入资源路径：
 
 - `YOLOV8n V1.0.0`：人员检测，`1x3x640x640`，模型文件 7,023,600 B；
 - `helmet V1.0.0`：安全帽分类，`1x3x224x224`，模型文件 6,001,416 B。

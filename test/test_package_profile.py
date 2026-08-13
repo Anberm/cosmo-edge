@@ -7,7 +7,10 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import shutil
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -23,6 +26,26 @@ spec.loader.exec_module(verifier)
 
 
 class PackageProfileTests(unittest.TestCase):
+    @staticmethod
+    def find_bash() -> tuple[str | None, dict[str, str]]:
+        bash = shutil.which("bash")
+        environment = os.environ.copy()
+        if os.name == "nt":
+            git = shutil.which("git")
+            if git:
+                git_root = pathlib.Path(git).resolve().parents[1]
+                git_bash = git_root / "bin" / "bash.exe"
+                if git_bash.is_file():
+                    bash = str(git_bash)
+                    environment["PATH"] = os.pathsep.join(
+                        [
+                            str(git_root / "usr" / "bin"),
+                            str(git_root / "mingw32" / "bin"),
+                            environment.get("PATH", ""),
+                        ]
+                    )
+        return bash, environment
+
     def make_package(
         self,
         profile: str,
@@ -109,6 +132,179 @@ class PackageProfileTests(unittest.TestCase):
             "cosmo-release-bootstrap",
         ):
             self.assertNotIn(obsolete, build_inputs)
+
+    def test_sophon_compose_selects_resources_by_chip_model(self) -> None:
+        compose = (REPOSITORY / "docker-compose.sophon.yml").read_text(
+            encoding="utf-8"
+        )
+        entrypoint = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("scripts/build_sophon_package.sh", compose)
+        self.assertIn("command: []", compose)
+        self.assertNotIn("COSMO_SOPHON_RESOURCE_DIR", compose)
+        self.assertIn('bm1688|cv186x)', entrypoint)
+        self.assertIn("unsupported Sophon chip", entrypoint)
+        self.assertIn('./scripts/build.sh -T -c "${chip}"', entrypoint)
+
+        build = (REPOSITORY / "scripts/build.sh").read_text(encoding="utf-8")
+        self.assertIn('CHIP_MODEL="${CHIP_MODEL:-bm1688}"', build)
+        self.assertIn('bm1688|cv186x)', build)
+        self.assertIn('aiboxresource_${CHIP_MODEL}', build)
+        self.assertIn("-c and -m cannot be used together", build)
+
+    def test_sophon_chip_selection_preserves_package_output_contract(self) -> None:
+        entrypoint = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
+            encoding="utf-8"
+        )
+        cmake = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
+            entrypoint,
+        )
+        self.assertIn("package_artifacts=(build/packages/*.tar.gz)", entrypoint)
+        self.assertIn(
+            'cp -f -- "${package_artifacts[0]}" "${output_dir}/"', entrypoint
+        )
+        self.assertIn('set(CPACK_OUTPUT_FILE_PREFIX', cmake)
+        self.assertIn('scripts/package_md5_rename.sh', cmake)
+
+    def test_sophon_package_entrypoint_behavior(self) -> None:
+        bash, test_environment = self.find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+
+        source = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
+            encoding="utf-8"
+        )
+        source = source.replace(
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
+            'output_dir="$PWD/export/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
+        )
+
+        with tempfile.TemporaryDirectory(dir=REPOSITORY) as temporary_directory:
+            workspace = pathlib.Path(temporary_directory)
+            scripts = workspace / "scripts"
+            scripts.mkdir()
+            (workspace / "build/packages").mkdir(parents=True)
+            entrypoint = scripts / "build_sophon_package.sh"
+            entrypoint.write_text(source, encoding="utf-8", newline="\n")
+            build_stub = scripts / "build.sh"
+            build_stub.write_text(
+                "#!/bin/bash\n"
+                "set -euo pipefail\n"
+                'printf "%s\\n" "$*" > build-invocation.txt\n'
+                "printf package > "
+                "build/packages/cosmo-V1.1.0-deadbeef.tar.gz\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            entrypoint.chmod(0o755)
+            build_stub.chmod(0o755)
+
+            def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [bash, "scripts/build_sophon_package.sh", *arguments],
+                    cwd=workspace,
+                    env=test_environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+
+            default_result = run()
+            self.assertEqual(default_result.returncode, 0, default_result.stderr)
+            self.assertEqual(
+                (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
+                "-T -c bm1688\n",
+            )
+            exported = (
+                workspace
+                / "export/public-runtime/cosmo-V1.1.0-deadbeef.tar.gz"
+            )
+            self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+
+            explicit_bm1688_result = run("--chip", "bm1688")
+            self.assertEqual(
+                explicit_bm1688_result.returncode, 0, explicit_bm1688_result.stderr
+            )
+            self.assertEqual(
+                (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
+                "-T -c bm1688\n",
+            )
+
+            cv186x_result = run("--chip", "cv186x")
+            self.assertEqual(cv186x_result.returncode, 0, cv186x_result.stderr)
+            self.assertEqual(
+                (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
+                "-T -c cv186x\n",
+            )
+            self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+
+            invalid_result = run("--chip", "unsupported-chip")
+            self.assertNotEqual(invalid_result.returncode, 0)
+            self.assertIn("unsupported Sophon chip", invalid_result.stderr)
+
+    def test_sophon_build_resolves_chip_resource_directory(self) -> None:
+        bash, test_environment = self.find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+
+        with tempfile.TemporaryDirectory(dir=REPOSITORY) as temporary_directory:
+            project_root = pathlib.Path(temporary_directory)
+            scripts = project_root / "scripts"
+            scripts.mkdir()
+            build_script = scripts / "build.sh"
+            build_script.write_text(
+                (REPOSITORY / "scripts/build.sh")
+                .read_text(encoding="utf-8")
+                .replace(
+                    'if [ -z "${PROJECT_ROOT_PATH:-}" ]; then',
+                    'PROJECT_ROOT_PATH="$(cd "$(dirname "$0")/.." && pwd -P)"\n'
+                    'if [ -z "${PROJECT_ROOT_PATH:-}" ]; then',
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+            build_script.chmod(0o755)
+            for chip in ("bm1688", "cv186x"):
+                (project_root / f"data/resource/aiboxresource_{chip}").mkdir(
+                    parents=True
+                )
+
+            def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [bash, "scripts/build.sh", *arguments],
+                    cwd=project_root,
+                    env=test_environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+
+            default_result = run()
+            self.assertIn(
+                "Sophon chip: bm1688",
+                default_result.stdout,
+                default_result.stderr,
+            )
+            self.assertIn("aiboxresource_bm1688", default_result.stdout)
+
+            cv186x_result = run("-c", "cv186x")
+            self.assertIn("Sophon chip: cv186x", cv186x_result.stdout)
+            self.assertIn("aiboxresource_cv186x", cv186x_result.stdout)
+
+            invalid_result = run("-c", "unsupported-chip")
+            self.assertNotEqual(invalid_result.returncode, 0)
+            self.assertIn("unsupported Sophon chip", invalid_result.stderr)
+
+            conflict_result = run("-c", "bm1688", "-m", "resource")
+            self.assertNotEqual(conflict_result.returncode, 0)
+            self.assertIn("-c and -m cannot be used together", conflict_result.stderr)
 
 
 if __name__ == "__main__":

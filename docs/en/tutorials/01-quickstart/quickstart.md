@@ -96,14 +96,26 @@ Rockchip NPU deployment, or production performance evidence.
 
 ### 1.3 Path C: A Provisioned Edge Device
 
-CosmoEdge currently supports the Sophon BM1688 platform. The following images show the BM1688 dual-Ethernet device used in the earlier walkthrough. Enclosures, labels, and specifications can differ by shipment; use the label and delivery manifest for the actual unit.
+CosmoEdge currently supports two Sophon chips: BM1688 and CV186X. The following images show the BM1688 dual-Ethernet device used in the earlier walkthrough. Enclosures, labels, and specifications can differ by shipment; use the label and delivery manifest for the actual unit.
 
-To build an upgrade package from source, run this at the repository root:
+To build an upgrade package from source, select the target chip with the
+`--chip <model>` option at the repository root:
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+# BM1688
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+
+# CV186X
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+
 ls -lh build_output/public-runtime/
 ```
+
+Omitting the chip argument defaults to `bm1688`. The build script selects the
+matching model resource directory; you do not need to provide a model path.
+
+The model resources in the package must match the target chip. BM1688 and
+CV186X artifacts are not interchangeable.
 
 Substitute the one package name reported by the build for `<package>` and install
 it on a prepared Sophon Linux device over SSH:

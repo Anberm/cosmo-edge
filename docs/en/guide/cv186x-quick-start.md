@@ -18,7 +18,20 @@ models still require contract-by-contract compatibility validation.
 
 ## 1. Obtain and verify the package
 
-Download the CosmoEdge 1.1 Sophon Open package and its published SHA-256 from the
+You can build the CV186X package from source:
+
+```bash
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+ls -lh build_output/public-runtime/
+```
+
+The chip-model argument only selects the CV186X resource directory. It does not
+change the output location or package naming: the artifact remains under
+`build_output/public-runtime/` and uses the
+`cosmo-V<version>-<md5>.tar.gz` format.
+
+Alternatively, download a CosmoEdge 1.1 Sophon Open package explicitly marked
+for CV186X and its published SHA-256 from the
 [GitHub Release](https://github.com/cosmo-wander-ai/cosmo-edge/releases), then verify it on the build host:
 
 ```bash
@@ -43,8 +56,9 @@ Management → System Maintenance → Software Upgrade**.
 
 ## 3. Create the first event with the bundled open models
 
-The CV186X Sophon Open package is built from `data/resource/aiboxresource_cv186x` and includes the
-two models used by the public CV186X benchmark:
+For a `cv186x` build, the build script automatically selects the matching resource
+directory. Users do not provide that path. The package includes the two models
+used by the public CV186X benchmark:
 
 - `YOLOV8n V1.0.0`: person detector, `1x3x640x640`, 7,023,600-byte model file;
 - `helmet V1.0.0`: safety-helmet classifier, `1x3x224x224`, 6,001,416-byte model file.

@@ -87,14 +87,22 @@ binary, an NPU deployment, or production performance evidence. Read the full
 
 After startup, use the [Scenario Configuration tutorial](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) to create your first AI detection task. Docker Compose V1 users can replace `docker compose` with `docker-compose`.
 
-### Build for Sophon BM1688
+### Build for Sophon
 
 ```bash
 git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+# BM1688 (default when the chip model is omitted)
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+
+# CV186X
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ls -lh build_output/public-runtime/
 ```
+
+The build script selects the matching model resources from the chip model; no
+model path is required. The chip model only changes the selected resource set;
+the output directory and package naming stay unchanged.
 
 The default Open package contains plaintext models and requires no device
 authorization. Copy the one generated package to a Sophon device, extract it,

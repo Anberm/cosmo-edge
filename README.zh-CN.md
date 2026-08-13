@@ -75,14 +75,21 @@ sudo docker compose -f docker-compose.x86.yml up -d --build
 
 启动后，按照[场景配置教程](https://www.cosmowander.ai/zh/docs/tutorials/02-scenario-config/scenario-config)创建第一个 AI 检测任务。Mac 用户先阅读 [macOS Docker Preview](docs/guide/macos-docker-preview.md) 的许可、环境和能力边界。使用 Docker Compose V1 时，可将 `docker compose` 替换为 `docker-compose`。
 
-### 为 Sophon BM1688 构建
+### 为 Sophon 构建
 
 ```bash
 git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+# BM1688（省略芯片型号时的默认值）
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+
+# CV186X
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ls -lh build_output/public-runtime/
 ```
+
+构建脚本会根据芯片型号选择对应模型资源，无需填写模型路径。芯片型号只影响资源选择，
+输出目录和安装包命名规则保持不变。
 
 默认 Open 包包含明文模型，不需要设备授权。Protected 包使用同一种 MD5 升级格式，但包含加密预置模型和授权工具；应用升级包本身不签名。安装到设备前请阅读[构建指南](https://www.cosmowander.ai/zh/docs/guide/build)和[部署指南](https://www.cosmowander.ai/zh/docs/guide/deployment)。
 

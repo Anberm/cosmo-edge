@@ -128,6 +128,7 @@ Use the full run command:
 For the Sophon path, use:
 
 ```bash
+# Defaults to bm1688; append --chip cv186x to select CV186X
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 ls -lh build_output/public-runtime/
 ```
@@ -151,8 +152,10 @@ The Sophon build uses a self-contained `Dockerfile.sophon` (based on `ubuntu:22.
 If the build fails, check the Docker build logs:
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package 2>&1 | tail -50
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
 ```
+
+For BM1688, replace the final argument with `bm1688` or omit it.
 
 Common causes:
 
@@ -160,6 +163,8 @@ Common causes:
 - Insufficient disk space — the build requires approximately 3GB.
 - An unsupported `COSMO_MODEL_GUARD_BUILD_PROFILE` value — only
   `public-runtime` and `production-release` are accepted.
+- An unsupported chip model — only `bm1688` and `cv186x` are accepted; omitting
+  it defaults to `bm1688`.
 - Selecting `production-release` outside the controlled release environment —
   missing production SDK, provisioning, release-public-key, or bootstrap inputs is
   rejected by design. Use SOURCE for ordinary source-code builds; do not bypass

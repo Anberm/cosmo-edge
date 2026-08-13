@@ -18,16 +18,19 @@ case "${COSMO_MODEL_GUARD_BUILD_PROFILE}" in
 esac
 
 # ── Parse options ──
+# -c = Sophon chip model; -m = explicit resource directory (internal/compatibility use);
 # -t = dev mode (disable watchdog); -T = also build cosmo-tests in this pass.
+CHIP_MODEL=""
 RESOURCE_DIR=""
 DEV_MODE=OFF
 BUILD_TESTS_FLAG=OFF
-while getopts "m:tT" opt; do
+while getopts "c:m:tT" opt; do
     case $opt in
+        c) CHIP_MODEL="${OPTARG,,}" ;;
         m) RESOURCE_DIR="$OPTARG" ;;
         t) DEV_MODE=ON ;;
         T) BUILD_TESTS_FLAG=ON ;;
-        *) echo "Usage: $0 [-m <resource_repo_path>] [-t (enable dev mode)] [-T (also build cosmo-tests)]"; exit 1 ;;
+        *) echo "Usage: $0 [-c <bm1688|cv186x> | -m <resource_repo_path>] [-t] [-T]"; exit 1 ;;
     esac
 done
 
@@ -35,8 +38,22 @@ if [ -z "${PROJECT_ROOT_PATH:-}" ]; then
     PROJECT_ROOT_PATH="$(cd "$(dirname "$0")/.." && pwd -P)"
 fi
 
+if [ -n "${CHIP_MODEL}" ] && [ -n "${RESOURCE_DIR}" ]; then
+    echo "ERROR: -c and -m cannot be used together" >&2
+    exit 1
+fi
+
 if [ -z "${RESOURCE_DIR}" ]; then
-    RESOURCE_DIR="${PROJECT_ROOT_PATH}/data/resource/aiboxresource_bm1688"
+    CHIP_MODEL="${CHIP_MODEL:-bm1688}"
+    case "${CHIP_MODEL}" in
+        bm1688|cv186x)
+            RESOURCE_DIR="${PROJECT_ROOT_PATH}/data/resource/aiboxresource_${CHIP_MODEL}"
+            ;;
+        *)
+            echo "ERROR: unsupported Sophon chip '${CHIP_MODEL}'; expected bm1688 or cv186x" >&2
+            exit 1
+            ;;
+    esac
 elif [ "${RESOURCE_DIR#/}" = "${RESOURCE_DIR}" ]; then
     RESOURCE_DIR="${PROJECT_ROOT_PATH}/${RESOURCE_DIR}"
 fi
@@ -67,6 +84,9 @@ mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
 echo "Dev mode: ${DEV_MODE}"
+if [ -n "${CHIP_MODEL}" ]; then
+    echo "Sophon chip: ${CHIP_MODEL}"
+fi
 echo "Resource dir: ${RESOURCE_DIR}"
 echo "Package variant: ${PACKAGE_VARIANT}"
 echo "Internal Model Guard build profile: ${COSMO_MODEL_GUARD_BUILD_PROFILE}"

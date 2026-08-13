@@ -59,6 +59,9 @@ ${INSTALLPATH}/scripts/run_start.sh start ${DATADIR}/log/logs/INTE_RUN_container
 
 `docker-compose.sophon.yml` 支持以下构建参数：
 
+芯片型号通过 Compose 服务后的 `--chip <型号>` 参数传入，支持 `bm1688` 和 `cv186x`；
+省略 `--chip` 时默认为 `bm1688`。构建脚本会自动选择匹配的资源目录。
+
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `SOPHON_APT_MIRROR` | `https://mirrors.aliyun.com/ubuntu` | apt 镜像 |
