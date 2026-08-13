@@ -14,7 +14,7 @@ Status: **PUBLICATION-READY PERFORMANCE REPORT — PREPARED, NOT YET PUBLISHED**
 - [x] Bilingual HTML includes scope, method, reproduction, comparability, and limitations.
 - [x] Capacity heatmap, throughput/latency curves, and resource-peak chart regenerated.
 - [x] Public package and generator checked for device addresses, credentials, local paths, serial numbers, and internal IDs.
-- [x] Model and video binaries excluded; only public metadata, contracts, results, and hashes are distributed.
+- [x] The two approved Open Sophon model assets are distributed once from the repository resource tree; the benchmark directory contains no duplicate model bytes or video sample.
 - [x] `SHA256SUMS` regenerated after all output files.
 
 ## Product-release evidence outside this benchmark
@@ -24,6 +24,6 @@ Status: **PUBLICATION-READY PERFORMANCE REPORT — PREPARED, NOT YET PUBLISHED**
 - [ ] Record the final RK3576 VLM artifact SHA-256.
 - [ ] Complete repeat, soak, customer-journey, and accuracy qualification for any recommended-profile claim.
 
-The unchecked items do not block publication of this scoped performance report because it does not distribute package, model, or video binaries and does not claim an official recommended profile. They remain required for complete product-package qualification and any stronger capacity commitment.
+The unchecked items do not block publication of this scoped performance report because it does not distribute package, non-approved model, or video binaries and does not claim an official recommended profile. They remain required for complete product-package qualification and any stronger capacity commitment.
 
 Do not copy `private-evidence/` into a release artifact.

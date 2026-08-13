@@ -68,7 +68,7 @@ BM1688 and CV186X use device-provided per-channel observations. RK3576 exposes a
 
 ## Test environment
 
-The CosmoEdge 1.1 source baseline is frozen to `feat/model-guard-v2.3` commit `c0e77f22c3d9cf57545123d2db90409c28c1acab`, tree `4cfa8cae62062ebb53a1481afa51ff3f88977f88`. It includes the RK3576 VLM inference path and performance changes used for this release line; subsequent changes at the freeze point affect Web linkage and upgrade-cache behavior, not inference, media, or memory lifecycles.
+The CosmoEdge 1.1 source baseline is frozen to `feat/model-guard-v2.3` commit `209bc2b52849864a15bdad91beb61f5bc982c17f`, tree `f64a98bce05b9ee8dc64dda8e56ad50f9d15687f`. It includes the RK3576 VLM inference path and performance changes used for this release line; subsequent changes at the freeze point affect Web linkage and upgrade-cache behavior plus formatting only, not inference, media, or memory lifecycle semantics.
 
 BM1688 and CV186X were tested with the same Open package, SHA-256 `8aee0bdb146d80647b4f517114c2920781ed6760e90e5bdf951fefd982dbecb2`. The packaged `cosmo-engine` and both running engines share SHA-256 `bc7274327896384bcf68abf7fc42ce9e133f15131f3be21cb265b8e4deb55d11`. The package does not embed a source commit and predates the final source freeze; this is therefore an explicit device/package binding, not a claim that the package was reproducibly built from the final source commit. The original RK3576 package was not recovered, so those results are bound to the installed version, model identity, environment, and captured evidence rather than a package digest.
 
@@ -78,7 +78,7 @@ BM1688 and CV186X were tested with the same Open package, SHA-256 `8aee0bdb146d8
 | CV186X | CV186X reference device | Ubuntu 22.04.5 LTS | libsophon/BMRT 0.4.12; Sophon FFmpeg/GStreamer 2.0.0 | 2,160,451,584 B system; 1,536 + 4,096 MiB accelerator heaps; 9,260,003,328 / 49,375,051,776 B system/data filesystems |
 | RK3576 | Rockchip RK3576 EVB1 V10 | distribution not exposed by the read-only API | exact RKNN/Driver/RGA/MPP versions not exposed; Rockchip MPP/RGA media paths confirmed | 7,917 MiB shared system memory; device API reported 11.56 GB used and 2.13 GB available storage |
 
-See `models/` for artifact identities, I/O contracts, and available SHA-256 values. The video SHA-256 is `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`; ScenarioBench version and source-file hashes are in `release-manifest.json`. Unknown RKNN/Driver/RGA/MPP versions and the RK VLM artifact hash remain explicit unknowns rather than inferred values.
+See `models/` for artifact identities, I/O contracts, repository paths, and available SHA-256 values. The byte-identical BM1688 and CV186X detector/classifier models are distributed from `data/resource/aiboxresource/models/` and included by the default Sophon Open build. The video SHA-256 is `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`; ScenarioBench version and source-file hashes are in `release-manifest.json`. Unknown RKNN/Driver/RGA/MPP versions and the RK VLM artifact hash remain explicit unknowns rather than inferred values.
 
 ## Limitations
 
@@ -109,4 +109,4 @@ The release material includes separate `summary.json`, `metrics.json`, `command.
 - SHA-256 for the final RK3576 VLM artifact;
 - repeat, soak, customer-journey, and accuracy qualification before any recommended-profile claim.
 
-These items do not block publication of this performance report. They do prevent the short-run boundary from being marketed as a recommended profile, and this report does not replace a complete product qualification report. Model and sample-video binaries are not redistributed; recorded SHA-256 values are identifiers only.
+These items do not block publication of this performance report. They do prevent the short-run boundary from being marketed as a recommended profile, and this report does not replace a complete product qualification report. The open BM1688 and CV186X detector/classifier models are distributed once from the repository resource tree; the sample video and all other model binaries are not redistributed by this benchmark. Recorded SHA-256 values identify the exact artifacts.

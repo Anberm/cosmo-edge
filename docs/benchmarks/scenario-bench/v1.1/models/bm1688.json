@@ -12,7 +12,8 @@
       "precision": "target artifact precision not exposed by the device catalog",
       "sha256": "56b207ef2876da76505e403a049d3c44a411b9fe707ab73dc64f1cd9d9b6c5c8",
       "sizeBytes": 7023600,
-      "redistribution": "not included; preset model"
+      "repositoryPath": "data/resource/aiboxresource/models/prod_BM1688_6047042_YOLOV8n_V1.0.0",
+      "redistribution": "included in the CosmoEdge repository and Sophon Open package under Apache-2.0"
     },
     {
       "publicId": "safety-helmet-classifier",
@@ -23,7 +24,8 @@
       "precision": "target artifact precision not exposed by the device catalog",
       "sha256": "33b0fb4bcb29e41a92f9c1c518671aefc69cbf9207934deaba32ca7cd8cd7c8a",
       "sizeBytes": 6001416,
-      "redistribution": "not included; preset model"
+      "repositoryPath": "data/resource/aiboxresource/models/prod_BM1688_7486163_helmet_V1.0.0",
+      "redistribution": "included in the CosmoEdge repository and Sophon Open package under Apache-2.0"
     },
     {
       "publicId": "vlm-0.8b",

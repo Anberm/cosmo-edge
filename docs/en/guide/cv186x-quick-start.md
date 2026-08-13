@@ -12,8 +12,9 @@ next:
 # CV186X Quick Start
 
 This guide targets a CV186X Linux device with Sophon runtime dependencies and networking already
-prepared. CosmoEdge 1.1 uses BMRT and CV186X-specific `.nn` models on this platform; BM1688 model
-artifacts are not interchangeable.
+prepared. CosmoEdge 1.1 uses BMRT and `.nn` artifacts validated on CV186X. The two open Sophon
+models used by this release benchmark are byte-identical to the BM1688 workload artifacts; other
+models still require contract-by-contract compatibility validation.
 
 ## 1. Obtain and verify the package
 
@@ -40,17 +41,31 @@ After the device returns, confirm that `cosmo.service` is active and verify vers
 device console. An existing CosmoEdge device can upload the same archive through **System
 Management → System Maintenance → Software Upgrade**.
 
-## 3. Import a model and create the first event
+## 3. Create the first event with the bundled open models
 
-1. Sign in to the Web console and import a `.nn` model directory with `chip_type=CV186X` under
-   **Model Repository**.
-2. Add one test stream under **Video Input**, then create a detection task and bind the stream.
+The default Sophon Open package includes the two shared Sophon models used by the public CV186X
+benchmark:
+
+- `YOLOV8n V1.0.0`: person detector, `1x3x640x640`, 7,023,600-byte model file;
+- `helmet V1.0.0`: safety-helmet classifier, `1x3x224x224`, 6,001,416-byte model file.
+
+Their repository directories, input/output contracts, and SHA-256 identities are recorded in the
+[ScenarioBench v1.1 model identity record](/benchmarks/scenario-bench/v1.1/models/cv186x.json).
+The repository directories retain the legacy `prod_BM1688_` compatibility prefix; that token is a
+readable label, not a runtime gate. CV186X qualification is based on an exact SHA-256 match between
+the files loaded by the CV186X benchmark device and the repository files. It does not imply that
+other BM1688 artifacts are interchangeable.
+
+1. Sign in to the Web console, open **Model Repository**, and confirm that both models are present.
+2. Add one test stream under **Video Input**, then create and bind a task with the person detector.
+   Add the helmet classifier to the orchestration when validating the complete helmet workflow.
 3. Open algorithm preview, confirm OSD and an event, then verify that task state and service logs
    show no continuing error.
 
-The model directory must contain a matching `config.json` and model file. Input dimensions,
-quantization, preprocessing, postprocessing, and output tensors must match the configuration. See
-the [Model Porting Guide](/en/tutorials/05-model-porting/model-porting) for the full contract.
+When importing a custom model, its directory must contain a matching `config.json` and model file.
+Input dimensions, quantization, preprocessing, postprocessing, and output tensors must match the
+configuration. See the [Model Porting Guide](/en/tutorials/05-model-porting/model-porting) for the
+full contract.
 
 ## Upgrade, recovery, and evidence boundary
 
@@ -63,4 +78,3 @@ the [Model Porting Guide](/en/tutorials/05-model-porting/model-porting) for the 
 - Public workload results are in [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/README).
   A highest short-run point is not an official recommended profile; size production deployments
   with the actual models, streams, and accuracy requirements.
-

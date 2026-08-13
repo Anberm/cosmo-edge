@@ -7,6 +7,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workspace = path.resolve(here, '..');
 const root = path.join(workspace, 'docs', 'benchmarks', 'scenario-bench', 'v1.1');
 const staticAssetCopier = path.join(workspace, 'scripts', 'copy-static-benchmark-assets.mjs');
+const repositoryModelRoot = path.join(workspace, 'data', 'resource', 'aiboxresource', 'models');
 
 const errors = [];
 const required = [
@@ -45,6 +46,26 @@ if (manifest.packageArtifacts?.open?.profile !== 'public-runtime') errors.push('
 
 for (const file of walk(root).filter((entry) => entry.endsWith('.json'))) {
   try { readJson(file); } catch (error) { errors.push(`invalid JSON: ${relative(file)} (${error.message})`); }
+}
+
+for (const platform of ['bm1688', 'cv186x']) {
+  const identities = readJson(path.join(root, 'models', `${platform}.json`)).models;
+  for (const publicId of ['person-detector', 'safety-helmet-classifier']) {
+    const identity = identities.find((model) => model.publicId === publicId);
+    if (!identity) { errors.push(`${platform} model identity is missing: ${publicId}`); continue; }
+    const repositoryPath = identity.repositoryPath ?? '';
+    const modelPath = path.resolve(workspace, ...repositoryPath.split('/'), 'model.nn');
+    const modelPrefix = `${path.resolve(repositoryModelRoot)}${path.sep}`;
+    if (!repositoryPath.startsWith('data/resource/aiboxresource/models/') || !modelPath.startsWith(modelPrefix)) {
+      errors.push(`${platform} repository model path is invalid: ${publicId}`);
+      continue;
+    }
+    if (!fs.existsSync(modelPath)) { errors.push(`${platform} repository model is missing: ${publicId}`); continue; }
+    const bytes = fs.readFileSync(modelPath);
+    const actual = crypto.createHash('sha256').update(bytes).digest('hex');
+    if (actual !== identity.sha256) errors.push(`${platform} repository model hash mismatch: ${publicId}`);
+    if (bytes.length !== identity.sizeBytes) errors.push(`${platform} repository model size mismatch: ${publicId}`);
+  }
 }
 
 const forbidden = [

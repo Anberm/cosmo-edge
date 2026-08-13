@@ -5,23 +5,31 @@
   "models": [
     {
       "publicId": "person-detector",
-      "name": "Pedestrian detector",
-      "version": "V8.0.1",
-      "input": "1x3x640x640",
+      "name": "YOLOv8n detector",
+      "version": "V1.0.0",
+      "input": "1x3x640x640 RGB, scale 1/255, letterbox 114",
       "output": "1x84x8400 candidate tensor",
+      "modelType": "yolov8_det",
       "precision": "target artifact precision not exposed by the device catalog",
-      "sha256": "50dfb31d9f5f2d347a919facd47256fa9594401e4d572d1e366f4f828533f080",
-      "redistribution": "not included; preset model"
+      "sha256": "56b207ef2876da76505e403a049d3c44a411b9fe707ab73dc64f1cd9d9b6c5c8",
+      "sizeBytes": 7023600,
+      "repositoryPath": "data/resource/aiboxresource/models/prod_BM1688_6047042_YOLOV8n_V1.0.0",
+      "deviceBinding": "byte-identical artifact observed in the CV186X benchmark device catalog",
+      "redistribution": "shared Sophon artifact included in the CosmoEdge repository and Open package under Apache-2.0"
     },
     {
       "publicId": "safety-helmet-classifier",
-      "name": "Pedestrian helmet classifier",
-      "version": "V6.0.1",
-      "input": "1x3x224x224",
-      "output": "target model classification tensor; device catalog labels include helmet and no-helmet classes",
+      "name": "Helmet classifier",
+      "version": "V1.0.0",
+      "input": "1x3x224x224 RGB, scale 1/255",
+      "output": "1x2 classification tensor: helmet, nohelmet",
+      "modelType": "classify",
       "precision": "target artifact precision not exposed by the device catalog",
-      "sha256": "851a7467b8c0bbeb1b0c7feee0258f2c5f48c8c897e1c54638c9a9958bc68810",
-      "redistribution": "not included; preset model"
+      "sha256": "33b0fb4bcb29e41a92f9c1c518671aefc69cbf9207934deaba32ca7cd8cd7c8a",
+      "sizeBytes": 6001416,
+      "repositoryPath": "data/resource/aiboxresource/models/prod_BM1688_7486163_helmet_V1.0.0",
+      "deviceBinding": "byte-identical artifact observed in the CV186X benchmark device catalog",
+      "redistribution": "shared Sophon artifact included in the CosmoEdge repository and Open package under Apache-2.0"
     },
     {
       "publicId": "vlm-0.8b",

@@ -68,7 +68,7 @@ BM1688、CV186X 使用设备提供的单路观测；RK3576 原始遥测采用共
 
 ## 测试环境
 
-CosmoEdge 1.1 源码基线冻结为 `feat/model-guard-v2.3` 的 commit `c0e77f22c3d9cf57545123d2db90409c28c1acab`、tree `4cfa8cae62062ebb53a1481afa51ff3f88977f88`。它包含本轮采用的 RK3576 VLM 推理路径与性能优化；冻结点新增变化只涉及 Web 联动与升级缓存行为，未改动推理、媒体或内存生命周期。
+CosmoEdge 1.1 源码基线冻结为 `feat/model-guard-v2.3` 的 commit `209bc2b52849864a15bdad91beb61f5bc982c17f`、tree `f64a98bce05b9ee8dc64dda8e56ad50f9d15687f`。它包含本轮采用的 RK3576 VLM 推理路径与性能优化；冻结点新增变化只涉及 Web 联动、升级缓存行为与纯格式化，未改动推理、媒体或内存生命周期语义。
 
 BM1688 与 CV186X 的实测设备使用同一 Open 安装包，SHA-256 为 `8aee0bdb146d80647b4f517114c2920781ed6760e90e5bdf951fefd982dbecb2`。包内 `cosmo-engine` SHA-256 与两台设备运行引擎均为 `bc7274327896384bcf68abf7fc42ce9e133f15131f3be21cb265b8e4deb55d11`。该安装包不嵌入 source commit，且早于最终源码冻结点；因此这是明确的设备/包绑定，不宣称为最终源码的可复现构建。RK3576 原始安装包未回收，相关结果按设备版本、模型身份、环境与测试证据绑定，不能视为 package-qualified 结果。
 
@@ -78,7 +78,7 @@ BM1688 与 CV186X 的实测设备使用同一 Open 安装包，SHA-256 为 `8aee
 | CV186X | CV186X reference device | Ubuntu 22.04.5 LTS | libsophon/BMRT 0.4.12；Sophon FFmpeg/GStreamer 2.0.0 | 系统 2,160,451,584 B；加速器 heap 1,536 + 4,096 MiB；system/data 文件系统 9,260,003,328 / 49,375,051,776 B |
 | RK3576 | Rockchip RK3576 EVB1 V10 | Linux 发行版未由只读接口暴露 | RKNN/Driver/RGA/MPP 精确版本未由只读接口暴露；已确认 Rockchip MPP/RGA 媒体路径 | 7,917 MiB 共享系统内存；设备 API 报告存储已用 11.56 GB、可用 2.13 GB |
 
-模型文件、输入输出合同与可用 SHA-256 见 `models/`；视频 SHA-256 为 `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`；ScenarioBench 版本及关键文件哈希见 `release-manifest.json`。没有证据的 RKNN/Driver/RGA/MPP 版本和 RK VLM 文件 SHA-256 均保持为空，不使用推测值。
+模型身份、输入输出合同、仓库路径与可用 SHA-256 见 `models/`。与压测字节一致的 BM1688、CV186X 检测和分类模型已放入 `data/resource/aiboxresource/models/`，默认 Sophon Open 构建会随包安装。视频 SHA-256 为 `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2`；ScenarioBench 版本及关键文件哈希见 `release-manifest.json`。没有证据的 RKNN/Driver/RGA/MPP 版本和 RK VLM 文件 SHA-256 均保持为空，不使用推测值。
 
 ## 限制说明
 
@@ -109,4 +109,4 @@ BM1688 与 CV186X 的实测设备使用同一 Open 安装包，SHA-256 为 `8aee
 - RK3576 VLM 最终模型文件 SHA-256；
 - 正式推荐配置所需的重复测试、长稳、客户旅程与精度资格材料。
 
-这些项目不阻止公开本性能报告，但阻止把短时边界包装成官方推荐配置，也意味着本报告不能代替完整产品资格报告。模型和样例视频二进制不随公开包分发，已记录的 SHA-256 只用于身份核对。
+这些项目不阻止公开本性能报告，但阻止把短时边界包装成官方推荐配置，也意味着本报告不能代替完整产品资格报告。BM1688、CV186X 的开源检测和分类模型只在仓库资源树中分发一份；样例视频和其他模型二进制不随本 benchmark 分发。已记录的 SHA-256 用于确认精确产物身份。
