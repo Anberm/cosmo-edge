@@ -3,7 +3,7 @@
   "platformId": "bm1688",
   "platform": "BM1688",
   "device": "BM1688 reference device",
-  "publicationStatus": "unpublished-candidate",
+  "publicationStatus": "release-evidence",
   "productInstalledVersion": "V1.1.0.0",
   "releaseManifest": "../../release-manifest.json",
   "environment": "../../environments/bm1688.json",

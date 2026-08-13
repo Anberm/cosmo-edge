@@ -6,7 +6,7 @@ Entry points: [English report](report.html) · [中文报告](report.zh-CN.html)
 
 ## Summary
 
-> **Status: local unpublished candidate. Do not publish before final package identity, provenance binding, and license approval are complete.**
+> **Status: final public performance material. Repository and PR preparation are complete; external publication has not started.**
 
 We validated CosmoEdge 1.1 multi-stream video analytics on three edge-AI platforms. Under the model, video, device, and runtime conditions defined by this report, the short staircase runs completed 16 channels with two detectors at 5 FPS on BM1688, and 8 channels with two detectors at 5 FPS on CV186X and RK3576. These are measured workload results for the stated configurations, not theoretical chip limits.
 
@@ -68,9 +68,9 @@ BM1688 and CV186X use device-provided per-channel observations. RK3576 exposes a
 
 ## Test environment
 
-The local unpublished candidate is frozen to the source identity recorded with the benchmark evidence: commit `1f1014809e3fa08d478c1f51626c8da4566ada47` and tree `e72d9159a3d6677fd0e2fe7a8f830fe1716426b4`. Every device reports installed version `V1.1.0.0`, but the final Open/Protected packages were not supplied, so the installed systems cannot yet be proven to originate from that source freeze.
+The CosmoEdge 1.1 source baseline is frozen to `feat/model-guard-v2.3` commit `c0e77f22c3d9cf57545123d2db90409c28c1acab`, tree `4cfa8cae62062ebb53a1481afa51ff3f88977f88`. It includes the RK3576 VLM inference path and performance changes used for this release line; subsequent changes at the freeze point affect Web linkage and upgrade-cache behavior, not inference, media, or memory lifecycles.
 
-This material is being integrated into `feat/model-guard-v2.3` at `e2d61700ae16bb946eed53841455f827a4174be1`. That branch added the RK3576 VLM inference path and performance changes after the evidence freeze, so these measurements do not validate `e2d61700`; final release qualification must rebind the evidence to the final candidate and packages.
+BM1688 and CV186X were tested with the same Open package, SHA-256 `8aee0bdb146d80647b4f517114c2920781ed6760e90e5bdf951fefd982dbecb2`. The packaged `cosmo-engine` and both running engines share SHA-256 `bc7274327896384bcf68abf7fc42ce9e133f15131f3be21cb265b8e4deb55d11`. The package does not embed a source commit and predates the final source freeze; this is therefore an explicit device/package binding, not a claim that the package was reproducibly built from the final source commit. The original RK3576 package was not recovered, so those results are bound to the installed version, model identity, environment, and captured evidence rather than a package digest.
 
 | Platform | Public device | OS | Runtime / media | Memory and storage |
 | --- | --- | --- | --- | --- |
@@ -94,7 +94,7 @@ See `models/` for artifact identities, I/O contracts, and available SHA-256 valu
 
 The public pack contains the methodology, sanitized scenarios, machine-readable results, environment templates, and checksums. Device serial numbers, internal channel IDs, internal algorithm IDs, local absolute paths, customer media, and full debugging logs remain in the private evidence archive.
 
-The candidate includes separate `summary.json`, `metrics.json`, `command.txt`, sanitized log, and HTML attachments for single-detector, dual-detector, and VLM workloads. Before execution, resolve the public model references to device-local identifiers as described in `methodology.md`; device addresses, credentials, and internal identifiers are intentionally absent.
+The release material includes separate `summary.json`, `metrics.json`, `command.txt`, sanitized log, and HTML attachments for single-detector, dual-detector, and VLM workloads. Before execution, resolve the public model references to device-local identifiers as described in `methodology.md`; device addresses, credentials, and internal identifiers are intentionally absent.
 
 | Platform | Single-detector staircase | Dual-detector staircase | VLM observation | Machine-readable summary |
 | --- | --- | --- | --- | --- |
@@ -102,13 +102,11 @@ The candidate includes separate `summary.json`, `metrics.json`, `command.txt`, s
 | CV186X | [open](results/cv186x/single-detector/report.html) | [open](results/cv186x/dual-detector/report.html) | [open](results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
 | RK3576 | [open](results/rk3576/single-detector/report.html) | [open](results/rk3576/dual-detector/report.html) | [open](results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
 
-## Current publication blockers
+## Product-release evidence boundary
 
-- final Open and Protected package files and SHA-256 values;
-- build provenance tying those packages to the frozen source commit/tree;
-- rebind the existing evidence to the final `feat/model-guard-v2.3` release candidate;
-- final redistribution approval for model artifacts and the sample video;
-- SHA-256 for the final RK3576 VLM model artifact;
-- repeated, soak, and accuracy qualification required for recommended profiles.
+- final Protected package SHA-256 and controlled build provenance;
+- final RK3576 package SHA-256 and source provenance;
+- SHA-256 for the final RK3576 VLM artifact;
+- repeat, soak, customer-journey, and accuracy qualification before any recommended-profile claim.
 
-This directory is therefore a complete unpublished material candidate, not a final release qualification claim.
+These items do not block publication of this performance report. They do prevent the short-run boundary from being marketed as a recommended profile, and this report does not replace a complete product qualification report. Model and sample-video binaries are not redistributed; recorded SHA-256 values are identifiers only.

@@ -3,7 +3,7 @@
   "platformId": "rk3576",
   "platform": "RK3576",
   "device": "RK3576 EVB",
-  "publicationStatus": "unpublished-candidate",
+  "publicationStatus": "release-evidence",
   "productInstalledVersion": "V1.1.0.0",
   "releaseManifest": "../../release-manifest.json",
   "environment": "../../environments/rk3576.json",

@@ -6,14 +6,15 @@ This project follows a release-note style inspired by Keep a Changelog.
 
 ## [Unreleased]
 
-The changes below are available on the development branch and are not yet included in the
-`v1.0.0` packages. Platform capacity and release-readiness claims remain bound to
-candidate-specific validation evidence.
+## [1.1.0] - 2026-08-13
+
+Multi-platform release for BM1688, CV186X, RK3576, and x86. Capacity claims remain bound to the
+models, packages, environments, thresholds, and durations recorded in their linked evidence.
 
 ### Added
 
 - Rockchip RK3576 integration with an RKNN inference backend, native MPP/RGA media pipeline,
-  cross-compilation toolchain, accelerator telemetry, integration assets, and candidate
+  cross-compilation toolchain, accelerator telemetry, integration assets, and
   qualification fixtures.
 - Platform-neutral host/backend and media-factory contracts, derived model-artifact identities,
   accelerator and preview-pipeline metrics, and ScenarioBench preview validation for additional
@@ -89,14 +90,15 @@ candidate-specific validation evidence.
 
 ### Docs
 
-- Reworked the English and Simplified Chinese README files around the platform matrix, next-release
-  preview, Open/Protected boundary, published validation baselines, and task-oriented quick starts.
+- Reworked the English and Simplified Chinese README files around the v1.1 platform matrix,
+  Open/Protected boundary, published validation baselines, and task-oriented quick starts.
 - Added official website links, certified-device purchase links, x86 first-run verification, an
   Ultralytics YOLO deployment guide, and reusable community-case documentation.
 - Expanded and restored the bilingual system guide, region-alarm tutorials, runtime localization,
   and model/resource references.
-- Added verifiable ScenarioBench reports and environment notes, including refreshed VLM benchmark
-  methodology and evidence links.
+- Added the bilingual CosmoEdge 1.1 multi-platform ScenarioBench report, sanitized single-detector,
+  dual-detector, and Experimental VLM attachments, environment/model identities, reproduction
+  descriptors, release manifest, and file checksums.
 - Added the agent-assisted development entry, environment and model-conversion guidance, and a
   contributor pre-commit hook guide.
 
@@ -177,11 +179,13 @@ Initial public open-source baseline.
 - Sample camera credentials and device serial values scrubbed from examples.
 - Sophon build environment Dockerfile made self-contained.
 
-[Unreleased]: https://github.com/cosmo-wander-ai/cosmo-edge/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/cosmo-wander-ai/cosmo-edge/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.0.0
 [0.1.0]: https://github.com/cosmo-wander-ai/cosmo-edge/releases
 
 <!-- Gitee mirrors -->
-[Unreleased (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/compare/v1.0.0...master
+[Unreleased (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/compare/v1.1.0...master
+[1.1.0 (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/releases
 [1.0.0 (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/releases
 [0.1.0 (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/releases

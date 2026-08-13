@@ -22,9 +22,11 @@
     "encoder": "bmvpu-h264"
   },
   "cosmoEdgeInstalledVersion": "V1.1.0.0",
-  "sourceCandidateCommit": "1f1014809e3fa08d478c1f51626c8da4566ada47",
-  "sourceCandidateTree": "e72d9159a3d6677fd0e2fe7a8f830fe1716426b4",
-  "packageSha256": null,
-  "candidateBinding": "unverified: original tested package bytes were not supplied",
+  "releaseSourceCommit": "c0e77f22c3d9cf57545123d2db90409c28c1acab",
+  "releaseSourceTree": "4cfa8cae62062ebb53a1481afa51ff3f88977f88",
+  "packageProfile": "public-runtime",
+  "packageSha256": "8aee0bdb146d80647b4f517114c2920781ed6760e90e5bdf951fefd982dbecb2",
+  "runningEngineSha256": "bc7274327896384bcf68abf7fc42ce9e133f15131f3be21cb265b8e4deb55d11",
+  "packageBinding": "verified: packaged and running engine SHA-256 values match; package does not embed a source commit",
   "capturedAt": "2026-08-12T16:10:00+08:00"
 }

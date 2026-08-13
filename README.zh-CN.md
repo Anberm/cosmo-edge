@@ -10,7 +10,7 @@
 [![Nightly RK3576 Cross Build](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rk3576.yml/badge.svg?branch=main)](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rk3576.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
 [![Runtime](https://img.shields.io/badge/runtime-C%2B%2B17-orange?style=flat-square)](#核心能力)
-[![Release](https://img.shields.io/badge/release-v1.0.0-green?style=flat-square)](https://github.com/cosmo-wander-ai/cosmo-edge/releases)
+[![Release](https://img.shields.io/badge/release-v1.1.0-green?style=flat-square)](https://github.com/cosmo-wander-ai/cosmo-edge/releases)
 [![Website](https://img.shields.io/badge/website-cosmowander.ai-3B82F6?style=flat-square)](https://www.cosmowander.ai/)
 [![Docs](https://img.shields.io/badge/docs-online-2563EB?style=flat-square)](https://www.cosmowander.ai/zh/docs/)
 [![Gitee](https://img.shields.io/badge/Gitee-cosmo--edge-C71D23?style=flat-square&logo=gitee)](https://gitee.com/cosmo-wander-ai/cosmo-edge)
@@ -29,13 +29,15 @@
 
 CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编排到告警与事件推送的完整应用层。仓库中的核心引擎与控制台以 Apache-2.0 开源；认证硬件、商业预置模型与 Model Guard 分发保护具有独立边界。
 
-## 下一版本预览
+## CosmoEdge 1.1
 
-> 以下变化面向下一版本；当前开发源码可见不等于已进入 v1.0.0 发布包。各平台可用范围以平台矩阵及其证据链接为准。
+> 当前分支是 CosmoEdge 1.1 源码线。不同模型和负载的容量不同，请以关联证据为准，不把短时最高点直接当作部署推荐值。
 
-- **Rockchip RK3576：**最终合并源码已完成板端验证。稳定版运行范围为 4 路 × 5 FPS；1/2/4/8 路 ScenarioBench 阶梯用于记录工程余量，不将 8 路结果作为正式容量承诺。
-- **Sophon 模型处理：**芯片无关模型目录和 `chip_type` 校验为 BM1688、CV186X 的模型元数据与导入路径提供基础；CV186X 发布包与设备证据仍在补充。
-- **RKNN 数据路径：**加入针对性的 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 candidate 直接解码路径，并保留明确的 fallback；同一冻结候选的单路 Detect 平均耗时由 142.3 ms 降至 58.2 ms（下降 59.1%）。
+- **多平台发布：**BM1688、CV186X 与 RK3576 共享同一套视频接入、任务编排、事件和可观测流程，并分别使用目标平台模型产物。
+- **公开 benchmark 包：**[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单算法、双算法与 Experimental VLM，提供脱敏后的可复现附件。
+- **Rockchip RK3576：**已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径；4 路单算法已有 12 小时证据，更高短时结果只作为实测边界，不直接作为推荐配置。
+- **Sophon 模型处理：**芯片感知校验支持 BM1688 与 CV186X 的目标 `.nn` 产物；benchmark 已记录两台参考设备的 Open 安装包和运行引擎精确绑定。
+- **RKNN 数据路径：**包含 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 张量直接解码路径，并保留明确 fallback。
 - **智能体辅助二开：**提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
 - **Model Guard 2.3：**为 Sophon Protected 包中的商业预置模型提供分发保护；Open 与 Protected 的应用软件能力一致，不以 SKU 解锁软件功能，区别在于模型是否加密以及是否包含设备授权工具。
 - **macOS Docker Preview：**为 Apple Silicon 提供隔离的 `linux/amd64` 单路本地视频体验候选；发布前仍需完成连续两轮端到端验收。它不启用 Model Guard，也不代表 NPU 或原生性能。
@@ -46,9 +48,9 @@ CosmoEdge 提供统一的引擎架构与编排体验，但每次构建只选择�
 
 | 平台 | 状态 | 运行时 / 模型产物 | 当前范围与证据 |
 | --- | --- | --- | --- |
-| Sophon BM1688 | 主力平台 | BMRT / `.nn` | 生产部署路径，已发布 [v1.0 基线](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/) |
-| Rockchip RK3576 | 稳定版就绪 | RKNN / `.rknn` | 正式 Docker 交叉编译与最终板端路径已验证。支持基线为 4 路 × 5 FPS；8 路结果仅作为工程余量。从 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)开始 |
-| Sophon CV186X | 候选 | BMRT / 目标芯片专用 `.nn` | 模型目录与导入兼容；发布包和设备证据正在补充 |
+| Sophon BM1688 | v1.1 已支持 / 主力平台 | BMRT / `.nn` | 生产部署路径，包含 [v1.1 工作负载证据](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)和已发布 [v1.0 基线](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/) |
+| Rockchip RK3576 | v1.1 已支持 | RKNN / `.rknn` | 交叉构建和板端路径已验证；参见 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)与 [v1.1 工作负载证据](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md) |
+| Sophon CV186X | v1.1 已支持 | BMRT / 目标芯片专用 `.nn` | 模型导入与设备工作负载证据见 [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md) |
 | x86 Linux / Windows；Apple Silicon macOS | Linux / Windows 已支持；macOS Preview | ONNX Runtime / `.onnx` | Mac 通过 amd64 仿真覆盖单路本地视频开发体验，不代表原生性能 |
 | Sophon BM1684X | 规划中 | — | 不属于当前发布范围 |
 
@@ -94,7 +96,7 @@ ls -lh build_output/rk3576/
 公开构建镜像已固定 digest，并包含 RKNN、MPP 和 RGA 构建依赖。目标运行时与
 设备验证边界请参阅 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)。
 
-CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配指南](https://www.cosmowander.ai/zh/docs/tutorials/05-model-porting/model-porting)。
+CV186X 请按照 [CV186X 快速开始](docs/guide/cv186x-quick-start.md)完成安装、模型导入、首个事件验证，以及升级和恢复检查。
 
 ## 你可以构建什么
 
@@ -136,7 +138,18 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 ## 验证与性能
 
-下表是**已发布的 v1.0 基线**，不代表下一版本所有平台的证据。新增结果将绑定源代码 commit 与 tree、最终安装包 SHA-256、设备和运行时版本、模型与数据集哈希以及验收阈值。
+### CosmoEdge 1.1 多平台性能报告
+
+已收口的 v1.1 公开材料覆盖 BM1688、CV186X 与 RK3576，包括精简主报告及关联的单算法、双算法、Experimental VLM 附件。除非明确标注更长时长，当前结果属于短时工作负载证据，不代表芯片理论上限，也不会自动成为部署推荐配置。
+
+- [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
+- [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
+- [中文主报告](docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
+- [方法与复现](docs/benchmarks/scenario-bench/v1.1/methodology.md)
+
+源码基线为 `feat/model-guard-v2.3` commit `c0e77f22c3d9cf57545123d2db90409c28c1acab`、tree `4cfa8cae62062ebb53a1481afa51ff3f88977f88`。BM1688 与 CV186X 已绑定到记录的 Open 安装包和运行引擎；RK3576 包哈希与 Protected 包构建来源不在公开 benchmark 中，因此报告不对它们作 package-qualified 声明。精确证据边界见 [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json)。
+
+下表保留此前已经公开的 **v1.0 历史基线**：
 
 | ScenarioBench 负载 | 硬件 | 最大验证路数 | 目标 FPS | 结果 | 证据 |
 | --- | --- | ---: | ---: | --- | --- |
@@ -146,21 +159,11 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 | VLM 复核 | YY-16T01-Preview / NPU | 8 | 0.1/channel | 通过 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/vlm-55009-npu/report.zh-CN.html) |
 | 安全帽检测 x86 基线 | x86 CPU | 7 | 3/channel | 受限；8 路超过延迟阈值 | [报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/helmet-7463-x86/report.zh-CN.html) |
 
-测试方法和发布边界见 [benchmark manifest](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/manifest.json)、[环境说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/environment)和[当前刷新说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/)。上方已发布的 v1.0 表格不代表 RK3576 或 CV186X；RK3576 的候选绑定性能基线单列如下。
+v1.0 的测试方法和发布边界见 [benchmark manifest](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/manifest.json)、[环境说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/environment)和[当前刷新说明](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/)。
 
-### CosmoEdge 1.1 多平台 benchmark 候选
+### RK3576 长稳验证背景
 
-`feat/model-guard-v2.3` 分支现已接入 BM1688、CV186X 与 RK3576 的**未发布脱敏材料候选**，包含精简公开主报告，以及关联的单算法、双算法和 Experimental VLM 逐路附件。当前结果属于短时工作负载证据，不是官方推荐配置，也不是芯片理论上限。
-
-- [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
-- [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
-- [中文主报告](docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
-
-现有证据早于该分支最新 RK3576 VLM 改动，最终 Open/Protected 安装包哈希和测试来源绑定也尚未补齐。因此材料仍明确标记为 `doNotPublish`，正式发布前必须重新绑定最终候选。
-
-### RK3576 验证基线
-
-这组下一版本结果绑定冻结源码候选 [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b)（tree `fd1b646f`）、engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`、RKNN Runtime `2.3.2-429f97ae6b`、driver `0.9.8`、RGA `1.10.1_[4]` 和 MPP `1.5.0-1`。
+这组较早的长稳证据仍绑定源码 [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b)（tree `fd1b646f`）、engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`、RKNN Runtime `2.3.2-429f97ae6b`、driver `0.9.8`、RGA `1.10.1_[4]` 和 MPP `1.5.0-1`。
 
 | ScenarioBench 负载 | 硬件 | 最大验证路数 | 目标 FPS | 结果 |
 | --- | --- | ---: | ---: | --- |
@@ -168,7 +171,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 
 1/2/4/8 路阶梯全部通过，丢帧及推理、RGA、MPP 失败均为 0；单路 Detect 平均耗时由 142.3 ms 降至 58.2 ms（下降 59.1%）。另一次 4 路 × 5 FPS、4 路算法预览的 12 小时长稳获得 720 个连续 hold 采样，CPU 平均/P95/最大值为 33.92% / 39% / 43%，丢帧及运行期/预览失败均为 0。
 
-最终合并源码已完成稳定版板端验证。正式支持范围为 4 路 × 5 FPS；8 路阶梯用于记录工程余量，不作为发布容量承诺。上方性能数据仍绑定所列候选；每个正式发布产物都应保留各自的源码与安装包 manifest。
+4 路 × 5 FPS 配置已完成 12 小时运行；8 路阶梯只记录工程余量，不作为发布容量承诺。这份历史证据作为长稳背景保留，不静默重绑定到更新的 v1.1 源码基线。
 
 ## 架构
 
@@ -186,7 +189,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 | 推理与媒体后端接口                                               |
 +--------------------+----------------------+----------------------+
 | Sophon BMRT/VPU    | RKNN + MPP/RGA       | ONNX Runtime/FFmpeg  |
-| BM1688；CV186X 候选 | RK3576                | x86 Linux / Windows  |
+| BM1688；CV186X      | RK3576                | x86 Linux / Windows  |
 +--------------------+----------------------+----------------------+
 ```
 
@@ -235,7 +238,7 @@ CV186X 暂无公开 Quick Start。当前目标芯片模型约束见[模型适配
 <details>
 <summary><b>CosmoEdge 的生产就绪程度如何？</b></summary>
 
-`v1.0.0` 是当前稳定公开版本，上方提供了已发布的 BM1688 和 x86 基线。RK3576 已完成下一稳定版的正式交叉编译和最终板端验证，支持基线为 4 路 × 5 FPS。上方性能快照仍绑定所列候选；生产使用前仍需针对自有模型和部署条件完成验证。
+`v1.1.0` 是 BM1688、CV186X、RK3576 与 x86 的多平台发布线。关联报告记录了实测工作负载边界和明确的证据缺口；生产容量仍需结合自有模型、视频流、精度要求和部署条件完成验证。
 
 </details>
 

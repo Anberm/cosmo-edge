@@ -2,7 +2,7 @@ benchmark=cosmoedge-1.1-multistream
 platform=CV186X
 device=CV186X reference device
 workload=dual-detector
-publication=unpublished-candidate
+publication=release-evidence
 channels=1 hold=30s result=PASS avg_discard=0
 channels=2 hold=30s result=PASS avg_discard=0
 channels=3 hold=30s result=PASS avg_discard=0

@@ -2,7 +2,7 @@ benchmark=cosmoedge-1.1-multistream
 platform=BM1688
 device=BM1688 reference device
 workload=vlm-observation
-publication=unpublished-candidate
+publication=release-evidence
 channels=1 hold=120s result=PASS avg_discard=0
 channels=2 hold=120s result=PASS avg_discard=0
 channels=3 hold=120s result=PASS avg_discard=0

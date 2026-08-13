@@ -12,7 +12,7 @@
       "precision": "not recorded by device catalog; do not infer INT8/FP16",
       "sha256": "26ed82e076b06bf0bd757286cafd2bff7ae957366640d96559bf3215a6d541e0",
       "sizeBytes": 6305107,
-      "verification": "hash from the frozen release-candidate resource; model code and dimensions match the tested device catalog",
+      "verification": "hash from the frozen release resource; model code and dimensions match the tested device catalog",
       "redistribution": "not included pending model-license decision"
     },
     {
@@ -24,7 +24,7 @@
       "precision": "not recorded by device catalog; do not infer INT8/FP16",
       "sha256": "471d1de315fd142d696066093eaf13e9657b61789c802cfe880606e209cd67ea",
       "sizeBytes": 3024125,
-      "verification": "hash from the frozen release-candidate resource; model code and dimensions match the tested device catalog",
+      "verification": "hash from the frozen release resource; model code and dimensions match the tested device catalog",
       "redistribution": "not included pending model-license decision"
     },
     {

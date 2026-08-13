@@ -2,6 +2,7 @@ import { defineConfig } from 'vitepress'
 
 const guideZh = [
   { text: '构建指南', link: '/guide/build' },
+  { text: 'CV186X 快速开始', link: '/guide/cv186x-quick-start' },
   { text: 'RK3576 / RKNN 集成', link: '/guide/rk3576-rknn-development' },
   { text: 'macOS Docker Preview', link: '/guide/macos-docker-preview' },
   { text: '部署指南', link: '/guide/deployment' },
@@ -33,7 +34,7 @@ const i18nZh = [
 ]
 
 const benchmarksZh = [
-  { text: 'ScenarioBench v1.1 候选', link: '/benchmarks/scenario-bench/v1.1/' },
+  { text: 'ScenarioBench v1.1', link: '/benchmarks/scenario-bench/v1.1/' },
   { text: 'ScenarioBench v1.0', link: '/benchmarks/scenario-bench/v1.0/' },
   { text: '当前滚动刷新', link: '/benchmarks/scenario-bench/current/' }
 ]
@@ -70,6 +71,7 @@ const communityZh = [
 
 const guideEn = [
   { text: 'Build Guide', link: '/en/guide/build' },
+  { text: 'CV186X Quick Start', link: '/en/guide/cv186x-quick-start' },
   { text: 'RK3576 / RKNN Integration', link: '/en/guide/rk3576-rknn-development' },
   { text: 'macOS Docker Preview', link: '/en/guide/macos-docker-preview' },
   { text: 'Deployment Guide', link: '/en/guide/deployment' },
@@ -120,7 +122,7 @@ const tutorialsEn = [
 ]
 
 const benchmarksEn = [
-  { text: 'ScenarioBench v1.1 Candidate', link: '/benchmarks/scenario-bench/v1.1/README' },
+  { text: 'ScenarioBench v1.1', link: '/benchmarks/scenario-bench/v1.1/README' },
   { text: 'ScenarioBench v1.0', link: '/benchmarks/scenario-bench/v1.0/README' },
   { text: 'Current Rolling Refresh', link: '/benchmarks/scenario-bench/current/README' }
 ]

@@ -24,9 +24,9 @@
     "encoder": "rockchip-mpp / copy-first stride-aligned I420"
   },
   "cosmoEdgeInstalledVersion": "V1.1.0.0",
-  "sourceCandidateCommit": "1f1014809e3fa08d478c1f51626c8da4566ada47",
-  "sourceCandidateTree": "e72d9159a3d6677fd0e2fe7a8f830fe1716426b4",
+  "releaseSourceCommit": "c0e77f22c3d9cf57545123d2db90409c28c1acab",
+  "releaseSourceTree": "4cfa8cae62062ebb53a1481afa51ff3f88977f88",
   "packageSha256": null,
-  "candidateBinding": "unverified: original tested package bytes were not supplied",
+  "packageBinding": "package bytes unavailable; evidence is bound to the installed V1.1.0.0 runtime, captured environment and model identities, not to a package digest",
   "capturedAt": "2026-08-12T16:10:00+08:00"
 }

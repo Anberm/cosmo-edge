@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
   "benchmark": "CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark",
-  "publicationStatus": "unpublished-candidate",
+  "publicationStatus": "release-evidence",
   "manifest": "../release-manifest.json",
-  "generatedAt": "2026-08-12T17:33:43+08:00",
+  "generatedAt": "2026-08-13T11:57:35+08:00",
   "primaryClaim": "short-run concurrent dual-detector workload; not a recommended profile",
   "platforms": [
     {

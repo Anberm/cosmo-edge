@@ -1,6 +1,6 @@
 # Security Policy
 
-CosmoEdge `v1.0.0` has been publicly released. Please avoid disclosing security-sensitive details publicly before maintainers have had time to review them. This policy describes how to report vulnerabilities privately and what to expect.
+CosmoEdge `v1.1.0` is the current release line. Please avoid disclosing security-sensitive details publicly before maintainers have had time to review them. This policy describes how to report vulnerabilities privately and what to expect.
 
 ## Reporting a Vulnerability
 
@@ -49,8 +49,9 @@ The table below shows the versions that receive security fixes. Builds made dire
 
 | Version | Supported          | Notes                                                  |
 | ------- | ------------------ | ------------------------------------------------------ |
-| 1.0.x   | :white_check_mark: | Current stable public release (`v1.0.0`)               |
-| 0.1.x   | :x:                | Superseded by v1.0.0; only critical fixes on request  |
+| 1.1.x   | :white_check_mark: | Current stable release line (`v1.1.0`)                 |
+| 1.0.x   | :x:                | Superseded by v1.1.0; upgrade to the current line      |
+| 0.1.x   | :x:                | Superseded by v1.0.0; only critical fixes on request   |
 | < 0.1   | :x:                | Not publicly released                                  |
 
 ## Deployment Hardening Notes

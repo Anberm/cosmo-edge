@@ -3,7 +3,7 @@
   "platformId": "cv186x",
   "platform": "CV186X",
   "device": "CV186X reference device",
-  "publicationStatus": "unpublished-candidate",
+  "publicationStatus": "release-evidence",
   "productInstalledVersion": "V1.1.0.0",
   "releaseManifest": "../../release-manifest.json",
   "environment": "../../environments/cv186x.json",

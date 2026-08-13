@@ -6,7 +6,7 @@
 
 ## 摘要
 
-> **状态：本地未发布候选。禁止在最终安装包身份、来源绑定和许可证审批完成前公开。**
+> **状态：最终公开性能材料。当前仅完成仓库与 PR 收口，尚未对外发布。**
 
 我们在三类边缘 AI 平台上验证了 CosmoEdge 1.1 的多路视频分析能力。在本报告指定的模型、视频、设备和运行时条件下，BM1688 短时阶梯测试完成了 16 路双算法 × 5 FPS，CV186X 与 RK3576 完成了 8 路双算法 × 5 FPS。结果代表指定配置下的实测工作负载，不代表芯片理论峰值。
 
@@ -68,9 +68,9 @@ BM1688、CV186X 使用设备提供的单路观测；RK3576 原始遥测采用共
 
 ## 测试环境
 
-本地未发布候选已冻结到压测材料所记录的源代码 commit `1f1014809e3fa08d478c1f51626c8da4566ada47`、tree `e72d9159a3d6677fd0e2fe7a8f830fe1716426b4`。设备均报告安装版本 `V1.1.0.0`，但最终 Open/Protected 安装包尚未提供，因而还不能证明这些设备由该冻结源码构建。
+CosmoEdge 1.1 源码基线冻结为 `feat/model-guard-v2.3` 的 commit `c0e77f22c3d9cf57545123d2db90409c28c1acab`、tree `4cfa8cae62062ebb53a1481afa51ff3f88977f88`。它包含本轮采用的 RK3576 VLM 推理路径与性能优化；冻结点新增变化只涉及 Web 联动与升级缓存行为，未改动推理、媒体或内存生命周期。
 
-本材料当前接入 `feat/model-guard-v2.3` 的 `e2d61700ae16bb946eed53841455f827a4174be1`。该分支在上述冻结点之后新增了 RK3576 VLM 推理路径与性能优化，因此这里的既有压测不能视为对 `e2d61700` 的验证；正式发布前必须重新绑定最终候选和安装包。
+BM1688 与 CV186X 的实测设备使用同一 Open 安装包，SHA-256 为 `8aee0bdb146d80647b4f517114c2920781ed6760e90e5bdf951fefd982dbecb2`。包内 `cosmo-engine` SHA-256 与两台设备运行引擎均为 `bc7274327896384bcf68abf7fc42ce9e133f15131f3be21cb265b8e4deb55d11`。该安装包不嵌入 source commit，且早于最终源码冻结点；因此这是明确的设备/包绑定，不宣称为最终源码的可复现构建。RK3576 原始安装包未回收，相关结果按设备版本、模型身份、环境与测试证据绑定，不能视为 package-qualified 结果。
 
 | 平台 | 公开设备 | OS | Runtime / Media | 内存与存储 |
 | --- | --- | --- | --- | --- |
@@ -94,7 +94,7 @@ BM1688、CV186X 使用设备提供的单路观测；RK3576 原始遥测采用共
 
 公开复现包提供方法说明、脱敏场景、机器可读结果、环境模板和文件哈希。原始设备序列号、内部通道 ID、内部算法 ID、本地绝对路径、客户素材和完整调试日志仅保存在内部证据包中。
 
-本候选已经生成单算法、双算法与 VLM 的独立 `summary.json`、`metrics.json`、`command.txt`、脱敏日志和 HTML。执行前需按 `methodology.md` 将公开模型引用解析为设备本地编号；公开包不会携带设备地址、凭据或内部编号。
+本发布材料已经生成单算法、双算法与 VLM 的独立 `summary.json`、`metrics.json`、`command.txt`、脱敏日志和 HTML。执行前需按 `methodology.md` 将公开模型引用解析为设备本地编号；公开包不会携带设备地址、凭据或内部编号。
 
 | 平台 | 单算法逐路报告 | 双算法逐路报告 | VLM 观测报告 | 机器可读汇总 |
 | --- | --- | --- | --- | --- |
@@ -102,13 +102,11 @@ BM1688、CV186X 使用设备提供的单路观测；RK3576 原始遥测采用共
 | CV186X | [打开](results/cv186x/single-detector/report.html) | [打开](results/cv186x/dual-detector/report.html) | [打开](results/cv186x/vlm-observation/report.html) | [summary.json](results/cv186x/summary.json) |
 | RK3576 | [打开](results/rk3576/single-detector/report.html) | [打开](results/rk3576/dual-detector/report.html) | [打开](results/rk3576/vlm-observation/report.html) | [summary.json](results/rk3576/summary.json) |
 
-## 当前发布阻断项
+## 产品发版证据边界
 
-- Open 与 Protected 最终安装包文件及 SHA-256；
-- 最终包与冻结源码 commit/tree 的构建来源证明；
-- 将现有证据重新绑定到 `feat/model-guard-v2.3` 的最终发布候选；
-- 模型与示例视频的最终再分发审批；
+- Protected 最终安装包 SHA-256 与受控构建来源；
+- RK3576 最终安装包 SHA-256 与源码来源；
 - RK3576 VLM 最终模型文件 SHA-256；
-- 正式推荐配置所需的重复测试、长稳与精度资格材料。
+- 正式推荐配置所需的重复测试、长稳、客户旅程与精度资格材料。
 
-因此本目录是完整的“未发布候选材料”，不是可直接发布的最终资格结论。
+这些项目不阻止公开本性能报告，但阻止把短时边界包装成官方推荐配置，也意味着本报告不能代替完整产品资格报告。模型和样例视频二进制不随公开包分发，已记录的 SHA-256 只用于身份核对。

@@ -24,9 +24,11 @@ the behavior of the CPU, CUDA, or Sophon backends:
   OSD paths.
 - Full DMA-BUF zero-copy is outside the supported release boundary.
 
-The supported release operating profile is four channels at 5 FPS per channel.
-The 1 / 2 / 4 / 8-channel ScenarioBench ladder records engineering headroom;
-the 8-channel result is not a release capacity guarantee.
+The recommended deployment starting point is the single-detector profile that completed a
+12-hour run at four channels and 5 FPS per channel. The latest short staircases reached 16
+channels at 5 FPS for a single detector and 8 channels at 5 FPS per task for two detectors.
+These are measured boundaries for the stated models and gates, not replacements for a recommended
+profile. See [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/README).
 
 ## Repository and Evidence Boundary
 
@@ -168,14 +170,15 @@ preflights them before mutating device configuration.
 ## Validated Release Boundary
 
 - Four channels at 5 FPS completed the 12-hour gate with zero media
-  failure/fallback deltas and stable memory-pool accounting; candidate-specific
-  CPU measurements remain in the corresponding evidence record.
+  failure/fallback deltas and stable memory-pool accounting; the corresponding
+  CPU measurements remain in that historical evidence record.
 - Real raw and algorithm playback, hardware decode/encode, OSD, reconnect, and
   task restart recovery passed on the tested build.
 - Delayed Copy-out discarded frames before host copies and is the selected
   optimization for this release.
-- The 8-channel ScenarioBench step passed as engineering headroom evidence but
-  is not an accepted capacity profile.
+- The v1.1 public report records a 16-channel, 5 FPS single-detector staircase and an 8-channel,
+  5 FPS-per-task dual-detector staircase. Both are short-run measured boundaries and have not been
+  promoted to official recommended profiles.
 - RK3576 NPU telemetry uses the vendor busy-time counter from
   `/sys/kernel/debug/rknpu/load`, reports the busiest core on the health card,
   and retains every core in the accelerator payload. The startup script exposes

@@ -55,11 +55,11 @@ The report always separates:
 - `Recommended profile`: repeated and soak-qualified configuration on the final package;
 - `Observed boundary`: the last short-run step that passed the enabled gates.
 
-This candidate has observed boundaries only. Recommended profiles remain pending.
+This release report has observed boundaries only. Recommended profiles remain pending.
 
 ## Reproduction
 
-1. Check `release-manifest.json`, especially `qualification.readyToPublish` and the package-binding status.
+1. Check `release-manifest.json`, especially `qualification.benchmarkReadyToPublish` and the package-binding status.
 2. Obtain the sample with `dataset/download-samples.sh`; verify the recorded SHA-256.
 3. Install licensed platform model artifacts matching `models/<platform>.json` and record their SHA-256. Different model bytes produce a community reproduction, not a byte-identical rerun.
 4. Resolve the public scenario descriptor to local device algorithm layouts and schedules. Keep credentials and internal IDs out of the public package.
@@ -80,5 +80,5 @@ The checked-in `command.txt` attachments explain why the public descriptor canno
 - No serial numbers, device addresses, credentials, internal channel/algorithm IDs, or local paths.
 - No chip ranking unless source model, precision, preprocessing, post-processing, input, media path, timing, and repetitions are identical.
 - No recommended-channel claim from a single short staircase.
-- No package-qualified benchmark until the final Open/Protected package hashes and source binding are verified.
-- No redistribution of models or media without a completed license/provenance decision.
+- State package qualification per platform. Missing Protected or RK3576 package provenance must not be generalized into a package-qualified claim.
+- No redistribution of models or media; published hashes identify the tested or inspected artifact and do not grant redistribution rights.

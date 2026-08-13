@@ -31,13 +31,17 @@ for (const relative of required) {
 }
 
 const manifest = readJson(path.join(root, 'release-manifest.json'));
-if (manifest.manifestStatus !== 'frozen-unpublished-candidate') errors.push('manifest status must remain frozen-unpublished-candidate');
-if (manifest.doNotPublish !== true) errors.push('doNotPublish must remain true for this local candidate');
-if (manifest.release?.publicationState !== 'not-published') errors.push('manifest publicationState must remain not-published');
-if (manifest.qualification?.readyToPublish !== false) errors.push('readyToPublish must remain false until final-package blockers are resolved');
-if (!/^[0-9a-f]{40}$/.test(manifest.sourceCandidate?.commit ?? '')) errors.push('source commit is not frozen');
-if (!/^[0-9a-f]{40}$/.test(manifest.sourceCandidate?.tree ?? '')) errors.push('source tree is not frozen');
+if (manifest.manifestStatus !== 'frozen-publication-ready') errors.push('manifest status must be frozen-publication-ready');
+if (manifest.doNotPublish !== false) errors.push('doNotPublish must be false for the final public benchmark');
+if (manifest.release?.publicationState !== 'prepared-not-published') errors.push('manifest publicationState must be prepared-not-published before external publication');
+if (manifest.qualification?.benchmarkReadyToPublish !== true) errors.push('benchmarkReadyToPublish must be true');
+if (manifest.qualification?.productReleaseQualificationComplete !== false) errors.push('productReleaseQualificationComplete must remain false while declared product evidence is outstanding');
+if (!/^[0-9a-f]{40}$/.test(manifest.sourceBaseline?.commit ?? '')) errors.push('source commit is not frozen');
+if (!/^[0-9a-f]{40}$/.test(manifest.sourceBaseline?.tree ?? '')) errors.push('source tree is not frozen');
 if (!/^[0-9a-f]{64}$/.test(manifest.dataset?.sha256 ?? '')) errors.push('dataset SHA-256 is missing');
+if (!/^[0-9a-f]{64}$/.test(manifest.packageArtifacts?.open?.sha256 ?? '')) errors.push('BM1688/CV186X Open package SHA-256 is missing');
+if (!/^[0-9a-f]{64}$/.test(manifest.packageArtifacts?.open?.engineSha256 ?? '')) errors.push('BM1688/CV186X running engine SHA-256 is missing');
+if (manifest.packageArtifacts?.open?.profile !== 'public-runtime') errors.push('Open package profile is not public-runtime');
 
 for (const file of walk(root).filter((entry) => entry.endsWith('.json'))) {
   try { readJson(file); } catch (error) { errors.push(`invalid JSON: ${relative(file)} (${error.message})`); }
@@ -64,6 +68,11 @@ for (const file of walk(root)) {
     pattern.lastIndex = 0;
     if (pattern.test(text)) errors.push(`${label} found in ${relative(file)}`);
   }
+}
+
+const redistributedBinaryExtensions = new Set(['.mp4', '.mov', '.mkv', '.avi', '.nn', '.bmodel', '.rknn', '.rkllm', '.onnx']);
+for (const file of walk(root)) {
+  if (redistributedBinaryExtensions.has(path.extname(file).toLowerCase())) errors.push(`model or video binary must not be redistributed: ${relative(file)}`);
 }
 
 const checksumPath = path.join(root, 'SHA256SUMS');
@@ -112,7 +121,7 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Validation passed: ${walk(root).length} files, unpublished candidate, checksums and public-scrub rules verified.`);
+console.log(`Validation passed: ${walk(root).length} files, publication-ready benchmark, checksums, binary-distribution, and public-scrub rules verified.`);
 
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

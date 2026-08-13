@@ -11,6 +11,6 @@
 | Audio | AAC |
 | Repository blob | `88cfb35d0c7fc2be45ecc2ad4324e2470ab3c979` |
 | First repository commit | `daeda95ccaf0119d384ff90d5d20c3e90fde8ccb` |
-| License review | Repository-level Apache-2.0 applies; maintainer must confirm source/provenance before publication |
+| Distribution policy | Metadata and hash only; the media binary is not redistributed by this benchmark |
 
 All benchmark channels replay this same fixed sample locally with repeat count `0` (continuous loop). This is a capacity input, not an accuracy dataset. It must not be used to infer precision, recall, F1, false-positive rate, or generalization.

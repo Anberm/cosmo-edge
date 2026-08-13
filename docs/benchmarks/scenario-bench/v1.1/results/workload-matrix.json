@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "publicationStatus": "unpublished-candidate",
+  "publicationStatus": "release-evidence",
   "interpretation": {
     "singleDetector": "last passing short-run channel count under enabled CV gates",
     "dualDetector": "highest configured short-run point passed; observed lower bound only",

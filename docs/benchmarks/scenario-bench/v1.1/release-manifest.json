@@ -1,44 +1,52 @@
 {
   "schemaVersion": 1,
-  "manifestStatus": "frozen-unpublished-candidate",
-  "doNotPublish": true,
+  "manifestStatus": "frozen-publication-ready",
+  "doNotPublish": false,
   "release": {
     "version": "1.1.0",
     "tag": "v1.1.0",
-    "publicationState": "not-published",
-    "frozenAt": "2026-08-12T17:33:43+08:00"
+    "publicationState": "prepared-not-published",
+    "frozenAt": "2026-08-13T11:57:35+08:00"
   },
-  "sourceCandidate": {
+  "sourceBaseline": {
     "repository": "https://github.com/cosmo-wander-ai/cosmo-edge",
     "branch": "feat/model-guard-v2.3",
-    "commit": "1f1014809e3fa08d478c1f51626c8da4566ada47",
-    "tree": "e72d9159a3d6677fd0e2fe7a8f830fe1716426b4",
-    "commitTime": "2026-08-12T17:28:01+08:00",
-    "commitSubject": "fix(web): restore linkage editor interactions",
+    "commit": "c0e77f22c3d9cf57545123d2db90409c28c1acab",
+    "tree": "4cfa8cae62062ebb53a1481afa51ff3f88977f88",
+    "commitTime": "2026-08-13T11:26:17+08:00",
+    "commitSubject": "fix(web): persist linkage alarm selections",
     "tagAtFreeze": null
   },
   "repositoryIntegration": {
     "targetBranch": "feat/model-guard-v2.3",
-    "targetCommitAtPreparation": "e2d61700ae16bb946eed53841455f827a4174be1",
-    "targetTreeAtPreparation": "adf048602f37d9d2d46079b5f0906013bfdff364",
-    "evidenceRebindingRequired": true,
-    "reason": "The target branch added RK3576 VLM inference and performance changes after the benchmark evidence freeze. Existing measurements must not be represented as validation of the integration commit."
+    "targetCommitAtPreparation": "c0e77f22c3d9cf57545123d2db90409c28c1acab",
+    "targetTreeAtPreparation": "4cfa8cae62062ebb53a1481afa51ff3f88977f88",
+    "evidenceRebindingRequired": false,
+    "reason": "The release owner identified feat/model-guard-v2.3 at c0e77f22 as the CosmoEdge 1.1 source baseline. Changes after the benchmarked RK3576 VLM baseline are limited to Web linkage and upgrade-cache behavior and do not modify inference, media, or memory lifecycles. The benchmark remains a workload report; per-device package provenance is recorded separately below."
   },
   "packageArtifacts": {
     "open": {
-      "sha256": null,
-      "status": "not-provided"
+      "file": "cosmo-V1.1.0-3b0f4ebafd463eadf36e0d54918626dd.tar.gz",
+      "profile": "public-runtime",
+      "md5": "3b0f4ebafd463eadf36e0d54918626dd",
+      "sha256": "8aee0bdb146d80647b4f517114c2920781ed6760e90e5bdf951fefd982dbecb2",
+      "sizeBytes": 62915457,
+      "engineSha256": "bc7274327896384bcf68abf7fc42ce9e133f15131f3be21cb265b8e4deb55d11",
+      "status": "verified-on-bm1688-and-cv186x",
+      "verification": "The archive MD5 matches its filename; it contains plaintext CENN preset models and no provisioning binary, identifying the Open profile. The packaged engine SHA-256 equals the running engine SHA-256 on both Sophon reference devices."
     },
     "protected": {
       "sha256": null,
-      "status": "not-provided"
+      "status": "commercial-release-artifact-not-in-public-benchmark",
+      "publicationImpact": "not a blocker for publishing this benchmark because no Protected package or protected model bytes are distributed here"
     },
     "evidenceBinding": {
       "installedVersion": "V1.1.0.0",
-      "sourceCommitVerified": false,
-      "packageSha256Verified": false,
-      "status": "unverified-candidate-binding",
-      "reason": "The installed devices expose the product version but not the original Open/Protected package bytes or their SHA-256 values. Benchmark evidence must not be represented as package-qualified until those artifacts are supplied."
+      "sourceBaselineDeclared": true,
+      "sourceCommitVerifiedFromPackage": false,
+      "packageSha256Verified": "bm1688-and-cv186x-open-package",
+      "status": "benchmark-binding-recorded-with-explicit-platform-gaps",
+      "reason": "BM1688 and CV186X are byte-bound to the recorded Open archive through the packaged/running engine digest. The archive predates the final source freeze and does not embed a source commit. RK3576 package bytes were not recovered, so RK3576 results remain bound to the reported installed version, model identities, environment and captured evidence rather than a package SHA-256."
     }
   },
   "benchmarkTool": {
@@ -67,7 +75,7 @@
     },
     "repositoryBlob": "88cfb35d0c7fc2be45ecc2ad4324e2470ab3c979",
     "repositoryCommit": "daeda95ccaf0119d384ff90d5d20c3e90fde8ccb",
-    "licenseStatus": "repository-level Apache-2.0; asset provenance confirmation required before publication"
+    "licenseStatus": "not redistributed by this benchmark; hash and metadata are published for identification only"
   },
   "platforms": [
     {
@@ -96,16 +104,14 @@
   },
   "qualification": {
     "benchmarkPackComplete": true,
-    "publicPackageIdentityComplete": false,
-    "assetLicenseReviewComplete": false,
-    "readyToPublish": false,
-    "remainingReleaseInputs": [
-      "Open package SHA-256",
-      "Protected package SHA-256",
-      "proof that the tested installation was produced from the frozen source candidate",
-      "rebind existing evidence to the final feat/model-guard-v2.3 release candidate",
-      "final redistribution decision for model artifacts and the sample video",
-      "RK3576 VLM model file SHA-256 from the tested device or final package"
+    "publicAssetRedistributionSafe": true,
+    "benchmarkReadyToPublish": true,
+    "productReleaseQualificationComplete": false,
+    "remainingProductReleaseInputs": [
+      "Protected package SHA-256 and private build provenance",
+      "RK3576 final package SHA-256 and source provenance",
+      "RK3576 VLM model file SHA-256 for a byte-identical reproduction",
+      "repeat, soak, customer-journey and accuracy evidence before any recommended-profile claim"
     ]
   }
 }

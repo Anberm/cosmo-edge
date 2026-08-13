@@ -9,4 +9,4 @@
 | CV186X user-installed VLM artifact | Distribution rights not established | No |
 | RK3576 target model artifacts | Distribution rights not established | No |
 
-No model binary or video sample is embedded in this candidate package. The recorded hashes identify the exact artifacts used or inspected; they do not grant redistribution rights.
+No model binary or video sample is embedded in this public benchmark package. The recorded hashes identify the exact artifacts used or inspected; they do not grant redistribution rights.
