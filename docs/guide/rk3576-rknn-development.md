@@ -21,8 +21,9 @@ RK3576 集成增加了面向生产的 CV 后端，不改变 CPU、CUDA 或 Sopho
 - RGA 执行预览与 OSD 路径所需的 Rockchip 图像处理操作。
 - 完整 DMA-BUF 零拷贝不属于当前稳定版支持边界。
 
-稳定版支持的运行范围为 4 路、每路 5 FPS。1/2/4/8 路 ScenarioBench 阶梯用于
-记录工程余量；8 路结果不作为发布容量承诺。
+推荐部署起点为已完成 12 小时验证的 4 路 × 5 FPS 单算法配置。最新短时阶梯中，
+单算法覆盖到 16 路 × 5 FPS，双算法覆盖到 8 路 × 每任务 5 FPS；这些是指定模型与
+门禁下的实测边界，不直接替代推荐配置。详见 [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/report.zh-CN.html)。
 
 ## 仓库与证据边界
 
@@ -147,10 +148,11 @@ export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_P
 ## 已验证发布边界
 
 - 4 路 × 5 FPS 完成 12 小时门禁，媒体失败/fallback 增量为 0，内存池统计稳定；
-  候选专属的 CPU 实测值保留在对应证据记录中。
+  对应 CPU 实测值保留在该次历史证据记录中。
 - 真实原始与算法播放、硬件解码/编码、OSD、重连和任务重启恢复在被测产物上通过。
 - 延迟 Copy-out 会在宿主拷贝前丢弃无需处理的帧，是本版本选定的优化方案。
-- 8 路 ScenarioBench 阶梯已作为工程余量证据通过，但不属于正式容量配置。
+- v1.1 公开报告记录了单算法 5 FPS 的 16 路阶梯和双算法 5 FPS 的 8 路阶梯；两者
+  均为短时实测边界，尚未升级为官方推荐配置。
 - RK3576 NPU 指标使用 `/sys/kernel/debug/rknpu/load` 的厂商忙碌时间计数器；健康卡片
   展示最忙核心，加速器 payload 保留所有核心。启动脚本仅将该只读文件暴露到
   `/run/cosmo-edge/metrics/rknpu-load`；devfreq governor 信号不会被当作 NPU 负载。

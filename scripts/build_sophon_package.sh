@@ -1,0 +1,53 @@
+#!/bin/bash
+set -euo pipefail
+
+COSMO_MODEL_GUARD_BUILD_PROFILE="${COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"
+case "${COSMO_MODEL_GUARD_BUILD_PROFILE}" in
+    public-runtime|production-release) ;;
+    *)
+        echo "ERROR: COSMO_MODEL_GUARD_BUILD_PROFILE must be public-runtime or production-release" >&2
+        exit 1
+        ;;
+esac
+
+chip="bm1688"
+if [ "$#" -gt 0 ]; then
+    if [ "$#" -ne 2 ] || [ "$1" != "--chip" ]; then
+        echo "Usage: $0 [--chip <bm1688|cv186x>]" >&2
+        exit 1
+    fi
+    chip="$2"
+fi
+chip="${chip,,}"
+case "${chip}" in
+    bm1688|cv186x) ;;
+    *)
+        echo "ERROR: unsupported Sophon chip '${chip}'; expected bm1688 or cv186x" >&2
+        exit 1
+        ;;
+esac
+
+if [ "${COSMO_MODEL_GUARD_BUILD_PROFILE}" = "public-runtime" ]; then
+    package_variant="Open"
+else
+    package_variant="Protected"
+fi
+
+echo "Starting ${package_variant} cross-compilation for ${chip}..."
+./scripts/build.sh -T -c "${chip}"
+
+output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"
+rm -rf -- "${output_dir}"
+mkdir -p "${output_dir}"
+
+shopt -s nullglob
+package_artifacts=(build/packages/*.tar.gz)
+shopt -u nullglob
+if [ "${#package_artifacts[@]}" -ne 1 ] || [ ! -f "${package_artifacts[0]:-}" ]; then
+    echo "ERROR: expected exactly one package artifact" >&2
+    exit 1
+fi
+
+cp -f -- "${package_artifacts[0]}" "${output_dir}/"
+ls -lh "${output_dir}"
+echo "Build finished."

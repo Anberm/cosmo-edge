@@ -87,13 +87,23 @@ The public entry point defaults to
 `COSMO_MODEL_GUARD_BUILD_PROFILE=public-runtime`:
 
 ```bash
+# Defaults to bm1688 when the chip model is omitted
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+
+# Select a chip model explicitly
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell:
 
 ```powershell
+# Defaults to bm1688 when the chip model is omitted
 .\scripts\build_sophon_package.ps1
+
+# Select a chip model explicitly
+.\scripts\build_sophon_package.ps1 -Chip bm1688
+.\scripts\build_sophon_package.ps1 -Chip cv186x
 ```
 
 The two supported profiles are deliberately isolated:
@@ -137,8 +147,11 @@ Guard SDK and provisioning tool:
 
 ```bash
 COSMO_MODEL_GUARD_BUILD_PROFILE=production-release \
-  docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+  docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
+
+This example builds a CV186X Protected package. Use `bm1688`, or omit the chip
+model, for BM1688.
 
 The Protected build fails immediately if the controlled SDK does not contain
 `cosmo-model-provision`.
@@ -161,9 +174,15 @@ This path is from:
 Confirmed behavior:
 
 - Base image uses the pre-built GHCR image: `ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_sophon:v1` (unified build environment, speeding up local start time).
-- Builds the package and `cosmo-tests` with `scripts/build.sh -T -m data/resource/aiboxresource`.
+- Docker Compose accepts a chip model argument: `cosmo-sophon-package --chip bm1688`
+  or `cosmo-sophon-package --chip cv186x`. Omitting `--chip` defaults to `bm1688`.
+- `scripts/build_sophon_package.sh` passes the chip model to
+  `scripts/build.sh -T -c <model>`. `build.sh` then selects the matching resource
+  directory; users do not provide a model path.
 - Exports build artifacts only (does not start services).
-- Keeps profile outputs separate under `build_output/<profile>/`.
+- The chip model does not change CPack or MD5 renaming. Profile outputs remain
+  under `build_output/<profile>/`, with package names in the existing
+  `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` format.
 
 ## RK3576 Artifacts
 

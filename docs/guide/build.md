@@ -85,13 +85,23 @@ Model Guard，也不构成原生 arm64 或 NPU 性能证据。完整说明和验
 Linux / Bash：
 
 ```bash
+# 省略型号时默认 bm1688
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+
+# 显式选择型号
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell：
 
 ```powershell
+# 省略型号时默认 bm1688
 .\scripts\build_sophon_package.ps1
+
+# 显式选择型号
+.\scripts\build_sophon_package.ps1 -Chip bm1688
+.\scripts\build_sophon_package.ps1 -Chip cv186x
 ```
 
 两个支持的配置使用相互隔离的输出目录：
@@ -129,8 +139,10 @@ sudo reboot
 
 ```bash
 COSMO_MODEL_GUARD_BUILD_PROFILE=production-release \
-  docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+  docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
+
+上例构建 CV186X Protected 包；构建 BM1688 时把末尾型号改为 `bm1688`，或省略型号。
 
 如果受控 SDK 中缺少 `cosmo-model-provision`，Protected 构建会直接失败。
 受控生产 SDK 应放在宿主机的
@@ -149,9 +161,13 @@ Guard 设备证书和模型加密秘密仍属于受控输入，不得写入公�
 已确认行为：
 
 - 基础镜像使用预先构建的 GHCR 镜像：`ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_sophon:v1`（统一的编译环境，加速了本地启动时间）。
-- 使用 `scripts/build.sh -T -m data/resource/aiboxresource` 构建发布候选产物和 `cosmo-tests`（不启用 dev mode，故不传 `-t`）。
+- Docker Compose 接受芯片型号参数：`cosmo-sophon-package --chip bm1688` 或
+  `cosmo-sophon-package --chip cv186x`。省略 `--chip` 时默认使用 `bm1688`。
+- `scripts/build_sophon_package.sh` 把芯片型号传给 `scripts/build.sh -T -c <型号>`；
+  `build.sh` 再选择对应资源目录，用户无需传入模型路径。
 - 只导出构建产物，不启动服务。
-- 各配置的输出隔离到 `build_output/<profile>/`。
+- 芯片型号不会改变 CPack 或 MD5 重命名逻辑；各配置的输出仍隔离到
+  `build_output/<profile>/`，包名仍为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
 
 ## RK3576 构建产物
 

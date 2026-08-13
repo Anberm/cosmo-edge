@@ -94,15 +94,25 @@ Mac 使用隔离的 `linux/amd64` Docker Preview。先阅读
 
 ### 1.3 路径 C：预装 CosmoEdge 的边缘设备
 
-CosmoEdge 当前支持 Sophon BM1688 平台。下图是旧版教程使用的 BM1688 双网口边缘设备示例；
+CosmoEdge 当前支持 Sophon BM1688 和 CV186X 两种芯片。下图是旧版教程使用的 BM1688 双网口边缘设备示例；
 不同批次的外壳、接口标识和硬件参数可能不同，应以设备标签与交付清单为准。
 
-如果需要从源码构建升级包，在仓库根目录执行：
+如果需要从源码构建升级包，在仓库根目录通过 `--chip <型号>` 选项指定目标芯片：
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+# BM1688
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+
+# CV186X
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+
 ls -lh build_output/public-runtime/
 ```
+
+省略芯片型号参数时默认使用 `bm1688`。构建脚本会根据型号选择对应的模型资源目录，
+无需手动填写模型路径。
+
+构建包中的模型资源必须与目标芯片匹配；BM1688 与 CV186X 的产物不可互换。
 
 把构建日志列出的唯一包名代入`<安装包>`，可以通过SSH安装到已准备好的Sophon Linux设备：
 

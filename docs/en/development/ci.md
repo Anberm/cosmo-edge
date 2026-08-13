@@ -23,7 +23,7 @@ This page collects the quality-check entry points that already exist in the repo
 | C++ static analysis | `scripts/static_analysis.sh --cppcheck`, `scripts/static_analysis.sh --clang-tidy` | Periodic / manual / self-hosted |
 | CPU test build | `scripts/build_cpu_test.sh`, `build_cpu/cosmo-tests` | Pull request / manual |
 | x86 Docker | `docker compose -f docker-compose.x86.yml up -d --build` (use `docker-compose.x86.windows.yml` on Windows) | Manual / before release |
-| Sophon release package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Manual / self-hosted |
+| Sophon release package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <model>]`; supports `bm1688` / `cv186x` (defaults to `bm1688`) | Manual / self-hosted |
 | RK3576 release package | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | Daily at 02:12 Beijing Time / manual |
 
 ## Documentation Site Checks
@@ -174,16 +174,22 @@ Before a release, confirm at minimum:
 Sophon/aarch64 release package build entry point:
 
 ```bash
+# Defaults to bm1688 when the chip model is omitted
 docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell:
 
 ```powershell
+# Defaults to bm1688 when the chip model is omitted
 .\scripts\build_sophon_package.ps1
+.\scripts\build_sophon_package.ps1 -Chip cv186x
 ```
 
-The Sophon release package build depends on the cross-compilation environment and the Sophon SDK. The package exported into `build_output/` is named in the form `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`.
+The Sophon release package build depends on the cross-compilation environment and the Sophon SDK.
+The chip model only selects the internal resource directory. Output remains under
+`build_output/<profile>/`, with the existing `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` name format.
 
 ## RK3576 Nightly Cross-Build
 

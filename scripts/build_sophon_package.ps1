@@ -1,3 +1,9 @@
+[CmdletBinding()]
+param(
+    [ValidateSet("bm1688", "cv186x")]
+    [string]$Chip = "bm1688"
+)
+
 $ErrorActionPreference = "Stop"
 
 # =============================================================================
@@ -96,7 +102,7 @@ Invoke-Docker run --rm `
     alpine `
     sh /workspace/scripts/restore-symlinks.sh
 
-Write-Step "Step 4/5 - Running Sophon cross-compilation ($PackageVariant)"
+Write-Step "Step 4/5 - Running Sophon $Chip cross-compilation ($PackageVariant)"
 
 # Generate a compose override that swaps the bind mount for our named volume.
 # The override REPLACES the volumes list; we keep ./build_output as a bind
@@ -115,7 +121,7 @@ volumes:
 
 Push-Location $projectRoot
 try {
-    cmd /c "docker compose -f $ComposeFile -f $OverrideFile run --rm cosmo-sophon-package"
+    cmd /c "docker compose -f $ComposeFile -f $OverrideFile run --rm cosmo-sophon-package --chip $Chip"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Docker build failed with exit code $LASTEXITCODE."
         exit $LASTEXITCODE

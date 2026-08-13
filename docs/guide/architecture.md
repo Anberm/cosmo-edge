@@ -109,8 +109,8 @@ src/web
 
 资源目录：
 
-- `data/resource/aiboxresource`
+- `data/resource/aiboxresource_bm1688`
+- `data/resource/aiboxresource_cv186x`
 - `data/resource/aiboxresource_x86`
 
-当前模板覆盖检测（YOLO v5/v8/v9/v11/v12/26）、分类、关键点、特征、分割（SAM2）、目标定位（DINO）以及视觉语言模型（Qwen3VL、Qwen3.5）。完整清单以 `data/resource/aiboxresource/model_template/` 与 `data/resource/aiboxresource_x86/model_template/` 目录下的实际模板文件为准。
-
+当前模板覆盖检测（YOLO v5/v8/v9/v11/v12/26）、分类、关键点、特征、分割（SAM2）、目标定位（DINO）以及视觉语言模型（Qwen3VL、Qwen3.5）。完整清单以各 `data/resource/aiboxresource_*/model_template/` 目录下的实际文件为准。
