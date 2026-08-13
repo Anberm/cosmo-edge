@@ -114,6 +114,7 @@ import DynamicForm from './DynamicForm.vue'
 import { getIconInfo } from './iconMapping.js'
 import { t } from '@/i18n'
 import { resolveResourceActionName, resolveResourceActionRemark } from '@/utils/i18nResource'
+import { getDetailPanelSize } from './layoutGeometry.js'
 
 const props = defineProps({
   nodeId: { type: String, required: true },
@@ -154,7 +155,9 @@ const isDragging = ref(false)
 
 const panelStyle = computed(() => ({
   left: `${props.position.x + dragOffset.value.x}px`,
-  top: `${props.position.y + dragOffset.value.y}px`
+  top: `${props.position.y + dragOffset.value.y}px`,
+  width: `${getDetailPanelSize(actionDetail.value?.actionId).width}px`,
+  maxHeight: `${getDetailPanelSize(actionDetail.value?.actionId).height}px`
 }))
 
 let dragStartMouse = { x: 0, y: 0 }
