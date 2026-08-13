@@ -102,10 +102,10 @@
 #include "service/task/ITaskService.h"
 #include "service/task/impl/ScheduleServiceImpl.h"
 #include "service/task/impl/TaskServiceImpl.h"
+#include "util/EnvUtil.h"
 #include "util/Log.h"
 #include "util/NnBackendConstants.h"
 #include "util/PathUtil.h"
-#include "util/EnvUtil.h"
 
 namespace cosmo::app {
 
@@ -339,8 +339,7 @@ static void InitializeExternalComponents() {
         "0.0.0.0", static_cast<uint16_t>(http_port));
 
     // uWebSockets Server Init
-    const int websocket_port =
-        cosmo::util::GetEnvIntOrDefault("COSMO_WEBSOCKET_PORT", kDefaultWebSocketPort);
+    const int websocket_port = cosmo::util::GetEnvIntOrDefault("COSMO_WEBSOCKET_PORT", kDefaultWebSocketPort);
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IEventNotifier>().InitializeWebSocket(
         "0.0.0.0", websocket_port);
 

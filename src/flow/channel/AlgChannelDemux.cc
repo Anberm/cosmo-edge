@@ -174,11 +174,11 @@ bool AlgChannelDemux::OpenStream() {
     NotifyOnInfo();
     video_read_count_ += 1;
 
-    bool was_repeat  = is_need_repeat_;
-    is_need_repeat_  = false;
-    is_have_report_  = false;
-    is_opened_       = true;
-    read_frames_     = 0;
+    bool was_repeat = is_need_repeat_;
+    is_need_repeat_ = false;
+    is_have_report_ = false;
+    is_opened_      = true;
+    read_frames_    = 0;
     SetStatusInfo(service::camera::AlgDemuxStatus::AlgDemuxOpened);
     if (!was_repeat) {
         action_status_ = util::ErrorEnum::DemuxStreamStart;

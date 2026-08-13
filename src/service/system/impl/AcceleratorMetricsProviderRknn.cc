@@ -132,13 +132,13 @@ namespace {
                 result.gpuusage          = 0.0;
                 result.gpuusageAvailable = false;
             }
-            result.gpumemtotal       = memory.total_mb;
-            result.gpumemavailable   = memory.available_mb;
-            result.gpumemusage       = memory.total_mb > 0
-                                           ? static_cast<double>(memory.total_mb - memory.available_mb) /
+            result.gpumemtotal     = memory.total_mb;
+            result.gpumemavailable = memory.available_mb;
+            result.gpumemusage     = memory.total_mb > 0
+                                         ? static_cast<double>(memory.total_mb - memory.available_mb) /
                                            static_cast<double>(memory.total_mb)
-                                           : 0.0;
-            result.gpuCapacity       = ReadNpuFrequency();
+                                         : 0.0;
+            result.gpuCapacity     = ReadNpuFrequency();
 
             cosmo::MsgGpuDevUsage shared;
             shared.gpuusage        = result.gpuusage;

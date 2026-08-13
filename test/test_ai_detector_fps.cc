@@ -208,7 +208,7 @@ TEST_CASE("AiDetectorFps CanAccept placement matrix", "[AiDetectorFps]") {
     }
 
     SECTION("default profile splits 12fps at two channels and 16fps at one channel") {
-        const auto profile = ai_detector_fps::DefaultReuseProfile();
+        const auto profile                 = ai_detector_fps::DefaultReuseProfile();
         std::vector<AiDetectorChannel> two = {makeChannel("ch1", {{"t1", 12.0f}}),
                                               makeChannel("ch2", {{"t2", 12.0f}})};
         REQUIRE_FALSE(CanAccept(two, "ch3", 12.0f, kMaxReuse, kBudget, profile));

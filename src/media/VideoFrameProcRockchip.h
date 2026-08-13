@@ -24,9 +24,8 @@ public:
     VideoFramePtr Resize(VideoFramePtr src, int dst_height, int dst_width) override;
 
 private:
-    VideoFramePtr ConvertWithRga(const VideoFramePtr& frame, PixelFormat dst_format,
-                                 int src_rga_format, int dst_rga_format, int color_mode,
-                                 const char* operation);
+    VideoFramePtr ConvertWithRga(const VideoFramePtr& frame, PixelFormat dst_format, int src_rga_format,
+                                 int dst_rga_format, int color_mode, const char* operation);
     VideoFramePtr ResizeWithRga(const VideoFramePtr& frame, int dst_height, int dst_width,
                                 const char* operation);
     void LogFallbackOnce(const char* operation, int status);

@@ -475,8 +475,8 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         std::ofstream(outsideFile) << "must survive";
         std::vector<cosmo::Model::BmodelFileInfo> files = {{"main", outsideFile}};
 
-        auto result = importExporter.AddAtomicModel("", "OutsideModel", "classify", "", files, "", "", "",
-                                                    "", "");
+        auto result =
+            importExporter.AddAtomicModel("", "OutsideModel", "classify", "", files, "", "", "", "", "");
         REQUIRE(result == cosmo::util::ErrorEnum::FileNotExist);
         REQUIRE(fs::exists(outsideFile));
 

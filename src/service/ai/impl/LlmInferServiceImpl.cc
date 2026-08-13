@@ -13,7 +13,7 @@ static constexpr const char* kTag = "LlmInferService ";
 namespace cosmo::service {
 
 bool LlmInferServiceImpl::EnsureInit(const std::string& atomic_code) {
-#if (defined(COSMO_NN_USE_HOST_BACKEND) && !defined(COSMO_NN_USE_RKNN_BACKEND)) || \
+#if (defined(COSMO_NN_USE_HOST_BACKEND) && !defined(COSMO_NN_USE_RKNN_BACKEND)) ||                           \
     (defined(COSMO_NN_USE_RKNN_BACKEND) && !defined(COSMO_NN_USE_RKLLM_BACKEND))
     // LLM inference (Qwen3VL/Qwen3.5) is not supported on x86 platform
     LOG_WARN("{}EnsureInit: LLM inference is not supported on x86 platform (atomicCode: {})", kTag,

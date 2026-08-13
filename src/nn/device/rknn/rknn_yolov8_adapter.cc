@@ -170,9 +170,8 @@ bool DetectRknnYolov8Layout(const std::vector<std::vector<int>>& shapes, RknnYol
     return false;
 }
 
-bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_height,
-                           int input_width, float* output, size_t output_count,
-                           std::string& error) {
+bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_height, int input_width,
+                           float* output, size_t output_count, std::string& error) {
     std::vector<std::vector<int>> shapes;
     shapes.reserve(heads.size());
     for (const auto& head : heads)
@@ -185,8 +184,8 @@ bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_h
         error = "YOLOv8 RKNN adapter received an invalid output or input size";
         return false;
     }
-    const size_t required = static_cast<size_t>(4 + layout.class_count) *
-                            static_cast<size_t>(layout.point_count);
+    const size_t required =
+        static_cast<size_t>(4 + layout.class_count) * static_cast<size_t>(layout.point_count);
     if (output_count < required) {
         error = "YOLOv8 RKNN logical output buffer is too small";
         return false;
@@ -217,15 +216,14 @@ bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_h
                     float maximum = -std::numeric_limits<float>::infinity();
                     for (int bin = 0; bin < 16; ++bin) {
                         const int channel = side * 16 + bin;
-                        maximum = std::max(maximum,
-                                           box_head.data[channel * spatial_count + spatial_index]);
+                        maximum = std::max(maximum, box_head.data[channel * spatial_count + spatial_index]);
                     }
                     float denominator = 0.0f;
                     float numerator   = 0.0f;
                     for (int bin = 0; bin < 16; ++bin) {
                         const int channel = side * 16 + bin;
-                        const float value = std::exp(
-                            box_head.data[channel * spatial_count + spatial_index] - maximum);
+                        const float value =
+                            std::exp(box_head.data[channel * spatial_count + spatial_index] - maximum);
                         denominator += value;
                         numerator += value * static_cast<float>(bin);
                     }
@@ -236,15 +234,15 @@ bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_h
                     distance[side] = numerator / denominator;
                 }
 
-                const float left   = (static_cast<float>(x) + 0.5f - distance[0]) * stride_x;
-                const float top    = (static_cast<float>(y) + 0.5f - distance[1]) * stride_y;
-                const float right  = (static_cast<float>(x) + 0.5f + distance[2]) * stride_x;
-                const float bottom = (static_cast<float>(y) + 0.5f + distance[3]) * stride_y;
+                const float left        = (static_cast<float>(x) + 0.5f - distance[0]) * stride_x;
+                const float top         = (static_cast<float>(y) + 0.5f - distance[1]) * stride_y;
+                const float right       = (static_cast<float>(x) + 0.5f + distance[2]) * stride_x;
+                const float bottom      = (static_cast<float>(y) + 0.5f + distance[3]) * stride_y;
                 const int logical_index = point_offset + spatial_index;
-                output[logical_index]                            = (left + right) * 0.5f;
-                output[layout.point_count + logical_index]       = (top + bottom) * 0.5f;
-                output[2 * layout.point_count + logical_index]   = right - left;
-                output[3 * layout.point_count + logical_index]   = bottom - top;
+                output[logical_index]   = (left + right) * 0.5f;
+                output[layout.point_count + logical_index]     = (top + bottom) * 0.5f;
+                output[2 * layout.point_count + logical_index] = right - left;
+                output[3 * layout.point_count + logical_index] = bottom - top;
                 for (int cls = 0; cls < layout.class_count; ++cls) {
                     output[(4 + cls) * layout.point_count + logical_index] =
                         ClassScore(layout, cls_head.data[cls * spatial_count + spatial_index]);
@@ -256,9 +254,8 @@ bool ReconstructRknnYolov8(const std::vector<RknnYolov8Head>& heads, int input_h
     return true;
 }
 
-bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& heads,
-                                    int input_height, int input_width, float* output,
-                                    size_t output_count, std::string& error,
+bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& heads, int input_height,
+                                    int input_width, float* output, size_t output_count, std::string& error,
                                     RknnYolov8TransformTiming* timing) {
     std::vector<std::vector<int>> shapes;
     shapes.reserve(heads.size());
@@ -272,8 +269,8 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
         error = "YOLOv8 RKNN quantized adapter received an invalid output or input size";
         return false;
     }
-    const size_t required = static_cast<size_t>(4 + layout.class_count) *
-                            static_cast<size_t>(layout.point_count);
+    const size_t required =
+        static_cast<size_t>(4 + layout.class_count) * static_cast<size_t>(layout.point_count);
     if (output_count < required) {
         error = "YOLOv8 RKNN logical output buffer is too small";
         return false;
@@ -289,15 +286,13 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
         int cls_channels = 0, cls_height = 0, cls_width = 0;
         ParseNchw(box_head.shape, box_channels, height, width);
         ParseNchw(cls_head.shape, cls_channels, cls_height, cls_width);
-        if (!box_head.data || !cls_head.data ||
-            box_head.element_count != ShapeCount(box_head.shape) ||
+        if (!box_head.data || !cls_head.data || box_head.element_count != ShapeCount(box_head.shape) ||
             cls_head.element_count != ShapeCount(cls_head.shape)) {
             error = "YOLOv8 RKNN quantized output byte count does not match the queried head shape";
             return false;
         }
-        if (!std::isfinite(box_head.scale) || !(box_head.scale > 0.0f) ||
-            !std::isfinite(cls_head.scale) || !(cls_head.scale > 0.0f) ||
-            box_head.zero_point < -128 || box_head.zero_point > 127 ||
+        if (!std::isfinite(box_head.scale) || !(box_head.scale > 0.0f) || !std::isfinite(cls_head.scale) ||
+            !(cls_head.scale > 0.0f) || box_head.zero_point < -128 || box_head.zero_point > 127 ||
             cls_head.zero_point < -128 || cls_head.zero_point > 127) {
             error = "YOLOv8 RKNN quantized output parameters are invalid";
             return false;
@@ -306,8 +301,7 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
         std::array<float, 256> dfl_exp_lut{};
         std::array<float, 256> class_score_lut{};
         for (size_t index = 0; index < dfl_exp_lut.size(); ++index) {
-            dfl_exp_lut[index] =
-                std::exp(-static_cast<float>(index) * box_head.scale);
+            dfl_exp_lut[index]  = std::exp(-static_cast<float>(index) * box_head.scale);
             const int quantized = static_cast<int>(index) - 128;
             class_score_lut[index] =
                 ClassScore(layout, (static_cast<float>(quantized) - cls_head.zero_point) * cls_head.scale);
@@ -325,7 +319,7 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
                     int maximum = -128;
                     for (int bin = 0; bin < 16; ++bin) {
                         const int channel = side * 16 + bin;
-                        maximum = std::max(
+                        maximum           = std::max(
                             maximum,
                             static_cast<int>(box_head.data[channel * spatial_count + spatial_index]));
                     }
@@ -342,12 +336,12 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
                     distance[side] = numerator / denominator;
                 }
 
-                const float left   = (static_cast<float>(x) + 0.5f - distance[0]) * stride_x;
-                const float top    = (static_cast<float>(y) + 0.5f - distance[1]) * stride_y;
-                const float right  = (static_cast<float>(x) + 0.5f + distance[2]) * stride_x;
-                const float bottom = (static_cast<float>(y) + 0.5f + distance[3]) * stride_y;
+                const float left        = (static_cast<float>(x) + 0.5f - distance[0]) * stride_x;
+                const float top         = (static_cast<float>(y) + 0.5f - distance[1]) * stride_y;
+                const float right       = (static_cast<float>(x) + 0.5f + distance[2]) * stride_x;
+                const float bottom      = (static_cast<float>(y) + 0.5f + distance[3]) * stride_y;
                 const int logical_index = point_offset + spatial_index;
-                output[logical_index]                          = (left + right) * 0.5f;
+                output[logical_index]   = (left + right) * 0.5f;
                 output[layout.point_count + logical_index]     = (top + bottom) * 0.5f;
                 output[2 * layout.point_count + logical_index] = right - left;
                 output[3 * layout.point_count + logical_index] = bottom - top;
@@ -359,7 +353,7 @@ bool ReconstructRknnYolov8Quantized(const std::vector<RknnYolov8QuantizedHead>& 
         const auto class_started = std::chrono::steady_clock::now();
         for (int cls = 0; cls < layout.class_count; ++cls) {
             const auto* source = cls_head.data + cls * spatial_count;
-            auto* destination = output + (4 + cls) * layout.point_count + point_offset;
+            auto* destination  = output + (4 + cls) * layout.point_count + point_offset;
             for (int spatial_index = 0; spatial_index < spatial_count; ++spatial_index)
                 destination[spatial_index] = class_score_lut[QuantizedIndex(source[spatial_index])];
         }
@@ -455,7 +449,7 @@ bool DecodeRknnYolov8QuantizedCandidates(const std::vector<RknnYolov8QuantizedHe
             }
         }
         for (int cls = 0; cls < cls_channels; ++cls) {
-            const auto* source = cls_head.data + cls * spatial_count;
+            const auto* source    = cls_head.data + cls * spatial_count;
             const auto update_max = [&](int spatial_index) {
                 if (scratch.class_ids[spatial_index] < 0 ||
                     source[spatial_index] > scratch.class_max[spatial_index]) {

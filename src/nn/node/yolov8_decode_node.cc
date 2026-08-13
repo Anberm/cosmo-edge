@@ -13,24 +13,23 @@
 namespace cosmo::nn {
 namespace {
 
-using MetricsClock = std::chrono::steady_clock;
+    using MetricsClock = std::chrono::steady_clock;
 
-uint64_t ElapsedNanoseconds(MetricsClock::time_point started_at) {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                     MetricsClock::now() - started_at)
-                                     .count());
-}
-
-class ScopedPostprocessMetric {
-public:
-    ScopedPostprocessMetric() : started_at_(MetricsClock::now()) {}
-    ~ScopedPostprocessMetric() {
-        GetInferencePipelineMetrics().RecordYolov8Postprocess(ElapsedNanoseconds(started_at_));
+    uint64_t ElapsedNanoseconds(MetricsClock::time_point started_at) {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(MetricsClock::now() - started_at).count());
     }
 
-private:
-    MetricsClock::time_point started_at_;
-};
+    class ScopedPostprocessMetric {
+    public:
+        ScopedPostprocessMetric() : started_at_(MetricsClock::now()) {}
+        ~ScopedPostprocessMetric() {
+            GetInferencePipelineMetrics().RecordYolov8Postprocess(ElapsedNanoseconds(started_at_));
+        }
+
+    private:
+        MetricsClock::time_point started_at_;
+    };
 
 }  // namespace
 
@@ -145,8 +144,8 @@ Status YoloV8DecodeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob
         std::vector<std::tuple<int, float, int, bool>> conf_list;
         conf_list.reserve(static_cast<size_t>(num_boxes));
         float global_max_conf = -1.0f;
-        const bool class_major_scan = !is_format1 && shared_resource &&
-                                      shared_resource->prefer_yolov8_class_major_scan;
+        const bool class_major_scan =
+            !is_format1 && shared_resource && shared_resource->prefer_yolov8_class_major_scan;
         if (class_major_scan) {
             class_max_scratch_.assign(static_cast<size_t>(num_boxes), -1.0f);
             class_id_scratch_.assign(static_cast<size_t>(num_boxes), -1);
@@ -171,7 +170,7 @@ Status YoloV8DecodeNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob
                 if (is_format1) {
                     // Format 1: [batch, num_boxes, num_features]
                     // Data layout: box0_features, box1_features, ...
-                    float* box_data  = bottom_ptr_i + j * num_features;
+                    float* box_data   = bottom_ptr_i + j * num_features;
                     float* conf_start = box_data + 4;
                     float max_conf    = -1.0f;
                     int class_id      = -1;

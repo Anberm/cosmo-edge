@@ -425,8 +425,7 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
             if (!f.is_regular_file())
                 continue;
             auto ext = f.path().extension().string();
-            if (ext == cosmo::util::kModelFileExt || ext == ".bmodel" || ext == ".onnx" ||
-                ext == ".rknn") {
+            if (ext == cosmo::util::kModelFileExt || ext == ".bmodel" || ext == ".onnx" || ext == ".rknn") {
                 flat_structure = true;
                 break;
             }

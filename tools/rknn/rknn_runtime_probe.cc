@@ -20,8 +20,12 @@ public:
         }
     }
 
-    rknn_context* Out() { return &context_; }
-    rknn_context Get() const { return context_; }
+    rknn_context* Out() {
+        return &context_;
+    }
+    rknn_context Get() const {
+        return context_;
+    }
 
 private:
     rknn_context context_{0};
@@ -90,7 +94,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        const auto model = ReadFile(argv[1]);
+        const auto model     = ReadFile(argv[1]);
         const auto core_mask = ParseCoreMask(argc == 3 ? argv[2] : "auto");
 
         ContextGuard context;
@@ -121,12 +125,12 @@ int main(int argc, char** argv) {
             PrintTensor("input", attr);
 
             input_buffers[index].resize(attr.size, 0);
-            inputs[index].index = index;
-            inputs[index].buf = input_buffers[index].data();
-            inputs[index].size = attr.size;
+            inputs[index].index        = index;
+            inputs[index].buf          = input_buffers[index].data();
+            inputs[index].size         = attr.size;
             inputs[index].pass_through = 0;
-            inputs[index].type = attr.type;
-            inputs[index].fmt = attr.fmt;
+            inputs[index].type         = attr.type;
+            inputs[index].fmt          = attr.fmt;
         }
 
         std::vector<rknn_tensor_attr> output_attrs(counts.n_output);
@@ -143,14 +147,14 @@ int main(int argc, char** argv) {
 
         std::vector<rknn_output> outputs(counts.n_output);
         for (std::uint32_t index = 0; index < counts.n_output; ++index) {
-            outputs[index].index = index;
-            outputs[index].want_float = 1;
+            outputs[index].index       = index;
+            outputs[index].want_float  = 1;
             outputs[index].is_prealloc = 0;
         }
         Check(rknn_outputs_get(context.Get(), counts.n_output, outputs.data(), nullptr), "rknn_outputs_get");
 
         for (std::uint32_t index = 0; index < counts.n_output; ++index) {
-            const auto count = outputs[index].size / sizeof(float);
+            const auto count   = outputs[index].size / sizeof(float);
             const auto* values = static_cast<const float*>(outputs[index].buf);
             std::cout << "output[" << index << "] float_count=" << count;
             if (count > 0) {

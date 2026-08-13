@@ -1,13 +1,13 @@
 #include "media/VideoDecoderRockchip.h"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <deque>
 #include <limits>
 #include <thread>
-
-#include <unistd.h>
 
 #define MODULE_TAG "cosmo_mpp_decoder"
 #include <rockchip/mpp_buffer.h>
@@ -23,186 +23,186 @@
 namespace cosmo::media {
 namespace {
 
-constexpr RK_U32 kDecoderBufferCount = 24;
-constexpr int kPacketSubmitAttempts  = 30;
-constexpr auto kPacketSubmitWait     = std::chrono::milliseconds(1);
-constexpr size_t kMaxPendingTimings  = 256;
+    constexpr RK_U32 kDecoderBufferCount = 24;
+    constexpr int kPacketSubmitAttempts  = 30;
+    constexpr auto kPacketSubmitWait     = std::chrono::milliseconds(1);
+    constexpr size_t kMaxPendingTimings  = 256;
 
-struct MppFrameHolder {
-    explicit MppFrameHolder(MppFrame value) : frame(value) {}
+    struct MppFrameHolder {
+        explicit MppFrameHolder(MppFrame value) : frame(value) {}
 
-    ~MppFrameHolder() {
-        if (frame) {
-            mpp_frame_deinit(&frame);
-        }
-    }
-
-    MppFrame frame{nullptr};
-};
-
-MppCodingType ToMppCoding(VideoCodecType type) {
-    if (type == VideoCodecType::kH264) {
-        return MPP_VIDEO_CodingAVC;
-    }
-    if (type == VideoCodecType::kH265) {
-        return MPP_VIDEO_CodingHEVC;
-    }
-    return MPP_VIDEO_CodingUnused;
-}
-
-uint64_t ElapsedNanoseconds(std::chrono::steady_clock::time_point started) {
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started)
-            .count());
-}
-
-bool IsCompact420Format(MppFrameFormat format) {
-    const auto properties = static_cast<RK_U32>(format) & MPP_FRAME_FMT_PROP_MASK;
-    if ((properties & (MPP_FRAME_FBC_MASK | MPP_FRAME_TILE_FLAG)) != 0 ||
-        MPP_FRAME_FMT_IS_YUV_10BIT(format)) {
-        return false;
-    }
-    const auto base = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
-    return base == MPP_FMT_YUV420P || base == MPP_FMT_YUV420SP || base == MPP_FMT_YUV420SP_VU;
-}
-
-NativeVideoBufferPtr ExportMppBuffer(const std::string& decoder_name, MppFrame frame) {
-    if (!frame) {
-        return nullptr;
-    }
-    auto buffer                    = mpp_frame_get_buffer(frame);
-    const auto format              = mpp_frame_get_fmt(frame);
-    const auto base_format         = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
-    const size_t width             = mpp_frame_get_width(frame);
-    const size_t height            = mpp_frame_get_height(frame);
-    const size_t horizontal_stride = mpp_frame_get_hor_stride(frame);
-    const size_t vertical_stride   = mpp_frame_get_ver_stride(frame);
-    if (!buffer || !IsCompact420Format(format) || width == 0 || height == 0 ||
-        width > static_cast<size_t>(std::numeric_limits<int>::max()) ||
-        height > static_cast<size_t>(std::numeric_limits<int>::max()) ||
-        horizontal_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
-        vertical_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
-        horizontal_stride < width || vertical_stride < height) {
-        return nullptr;
-    }
-
-    NativeVideoBufferFormat native_format = NativeVideoBufferFormat::Unknown;
-    if (base_format == MPP_FMT_YUV420SP) {
-        native_format = NativeVideoBufferFormat::NV12;
-    } else if (base_format == MPP_FMT_YUV420SP_VU) {
-        native_format = NativeVideoBufferFormat::NV21;
-    } else if (base_format == MPP_FMT_YUV420P) {
-        native_format = NativeVideoBufferFormat::I420;
-    }
-    const int fd = mpp_buffer_get_fd(buffer);
-    if (native_format == NativeVideoBufferFormat::Unknown || fd < 0 ||
-        mpp_buffer_inc_ref(buffer) != MPP_OK) {
-        LOG_WARN("{} could not retain MPP DMA-BUF for inference", decoder_name);
-        return nullptr;
-    }
-
-    auto result          = std::make_shared<NativeVideoBuffer>();
-    result->fd            = fd;
-    result->bytes         = mpp_buffer_get_size(buffer);
-    result->width         = static_cast<int>(width);
-    result->height        = static_cast<int>(height);
-    result->width_stride  = static_cast<int>(horizontal_stride);
-    result->height_stride = static_cast<int>(vertical_stride);
-    result->format        = native_format;
-    result->owner = std::shared_ptr<void>(buffer, [](void* value) {
-        if (value) {
-            mpp_buffer_put(static_cast<MppBuffer>(value));
-        }
-    });
-    return result;
-}
-
-VideoFramePtr CopyMppFrame(const std::string& decoder_name, MppFrame frame) {
-    if (!frame) {
-        return nullptr;
-    }
-
-    const size_t width             = mpp_frame_get_width(frame);
-    const size_t height            = mpp_frame_get_height(frame);
-    const size_t horizontal_stride = mpp_frame_get_hor_stride(frame);
-    const size_t vertical_stride   = mpp_frame_get_ver_stride(frame);
-    const auto format              = mpp_frame_get_fmt(frame);
-    auto buffer                    = mpp_frame_get_buffer(frame);
-    if (width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 ||
-        horizontal_stride < width || vertical_stride < height || !IsCompact420Format(format) || !buffer) {
-        LOG_WARN("{} MPP decoder rejected output layout: {}x{} stride={}x{} format=0x{:x}", decoder_name,
-                 width, height, horizontal_stride, vertical_stride, static_cast<RK_U32>(format));
-        return nullptr;
-    }
-    if (horizontal_stride > std::numeric_limits<size_t>::max() / vertical_stride) {
-        return nullptr;
-    }
-    const size_t y_plane_size = horizontal_stride * vertical_stride;
-    if (y_plane_size > std::numeric_limits<size_t>::max() - y_plane_size / 2) {
-        return nullptr;
-    }
-    const size_t required = y_plane_size * 3 / 2;
-    if (mpp_buffer_get_size(buffer) < required) {
-        LOG_WARN("{} MPP decoder output buffer too small: {} < {}", decoder_name,
-                 mpp_buffer_get_size(buffer), required);
-        return nullptr;
-    }
-
-    auto output = std::make_shared<VideoFrame>(static_cast<int>(width), static_cast<int>(height),
-                                               PixelFormat::PIXEL_I420);
-    if (!output || !output->Active() || !output->GetData()) {
-        LOG_WARN("{} compact I420 VideoFrame allocation failed for {}x{}", decoder_name, width, height);
-        return nullptr;
-    }
-
-    auto* source = static_cast<const uint8_t*>(mpp_buffer_get_ptr(buffer));
-    if (!source || mpp_buffer_sync_ro_begin(buffer) != MPP_OK) {
-        return nullptr;
-    }
-    struct ReadSyncGuard {
-        MppBuffer buffer;
-        ~ReadSyncGuard() {
-            mpp_buffer_sync_ro_end(buffer);
-        }
-    } sync_guard{buffer};
-
-    auto* destination       = output->GetData();
-    const size_t compact_y  = width * height;
-    const size_t compact_uv = compact_y / 4;
-    auto* destination_u     = destination + compact_y;
-    auto* destination_v     = destination_u + compact_uv;
-    for (size_t row = 0; row < height; ++row) {
-        std::memcpy(destination + row * width, source + row * horizontal_stride, width);
-    }
-
-    const auto base_format = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
-    if (base_format == MPP_FMT_YUV420P) {
-        const size_t chroma_stride = horizontal_stride / 2;
-        const size_t chroma_height = vertical_stride / 2;
-        const auto* source_u       = source + y_plane_size;
-        const auto* source_v       = source_u + chroma_stride * chroma_height;
-        for (size_t row = 0; row < height / 2; ++row) {
-            std::memcpy(destination_u + row * (width / 2), source_u + row * chroma_stride, width / 2);
-            std::memcpy(destination_v + row * (width / 2), source_v + row * chroma_stride, width / 2);
-        }
-    } else {
-        const bool vu_order       = base_format == MPP_FMT_YUV420SP_VU;
-        const auto* source_chroma = source + y_plane_size;
-        for (size_t row = 0; row < height / 2; ++row) {
-            const auto* source_row = source_chroma + row * horizontal_stride;
-            auto* u_row            = destination_u + row * (width / 2);
-            auto* v_row            = destination_v + row * (width / 2);
-            for (size_t column = 0; column < width / 2; ++column) {
-                const auto first  = source_row[column * 2];
-                const auto second = source_row[column * 2 + 1];
-                u_row[column]     = vu_order ? second : first;
-                v_row[column]     = vu_order ? first : second;
+        ~MppFrameHolder() {
+            if (frame) {
+                mpp_frame_deinit(&frame);
             }
         }
+
+        MppFrame frame{nullptr};
+    };
+
+    MppCodingType ToMppCoding(VideoCodecType type) {
+        if (type == VideoCodecType::kH264) {
+            return MPP_VIDEO_CodingAVC;
+        }
+        if (type == VideoCodecType::kH265) {
+            return MPP_VIDEO_CodingHEVC;
+        }
+        return MPP_VIDEO_CodingUnused;
     }
 
-    return output;
-}
+    uint64_t ElapsedNanoseconds(std::chrono::steady_clock::time_point started) {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started)
+                .count());
+    }
+
+    bool IsCompact420Format(MppFrameFormat format) {
+        const auto properties = static_cast<RK_U32>(format) & MPP_FRAME_FMT_PROP_MASK;
+        if ((properties & (MPP_FRAME_FBC_MASK | MPP_FRAME_TILE_FLAG)) != 0 ||
+            MPP_FRAME_FMT_IS_YUV_10BIT(format)) {
+            return false;
+        }
+        const auto base = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
+        return base == MPP_FMT_YUV420P || base == MPP_FMT_YUV420SP || base == MPP_FMT_YUV420SP_VU;
+    }
+
+    NativeVideoBufferPtr ExportMppBuffer(const std::string& decoder_name, MppFrame frame) {
+        if (!frame) {
+            return nullptr;
+        }
+        auto buffer                    = mpp_frame_get_buffer(frame);
+        const auto format              = mpp_frame_get_fmt(frame);
+        const auto base_format         = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
+        const size_t width             = mpp_frame_get_width(frame);
+        const size_t height            = mpp_frame_get_height(frame);
+        const size_t horizontal_stride = mpp_frame_get_hor_stride(frame);
+        const size_t vertical_stride   = mpp_frame_get_ver_stride(frame);
+        if (!buffer || !IsCompact420Format(format) || width == 0 || height == 0 ||
+            width > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            height > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            horizontal_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            vertical_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            horizontal_stride < width || vertical_stride < height) {
+            return nullptr;
+        }
+
+        NativeVideoBufferFormat native_format = NativeVideoBufferFormat::Unknown;
+        if (base_format == MPP_FMT_YUV420SP) {
+            native_format = NativeVideoBufferFormat::NV12;
+        } else if (base_format == MPP_FMT_YUV420SP_VU) {
+            native_format = NativeVideoBufferFormat::NV21;
+        } else if (base_format == MPP_FMT_YUV420P) {
+            native_format = NativeVideoBufferFormat::I420;
+        }
+        const int fd = mpp_buffer_get_fd(buffer);
+        if (native_format == NativeVideoBufferFormat::Unknown || fd < 0 ||
+            mpp_buffer_inc_ref(buffer) != MPP_OK) {
+            LOG_WARN("{} could not retain MPP DMA-BUF for inference", decoder_name);
+            return nullptr;
+        }
+
+        auto result           = std::make_shared<NativeVideoBuffer>();
+        result->fd            = fd;
+        result->bytes         = mpp_buffer_get_size(buffer);
+        result->width         = static_cast<int>(width);
+        result->height        = static_cast<int>(height);
+        result->width_stride  = static_cast<int>(horizontal_stride);
+        result->height_stride = static_cast<int>(vertical_stride);
+        result->format        = native_format;
+        result->owner         = std::shared_ptr<void>(buffer, [](void* value) {
+            if (value) {
+                mpp_buffer_put(static_cast<MppBuffer>(value));
+            }
+        });
+        return result;
+    }
+
+    VideoFramePtr CopyMppFrame(const std::string& decoder_name, MppFrame frame) {
+        if (!frame) {
+            return nullptr;
+        }
+
+        const size_t width             = mpp_frame_get_width(frame);
+        const size_t height            = mpp_frame_get_height(frame);
+        const size_t horizontal_stride = mpp_frame_get_hor_stride(frame);
+        const size_t vertical_stride   = mpp_frame_get_ver_stride(frame);
+        const auto format              = mpp_frame_get_fmt(frame);
+        auto buffer                    = mpp_frame_get_buffer(frame);
+        if (width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 || horizontal_stride < width ||
+            vertical_stride < height || !IsCompact420Format(format) || !buffer) {
+            LOG_WARN("{} MPP decoder rejected output layout: {}x{} stride={}x{} format=0x{:x}", decoder_name,
+                     width, height, horizontal_stride, vertical_stride, static_cast<RK_U32>(format));
+            return nullptr;
+        }
+        if (horizontal_stride > std::numeric_limits<size_t>::max() / vertical_stride) {
+            return nullptr;
+        }
+        const size_t y_plane_size = horizontal_stride * vertical_stride;
+        if (y_plane_size > std::numeric_limits<size_t>::max() - y_plane_size / 2) {
+            return nullptr;
+        }
+        const size_t required = y_plane_size * 3 / 2;
+        if (mpp_buffer_get_size(buffer) < required) {
+            LOG_WARN("{} MPP decoder output buffer too small: {} < {}", decoder_name,
+                     mpp_buffer_get_size(buffer), required);
+            return nullptr;
+        }
+
+        auto output = std::make_shared<VideoFrame>(static_cast<int>(width), static_cast<int>(height),
+                                                   PixelFormat::PIXEL_I420);
+        if (!output || !output->Active() || !output->GetData()) {
+            LOG_WARN("{} compact I420 VideoFrame allocation failed for {}x{}", decoder_name, width, height);
+            return nullptr;
+        }
+
+        auto* source = static_cast<const uint8_t*>(mpp_buffer_get_ptr(buffer));
+        if (!source || mpp_buffer_sync_ro_begin(buffer) != MPP_OK) {
+            return nullptr;
+        }
+        struct ReadSyncGuard {
+            MppBuffer buffer;
+            ~ReadSyncGuard() {
+                mpp_buffer_sync_ro_end(buffer);
+            }
+        } sync_guard{buffer};
+
+        auto* destination       = output->GetData();
+        const size_t compact_y  = width * height;
+        const size_t compact_uv = compact_y / 4;
+        auto* destination_u     = destination + compact_y;
+        auto* destination_v     = destination_u + compact_uv;
+        for (size_t row = 0; row < height; ++row) {
+            std::memcpy(destination + row * width, source + row * horizontal_stride, width);
+        }
+
+        const auto base_format = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
+        if (base_format == MPP_FMT_YUV420P) {
+            const size_t chroma_stride = horizontal_stride / 2;
+            const size_t chroma_height = vertical_stride / 2;
+            const auto* source_u       = source + y_plane_size;
+            const auto* source_v       = source_u + chroma_stride * chroma_height;
+            for (size_t row = 0; row < height / 2; ++row) {
+                std::memcpy(destination_u + row * (width / 2), source_u + row * chroma_stride, width / 2);
+                std::memcpy(destination_v + row * (width / 2), source_v + row * chroma_stride, width / 2);
+            }
+        } else {
+            const bool vu_order       = base_format == MPP_FMT_YUV420SP_VU;
+            const auto* source_chroma = source + y_plane_size;
+            for (size_t row = 0; row < height / 2; ++row) {
+                const auto* source_row = source_chroma + row * horizontal_stride;
+                auto* u_row            = destination_u + row * (width / 2);
+                auto* v_row            = destination_v + row * (width / 2);
+                for (size_t column = 0; column < width / 2; ++column) {
+                    const auto first  = source_row[column * 2];
+                    const auto second = source_row[column * 2 + 1];
+                    u_row[column]     = vu_order ? second : first;
+                    v_row[column]     = vu_order ? first : second;
+                }
+            }
+        }
+
+        return output;
+    }
 
 }  // namespace
 
@@ -226,7 +226,7 @@ struct RockchipDecoderState {
 VideoDecoderRockchip::VideoDecoderRockchip(size_t name) : VideoDecoder(name) {}
 
 VideoDecoderRockchip::~VideoDecoderRockchip() {
-    Close();
+    VideoDecoderRockchip::Close();
 }
 
 VideoDecoderCapability VideoDecoderRockchip::Probe(VideoCodecType type) {
@@ -236,12 +236,13 @@ VideoDecoderCapability VideoDecoderRockchip::Probe(VideoCodecType type) {
 
     const auto coding = ToMppCoding(type);
     if (coding == MPP_VIDEO_CodingUnused) {
-        const auto cpu = VideoDecoderCpu::Probe(type);
+        const auto cpu            = VideoDecoderCpu::Probe(type);
         capability.available      = cpu.available;
         capability.backend        = cpu.available ? "ffmpeg-software-fallback" : capability.backend;
         capability.implementation = cpu.available ? cpu.implementation : std::string{};
-        capability.detail = cpu.available ? "Codec is outside the MPP H264/H265 scope; FFmpeg fallback is available"
-                                          : "Codec is outside the MPP H264/H265 scope; FFmpeg fallback unavailable";
+        capability.detail         = cpu.available
+                                        ? "Codec is outside the MPP H264/H265 scope; FFmpeg fallback is available"
+                                        : "Codec is outside the MPP H264/H265 scope; FFmpeg fallback unavailable";
         return capability;
     }
 
@@ -249,7 +250,7 @@ VideoDecoderCapability VideoDecoderRockchip::Probe(VideoCodecType type) {
     const bool format_supported  = mpp_check_support_format(MPP_CTX_DEC, coding) == MPP_OK;
     if (device_accessible && format_supported) {
         capability.available = true;
-        capability.detail = "MPP VPU decoder is available; decoded frames are copied out as compact I420";
+        capability.detail    = "MPP VPU decoder is available; decoded frames are copied out as compact I420";
         return capability;
     }
 
@@ -258,7 +259,7 @@ VideoDecoderCapability VideoDecoderRockchip::Probe(VideoCodecType type) {
         capability.available      = true;
         capability.backend        = "ffmpeg-software-fallback";
         capability.implementation = cpu.implementation;
-        capability.detail = "MPP decoder unavailable; FFmpeg software fallback is available";
+        capability.detail         = "MPP decoder unavailable; FFmpeg software fallback is available";
         return capability;
     }
 
@@ -288,8 +289,7 @@ bool VideoDecoderRockchip::Open() {
         return false;
     }
     GetPreviewPipelineMetrics().RecordMppDecodeFallback();
-    LOG_WARN("{} MPP decoder unavailable; using FFmpeg decoder {}", idx_name_,
-             cpu_capability.implementation);
+    LOG_WARN("{} MPP decoder unavailable; using FFmpeg decoder {}", idx_name_, cpu_capability.implementation);
     return true;
 }
 
@@ -365,8 +365,7 @@ bool VideoDecoderRockchip::OpenMpp() {
     }
 
     state_->opened = true;
-    LOG_INFO("{} MPP VPU decoder opened: codec={} copy-out=I420", idx_name_,
-             static_cast<int>(codec_type_));
+    LOG_INFO("{} MPP VPU decoder opened: codec={} copy-out=I420", idx_name_, static_cast<int>(codec_type_));
     return true;
 }
 
@@ -385,9 +384,9 @@ bool VideoDecoderRockchip::IsOpened() {
 }
 
 bool VideoDecoderRockchip::ReuseForStreamRestart(VideoCodecType type, int width, int height) {
-    if (fallback_ || !state_ || !state_->opened || !state_->context || !state_->api ||
-        type != codec_type_ || width <= 0 || height <= 0 ||
-        static_cast<size_t>(width) != width_ || static_cast<size_t>(height) != height_) {
+    if (fallback_ || !state_ || !state_->opened || !state_->context || !state_->api || type != codec_type_ ||
+        width <= 0 || height <= 0 || static_cast<size_t>(width) != width_ ||
+        static_cast<size_t>(height) != height_) {
         return false;
     }
 
@@ -408,7 +407,7 @@ bool VideoDecoderRockchip::SendPacket(const uint8_t* pkt, size_t len, int64_t fr
     }
 
     const auto started = std::chrono::steady_clock::now();
-    const auto fail = [&]() {
+    const auto fail    = [&]() {
         GetPreviewPipelineMetrics().RecordMppDecode(false, ElapsedNanoseconds(started));
         return false;
     };
@@ -417,7 +416,7 @@ bool VideoDecoderRockchip::SendPacket(const uint8_t* pkt, size_t len, int64_t fr
     }
 
     MppPacket packet = nullptr;
-    auto ret = mpp_packet_init(&packet, const_cast<uint8_t*>(pkt), len);
+    auto ret         = mpp_packet_init(&packet, const_cast<uint8_t*>(pkt), len);
     if (ret != MPP_OK || !packet) {
         return fail();
     }
@@ -467,9 +466,8 @@ bool VideoDecoderRockchip::ConfigureFrameGroup(size_t buffer_size) {
         return false;
     }
 
-    MPP_RET ret = MPP_OK;
-    const bool reuse_existing_group =
-        state_->frame_group && state_->frame_group_buffer_size == buffer_size;
+    MPP_RET ret                     = MPP_OK;
+    const bool reuse_existing_group = state_->frame_group && state_->frame_group_buffer_size == buffer_size;
     if (!state_->frame_group) {
         ret = mpp_buffer_group_get_internal(
             &state_->frame_group,
@@ -512,8 +510,8 @@ DecodedVideoFrame VideoDecoderRockchip::ReceiveMppFrame(bool& made_progress) {
     }
 
     const auto decode_started = std::chrono::steady_clock::now();
-    MppFrame frame             = nullptr;
-    const auto ret = state_->api->decode_get_frame(state_->context, &frame);
+    MppFrame frame            = nullptr;
+    const auto ret            = state_->api->decode_get_frame(state_->context, &frame);
     if (ret == MPP_ERR_TIMEOUT || (ret == MPP_OK && !frame)) {
         return {};
     }
@@ -525,11 +523,10 @@ DecodedVideoFrame VideoDecoderRockchip::ReceiveMppFrame(bool& made_progress) {
     }
 
     if (mpp_frame_get_info_change(frame)) {
-        made_progress          = true;
-        const auto buffer_size = mpp_frame_get_buf_size(frame);
-        const bool reused_group = state_->frame_group &&
-                                  state_->frame_group_buffer_size == buffer_size;
-        const auto configured  = ConfigureFrameGroup(buffer_size);
+        made_progress           = true;
+        const auto buffer_size  = mpp_frame_get_buf_size(frame);
+        const bool reused_group = state_->frame_group && state_->frame_group_buffer_size == buffer_size;
+        const auto configured   = ConfigureFrameGroup(buffer_size);
         if (!reused_group || !configured) {
             LOG_INFO("{} MPP decoder info change: {}x{} stride={}x{} buffer={} configured={} reused={}",
                      idx_name_, mpp_frame_get_width(frame), mpp_frame_get_height(frame),
@@ -549,7 +546,7 @@ DecodedVideoFrame VideoDecoderRockchip::ReceiveMppFrame(bool& made_progress) {
 
     const auto pts = mpp_frame_get_pts(frame);
     made_progress  = true;
-    auto timing = state_->pending.end();
+    auto timing    = state_->pending.end();
     if (pts >= 0) {
         timing = std::find_if(state_->pending.begin(), state_->pending.end(),
                               [pts](const auto& item) { return item.pts == pts; });
@@ -596,8 +593,7 @@ DecodedVideoFrame VideoDecoderRockchip::ReceiveMppFrame(bool& made_progress) {
             if (output) {
                 output->SetFrameIndex(static_cast<uint64_t>(std::max<int64_t>(0, resolved_pts)));
             }
-            GetPreviewPipelineMetrics().RecordMppCopyOut(
-                output != nullptr, ElapsedNanoseconds(copy_started));
+            GetPreviewPipelineMetrics().RecordMppCopyOut(output != nullptr, ElapsedNanoseconds(copy_started));
             return output;
         },
         []() { GetPreviewPipelineMetrics().RecordMppEarlyDrop(); },

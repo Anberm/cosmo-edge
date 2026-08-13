@@ -43,17 +43,17 @@ namespace media {
 
     VideoDecoderCapability VideoDecoderCpu::Probe(VideoCodecType type) {
         VideoDecoderCapability capability;
-        capability.backend = "ffmpeg-software";
+        capability.backend  = "ffmpeg-software";
         const auto codec_id = ToAvCodecId(type);
         if (codec_id == AV_CODEC_ID_NONE) {
             capability.detail = "unsupported codec";
             return capability;
         }
-        const auto* codec = avcodec_find_decoder(codec_id);
-        capability.available = codec != nullptr;
+        const auto* codec         = avcodec_find_decoder(codec_id);
+        capability.available      = codec != nullptr;
         capability.implementation = codec ? codec->name : std::string{};
-        capability.detail = capability.available ? "FFmpeg software decoder is registered"
-                                                  : "FFmpeg software decoder is unavailable";
+        capability.detail         = capability.available ? "FFmpeg software decoder is registered"
+                                                         : "FFmpeg software decoder is unavailable";
         return capability;
     }
 

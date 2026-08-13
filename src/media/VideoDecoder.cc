@@ -75,7 +75,7 @@ namespace media {
 
         auto materializer = std::move(materializer_);
         discard_handler_  = nullptr;
-        frame_             = materializer();
+        frame_            = materializer();
         return frame_;
     }
 
@@ -84,8 +84,8 @@ namespace media {
             discard_handler_();
         }
         frame_.reset();
-        materializer_    = nullptr;
-        discard_handler_ = nullptr;
+        materializer_           = nullptr;
+        discard_handler_        = nullptr;
         native_buffer_exporter_ = nullptr;
         native_buffer_.reset();
     }

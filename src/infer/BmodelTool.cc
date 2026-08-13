@@ -260,7 +260,7 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
     for (uint32_t index = 0; index < count.n_input; ++index) {
         rknn_tensor_attr attr{};
         attr.index = index;
-        result = rknn_query(guard.context, RKNN_QUERY_INPUT_ATTR, &attr, sizeof(attr));
+        result     = rknn_query(guard.context, RKNN_QUERY_INPUT_ATTR, &attr, sizeof(attr));
         if (result != RKNN_SUCC) {
             info.error_msg = "Failed to query RKNN input attributes";
             return info;
@@ -282,8 +282,8 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
     std::vector<std::vector<int>> output_shapes;
     for (uint32_t index = 0; index < count.n_output; ++index) {
         output_attrs[index].index = index;
-        result = rknn_query(guard.context, RKNN_QUERY_OUTPUT_ATTR, &output_attrs[index],
-                            sizeof(output_attrs[index]));
+        result                    = rknn_query(guard.context, RKNN_QUERY_OUTPUT_ATTR, &output_attrs[index],
+                                               sizeof(output_attrs[index]));
         if (result != RKNN_SUCC) {
             info.error_msg = "Failed to query RKNN output attributes";
             return info;
@@ -311,8 +311,8 @@ BmodelInfo BmodelTool::GetBmodelInfo(const std::string& bmodelPath) {
     } else {
         for (uint32_t index = 0; index < count.n_output; ++index) {
             BmodelNodeInfo node;
-            node.name = output_attrs[index].name[0] ? output_attrs[index].name
-                                                    : "output_" + std::to_string(index);
+            node.name =
+                output_attrs[index].name[0] ? output_attrs[index].name : "output_" + std::to_string(index);
             node.shape     = std::move(output_shapes[index]);
             node.data_type = 0;  // rknn_outputs_get(want_float=1)
             network.outputs.push_back(std::move(node));

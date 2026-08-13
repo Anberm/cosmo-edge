@@ -4,9 +4,9 @@
 #include <memory>
 #include <string>
 
+#include "media/NativeVideoBuffer.h"
 #include "media/VideoCodecType.h"
 #include "media/VideoFrame.h"
-#include "media/NativeVideoBuffer.h"
 
 namespace cosmo {
 namespace media {
@@ -27,8 +27,8 @@ namespace media {
     /// decoder is closed.
     class DecodedVideoFrame {
     public:
-        using Materializer = std::function<VideoFramePtr()>;
-        using DiscardHandler = std::function<void()>;
+        using Materializer         = std::function<VideoFramePtr()>;
+        using DiscardHandler       = std::function<void()>;
         using NativeBufferExporter = std::function<NativeVideoBufferPtr()>;
 
         DecodedVideoFrame() = default;
@@ -37,9 +37,9 @@ namespace media {
                           Materializer materializer, DiscardHandler discard_handler,
                           NativeBufferExporter native_buffer_exporter = {});
 
-        DecodedVideoFrame(const DecodedVideoFrame&)            = delete;
-        DecodedVideoFrame& operator=(const DecodedVideoFrame&) = delete;
-        DecodedVideoFrame(DecodedVideoFrame&&) noexcept        = default;
+        DecodedVideoFrame(const DecodedVideoFrame&)                = delete;
+        DecodedVideoFrame& operator=(const DecodedVideoFrame&)     = delete;
+        DecodedVideoFrame(DecodedVideoFrame&&) noexcept            = default;
         DecodedVideoFrame& operator=(DecodedVideoFrame&&) noexcept = default;
 
         [[nodiscard]] bool HasFrame() const;

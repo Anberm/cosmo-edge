@@ -32,7 +32,7 @@ util::ErrorEnum Qwen3VLUnify::Init() {
         LOG_ERRO("RKLLM Qwen3.5 initialization failed. ModelPath:{} Ret:{}", model_path_, ret);
         return ret;
     }
-    rkllm_backend_ = std::move(backend);
+    rkllm_backend_  = std::move(backend);
     max_batch_size_ = 1;
     LOG_INFO("RKLLM Qwen3.5 initialized. ModelPath:{}", model_path_);
     return util::ErrorEnum::Success;

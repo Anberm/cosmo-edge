@@ -26,7 +26,7 @@ AudioServiceImpl::AudioServiceImpl()
     : audio_db_file_(cosmo::path::GetCfgPath() + "/audioMng.json"),
       device_db_file_(cosmo::path::GetCfgPath() + "/AudioDeviceMng.json") {
     default_audio_file_name_ = cosmo::path::GetAppBaseDir() + "/files/Audio/beep.ogg";
-    audio_file_path_ = cosmo::path::GetBaseDir() + audio_relative_path_;
+    audio_file_path_         = cosmo::path::GetBaseDir() + audio_relative_path_;
     LOG_INFO("Init Cfg:{} FilePath:{}", audio_db_file_, audio_file_path_);
     {
         std::error_code err;

@@ -385,8 +385,7 @@ util::ErrorEnum ModelImportExporter::WriteNnFile(const std::string& modelType,
                 const auto destination = (fs::path(model_dir) / destination_names[i]).string();
                 fs::copy_file(bmodel_paths[i], destination, fs::copy_options::overwrite_existing, ec);
                 if (ec) {
-                    convert_error = "Failed to copy RKLLM component to " + destination + ": " +
-                                    ec.message();
+                    convert_error = "Failed to copy RKLLM component to " + destination + ": " + ec.message();
                     break;
                 }
                 LOG_INFO("[AddModel] RKLLM: copied component to {}", destination);
