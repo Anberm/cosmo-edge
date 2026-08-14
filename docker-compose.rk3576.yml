@@ -9,16 +9,19 @@ services:
     volumes:
       - .:/workspace
       - ./build_output:/build_output
+      - cosmo-npm-cache:/root/.npm
     working_dir: /workspace
     environment:
       RKNN_ROOT: /opt/rknn
       RKLLM_ROOT: /opt/rkllm
       ROCKCHIP_MEDIA_ROOT: /opt/rockchip-media
       COSMO_RKLLM_REQUIRED: "ON"
-      NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-10}"
+      NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-4}"
       NPM_CONFIG_PROGRESS: "${NPM_CONFIG_PROGRESS:-false}"
       NPM_CONFIG_FETCH_RETRIES: "${NPM_CONFIG_FETCH_RETRIES:-3}"
       NPM_CONFIG_FETCH_TIMEOUT: "${NPM_CONFIG_FETCH_TIMEOUT:-120000}"
+      NPM_CONFIG_PREFER_OFFLINE: "${NPM_CONFIG_PREFER_OFFLINE:-true}"
+      NPM_CONFIG_UPDATE_NOTIFIER: "${NPM_CONFIG_UPDATE_NOTIFIER:-false}"
     command: >
       bash -lc "
       set -euo pipefail;
@@ -47,3 +50,6 @@ services:
       ls -lh \"$${output_dir}\";
       echo 'RK3576 build finished.'
       "
+
+volumes:
+  cosmo-npm-cache:
