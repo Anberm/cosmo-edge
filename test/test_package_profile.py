@@ -152,6 +152,7 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn('CHIP_MODEL="${CHIP_MODEL:-bm1688}"', build)
         self.assertIn('bm1688|cv186x)', build)
         self.assertIn('aiboxresource_${CHIP_MODEL}', build)
+        self.assertIn('-DCOSMO_TARGET_CHIP="${CHIP_MODEL:-unspecified}"', build)
         self.assertIn("-c and -m cannot be used together", build)
 
     def test_sophon_chip_selection_preserves_package_output_contract(self) -> None:
@@ -169,6 +170,8 @@ class PackageProfileTests(unittest.TestCase):
             'printf \'%s\\n\' "${chip}" > "${output_dir}/TARGET_CHIP"', entrypoint
         )
         self.assertIn('sha256sum -- "${package_name}" > SHA256SUMS', entrypoint)
+        self.assertIn('DESTINATION share/cosmo', cmake)
+        self.assertIn('"${COSMO_TARGET_CHIP_NORMALIZED}\\n"', cmake)
         self.assertIn('set(CPACK_OUTPUT_FILE_PREFIX', cmake)
         self.assertIn('scripts/package_md5_rename.sh', cmake)
 
@@ -337,6 +340,7 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
         self.assertIn("install_rkllm_sdk.py", dockerfile)
         self.assertIn('lib/librkllmrt.so LICENSE', build)
+        self.assertIn("-DCOSMO_TARGET_CHIP=rk3576", build)
         self.assertIn('-DCOSMO_RKLLM_REQUIRED="${RKLLM_REQUIRED}"', build)
         self.assertIn('set(RKLLM_RUNTIME_LICENSE "${COSMO_RKLLM_ROOT}/LICENSE")', cmake)
 

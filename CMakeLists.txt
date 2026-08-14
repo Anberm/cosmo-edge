@@ -782,6 +782,24 @@ set(PACKAGE_PREFIX  "cosmo")
 set(PACKAGE_VERSION "V${VER_MAJOR}.${VER_MINOR}.${VER_PATCH}")
 set(PACKAGE_NAME    "${PACKAGE_PREFIX}-${PACKAGE_VERSION}")
 
+# Record the intended accelerator inside the archive. The exported sidecar is
+# convenient for automation, but it can be separated from the package during a
+# manual copy. This marker keeps such mistakes observable and prevents packages
+# for different chips from being byte-identical.
+set(COSMO_TARGET_CHIP "" CACHE STRING "Target accelerator chip recorded in release packages")
+if(COSMO_TARGET_CHIP)
+    string(TOLOWER "${COSMO_TARGET_CHIP}" COSMO_TARGET_CHIP_NORMALIZED)
+    if(NOT COSMO_TARGET_CHIP_NORMALIZED MATCHES "^(bm1688|cv186x|rk3576|unspecified)$")
+        message(FATAL_ERROR "Unsupported COSMO_TARGET_CHIP: ${COSMO_TARGET_CHIP}")
+    endif()
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/target-chip.txt"
+        "${COSMO_TARGET_CHIP_NORMALIZED}\n")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/target-chip.txt"
+        DESTINATION share/cosmo
+        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
+    message(STATUS "Package target chip: ${COSMO_TARGET_CHIP_NORMALIZED}")
+endif()
+
 # Generate and install version.txt
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/version.txt" "${PACKAGE_VERSION}\n")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/version.txt"

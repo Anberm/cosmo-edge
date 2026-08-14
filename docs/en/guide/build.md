@@ -115,9 +115,10 @@ The two supported profiles are deliberately isolated:
 | Open (`public-runtime`, default) | Public aarch64 compile, link, package, and test validation using the tracked runtime SDK | `build_output/public-runtime/<chip>/` | Plain models; no device authorization required |
 | Protected (`production-release`) | Controlled build with the complete production SDK and provisioning tool | `build_output/production-release/<chip>/` | Encrypted models; device authorization required |
 
-Every chip directory also contains `TARGET_CHIP` and `SHA256SUMS`. Always carry
-these files with the archive; an identical archive name or hash does not prove
-cross-chip compatibility.
+Every chip directory also contains `TARGET_CHIP` and `SHA256SUMS`, while the
+archive contains `share/cosmo/target-chip.txt`. Even when the selected public
+model bytes match, complete packages for different chips must have different
+hashes. Always take the archive from its chip-scoped directory.
 
 Both profiles produce `cosmo-V<version>-<32-char-md5>.tar.gz`. The same format
 can be uploaded through the management page on a main-branch installation and

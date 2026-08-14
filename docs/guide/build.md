@@ -114,8 +114,9 @@ Windows PowerShell：
 | Open（内部配置 `public-runtime`，默认） | 使用仓库内运行时 SDK 完成公开的 aarch64 编译、链接、打包和测试验证 | `build_output/public-runtime/<chip>/` | 明文模型，无需设备授权 |
 | Protected（内部配置 `production-release`） | 在受控环境中使用完整正式 SDK 和设备授权工具构建 | `build_output/production-release/<chip>/` | 加密模型，需要设备授权 |
 
-每个芯片目录同时包含 `TARGET_CHIP` 和 `SHA256SUMS`。即使两个芯片当前选择的公开
-模型字节一致，也必须从各自目录取包，不能用相同包名推断芯片兼容性。
+每个芯片目录同时包含 `TARGET_CHIP` 和 `SHA256SUMS`，压缩包内部还包含
+`share/cosmo/target-chip.txt`。即使两个芯片当前选择的公开模型字节一致，完整安装包也
+必须具有不同哈希；必须从各自目录取包，不能用相同包名推断芯片兼容性。
 
 两种配置都生成 `cosmo-V<版本号>-<32位md5>.tar.gz`。同一格式既可以在 main
 分支部署的管理页面升级，也可以在后续任意版本继续升级。应用包不签名；两种配置
