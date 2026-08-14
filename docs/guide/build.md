@@ -118,6 +118,10 @@ Windows PowerShell：
 `share/cosmo/target-chip.txt`。即使两个芯片当前选择的公开模型字节一致，完整安装包也
 必须具有不同哈希；必须从各自目录取包，不能用相同包名推断芯片兼容性。
 
+Compose 会在首次构建时按 `package-lock.json` 串行填充 npm 缓存，随后完全离线安装；
+同一工作目录中的 BM1688、CV186X 与 RK3576 构建共享该缓存。这样可规避 npm 10.2
+在部分网络上建立大量 CDN 连接后无法退出的问题。删除 Compose 卷会触发重新填充。
+
 两种配置都生成 `cosmo-V<版本号>-<32位md5>.tar.gz`。同一格式既可以在 main
 分支部署的管理页面升级，也可以在后续任意版本继续升级。应用包不签名；两种配置
 只在模型是否加密以及是否包含 `cosmo-model-provision` 上有区别。

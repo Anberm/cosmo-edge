@@ -120,6 +120,11 @@ archive contains `share/cosmo/target-chip.txt`. Even when the selected public
 model bytes match, complete packages for different chips must have different
 hashes. Always take the archive from its chip-scoped directory.
 
+On the first build, Compose fills the npm cache serially from `package-lock.json`
+and then installs fully offline. BM1688, CV186X, and RK3576 builds in the same
+working directory share that cache. This avoids an npm 10.2 failure mode where
+many CDN sockets remain open indefinitely. Removing the Compose volume refills it.
+
 Both profiles produce `cosmo-V<version>-<32-char-md5>.tar.gz`. The same format
 can be uploaded through the management page on a main-branch installation and
 on every later version. Application archives are not signed. The profiles differ

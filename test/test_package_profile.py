@@ -162,6 +162,37 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn("prefer-offline=true", npmrc)
         self.assertIn("update-notifier=false", npmrc)
 
+        lock = json.loads(
+            (REPOSITORY / "src/web/package-lock.json").read_text(encoding="utf-8")
+        )
+        locked_packages = [
+            metadata
+            for path, metadata in lock["packages"].items()
+            if "node_modules/" in path and not metadata.get("link")
+        ]
+        self.assertTrue(locked_packages)
+        self.assertTrue(all(package.get("integrity") for package in locked_packages))
+        self.assertTrue(
+            all(
+                package.get("resolved", "").startswith(
+                    "https://cdn.npmmirror.com/packages/"
+                )
+                for package in locked_packages
+            )
+        )
+
+        npm_builder = (
+            REPOSITORY / "scripts/build_npm_dependencies.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("cache add", npm_builder)
+        self.assertIn("ci --offline", npm_builder)
+        self.assertIn("package-lock.json has incomplete entries", npm_builder)
+
+        web_cmake = (REPOSITORY / "cmake/web_frontend.cmake").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("build_npm_dependencies.sh", web_cmake)
+
         for compose_name in ("docker-compose.sophon.yml", "docker-compose.rk3576.yml"):
             compose = (REPOSITORY / compose_name).read_text(encoding="utf-8")
             self.assertIn('NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-1}"', compose)
