@@ -16,16 +16,28 @@ prepared. CosmoEdge 1.1 uses BMRT and `.nn` artifacts validated on CV186X. The t
 models used by this release benchmark are byte-identical to the BM1688 workload artifacts; other
 models still require contract-by-contract compatibility validation.
 
-Verify hardware identity before installation; an IP address, old model directory,
-or asset label is not chip evidence:
+Verify hardware identity before installation; an IP address or old model directory
+is not platform evidence:
 
 ```bash
 tr -d '\0' </proc/device-tree/model; echo
 ```
 
-If the result says `BM1688`, is empty, or conflicts with vendor CV186X evidence,
-stop CV186X qualification and correct the asset/firmware identity first. A running
-service alone does not qualify CV186X inference.
+The device-tree string identifies a SoC, accelerator, or firmware stack; it does
+not always equal the commercial product-platform name. A CV186X product using the
+Sophon compute stack may legitimately report `BM1688`. Do not reject CV186X solely
+because of that string. Qualification must bind all three evidence layers:
+
+1. Vendor, BOM, or controlled inventory evidence maps the complete device to the
+   CV186X product platform.
+2. The package `TARGET_CHIP` is `cv186x`, and the package SHA-256 matches the
+   release record.
+3. The model loaded by the device matches the CV186X resource record by SHA-256
+   and completes one real BMRT or product-task inference on that device.
+
+Stop qualification when the device-tree value is empty and no independent platform
+evidence exists, or when device-tree, inventory, package, and runtime evidence
+conflict. A running service alone does not qualify CV186X inference.
 
 ## 1. Obtain and verify the package
 
@@ -78,15 +90,18 @@ used by the public CV186X benchmark:
 Their repository directories, input/output contracts, and SHA-256 identities are recorded in the
 [ScenarioBench v1.1 model identity record](/benchmarks/scenario-bench/v1.1/models/cv186x.json).
 The model subdirectories retain the legacy `prod_BM1688_` compatibility prefix because the files
-were copied from the CV186X benchmark device without modification. CV186X qualification is based
-on an exact SHA-256 match between the device-loaded files and the copies under the CV186X resource
-set. It does not imply that other BM1688 artifacts are interchangeable.
+were copied from the CV186X benchmark device without modification. Neither that directory prefix
+nor a `BM1688` device-tree string determines the complete product platform by itself. CV186X
+qualification binds controlled platform mapping, an exact SHA-256 match between device-loaded
+files and the CV186X resource set, and successful device inference. It does not imply that other
+BM1688 artifacts are interchangeable.
 
 1. Sign in to the Web console, open **Model Repository**, and confirm that both models are present.
 2. Add one test stream under **Video Input**, then create and bind a task with the person detector.
    Add the helmet classifier to the orchestration when validating the complete helmet workflow.
 3. Open algorithm preview, confirm OSD and an event, then verify that task state and service logs
-   show no continuing error.
+   show no continuing error. Record the model SHA-256, literal device-tree string, and inference
+   result together in the qualification evidence.
 
 When importing a custom model, its directory must contain a matching `config.json` and model file.
 Input dimensions, quantization, preprocessing, postprocessing, and output tensors must match the

@@ -17,6 +17,8 @@ The RK3576 integration adds a production-oriented CV backend without changing
 the behavior of the CPU, CUDA, or Sophon backends:
 
 - RKNN Runtime 2.3.2 executes static-batch detector and classifier models.
+- RKLLM Runtime 1.3.0 works with an RKNN vision encoder to execute Qwen3.5
+  multimodal models.
 - Rockchip MPP performs H.264/H.265 decode and encode.
 - The decoder uses delayed Copy-out: frames are sampled or discarded before a
   host I420 copy is requested.
@@ -73,6 +75,19 @@ The first supported models are:
 
 1. Helmet classification: `1x3x224x224`, ONNX opset 19.
 2. YOLOv8 detection: `1x3x640x640`, converted to ONNX opset 19 / IR 9.
+
+Qwen3.5 multimodal deployment is a separate model contract. An importable
+directory contains at least:
+
+- `model.rkllm`: a language model targeting RK3576;
+- `vision.rknn`: a vision encoder whose image-token count and embedding width
+  match the language model;
+- `tokenizer.json`: the tokenizer from the exact conversion source model;
+- `config.json`: `model_type` is `qwen3_5` and `runtime_backend` is `rkllm`.
+
+Record SHA-256 for the four files as one set. The presence of `librkllmrt.so`,
+a text-only model load, or an isolated `vision.rknn` run does not prove
+multimodal capability.
 
 CosmoEdge owns resize, channel order, and normalization. Conversion must not
 bake in a second mean/std transform. CosmoEdge supplies float32 NCHW tensors;
@@ -139,6 +154,10 @@ RKLLM is mandatory for a formal RK3576 package. A missing header,
 `librkllmrt.so`, or license fails configuration instead of silently producing a
 package without Qwen3.5 support.
 
+The package distributes RKLLM Runtime, but the Open package does not distribute
+Qwen3.5 model files. The deployer must provide a licensed conversion artifact
+that matches RK3576 and Runtime 1.3.0 and import it as the four-file set above.
+
 The formal entry removes the previous `build_rknn` directory before building so
 a partial cross-compilation cache cannot be reused as release evidence. It uses
 host networking for build-time dependency resolution; the one-shot build
@@ -176,6 +195,31 @@ so credentials do not enter process arguments.
 
 Preview validation requires real `ffmpeg` and `ffprobe` executables. The tool
 preflights them before mutating device configuration.
+
+## Qwen3.5 Multimodal Device Acceptance
+
+Formal acceptance supplies a fixed test image on a real RK3576 device and
+requires non-empty text related to that image. A text-only prompt proves only
+the RKLLM language path and does not replace this gate. Use the CosmoEdge
+**Image Analysis** flow, or cross-compile Rockchip's official
+[`multimodal_model_demo`](https://github.com/airockchip/rknn-llm/tree/878f9361fd3afa7e167b7079918918f78d2c1c2a/examples/multimodal_model_demo)
+with the same aarch64 toolchain as the build image and run it on the device:
+
+```bash
+MODEL_DIR=/data/cwaiuserdata/resource/models/<qwen3.5-model-directory>
+export LD_LIBRARY_PATH=./lib
+./demo smoke.jpg "$MODEL_DIR/vision.rknn" "$MODEL_DIR/model.rkllm" \
+  64 4096 2 rk3576 \
+  '<|vision_start|>' '<|vision_end|>' '<|image_pad|>'
+```
+
+Record the package and four model-file SHA-256 values, RKLLM/Toolkit/driver
+versions, target platform, quantization type, vision input/output shapes, test
+image hash, returned text, and exit status. The gate passes only when both
+models load, vision encoding runs successfully, and non-empty image-related
+text is returned. After the test, restore `cosmo.service`, confirm it is
+`active`, verify a successful management-page response, and recheck the
+device's actual IP address.
 
 ## Validated Release Boundary
 
