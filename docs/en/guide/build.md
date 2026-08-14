@@ -198,12 +198,12 @@ Confirmed behavior:
 
 ## RK3576 Artifacts
 
-The public RK3576 entry extends a digest-pinned GHCR base image with RKLLM
-Runtime v1.3.0 from a pinned official Rockchip commit. The resulting environment
+The public RK3576 entry uses a digest-pinned final GHCR builder with RKLLM
+Runtime v1.3.0 from a pinned official Rockchip commit. The environment
 contains the aarch64 toolchain, RKNN Runtime, RKLLM Runtime, MPP, and RGA files:
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 ./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```

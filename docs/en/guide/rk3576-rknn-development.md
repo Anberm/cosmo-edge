@@ -133,14 +133,14 @@ labeled precision/recall/F1 acceptance set.
 
 ## Build and Deployment
 
-The public build extends a digest-pinned base image with RKLLM Runtime v1.3.0
-from a pinned official Rockchip commit. The final environment contains the
+The public build uses a digest-pinned final image with RKLLM Runtime v1.3.0
+from a pinned official Rockchip commit. The environment contains the
 aarch64 toolchain, RKNN Runtime, RKLLM Runtime, MPP, and RGA development files.
 The base resource directory supplies common actions, layouts, and fonts; the
 RKNN resource directory supplies the RK3576 algorithms and models.
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 ./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```

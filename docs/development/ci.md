@@ -195,17 +195,17 @@ Sophon 发布包构建依赖交叉编译环境和 Sophon SDK。型号只决定�
 北京时间 02:12（UTC 前一日 18:12）在默认分支运行，同时保留手动触发。定时工作流
 只有进入 GitHub 默认分支后才会生效。
 
-CI 使用公开、固定 digest 的基础镜像，并构建加入固定 RKLLM v1.3.0 的最终镜像，
+CI 使用公开、固定 digest 且已包含固定 RKLLM v1.3.0 的最终构建镜像，
 无需 registry 登录：
 
 ```bash
-docker compose -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 ```
 
 工作流执行以下发布候选检查：
 
-1. 验证 Compose 配置，并从固定基础镜像构建带 RKLLM 的最终镜像。
+1. 验证 Compose 配置，并拉取固定 digest、带 RKLLM 的最终构建镜像。
 2. 从干净的 `build_rknn/` 完成交叉编译、测试程序构建和打包。
 3. 要求 `build_output/rk3576/` 中只存在一个普通文件类型的发布包，并记录 SHA-256。
 4. 确认 `cosmo-tests`、`cosmo-rknn-backend-smoke` 和

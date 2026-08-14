@@ -116,13 +116,13 @@ python tools/rknn/convert_model.py \
 
 ## 构建与部署
 
-公开构建以 digest 固定的基础镜像为起点，并从 Rockchip 官方仓库的固定 commit 安装
-RKLLM Runtime v1.3.0；最终环境包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
+公开构建使用 digest 固定的最终镜像，其中 RKLLM Runtime v1.3.0 来自 Rockchip 官方仓库
+的固定 commit；最终环境包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
 MPP 和 RGA 开发文件。基础资源目录提供通用动作、布局和字体；RKNN 资源目录提供
 RK3576 算法与模型。
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 ./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```

@@ -375,12 +375,21 @@ class PackageProfileTests(unittest.TestCase):
             encoding="utf-8"
         )
         dockerfile = (REPOSITORY / "Dockerfile.rk3576").read_text(encoding="utf-8")
+        workflow = (REPOSITORY / ".github/workflows/ci-build-rk3576.yml").read_text(
+            encoding="utf-8"
+        )
         build = (REPOSITORY / "scripts/build_rknn.sh").read_text(encoding="utf-8")
         cmake = (REPOSITORY / "cmake/rkllm.cmake").read_text(encoding="utf-8")
 
-        self.assertIn("dockerfile: Dockerfile.rk3576", compose)
+        self.assertIn(
+            "image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:"
+            "135d25d0baf14e7918726f7efb040a0627926aedd5825f52fab6c1cd208da348",
+            compose,
+        )
+        self.assertNotIn("\n    build:", compose)
         self.assertIn("RKLLM_ROOT: /opt/rkllm", compose)
         self.assertIn('COSMO_RKLLM_REQUIRED: "ON"', compose)
+        self.assertIn("docker compose -f docker-compose.rk3576.yml pull", workflow)
         self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
         self.assertIn("install_rkllm_sdk.py", dockerfile)
         self.assertIn('lib/librkllmrt.so LICENSE', build)

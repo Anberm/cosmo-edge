@@ -141,13 +141,13 @@ full validation and recovery boundaries.
 ### Build for RK3576
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 ./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 ls -lh build_output/rk3576/
 ```
 
-The public build extends a digest-pinned base with a checksum-pinned official
-RKLLM v1.3.0 runtime and includes the RKNN, MPP, and RGA build dependencies. See
+The public digest-pinned builder contains the checksum-pinned official RKLLM
+v1.3.0 runtime and the RKNN, MPP, and RGA build dependencies. See
 the [RK3576 integration guide](docs/en/guide/rk3576-rknn-development.md)
 for the target runtime and device-validation boundary.
 

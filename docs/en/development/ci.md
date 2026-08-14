@@ -198,11 +198,11 @@ every day at 02:12 Beijing Time (18:12 UTC on the previous day) and also support
 manual dispatch. A scheduled workflow becomes active only after it reaches the
 GitHub default branch.
 
-CI extends the public digest-pinned base with pinned RKLLM v1.3.0 files; no
-registry login is required:
+CI uses the public digest-pinned final builder that already contains the pinned
+RKLLM v1.3.0 files; no registry login is required:
 
 ```bash
-docker compose -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 ```
 

@@ -183,12 +183,12 @@ Guard 设备证书和模型加密秘密仍属于受控输入，不得写入公�
 
 ## RK3576 构建产物
 
-RK3576 公开构建入口以固定 digest 的 GHCR 基础镜像为起点，加入固定到官方 commit 的
-RKLLM Runtime v1.3.0。最终镜像包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
+RK3576 公开构建入口使用固定 digest 的 GHCR 最终构建镜像，其中 RKLLM Runtime v1.3.0
+固定到官方 commit。该镜像包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
 MPP 和 RGA 开发文件：
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 ./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```

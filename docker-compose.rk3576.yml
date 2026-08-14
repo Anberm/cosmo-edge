@@ -1,9 +1,6 @@
 services:
   cosmo-rk3576-package:
-    image: cosmo-edge-build-env-rk3576:rkllm-v1.3.0
-    build:
-      context: .
-      dockerfile: Dockerfile.rk3576
+    image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:135d25d0baf14e7918726f7efb040a0627926aedd5825f52fab6c1cd208da348
     platform: linux/amd64
     network_mode: host
     volumes:
