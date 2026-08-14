@@ -21,7 +21,7 @@ $ErrorActionPreference = "Stop"
 # Subsequent builds copy only changed files.
 #
 # Prerequisites: Docker Desktop
-# Output:         build_output/<build-profile>/cosmo-*.tar.gz
+# Output:         build_output/<build-profile>/<chip>/cosmo-*.tar.gz
 # =============================================================================
 
 $VolumeName  = "cosmo-sophon-source"
@@ -132,7 +132,7 @@ try {
 }
 
 Write-Step "Step 5/5 - Build output"
-$outputDir = Join-Path (Join-Path $projectRoot "build_output") $BuildProfile
+$outputDir = Join-Path (Join-Path (Join-Path $projectRoot "build_output") $BuildProfile) $Chip
 if (Test-Path $outputDir) {
     $packages = Get-ChildItem $outputDir -Filter "*.tar.gz"
     if ($packages) {
@@ -140,10 +140,10 @@ if (Test-Path $outputDir) {
             Write-Host "  $($pkg.Name)  ($('{0:N0}' -f $pkg.Length) bytes)" -ForegroundColor Green
         }
     } else {
-        Write-Warning "No .tar.gz found in build_output/$BuildProfile/"
+        Write-Warning "No .tar.gz found in build_output/$BuildProfile/$Chip/"
     }
 } else {
-    Write-Warning "build_output/$BuildProfile/ directory not found"
+    Write-Warning "build_output/$BuildProfile/$Chip/ directory not found"
 }
 
 if ($BuildProfile -eq "public-runtime") {

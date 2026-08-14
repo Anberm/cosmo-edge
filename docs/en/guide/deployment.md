@@ -157,7 +157,7 @@ application, replaces and enables `cosmo.service`, and relies on reboot to start
 the service:
 
 ```bash
-scp build_output/public-runtime/<package>.tar.gz root@<device_ip>:/tmp/
+scp build_output/public-runtime/<chip>/<package>.tar.gz root@<device_ip>:/tmp/
 ssh root@<device_ip>
 cd /tmp
 install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)

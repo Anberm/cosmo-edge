@@ -15,17 +15,28 @@ next:
 的 CV186X 路径使用 BMRT 与已在 CV186X 上验证的 `.nn` 模型。本版本公开压测使用的两份
 Sophon 模型与 BM1688 压测产物字节一致；其他模型是否可复用仍须按模型合同逐项验证。
 
+安装前必须先核对硬件身份，不能用设备 IP、旧模型目录名或资产标签代替芯片证据：
+
+```bash
+tr -d '\0' </proc/device-tree/model; echo
+```
+
+如果输出声明 `BM1688`、为空，或与供应商提供的 CV186X 身份材料冲突，应停止 CV186X
+资格验收并先修正资产/固件身份；服务能够启动不等于 CV186X 推理已经通过。
+
 ## 1. 获取并核对安装包
 
 可以从源码构建 CV186X 包：
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
-ls -lh build_output/public-runtime/
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+cat build_output/public-runtime/cv186x/TARGET_CHIP
+(cd build_output/public-runtime/cv186x && sha256sum -c SHA256SUMS)
 ```
 
-型号参数只让构建脚本选择 CV186X 资源目录，不改变输出位置和包名；产物仍位于
-`build_output/public-runtime/`，并使用 `cosmo-V<version>-<md5>.tar.gz` 命名。
+型号参数让构建脚本选择 CV186X 资源目录，并把产物隔离到
+`build_output/public-runtime/cv186x/`。包仍使用 `cosmo-V<version>-<md5>.tar.gz` 命名，
+但必须连同同目录的 `TARGET_CHIP` 与 `SHA256SUMS` 一起验收。
 
 也可以从 [GitHub Release](https://github.com/cosmo-wander-ai/cosmo-edge/releases) 获取明确标注
 适用于 CV186X 的 CosmoEdge 1.1 Sophon Open 包和发布页列出的 SHA-256，然后在构建机上核对：

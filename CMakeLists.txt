@@ -723,6 +723,11 @@ if(COSMO_NN_USE_RKNN_BACKEND)
             DESTINATION lib
             PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
         )
+        install(FILES "${RKLLM_RUNTIME_LICENSE}"
+            DESTINATION share/licenses/rkllm
+            RENAME LICENSE
+            PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+        )
     endif()
 endif()
 

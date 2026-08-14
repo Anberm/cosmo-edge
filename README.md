@@ -141,12 +141,14 @@ full validation and recovery boundaries.
 ### Build for RK3576
 
 ```bash
-docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 ls -lh build_output/rk3576/
 ```
 
-The public builder is pinned by digest and includes the RKNN, MPP, and RGA build
-dependencies. See the [RK3576 integration guide](docs/en/guide/rk3576-rknn-development.md)
+The public build extends a digest-pinned base with a checksum-pinned official
+RKLLM v1.3.0 runtime and includes the RKNN, MPP, and RGA build dependencies. See
+the [RK3576 integration guide](docs/en/guide/rk3576-rknn-development.md)
 for the target runtime and device-validation boundary.
 
 For CV186X, follow the [CV186X Quick Start](docs/en/guide/cv186x-quick-start.md) for package installation, model import, first-event verification, upgrade, and recovery boundaries.

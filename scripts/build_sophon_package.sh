@@ -36,7 +36,7 @@ fi
 echo "Starting ${package_variant} cross-compilation for ${chip}..."
 ./scripts/build.sh -T -c "${chip}"
 
-output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"
+output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"
 rm -rf -- "${output_dir}"
 mkdir -p "${output_dir}"
 
@@ -48,6 +48,9 @@ if [ "${#package_artifacts[@]}" -ne 1 ] || [ ! -f "${package_artifacts[0]:-}" ];
     exit 1
 fi
 
-cp -f -- "${package_artifacts[0]}" "${output_dir}/"
+package_name="${package_artifacts[0]##*/}"
+cp -f -- "${package_artifacts[0]}" "${output_dir}/${package_name}"
+printf '%s\n' "${chip}" > "${output_dir}/TARGET_CHIP"
+(cd "${output_dir}" && sha256sum -- "${package_name}" > SHA256SUMS)
 ls -lh "${output_dir}"
 echo "Build finished."

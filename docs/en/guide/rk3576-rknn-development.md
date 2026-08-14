@@ -118,26 +118,36 @@ labeled precision/recall/F1 acceptance set.
 
 ## Build and Deployment
 
-The public builder image is pinned by digest in `docker-compose.rk3576.yml` and
-contains the aarch64 toolchain, RKNN Runtime, MPP, and RGA development files.
+The public build extends a digest-pinned base image with RKLLM Runtime v1.3.0
+from a pinned official Rockchip commit. The final environment contains the
+aarch64 toolchain, RKNN Runtime, RKLLM Runtime, MPP, and RGA development files.
 The base resource directory supplies common actions, layouts, and fonts; the
 RKNN resource directory supplies the RK3576 algorithms and models.
 
 ```bash
-docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
 
-The image is public and does not require `docker login`. Docker Compose V1 users
-can replace `docker compose` with `docker-compose`. This command builds a
+The base image and pinned official RKLLM files are public and require no
+`docker login`; the helper selects Compose V2/V1. This command builds a
 Release package with the Rockchip media backend and leaves the aarch64 test
 binary at `build_rknn/cosmo-tests`; it does not enable `COSMO_DEV_MODE`.
+
+RKLLM is mandatory for a formal RK3576 package. A missing header,
+`librkllmrt.so`, or license fails configuration instead of silently producing a
+package without Qwen3.5 support.
 
 The formal entry removes the previous `build_rknn` directory before building so
 a partial cross-compilation cache cannot be reused as release evidence. It uses
 host networking for build-time dependency resolution; the one-shot build
 service does not publish or listen on application ports.
+
+Board networking on RK3576 is managed by system NetworkManager, not by the
+Sophon netplan path in CosmoEdge. Clearing `/data/cwaiuserdata` recreates the
+default JSON but does not change an existing NetworkManager connection to
+`192.168.100.1`; use `ip -4 addr`/`nmcli` as the deployment source of truth.
 
 Keep mutable and packaged roots separate at runtime:
 

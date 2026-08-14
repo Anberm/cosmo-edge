@@ -129,15 +129,15 @@ Sophon 路径使用：
 
 ```bash
 # 省略型号时默认 bm1688；CV186X 在命令末尾添加 --chip cv186x
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
-ls -lh build_output/public-runtime/
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+ls -lh build_output/public-runtime/bm1688/
 ```
 
 Sophon 产物不会直接写在 `build_output/` 根目录，而是按
 `COSMO_MODEL_GUARD_BUILD_PROFILE` 隔离：
 
-- SOURCE 构建（内部配置 `public-runtime`）：`build_output/public-runtime/`；
-- 受控正式构建：`build_output/production-release/`。
+- SOURCE 构建（内部配置 `public-runtime`）：`build_output/public-runtime/<chip>/`；
+- 受控正式构建：`build_output/production-release/<chip>/`。
 
 默认文件名包含
 `-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>`。它是可安装的源码

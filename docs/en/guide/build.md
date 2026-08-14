@@ -15,6 +15,8 @@ This page documents build paths that are confirmed and available in the reposito
 
 > **💡 Docker Compose Version Note**
 > This documentation uses the latest Docker Compose V2 command format (`docker compose`). If you are using an older Docker environment, please replace `docker compose` with the hyphenated `docker-compose` in all commands.
+> On Linux, `./scripts/docker-compose.sh` detects Compose V2/V1 and requests
+> `sudo` once when the current account cannot access the Docker daemon.
 
 ## Build Path Overview
 
@@ -88,11 +90,11 @@ The public entry point defaults to
 
 ```bash
 # Defaults to bm1688 when the chip model is omitted
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 
 # Select a chip model explicitly
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell:
@@ -110,8 +112,12 @@ The two supported profiles are deliberately isolated:
 
 | Profile | Intended use | Output directory | Deployment status |
 | --- | --- | --- | --- |
-| Open (`public-runtime`, default) | Public aarch64 compile, link, package, and test validation using the tracked runtime SDK | `build_output/public-runtime/` | Plain models; no device authorization required |
-| Protected (`production-release`) | Controlled build with the complete production SDK and provisioning tool | `build_output/production-release/` | Encrypted models; device authorization required |
+| Open (`public-runtime`, default) | Public aarch64 compile, link, package, and test validation using the tracked runtime SDK | `build_output/public-runtime/<chip>/` | Plain models; no device authorization required |
+| Protected (`production-release`) | Controlled build with the complete production SDK and provisioning tool | `build_output/production-release/<chip>/` | Encrypted models; device authorization required |
+
+Every chip directory also contains `TARGET_CHIP` and `SHA256SUMS`. Always carry
+these files with the archive; an identical archive name or hash does not prove
+cross-chip compatibility.
 
 Both profiles produce `cosmo-V<version>-<32-char-md5>.tar.gz`. The same format
 can be uploaded through the management page on a main-branch installation and
@@ -126,7 +132,7 @@ device and creates and enables `cosmo.service`. Substitute the one package name
 reported by the build:
 
 ```bash
-scp build_output/public-runtime/<package>.tar.gz root@<device_ip>:/tmp/
+scp build_output/public-runtime/<chip>/<package>.tar.gz root@<device_ip>:/tmp/
 ssh root@<device_ip>
 cd /tmp
 install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
@@ -181,18 +187,18 @@ Confirmed behavior:
   directory; users do not provide a model path.
 - Exports build artifacts only (does not start services).
 - The chip model does not change CPack or MD5 renaming. Profile outputs remain
-  under `build_output/<profile>/`, with package names in the existing
+  under `build_output/<profile>/<chip>/`, with package names in the existing
   `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` format.
 
 ## RK3576 Artifacts
 
-The public RK3576 entry uses a digest-pinned GHCR image containing the aarch64
-toolchain, RKNN Runtime, MPP, and RGA development files. The image can be pulled
-without authentication:
+The public RK3576 entry extends a digest-pinned GHCR base image with RKLLM
+Runtime v1.3.0 from a pinned official Rockchip commit. The resulting environment
+contains the aarch64 toolchain, RKNN Runtime, RKLLM Runtime, MPP, and RGA files:
 
 ```bash
-docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
 
@@ -201,6 +207,9 @@ Confirmed behavior:
 - Runs the aarch64 cross-build in a `linux/amd64` build container.
 - Removes `build_rknn/` before calling `scripts/build_rknn.sh -T`, preventing a
   partial cache from being reused.
+- Fails when the RKLLM header, runtime, or license is missing; a package without
+  Qwen3.5 support is not a valid release candidate.
+- Packages both `lib/librkllmrt.so` and `share/licenses/rkllm/LICENSE`.
 - Exports the single release package to `build_output/rk3576/` without starting
   application services.
 - Also builds the aarch64 `build_rknn/cosmo-tests`,

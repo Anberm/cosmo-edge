@@ -155,7 +155,7 @@ Web 控制台的本地升级流程如下：
 它会安装应用、替换并启用`cosmo.service`，然后由重启启动服务：
 
 ```bash
-scp build_output/public-runtime/<安装包>.tar.gz root@<设备IP>:/tmp/
+scp build_output/public-runtime/<chip>/<安装包>.tar.gz root@<设备IP>:/tmp/
 ssh root@<设备IP>
 cd /tmp
 install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)

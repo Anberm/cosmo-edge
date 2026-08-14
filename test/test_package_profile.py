@@ -161,13 +161,14 @@ class PackageProfileTests(unittest.TestCase):
         cmake = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
 
         self.assertIn(
-            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
             entrypoint,
         )
         self.assertIn("package_artifacts=(build/packages/*.tar.gz)", entrypoint)
         self.assertIn(
-            'cp -f -- "${package_artifacts[0]}" "${output_dir}/"', entrypoint
+            'printf \'%s\\n\' "${chip}" > "${output_dir}/TARGET_CHIP"', entrypoint
         )
+        self.assertIn('sha256sum -- "${package_name}" > SHA256SUMS', entrypoint)
         self.assertIn('set(CPACK_OUTPUT_FILE_PREFIX', cmake)
         self.assertIn('scripts/package_md5_rename.sh', cmake)
 
@@ -180,8 +181,8 @@ class PackageProfileTests(unittest.TestCase):
             encoding="utf-8"
         )
         source = source.replace(
-            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
-            'output_dir="$PWD/export/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
+            'output_dir="$PWD/export/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
         )
 
         with tempfile.TemporaryDirectory(dir=REPOSITORY) as temporary_directory:
@@ -223,9 +224,15 @@ class PackageProfileTests(unittest.TestCase):
             )
             exported = (
                 workspace
-                / "export/public-runtime/cosmo-V1.1.0-deadbeef.tar.gz"
+                / "export/public-runtime/bm1688/cosmo-V1.1.0-deadbeef.tar.gz"
             )
             self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+            self.assertEqual(
+                (workspace / "export/public-runtime/bm1688/TARGET_CHIP").read_text(
+                    encoding="utf-8"
+                ),
+                "bm1688\n",
+            )
 
             explicit_bm1688_result = run("--chip", "bm1688")
             self.assertEqual(
@@ -242,7 +249,17 @@ class PackageProfileTests(unittest.TestCase):
                 (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
                 "-T -c cv186x\n",
             )
-            self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+            cv186x_exported = (
+                workspace
+                / "export/public-runtime/cv186x/cosmo-V1.1.0-deadbeef.tar.gz"
+            )
+            self.assertEqual(cv186x_exported.read_text(encoding="utf-8"), "package")
+            self.assertEqual(
+                (workspace / "export/public-runtime/cv186x/TARGET_CHIP").read_text(
+                    encoding="utf-8"
+                ),
+                "cv186x\n",
+            )
 
             invalid_result = run("--chip", "unsupported-chip")
             self.assertNotEqual(invalid_result.returncode, 0)
@@ -305,6 +322,23 @@ class PackageProfileTests(unittest.TestCase):
             conflict_result = run("-c", "bm1688", "-m", "resource")
             self.assertNotEqual(conflict_result.returncode, 0)
             self.assertIn("-c and -m cannot be used together", conflict_result.stderr)
+
+    def test_rk3576_release_builder_requires_pinned_rkllm(self) -> None:
+        compose = (REPOSITORY / "docker-compose.rk3576.yml").read_text(
+            encoding="utf-8"
+        )
+        dockerfile = (REPOSITORY / "Dockerfile.rk3576").read_text(encoding="utf-8")
+        build = (REPOSITORY / "scripts/build_rknn.sh").read_text(encoding="utf-8")
+        cmake = (REPOSITORY / "cmake/rkllm.cmake").read_text(encoding="utf-8")
+
+        self.assertIn("dockerfile: Dockerfile.rk3576", compose)
+        self.assertIn("RKLLM_ROOT: /opt/rkllm", compose)
+        self.assertIn('COSMO_RKLLM_REQUIRED: "ON"', compose)
+        self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
+        self.assertIn("install_rkllm_sdk.py", dockerfile)
+        self.assertIn('lib/librkllmrt.so LICENSE', build)
+        self.assertIn('-DCOSMO_RKLLM_REQUIRED="${RKLLM_REQUIRED}"', build)
+        self.assertIn('set(RKLLM_RUNTIME_LICENSE "${COSMO_RKLLM_ROOT}/LICENSE")', cmake)
 
 
 if __name__ == "__main__":

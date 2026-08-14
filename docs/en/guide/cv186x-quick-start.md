@@ -16,19 +16,31 @@ prepared. CosmoEdge 1.1 uses BMRT and `.nn` artifacts validated on CV186X. The t
 models used by this release benchmark are byte-identical to the BM1688 workload artifacts; other
 models still require contract-by-contract compatibility validation.
 
+Verify hardware identity before installation; an IP address, old model directory,
+or asset label is not chip evidence:
+
+```bash
+tr -d '\0' </proc/device-tree/model; echo
+```
+
+If the result says `BM1688`, is empty, or conflicts with vendor CV186X evidence,
+stop CV186X qualification and correct the asset/firmware identity first. A running
+service alone does not qualify CV186X inference.
+
 ## 1. Obtain and verify the package
 
 You can build the CV186X package from source:
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
-ls -lh build_output/public-runtime/
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+cat build_output/public-runtime/cv186x/TARGET_CHIP
+(cd build_output/public-runtime/cv186x && sha256sum -c SHA256SUMS)
 ```
 
-The chip-model argument only selects the CV186X resource directory. It does not
-change the output location or package naming: the artifact remains under
-`build_output/public-runtime/` and uses the
-`cosmo-V<version>-<md5>.tar.gz` format.
+The chip-model argument selects the CV186X resource directory and isolates the
+output under `build_output/public-runtime/cv186x/`. The archive still uses the
+`cosmo-V<version>-<md5>.tar.gz` format and must be qualified together with the
+adjacent `TARGET_CHIP` and `SHA256SUMS` files.
 
 Alternatively, download a CosmoEdge 1.1 Sophon Open package explicitly marked
 for CV186X and its published SHA-256 from the

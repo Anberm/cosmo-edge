@@ -129,15 +129,15 @@ For the Sophon path, use:
 
 ```bash
 # Defaults to bm1688; append --chip cv186x to select CV186X
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
-ls -lh build_output/public-runtime/
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+ls -lh build_output/public-runtime/bm1688/
 ```
 
 Sophon output is not written directly to `build_output/`. It is isolated by
 `COSMO_MODEL_GUARD_BUILD_PROFILE`:
 
-- SOURCE build (internal profile `public-runtime`): `build_output/public-runtime/`;
-- controlled production build: `build_output/production-release/`.
+- SOURCE build (internal profile `public-runtime`): `build_output/public-runtime/<chip>/`;
+- controlled production build: `build_output/production-release/<chip>/`.
 
 Both profiles produce `cosmo-V<version>-<32-char-md5>.tar.gz`. Protected models
 still require a device-bound certificate provisioned through the authorized

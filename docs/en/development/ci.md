@@ -189,7 +189,7 @@ Windows PowerShell:
 
 The Sophon release package build depends on the cross-compilation environment and the Sophon SDK.
 The chip model only selects the internal resource directory. Output remains under
-`build_output/<profile>/`, with the existing `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` name format.
+`build_output/<profile>/<chip>/`, with the existing `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` name format.
 
 ## RK3576 Nightly Cross-Build
 
@@ -198,24 +198,25 @@ every day at 02:12 Beijing Time (18:12 UTC on the previous day) and also support
 manual dispatch. A scheduled workflow becomes active only after it reaches the
 GitHub default branch.
 
-CI uses the public, digest-pinned builder image without a registry login:
+CI extends the public digest-pinned base with pinned RKLLM v1.3.0 files; no
+registry login is required:
 
 ```bash
-docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
+docker compose -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
 docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 ```
 
 The workflow applies these release-candidate checks:
 
-1. Validates the Compose configuration and pulls the public image.
+1. Validates Compose and builds the RKLLM-enabled image from the pinned base.
 2. Cross-compiles, builds validation programs, and packages from a clean
    `build_rknn/` directory.
 3. Requires exactly one regular package file under `build_output/rk3576/` and
    records its SHA-256.
 4. Confirms that `cosmo-tests`, `cosmo-rknn-backend-smoke`, and
    `cosmo-rknn-fastpath-qualify` are ARM aarch64 programs.
-5. Audits package contents with the `public-runtime` profile inside the build
-   container.
+5. Requires `librkllmrt.so` and its license, then audits package contents with
+   the `public-runtime` profile inside the build container.
 6. Uploads the package, checksum, and three validation programs for 7 days.
 
 The workflow has only `contents: read` permission and cancels an older

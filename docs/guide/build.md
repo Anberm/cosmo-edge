@@ -15,6 +15,9 @@ next:
 
 > **💡 Docker Compose 版本提示**
 > 本文档统一使用最新的 Docker Compose V2 命令格式 (`docker compose`)。如果你使用的是旧版 Docker 环境（如自带独立的 V1 插件），请将文中的 `docker compose` 替换为带横杠的 `docker-compose`。
+> Linux 上也可以直接使用 `./scripts/docker-compose.sh`；它会检测 Compose V2/V1，
+> 并在当前账号无权访问 Docker daemon 时明确请求一次 `sudo`。若不希望使用 sudo，
+> 请先按 Docker 官方方式授予当前账号 daemon 访问权限并重新登录。
 
 ## 构建路径总览
 
@@ -22,7 +25,7 @@ next:
 | --- | --- | --- | --- |
 | x86 Docker 开发运行环境 | 首次体验、开发评估、生成 x86 发布包 | 是 | `build_output/` |
 | macOS Docker Preview | Apple Silicon 上体验单路 x86 工作流 | 是 | `build_output/macos-x86/` |
-| Sophon SOURCE 构建 | 交叉编译可安装的源码构建包 | 否 | `build_output/public-runtime/` |
+| Sophon SOURCE 构建 | 交叉编译可安装的源码构建包 | 否 | `build_output/public-runtime/<chip>/` |
 | RK3576 稳定版构建 | 使用 RKNN、MPP 和 RGA 交叉编译发布包与测试程序 | 否 | `build_output/rk3576/` |
 | CPU 测试构建 | 构建 `cosmo-tests` | 否 | `build_cpu/cosmo-tests` |
 
@@ -86,11 +89,11 @@ Linux / Bash：
 
 ```bash
 # 省略型号时默认 bm1688
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
 
 # 显式选择型号
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell：
@@ -108,8 +111,11 @@ Windows PowerShell：
 
 | 配置 | 用途 | 输出目录 | 部署状态 |
 | --- | --- | --- | --- |
-| Open（内部配置 `public-runtime`，默认） | 使用仓库内运行时 SDK 完成公开的 aarch64 编译、链接、打包和测试验证 | `build_output/public-runtime/` | 明文模型，无需设备授权 |
-| Protected（内部配置 `production-release`） | 在受控环境中使用完整正式 SDK 和设备授权工具构建 | `build_output/production-release/` | 加密模型，需要设备授权 |
+| Open（内部配置 `public-runtime`，默认） | 使用仓库内运行时 SDK 完成公开的 aarch64 编译、链接、打包和测试验证 | `build_output/public-runtime/<chip>/` | 明文模型，无需设备授权 |
+| Protected（内部配置 `production-release`） | 在受控环境中使用完整正式 SDK 和设备授权工具构建 | `build_output/production-release/<chip>/` | 加密模型，需要设备授权 |
+
+每个芯片目录同时包含 `TARGET_CHIP` 和 `SHA256SUMS`。即使两个芯片当前选择的公开
+模型字节一致，也必须从各自目录取包，不能用相同包名推断芯片兼容性。
 
 两种配置都生成 `cosmo-V<版本号>-<32位md5>.tar.gz`。同一格式既可以在 main
 分支部署的管理页面升级，也可以在后续任意版本继续升级。应用包不签名；两种配置
@@ -121,7 +127,7 @@ Windows PowerShell：
 Sophon Linux设备并创建、启用`cosmo.service`。将构建输出中的唯一包名代入占位符：
 
 ```bash
-scp build_output/public-runtime/<安装包>.tar.gz root@<设备IP>:/tmp/
+scp build_output/public-runtime/<chip>/<安装包>.tar.gz root@<设备IP>:/tmp/
 ssh root@<设备IP>
 cd /tmp
 install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
@@ -166,17 +172,19 @@ Guard 设备证书和模型加密秘密仍属于受控输入，不得写入公�
 - `scripts/build_sophon_package.sh` 把芯片型号传给 `scripts/build.sh -T -c <型号>`；
   `build.sh` 再选择对应资源目录，用户无需传入模型路径。
 - 只导出构建产物，不启动服务。
-- 芯片型号不会改变 CPack 或 MD5 重命名逻辑；各配置的输出仍隔离到
-  `build_output/<profile>/`，包名仍为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
+- 芯片型号不会改变 CPack 或 MD5 重命名逻辑；输出隔离到
+  `build_output/<profile>/<chip>/`，包名仍为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`，
+  旁边的 `TARGET_CHIP` 与 `SHA256SUMS` 用于阻止同名产物混用。
 
 ## RK3576 构建产物
 
-RK3576 公开构建入口使用已固定 digest 的 GHCR 镜像，镜像包含 aarch64 工具链、
-RKNN Runtime、MPP 和 RGA 开发文件，无需登录即可拉取：
+RK3576 公开构建入口以固定 digest 的 GHCR 基础镜像为起点，加入固定到官方 commit 的
+RKLLM Runtime v1.3.0。最终镜像包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
+MPP 和 RGA 开发文件：
 
 ```bash
-docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml build --pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
 
@@ -184,6 +192,8 @@ sha256sum build_output/rk3576/cosmo-*.tar.gz
 
 - 在 `linux/amd64` 构建容器中执行 aarch64 交叉编译。
 - 构建前清理 `build_rknn/`，再调用 `scripts/build_rknn.sh -T`，避免复用部分缓存。
+- RKLLM 头文件、运行库或许可证缺少时立即失败，不再静默生成缺少 Qwen3.5 的包。
+- 发布包必须包含 `lib/librkllmrt.so` 和 `share/licenses/rkllm/LICENSE`。
 - 将唯一发布包导出到 `build_output/rk3576/`，不启动应用服务。
 - 同时生成 `build_rknn/cosmo-tests`、`cosmo-rknn-backend-smoke` 和
   `cosmo-rknn-fastpath-qualify` 三个 aarch64 验证程序。

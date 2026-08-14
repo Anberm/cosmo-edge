@@ -113,10 +113,16 @@ if (fs.existsSync(checksumPath)) {
   for (const line of fs.readFileSync(checksumPath, 'utf8').split(/\r?\n/).filter(Boolean)) {
     const match = line.match(/^([0-9a-f]{64})  (.+)$/);
     if (!match) { errors.push(`invalid SHA256SUMS line: ${line}`); continue; }
-    const file = path.join(root, ...match[2].split('/'));
-    if (!fs.existsSync(file)) { errors.push(`checksum target missing: ${match[2]}`); continue; }
+    const checksumTarget = match[2].replaceAll('\\', '/');
+    const targetParts = checksumTarget.split('/');
+    if (path.isAbsolute(checksumTarget) || targetParts.some((part) => part === '..' || part === '')) {
+      errors.push(`unsafe checksum target: ${match[2]}`);
+      continue;
+    }
+    const file = path.join(root, ...targetParts);
+    if (!fs.existsSync(file)) { errors.push(`checksum target missing: ${checksumTarget}`); continue; }
     const actual = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-    if (actual !== match[1]) errors.push(`checksum mismatch: ${match[2]}`);
+    if (actual !== match[1]) errors.push(`checksum mismatch: ${checksumTarget}`);
   }
 }
 
