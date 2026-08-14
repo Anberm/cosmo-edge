@@ -157,14 +157,14 @@ class PackageProfileTests(unittest.TestCase):
 
     def test_container_builds_bound_and_cache_npm_connections(self) -> None:
         npmrc = (REPOSITORY / "src/web/.npmrc").read_text(encoding="utf-8")
-        self.assertIn("registry=https://registry.npmjs.org/", npmrc)
-        self.assertIn("maxsockets=4", npmrc)
+        self.assertIn("registry=https://registry.npmmirror.com/", npmrc)
+        self.assertIn("maxsockets=1", npmrc)
         self.assertIn("prefer-offline=true", npmrc)
         self.assertIn("update-notifier=false", npmrc)
 
         for compose_name in ("docker-compose.sophon.yml", "docker-compose.rk3576.yml"):
             compose = (REPOSITORY / compose_name).read_text(encoding="utf-8")
-            self.assertIn('NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-4}"', compose)
+            self.assertIn('NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-1}"', compose)
             self.assertIn("cosmo-npm-cache:/root/.npm", compose)
             self.assertIn('NPM_CONFIG_PREFER_OFFLINE: "${NPM_CONFIG_PREFER_OFFLINE:-true}"', compose)
 
