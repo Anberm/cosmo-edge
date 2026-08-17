@@ -82,6 +82,7 @@ export default {
     batchUpdate: '批量更新',
     editModel: '修改模型',
     configure: '配置',
+    deleteAndContinue: '删除并继续',
     resetOnboarding: '重置引导'
   },
   short: {
@@ -1276,6 +1277,10 @@ export default {
     upgradeTip1: '1.升级期间设备会自动重启，请保持供电和网络连接。',
     upgradeTip2: '2.仅支持文件名为cosmo-V版本号-md5.tar.gz的安装包。',
     upgradeConfirm: '将使用 {fileName} 升级设备。设备会自动重启，管理页面将暂时断开，是否继续？',
+    upgradeSpaceCheckFailed: '无法检查升级所需的数据盘空间，请稍后重试',
+    upgradeSpaceCleanupConfirm: '数据盘空间不足：当前可用 {available}，升级至少需要 {required}。继续操作将永久删除事件记录目录中的图片和视频（预计可释放 {reclaimable}），是否删除并继续升级？',
+    upgradeEventCleanupFailed: '事件图片和视频清理失败，升级已停止',
+    upgradeSpaceStillInsufficient: '清理后空间仍不足：当前可用 {available}，升级至少需要 {required}',
     restoreFactory: '恢复出厂设置',
     downloadDeviceLog: '下载设备日志',
     invalidUpgradeFile: '只能上传cosmo-V版本号-md5.tar.gz格式的文件!',

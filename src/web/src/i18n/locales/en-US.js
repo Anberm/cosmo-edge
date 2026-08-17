@@ -82,6 +82,7 @@ export default {
     batchUpdate: 'Batch Update',
     editModel: 'Edit Model',
     configure: 'Config',
+    deleteAndContinue: 'Delete and Continue',
     resetOnboarding: 'Reset Guide'
   },
   short: {
@@ -1276,6 +1277,10 @@ export default {
     upgradeTip1: '1. The device restarts during upgrade; keep power and network connected.',
     upgradeTip2: '2. The package name must match cosmo-Vversion-md5.tar.gz.',
     upgradeConfirm: 'Upgrade the device with {fileName}? The device will restart and this page will disconnect temporarily.',
+    upgradeSpaceCheckFailed: 'Unable to check data-volume space required for the upgrade. Try again later.',
+    upgradeSpaceCleanupConfirm: 'Insufficient data-volume space: {available} available and at least {required} required. Continuing permanently deletes images and videos under the event-record directory (estimated reclaimable space: {reclaimable}). Delete them and continue the upgrade?',
+    upgradeEventCleanupFailed: 'Failed to clear event images and videos. The upgrade was stopped.',
+    upgradeSpaceStillInsufficient: 'Space is still insufficient after cleanup: {available} available and at least {required} required.',
     restoreFactory: 'Restore Factory Settings',
     downloadDeviceLog: 'Download Device Log',
     invalidUpgradeFile: 'Only cosmo-Vversion-md5.tar.gz files are supported!',

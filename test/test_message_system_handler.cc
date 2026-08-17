@@ -111,6 +111,29 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     CHECK(ret.resData.itemList.front().usedSize == "1.37 GiB");
 }
 
+TEST_CASE("SystemHandler: CheckUpgradeSpace exposes cleanup decision facts", "[system-handler][upgrade]") {
+    MockServiceRegistry mocks;
+    auto handler = MakeHandler(mocks);
+
+    REQUIRE_CALL(mocks.systemOpSvc, CheckUpgradeSpace(2048, true, _))
+        .SIDE_EFFECT(_3 = service::UpgradeSpaceStatus{false, 5120, 4096, 2048, 1024, 3})
+        .RETURN(util::ErrorEnum::Success);
+
+    System::MsgCheckUpgradeSpaceRecv data{};
+    data.packageSizeBytes  = 2048;
+    data.cleanupEventMedia = true;
+    std::error_condition errc;
+    const auto result = handler.Handle(std::move(data), errc);
+
+    CHECK(!errc);
+    CHECK_FALSE(result.resData.sufficient);
+    CHECK(result.resData.requiredBytes == 5120);
+    CHECK(result.resData.availableBytes == 4096);
+    CHECK(result.resData.eventMediaBytes == 2048);
+    CHECK(result.resData.deletedMediaBytes == 1024);
+    CHECK(result.resData.deletedMediaFiles == 3);
+}
+
 TEST_CASE("SystemHandler: QueryPictureQuality", "[system-handler]") {
     MockServiceRegistry mocks;
     auto handler = MakeHandler(mocks);

@@ -67,6 +67,46 @@ void from_json(const nlohmann::json& j, MsgUpgradeRecv& v) {
     JSON_OPT(j, v, fileUrl);
 }
 
+void to_json(nlohmann::json& j, const MsgCheckUpgradeSpaceRecv& v) {
+    to_json(j, static_cast<const MsgRecvHead&>(v));
+    j["packageSizeBytes"]  = v.packageSizeBytes;
+    j["cleanupEventMedia"] = v.cleanupEventMedia;
+}
+
+void from_json(const nlohmann::json& j, MsgCheckUpgradeSpaceRecv& v) {
+    from_json(j, static_cast<MsgRecvHead&>(v));
+    JSON_OPT(j, v, packageSizeBytes);
+    JSON_OPT(j, v, cleanupEventMedia);
+}
+
+void to_json(nlohmann::json& j, const MsgCheckUpgradeSpaceSend& v) {
+    to_json(j, static_cast<const MsgSendHead&>(v));
+    j["resData"] = v.resData;
+}
+
+void from_json(const nlohmann::json& j, MsgCheckUpgradeSpaceSend& v) {
+    from_json(j, static_cast<MsgSendHead&>(v));
+    JSON_OPT(j, v, resData);
+}
+
+void to_json(nlohmann::json& j, const MsgCheckUpgradeSpaceSend::ResData& v) {
+    j = nlohmann::json{{"sufficient", v.sufficient},
+                       {"requiredBytes", v.requiredBytes},
+                       {"availableBytes", v.availableBytes},
+                       {"eventMediaBytes", v.eventMediaBytes},
+                       {"deletedMediaBytes", v.deletedMediaBytes},
+                       {"deletedMediaFiles", v.deletedMediaFiles}};
+}
+
+void from_json(const nlohmann::json& j, MsgCheckUpgradeSpaceSend::ResData& v) {
+    JSON_OPT(j, v, sufficient);
+    JSON_OPT(j, v, requiredBytes);
+    JSON_OPT(j, v, availableBytes);
+    JSON_OPT(j, v, eventMediaBytes);
+    JSON_OPT(j, v, deletedMediaBytes);
+    JSON_OPT(j, v, deletedMediaFiles);
+}
+
 void to_json(nlohmann::json& j, const MsgQueryModelAuthorizationSend& v) {
     to_json(j, static_cast<const MsgSendHead&>(v));
     j["resData"] = v.resData;

@@ -77,6 +77,8 @@ public:
     System::MsgUpgradeSend Handle(System::MsgUpgradeRecv&& data, std::error_condition& errc);  //
     System::MsgUpgradeSend Handle(System::MsgUpgradeRecv&& data, const RequestDispatchContext& context,
                                   std::error_condition& errc);
+    System::MsgCheckUpgradeSpaceSend Handle(System::MsgCheckUpgradeSpaceRecv&& data,
+                                            std::error_condition& errc);
     System::MsgQueryModelAuthorizationSend Handle(System::MsgQueryModelAuthorizationRecv&& data,
                                                   std::error_condition& errc);
     System::MsgDownloadModelAuthorizationRequestSend Handle(

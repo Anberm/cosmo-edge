@@ -130,6 +130,14 @@ const system = {
       data,
     })
   },
+  // 升级前检查 /data 空间；cleanupEventMedia=true 时清理事件图片和视频后复检
+  boxCheckUpgradeSpace(data) {
+    return request({
+      url: '/gtw/cwai/System/CheckUpgradeSpace',
+      method: 'post',
+      data,
+    })
+  },
   // 检测主机状态
   boxCheckDeviceStatus(data) {
     return request({

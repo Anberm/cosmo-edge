@@ -61,7 +61,7 @@ import { ref, watch, onBeforeUnmount, onMounted, getCurrentInstance } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import RunningDetail from './components/RunningDetail.vue'
 import { t } from '@/i18n'
-import { normalizeApiError } from '@/utils/apiError'
+import { formatBytes, normalizeApiError } from '@/utils/apiError'
 import { isSupportedUpgradePackageName } from '@/utils/upgradePackage'
 import {
   uploadFileInChunks,
@@ -131,6 +131,14 @@ onMounted(refreshAuthorization)
 
 const extractDeviceStatus = response =>
   response?.resData?.resData || response?.resData || {}
+
+const checkUpgradeSpace = async cleanupEventMedia => {
+  const response = await $API.boxCheckUpgradeSpace({
+    packageSizeBytes: uploadFile.value.size,
+    cleanupEventMedia
+  })
+  return extractDeviceStatus(response)
+}
 
 const delay = milliseconds =>
   new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -225,6 +233,48 @@ const handleUpgrade = async () => {
     )
   } catch (_) {
     return
+  }
+
+  let spaceStatus
+  try {
+    spaceStatus = await checkUpgradeSpace(false)
+  } catch (_) {
+    ElMessage.error(t('systemManage.upgradeSpaceCheckFailed'))
+    return
+  }
+
+  if (!spaceStatus.sufficient) {
+    try {
+      await ElMessageBox.confirm(
+        t('systemManage.upgradeSpaceCleanupConfirm', {
+          available: formatBytes(spaceStatus.availableBytes),
+          required: formatBytes(spaceStatus.requiredBytes),
+          reclaimable: formatBytes(spaceStatus.eventMediaBytes)
+        }),
+        t('common.notice'),
+        {
+          confirmButtonText: t('action.deleteAndContinue'),
+          cancelButtonText: t('action.cancel'),
+          type: 'warning'
+        }
+      )
+    } catch (_) {
+      return
+    }
+
+    try {
+      spaceStatus = await checkUpgradeSpace(true)
+    } catch (_) {
+      ElMessage.error(t('systemManage.upgradeEventCleanupFailed'))
+      return
+    }
+    if (!spaceStatus.sufficient) {
+      ElMessage.error(t('systemManage.upgradeSpaceStillInsufficient', {
+        available: formatBytes(spaceStatus.availableBytes),
+        required: formatBytes(spaceStatus.requiredBytes)
+      }))
+      return
+    }
   }
 
   clearCheckTimer()

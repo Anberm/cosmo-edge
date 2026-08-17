@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <system_error>
 
 #include "util/dto/ServerMsgTypes.h"
@@ -61,6 +62,30 @@ void from_json(const nlohmann::json& j, MsgUpgradeRecv& v);
 
 //
 struct MsgUpgradeSend : public MsgSendHead {};
+
+struct MsgCheckUpgradeSpaceRecv : public MsgRecvHead {
+    std::uint64_t packageSizeBytes{0};
+    bool cleanupEventMedia{false};
+};
+
+void to_json(nlohmann::json& j, const MsgCheckUpgradeSpaceRecv& v);
+void from_json(const nlohmann::json& j, MsgCheckUpgradeSpaceRecv& v);
+
+struct MsgCheckUpgradeSpaceSend : public MsgSendHead {
+    struct ResData {
+        bool sufficient{false};
+        std::uint64_t requiredBytes{0};
+        std::uint64_t availableBytes{0};
+        std::uint64_t eventMediaBytes{0};
+        std::uint64_t deletedMediaBytes{0};
+        std::uint64_t deletedMediaFiles{0};
+        friend void to_json(nlohmann::json& j, const ResData& v);
+        friend void from_json(const nlohmann::json& j, ResData& v);
+    } resData;
+};
+
+void to_json(nlohmann::json& j, const MsgCheckUpgradeSpaceSend& v);
+void from_json(const nlohmann::json& j, MsgCheckUpgradeSpaceSend& v);
 
 struct MsgQueryModelAuthorizationRecv : public MsgRecvHead {};
 struct MsgQueryModelAuthorizationSend : public MsgSendHead {

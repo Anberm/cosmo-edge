@@ -502,6 +502,20 @@ System::MsgUpgradeSend MessageSystemHandler::Handle(System::MsgUpgradeRecv&& dat
     return retData;
 }
 
+System::MsgCheckUpgradeSpaceSend MessageSystemHandler::Handle(System::MsgCheckUpgradeSpaceRecv&& data,
+                                                              std::error_condition& errc) {
+    System::MsgCheckUpgradeSpaceSend result{};
+    service::UpgradeSpaceStatus status;
+    errc = system_op_.CheckUpgradeSpace(data.packageSizeBytes, data.cleanupEventMedia, status);
+    result.resData.sufficient        = status.sufficient;
+    result.resData.requiredBytes     = status.required_bytes;
+    result.resData.availableBytes    = status.available_bytes;
+    result.resData.eventMediaBytes   = status.event_media_bytes;
+    result.resData.deletedMediaBytes = status.deleted_media_bytes;
+    result.resData.deletedMediaFiles = status.deleted_media_files;
+    return result;
+}
+
 System::MsgQueryModelAuthorizationSend MessageSystemHandler::Handle(
     System::MsgQueryModelAuthorizationRecv&& /*data*/, std::error_condition& errc) {
     System::MsgQueryModelAuthorizationSend result{};
