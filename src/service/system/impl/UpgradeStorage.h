@@ -19,8 +19,7 @@ struct EventMediaCleanupResult {
 [[nodiscard]] EventMediaCleanupResult DeleteEventMediaFiles(const std::filesystem::path& event_root);
 [[nodiscard]] util::ErrorEnum CheckUpgradeStorage(const std::filesystem::path& data_root,
                                                   const std::filesystem::path& event_root,
-                                                  std::uint64_t package_size_bytes,
-                                                  bool cleanup_event_media,
+                                                  std::uint64_t package_size_bytes, bool cleanup_event_media,
                                                   UpgradeSpaceStatus& status);
 
 }  // namespace cosmo::service

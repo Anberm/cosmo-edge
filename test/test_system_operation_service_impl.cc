@@ -145,11 +145,10 @@ TEST_CASE("Upgrade storage requires two and a half package sizes", "[system][upg
           std::numeric_limits<std::uint64_t>::max());
 }
 
-TEST_CASE("Upgrade storage cleanup removes only event images and videos",
-          "[system][upgrade][storage]") {
-    const auto root = fs::temp_directory_path() / "cosmo_upgrade_storage_cleanup_test";
+TEST_CASE("Upgrade storage cleanup removes only event images and videos", "[system][upgrade][storage]") {
+    const auto root       = fs::temp_directory_path() / "cosmo_upgrade_storage_cleanup_test";
     const auto event_root = root / "event";
-    const auto outside = root / "outside.jpg";
+    const auto outside    = root / "outside.jpg";
     std::error_code ec;
     fs::remove_all(root, ec);
     fs::create_directories(event_root / "2026/08/17");
@@ -175,8 +174,7 @@ TEST_CASE("Upgrade storage cleanup removes only event images and videos",
     fs::remove_all(root, ec);
 }
 
-TEST_CASE("Upgrade storage rechecks available space after confirmed cleanup",
-          "[system][upgrade][storage]") {
+TEST_CASE("Upgrade storage rechecks available space after confirmed cleanup", "[system][upgrade][storage]") {
     const auto root       = fs::temp_directory_path() / "cosmo_upgrade_storage_recheck_test";
     const auto event_root = root / "event";
     std::error_code ec;

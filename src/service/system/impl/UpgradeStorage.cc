@@ -24,8 +24,7 @@ namespace {
         return rhs > max_value - lhs ? max_value : lhs + rhs;
     }
 
-    util::ErrorEnum CollectEventMediaFiles(const fs::path& event_root,
-                                           std::vector<EventMediaFile>& files,
+    util::ErrorEnum CollectEventMediaFiles(const fs::path& event_root, std::vector<EventMediaFile>& files,
                                            std::uint64_t& total_bytes) {
         files.clear();
         total_bytes = 0;
@@ -76,20 +75,19 @@ std::uint64_t RequiredUpgradeSpaceBytes(std::uint64_t package_size_bytes) {
 
 bool IsEventMediaFile(const fs::path& path) {
     static constexpr std::array<const char*, 16> kMediaExtensions{
-        ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".mp4", ".avi",
-        ".mov", ".mkv",  ".webm", ".flv", ".ts",  ".m4v", ".h264", ".h265"};
+        ".jpg", ".jpeg", ".png",  ".bmp", ".webp", ".gif", ".mp4",  ".avi",
+        ".mov", ".mkv",  ".webm", ".flv", ".ts",   ".m4v", ".h264", ".h265"};
     auto extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return std::find(kMediaExtensions.begin(), kMediaExtensions.end(), extension) !=
-           kMediaExtensions.end();
+    return std::find(kMediaExtensions.begin(), kMediaExtensions.end(), extension) != kMediaExtensions.end();
 }
 
 EventMediaCleanupResult DeleteEventMediaFiles(const fs::path& event_root) {
     EventMediaCleanupResult result;
     std::vector<EventMediaFile> files;
     std::uint64_t total_bytes = 0;
-    result.error = CollectEventMediaFiles(event_root, files, total_bytes);
+    result.error              = CollectEventMediaFiles(event_root, files, total_bytes);
     if (result.error != util::ErrorEnum::Success) {
         return result;
     }
@@ -123,7 +121,7 @@ util::ErrorEnum CheckUpgradeStorage(const fs::path& data_root, const fs::path& e
         return util::ErrorEnum::SysErr;
     }
     status.available_bytes = space.available;
-    status.sufficient = status.available_bytes >= status.required_bytes;
+    status.sufficient      = status.available_bytes >= status.required_bytes;
     if (status.sufficient) {
         return util::ErrorEnum::Success;
     }
@@ -133,7 +131,7 @@ util::ErrorEnum CheckUpgradeStorage(const fs::path& data_root, const fs::path& e
         return CollectEventMediaFiles(event_root, media_files, status.event_media_bytes);
     }
 
-    const auto cleanup = DeleteEventMediaFiles(event_root);
+    const auto cleanup         = DeleteEventMediaFiles(event_root);
     status.event_media_bytes   = cleanup.deleted_bytes;
     status.deleted_media_bytes = cleanup.deleted_bytes;
     status.deleted_media_files = cleanup.deleted_files;
@@ -146,7 +144,7 @@ util::ErrorEnum CheckUpgradeStorage(const fs::path& data_root, const fs::path& e
         return util::ErrorEnum::SysErr;
     }
     status.available_bytes = space.available;
-    status.sufficient = status.available_bytes >= status.required_bytes;
+    status.sufficient      = status.available_bytes >= status.required_bytes;
     return util::ErrorEnum::Success;
 }
 

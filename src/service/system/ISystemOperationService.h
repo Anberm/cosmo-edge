@@ -43,8 +43,7 @@ public:
     /// Check the data-volume budget required for an upgrade package. When
     /// explicitly confirmed, event images and videos may be removed before
     /// the budget is inspected again.
-    virtual cosmo::util::ErrorEnum CheckUpgradeSpace(std::uint64_t packageSizeBytes,
-                                                     bool cleanupEventMedia,
+    virtual cosmo::util::ErrorEnum CheckUpgradeSpace(std::uint64_t packageSizeBytes, bool cleanupEventMedia,
                                                      UpgradeSpaceStatus& status) = 0;
 
     // ── Debug Tools ──
