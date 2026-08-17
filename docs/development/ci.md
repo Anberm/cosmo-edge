@@ -23,7 +23,7 @@ next:
 | C++ 静态分析 | `scripts/static_analysis.sh --cppcheck`、`scripts/static_analysis.sh --clang-tidy` | 定期 / 手动 / self-hosted |
 | CPU 测试构建 | `scripts/build_cpu_test.sh`、`build_cpu/cosmo-tests` | Pull request / 手动 |
 | x86 Docker | `docker compose -f docker-compose.x86.yml up -d --build` (Windows 下为 `docker-compose.x86.windows.yml`) | 手动 / release 前 |
-| Sophon 发布包 | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <型号>]`，支持 `bm1688` / `cv186x`（默认 `bm1688`） | 手动 / self-hosted |
+| Sophon 发布包 | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <型号>]`，支持 `bm1688` / `cv186x`（默认 `bm1688`） | 手动 / self-hosted |
 | RK3576 发布包 | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | 每日 02:12（北京时间）/ 手动 |
 
 ## 文档站检查
@@ -174,8 +174,8 @@ Sophon/aarch64 发布包构建入口：
 
 ```bash
 # 省略型号时默认 bm1688
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell：
@@ -186,8 +186,9 @@ Windows PowerShell：
 .\scripts\build_sophon_package.ps1 -Chip cv186x
 ```
 
-Sophon 发布包构建依赖交叉编译环境和 Sophon SDK。型号只决定内部资源目录；输出位置不变，
-`build_output/<profile>/<chip>/` 中导出的包名仍为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
+Sophon 发布包构建依赖交叉编译环境和 Sophon SDK。型号决定内部资源目录和芯片隔离的
+输出目录；`build_output/<profile>/<chip>/` 同时包含 `TARGET_CHIP`、`SHA256SUMS` 和
+`cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
 
 ## RK3576 夜间交叉编译
 

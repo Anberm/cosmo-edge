@@ -125,35 +125,32 @@ git check-attr text eol -- 3rd/mp4v2-2.0.0/configure 3rd/openssl-3.5.3/config 3r
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
 
-Sophon 路径使用：
+Sophon 的完整构建入口、profile 和输出约定以[构建指南](./build.md#sophon-构建产物)为准。
+例如，默认 BM1688 Open 构建完成后可直接检查芯片目录：
 
 ```bash
-# 省略型号时默认 bm1688；CV186X 在命令末尾添加 --chip cv186x
 ./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
-ls -lh build_output/public-runtime/bm1688/
+cat build_output/public-runtime/bm1688/TARGET_CHIP
+(cd build_output/public-runtime/bm1688 && sha256sum -c SHA256SUMS)
 ```
 
-Sophon 产物不会直接写在 `build_output/` 根目录，而是按
-`COSMO_MODEL_GUARD_BUILD_PROFILE` 隔离：
+Sophon 产物不会直接写在 `build_output/` 根目录。每个
+`build_output/<profile>/<chip>/` 目录应包含 `TARGET_CHIP`、`SHA256SUMS` 和唯一的
+`cosmo-V<version>-<32位md5>.tar.gz`。先确认检查的是本次选择的 profile 和芯片目录。
 
-- SOURCE 构建（内部配置 `public-runtime`）：`build_output/public-runtime/<chip>/`；
-- 受控正式构建：`build_output/production-release/<chip>/`。
-
-默认文件名包含
-`-SOURCE-<edge-commit>-<build-identity>-<archive-sha256>`。它是可安装的源码
-构建，但不是正式签名发布；受保护 preset 模型仍要求通过独立的受控授权流程安装
-一张与本机绑定的设备证书，不存在逐模型 license。
-
-注意：`docker compose build` 只构建镜像，不一定执行导出产物的容器命令。
+注意：不要使用 `docker compose build` 代替上述 `run` 入口；前者不会执行导出产物的
+容器命令。
 
 ## Sophon 构建失败
 
-Sophon 构建使用自包含的 `Dockerfile.sophon`（基于 `ubuntu:22.04`），无需外部基础镜像。
+`cosmo-sophon-package` 服务直接使用 `docker-compose.sophon.yml` 中配置的预构建 GHCR
+镜像，仓库没有 `Dockerfile.sophon` 本地构建路径。镜像和构建链路的当前事实统一见
+[构建指南](./build.md#sophon-构建产物)。
 
-如果构建失败，请检查 Docker 构建日志：
+如果构建失败，请重新运行同一入口并检查末尾日志：
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
 ```
 
 检查 BM1688 构建时把末尾型号改为 `bm1688`，或省略型号。

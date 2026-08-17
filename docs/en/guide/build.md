@@ -24,7 +24,7 @@ This page documents build paths that are confirmed and available in the reposito
 | --- | --- | --- |
 | x86 Docker runtime | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | Starts the containerized development/runtime environment. |
 | macOS Docker Preview | `scripts/macos-docker-preview.sh` | Runs the one-video x86 workflow under amd64 emulation on Apple Silicon. |
-| Sophon SOURCE package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Cross-compiles the installable source-build package. |
+| Sophon SOURCE package | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Cross-compiles the installable source-build package. |
 | RK3576 release package | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | Cross-compiles the RKNN/MPP/RGA package and aarch64 validation programs. |
 | CPU test build | `scripts/build_cpu_test.sh` | Builds `cosmo-tests` for x86 CPU validation. |
 | Documentation site | `npm ci` and `npm run docs:build` | Builds this VitePress site. |
@@ -130,36 +130,28 @@ can be uploaded through the management page on a main-branch installation and
 on every later version. Application archives are not signed. The profiles differ
 only in model protection and availability of `cosmo-model-provision`.
 
-### Install a Build on a Sophon Device
+### Hand a Sophon Build to the Deployment Workflow
 
-CMake generates the packaged `scripts/install.sh` from the compatibility
-migration installer. It installs the application on a prepared Sophon Linux
-device and creates and enables `cosmo.service`. Substitute the one package name
-reported by the build:
+After the build, verify the target marker and SHA-256 in the chip-scoped output
+directory:
 
 ```bash
-scp build_output/public-runtime/<chip>/<package>.tar.gz root@<device_ip>:/tmp/
-ssh root@<device_ip>
-cd /tmp
-install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
-tar -xzf <package>.tar.gz -C "$install_dir"
-cd "$install_dir"/cosmo-V*/
-sudo ./scripts/install.sh
-sudo reboot
+chip=bm1688 # or cv186x
+cat "build_output/public-runtime/${chip}/TARGET_CHIP"
+(cd "build_output/public-runtime/${chip}" && sha256sum -c SHA256SUMS)
 ```
 
-When CosmoEdge is already running, you can instead upload the same package from
-**System Management → System Maintenance → Software Upgrade**. After either
-path, sign in again and verify **Software Version** against the package. The SSH
-installer installs the application and service; it is not an OS-image installer
-for arbitrary blank hardware.
+Use the [Deployment Guide](./deployment.md#ssh-installation-path) as the single
+reference for SSH installation, web upgrade, recovery boundaries, and
+post-reboot version acceptance. This guide does not duplicate device installation
+commands, so the build entry point and deployment workflow cannot drift apart.
 
 Maintainers use one command in a controlled environment containing the complete
 Guard SDK and provisioning tool:
 
 ```bash
 COSMO_MODEL_GUARD_BUILD_PROFILE=production-release \
-  docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+  ./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 This example builds a CV186X Protected package. Use `bm1688`, or omit the chip
@@ -179,7 +171,9 @@ be placed in the public repository.
 
 This path is from:
 
+- `scripts/docker-compose.sh` (Linux/macOS: selects Compose V2 or V1 and handles Docker access)
 - `docker-compose.sophon.yml`
+- `scripts/build_sophon_package.sh`
 - `scripts/build_sophon_package.ps1` (Windows: restores `.so` symlinks before building)
 - `scripts/build.sh`
 

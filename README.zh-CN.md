@@ -81,17 +81,19 @@ sudo docker compose -f docker-compose.x86.yml up -d --build
 git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
 # BM1688（省略芯片型号时的默认值）
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
 
 # CV186X
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
-ls -lh build_output/public-runtime/
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
-构建脚本会根据芯片型号选择对应模型资源，无需填写模型路径。芯片型号只影响资源选择，
-输出目录和安装包命名规则保持不变。
+包装脚本会自动选择当前环境可用的 Compose 实现，并仅在 Docker 权限不足时请求提权。
+构建脚本会根据芯片型号选择对应模型资源，无需填写模型路径；不同目标分别导出到
+`build_output/public-runtime/<chip>/`，目录内同时包含 `TARGET_CHIP` 和 `SHA256SUMS`。
 
-默认 Open 包包含明文模型，不需要设备授权。Protected 包使用同一种 MD5 升级格式，但包含加密预置模型和授权工具；应用升级包本身不签名。安装到设备前请阅读[构建指南](https://www.cosmowander.ai/zh/docs/guide/build)和[部署指南](https://www.cosmowander.ai/zh/docs/guide/deployment)。
+默认 Open 包包含明文模型，不需要设备授权。部署前必须核对芯片标记和校验和。
+[构建指南](https://www.cosmowander.ai/zh/docs/guide/build)是构建事实的权威入口；SSH 安装、
+页面升级、恢复与重启后验收统一参阅[部署指南](https://www.cosmowander.ai/zh/docs/guide/deployment)。
 
 ### 为 RK3576 构建
 

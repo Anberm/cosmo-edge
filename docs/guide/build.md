@@ -126,31 +126,24 @@ Compose 会在首次构建时按 `package-lock.json` 串行填充 npm 缓存，�
 分支部署的管理页面升级，也可以在后续任意版本继续升级。应用包不签名；两种配置
 只在模型是否加密以及是否包含 `cosmo-model-provision` 上有区别。
 
-### 在Sophon设备上安装构建包
+### 将 Sophon 构建包交给部署流程
 
-包内的`scripts/install.sh`由CMake从兼容迁移安装器生成，用于把应用安装到已准备好的
-Sophon Linux设备并创建、启用`cosmo.service`。将构建输出中的唯一包名代入占位符：
+构建完成后，先在对应芯片目录核对目标标记和 SHA-256：
 
 ```bash
-scp build_output/public-runtime/<chip>/<安装包>.tar.gz root@<设备IP>:/tmp/
-ssh root@<设备IP>
-cd /tmp
-install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
-tar -xzf <安装包>.tar.gz -C "$install_dir"
-cd "$install_dir"/cosmo-V*/
-sudo ./scripts/install.sh
-sudo reboot
+chip=bm1688 # 或 cv186x
+cat "build_output/public-runtime/${chip}/TARGET_CHIP"
+(cd "build_output/public-runtime/${chip}" && sha256sum -c SHA256SUMS)
 ```
 
-已有CosmoEdge正常运行时，也可以在 **系统管理 → 系统维护 → 软件升级** 上传同一个包。
-两条路径完成后都要重新登录，并核对 **软件版本** 与安装包版本一致。SSH安装器安装应用和
-服务，但不是任意空白硬件的操作系统镜像安装器。
+SSH 安装、Web 升级、恢复边界和重启后的版本验收统一见[部署指南](./deployment.md#ssh安装路径)。
+构建指南不重复维护设备安装命令，避免构建入口和部署流程独立演进后出现两套口径。
 
 维护人员在包含完整 Guard SDK 和授权工具的受控环境中使用一条命令构建：
 
 ```bash
 COSMO_MODEL_GUARD_BUILD_PROFILE=production-release \
-  docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+  ./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 上例构建 CV186X Protected 包；构建 BM1688 时把末尾型号改为 `bm1688`，或省略型号。
@@ -165,7 +158,9 @@ Guard 设备证书和模型加密秘密仍属于受控输入，不得写入公�
 
 该路径来自：
 
+- `scripts/docker-compose.sh`（Linux/macOS：选择 Compose V2 或 V1，并处理 Docker 权限）
 - `docker-compose.sophon.yml`
+- `scripts/build_sophon_package.sh`
 - `scripts/build_sophon_package.ps1`（Windows：构建前自动修复 `.so` 软链接）
 - `scripts/build.sh`
 

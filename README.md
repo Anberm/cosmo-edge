@@ -93,50 +93,23 @@ After startup, use the [Scenario Configuration tutorial](https://www.cosmowander
 git clone https://github.com/cosmo-wander-ai/cosmo-edge.git
 cd cosmo-edge
 # BM1688 (default when the chip model is omitted)
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
 
 # CV186X
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
-ls -lh build_output/public-runtime/
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
-The build script selects the matching model resources from the chip model; no
-model path is required. The chip model only changes the selected resource set;
-the output directory and package naming stay unchanged.
+The wrapper selects the available Compose implementation and requests elevated
+Docker access only when required. The build selects the matching model resources
+without a model-path argument and exports each target independently under
+`build_output/public-runtime/<chip>/`, together with `TARGET_CHIP` and
+`SHA256SUMS`.
 
 The default Open package contains plaintext models and requires no device
-authorization. Copy the one generated package to a Sophon device, extract it,
-enter its single top-level directory, and run the packaged compatibility
-installer:
-
-```bash
-# Host: replace both placeholders with the values reported by the build.
-scp build_output/public-runtime/<cosmo-package>.tar.gz \
-  root@<device_ip>:/tmp/
-
-# Device
-ssh root@<device_ip>
-cd /tmp
-install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
-tar -xzf <cosmo-package>.tar.gz -C "$install_dir"
-cd "$install_dir"/cosmo-V*/
-sudo ./scripts/install.sh
-sudo reboot
-```
-
-For an already running CosmoEdge system, the web console provides the same
-upgrade lifecycle under **System Management → System Maintenance → Software
-Upgrade**. Keep power connected during installation. After reboot, open
-`http://192.168.100.1` by default and verify **Software Version** against the
-package. The initial web credentials are `admin` / `admin`; change the password
-after the first sign-in.
-
-The SSH installer targets a prepared Sophon Linux device and installs the
-application plus `cosmo.service`; it is not a generic OS-image installer for
-arbitrary blank hardware. Protected packages contain encrypted preset models
-and provisioning tooling. See the [Build Guide](https://www.cosmowander.ai/docs/guide/build)
-and [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment) for the
-full validation and recovery boundaries.
+authorization. Verify the chip marker and checksum before deployment. The
+[Build Guide](https://www.cosmowander.ai/docs/guide/build) is the authoritative
+build reference; follow the [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment)
+for SSH installation, web upgrade, recovery, and post-reboot acceptance.
 
 ### Build for RK3576
 
