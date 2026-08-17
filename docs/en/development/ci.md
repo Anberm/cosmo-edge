@@ -23,7 +23,7 @@ This page collects the quality-check entry points that already exist in the repo
 | C++ static analysis | `scripts/static_analysis.sh --cppcheck`, `scripts/static_analysis.sh --clang-tidy` | Periodic / manual / self-hosted |
 | CPU test build | `scripts/build_cpu_test.sh`, `build_cpu/cosmo-tests` | Pull request / manual |
 | x86 Docker | `docker compose -f docker-compose.x86.yml up -d --build` (use `docker-compose.x86.windows.yml` on Windows) | Manual / before release |
-| Sophon release package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <model>]`; supports `bm1688` / `cv186x` (defaults to `bm1688`) | Manual / self-hosted |
+| Sophon release package | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <model>]`; supports `bm1688` / `cv186x` (defaults to `bm1688`) | Manual / self-hosted |
 | RK3576 release package | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | Daily at 02:12 Beijing Time / manual |
 
 ## Documentation Site Checks
@@ -175,8 +175,8 @@ Sophon/aarch64 release package build entry point:
 
 ```bash
 # Defaults to bm1688 when the chip model is omitted
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell:
@@ -187,9 +187,11 @@ Windows PowerShell:
 .\scripts\build_sophon_package.ps1 -Chip cv186x
 ```
 
-The Sophon release package build depends on the cross-compilation environment and the Sophon SDK.
-The chip model only selects the internal resource directory. Output remains under
-`build_output/<profile>/<chip>/`, with the existing `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` name format.
+The Sophon release package build depends on the cross-compilation environment and
+the Sophon SDK. The chip model selects both the internal resource directory and
+the chip-scoped output. Each `build_output/<profile>/<chip>/` directory contains
+`TARGET_CHIP`, `SHA256SUMS`, and one
+`cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` archive.
 
 ## RK3576 Nightly Cross-Build
 

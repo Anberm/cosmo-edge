@@ -125,34 +125,35 @@ Use the full run command:
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
 
-For the Sophon path, use:
+The [Build Guide](./build.md#sophon-artifacts) is the authoritative reference for
+the Sophon entry point, profiles, and output contract. For example, after the
+default BM1688 Open build, inspect the chip-scoped directory directly:
 
 ```bash
-# Defaults to bm1688; append --chip cv186x to select CV186X
 ./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
-ls -lh build_output/public-runtime/bm1688/
+cat build_output/public-runtime/bm1688/TARGET_CHIP
+(cd build_output/public-runtime/bm1688 && sha256sum -c SHA256SUMS)
 ```
 
-Sophon output is not written directly to `build_output/`. It is isolated by
-`COSMO_MODEL_GUARD_BUILD_PROFILE`:
+Sophon output is not written directly to `build_output/`. Each
+`build_output/<profile>/<chip>/` directory should contain `TARGET_CHIP`,
+`SHA256SUMS`, and exactly one `cosmo-V<version>-<32-char-md5>.tar.gz`. First check
+that the selected profile and chip match the directory being inspected.
 
-- SOURCE build (internal profile `public-runtime`): `build_output/public-runtime/<chip>/`;
-- controlled production build: `build_output/production-release/<chip>/`.
-
-Both profiles produce `cosmo-V<version>-<32-char-md5>.tar.gz`. Protected models
-still require a device-bound certificate provisioned through the authorized
-workflow; application packages do not require release signatures.
-
-Note: `docker compose build` only builds the image and does not necessarily execute the container command that exports an artifact.
+Do not substitute `docker compose build` for the `run` entry point above; it does
+not execute the container command that exports the artifact.
 
 ## Sophon Build Failure
 
-The Sophon build uses a self-contained `Dockerfile.sophon` (based on `ubuntu:22.04`) and does not require an external base image.
+The `cosmo-sophon-package` service directly uses the pre-built GHCR image
+configured in `docker-compose.sophon.yml`; there is no local `Dockerfile.sophon`
+build path. The [Build Guide](./build.md#sophon-artifacts) is the single reference
+for the current image and build chain.
 
-If the build fails, check the Docker build logs:
+If the build fails, rerun the same entry point and inspect the final log lines:
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
 ```
 
 For BM1688, replace the final argument with `bm1688` or omit it.
