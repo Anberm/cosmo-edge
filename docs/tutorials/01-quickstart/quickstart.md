@@ -101,12 +101,12 @@ CosmoEdge 当前支持 Sophon BM1688 和 CV186X 两种芯片。下图是旧版�
 
 ```bash
 # BM1688
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
 
 # CV186X
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 
-ls -lh build_output/public-runtime/
+find build_output/public-runtime -mindepth 2 -maxdepth 2 -type f -print
 ```
 
 省略芯片型号参数时默认使用 `bm1688`。构建脚本会根据型号选择对应的模型资源目录，
@@ -118,7 +118,7 @@ ls -lh build_output/public-runtime/
 
 ```bash
 # 构建主机
-scp build_output/public-runtime/<安装包>.tar.gz root@<设备IP>:/tmp/
+scp build_output/public-runtime/<chip>/<安装包>.tar.gz root@<设备IP>:/tmp/
 
 # 设备
 ssh root@<设备IP>

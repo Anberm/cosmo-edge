@@ -95,6 +95,7 @@ cmake   -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
         -DBUILD_TESTS="${BUILD_TESTS_FLAG}" \
         -DCOSMO_DEV_MODE="${DEV_MODE}" \
+        -DCOSMO_TARGET_CHIP="${CHIP_MODEL:-unspecified}" \
         -DCOSMO_MODEL_GUARD_SDK_ROOT="${COSMO_GUARD_SDK_DIR}" \
         -DRESOURCE_DIR="${RESOURCE_DIR}" \
         "${MODEL_GUARD_PROFILE_ARGS[@]}" \

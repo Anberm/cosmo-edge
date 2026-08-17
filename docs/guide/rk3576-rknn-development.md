@@ -16,6 +16,7 @@ next:
 RK3576 集成增加了面向生产的 CV 后端，不改变 CPU、CUDA 或 Sophon 后端的行为：
 
 - RKNN Runtime 2.3.2 执行静态 batch 的检测和分类模型。
+- RKLLM Runtime 1.3.0 配合 RKNN 视觉编码器执行 Qwen3.5 多模态模型。
 - Rockchip MPP 执行 H.264/H.265 解码与编码。
 - 解码器使用延迟 Copy-out：先对帧进行采样或丢弃，再按需复制宿主机 I420 数据。
 - RGA 执行预览与 OSD 路径所需的 Rockchip 图像处理操作。
@@ -64,6 +65,16 @@ RK3576 集成增加了面向生产的 CV 后端，不改变 CPU、CUDA 或 Sopho
 1. 安全帽分类：`1x3x224x224`，ONNX opset 19。
 2. YOLOv8 检测：`1x3x640x640`，转换为 ONNX opset 19 / IR 9。
 
+Qwen3.5 多模态模型属于另一份模型合同。一个可导入目录至少包含：
+
+- `model.rkllm`：目标平台为 RK3576 的语言模型；
+- `vision.rknn`：与语言模型的图像 token 数、embedding 宽度匹配的视觉编码器；
+- `tokenizer.json`：与转换源模型完全一致的分词器；
+- `config.json`：`model_type` 为 `qwen3_5`，并声明 `runtime_backend: rkllm`。
+
+四个文件必须作为一组记录 SHA-256。仅有 `librkllmrt.so`、仅能加载文本模型，或仅能
+运行 `vision.rknn`，都不能证明多模态能力。
+
 CosmoEdge 负责 resize、通道顺序和归一化。转换过程不得再次固化 mean/std 变换。
 CosmoEdge 提供 float32 NCHW 张量；由于 Runtime 2.3.2 在该输入转换路径拒绝 NCHW，
 RKNN 边界执行一次显式 NCHW 到 NHWC 拷贝。输出请求为 float32，以现有后处理器
@@ -105,22 +116,33 @@ python tools/rknn/convert_model.py \
 
 ## 构建与部署
 
-公开构建镜像以 digest 固定在 `docker-compose.rk3576.yml` 中，包含 aarch64 工具链、
-RKNN Runtime、MPP 和 RGA 开发文件。基础资源目录提供通用动作、布局和字体；RKNN
-资源目录提供 RK3576 算法与模型。
+公开构建使用 digest 固定的最终镜像，其中 RKLLM Runtime v1.3.0 来自 Rockchip 官方仓库
+的固定 commit；最终环境包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
+MPP 和 RGA 开发文件。基础资源目录提供通用动作、布局和字体；RKNN 资源目录提供
+RK3576 算法与模型。
 
 ```bash
-docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
 
-镜像公开，无需 `docker login`。Docker Compose V1 用户可将 `docker compose` 替换为
-`docker-compose`。该命令使用 Rockchip 媒体后端构建 Release 包，并在
+基础镜像和 RKLLM 官方文件均可公开获取，无需 `docker login`。辅助脚本会自动选择
+Docker Compose V2/V1。该命令使用 Rockchip 媒体后端构建 Release 包，并在
 `build_rknn/cosmo-tests` 保留 aarch64 测试程序；不会启用 `COSMO_DEV_MODE`。
+
+RKLLM 是正式 RK3576 包的强制依赖：头文件、`librkllmrt.so` 或许可证任一缺失都会让
+配置阶段失败，不能用缺少 Qwen3.5 的降级包作为发布候选。
+
+RKLLM Runtime 会随安装包发布，但 Qwen3.5 模型文件不随 Open 包分发。部署人员必须使用
+有权使用、与 RK3576 和 Runtime 1.3.0 匹配的转换产物，并按上一节的四文件合同导入。
 
 正式入口在构建前删除旧的 `build_rknn`，避免将部分交叉编译缓存误作发布证据。
 构建时依赖解析使用宿主机网络；一次性构建服务不发布或监听应用端口。
+
+RK3576 的板端网络由系统 NetworkManager 管理，不由 CosmoEdge 的 Sophon netplan 路径
+接管。清空 `/data/cwaiuserdata` 会重新生成默认 JSON，但不会把现有 NetworkManager
+连接改成 `192.168.100.1`；部署和恢复时应以 `ip -4 addr`/`nmcli` 的实际地址为准。
 
 运行时应隔离可变数据目录和包内应用目录：
 
@@ -144,6 +166,27 @@ export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_P
 
 预览验证需要真实的 `ffmpeg` 和 `ffprobe` 可执行文件。工具会在修改设备配置前
 完成环境预检。
+
+## Qwen3.5 多模态真机验收
+
+正式验收必须在 RK3576 真机上输入一张固定测试图，并得到非空、与画面相关的文本结果。
+纯文本问答只证明 RKLLM 语言侧，不能代替本项。可以使用 CosmoEdge 的**图片分析**流程；
+也可以用与构建镜像相同的 aarch64 工具链编译 Rockchip 官方
+[`multimodal_model_demo`](https://github.com/airockchip/rknn-llm/tree/878f9361fd3afa7e167b7079918918f78d2c1c2a/examples/multimodal_model_demo)，
+再在设备上运行：
+
+```bash
+MODEL_DIR=/data/cwaiuserdata/resource/models/<qwen3.5-model-directory>
+export LD_LIBRARY_PATH=./lib
+./demo smoke.jpg "$MODEL_DIR/vision.rknn" "$MODEL_DIR/model.rkllm" \
+  64 4096 2 rk3576 \
+  '<|vision_start|>' '<|vision_end|>' '<|image_pad|>'
+```
+
+验收记录至少包含：安装包和四个模型文件的 SHA-256、RKLLM/Toolkit/驱动版本、目标平台、
+量化类型、视觉模型输入输出形状、测试图哈希、返回文本和退出状态。通过条件为语言模型与
+视觉模型均成功加载，视觉编码推理成功，并返回与测试图相关的非空文本。测试结束后还要
+恢复 `cosmo.service`，确认服务为 `active`、管理页返回成功，并再次核对设备实际 IP。
 
 ## 已验证发布边界
 

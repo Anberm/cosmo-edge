@@ -187,7 +187,7 @@ Windows PowerShell：
 ```
 
 Sophon 发布包构建依赖交叉编译环境和 Sophon SDK。型号只决定内部资源目录；输出位置不变，
-`build_output/<profile>/` 中导出的包名仍为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
+`build_output/<profile>/<chip>/` 中导出的包名仍为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
 
 ## RK3576 夜间交叉编译
 
@@ -195,7 +195,8 @@ Sophon 发布包构建依赖交叉编译环境和 Sophon SDK。型号只决定�
 北京时间 02:12（UTC 前一日 18:12）在默认分支运行，同时保留手动触发。定时工作流
 只有进入 GitHub 默认分支后才会生效。
 
-CI 使用公开、固定 digest 的构建镜像，无需 registry 登录：
+CI 使用公开、固定 digest 且已包含固定 RKLLM v1.3.0 的最终构建镜像，
+无需 registry 登录：
 
 ```bash
 docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
@@ -204,12 +205,12 @@ docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
 
 工作流执行以下发布候选检查：
 
-1. 验证 Compose 配置并拉取公开镜像。
+1. 验证 Compose 配置，并拉取固定 digest、带 RKLLM 的最终构建镜像。
 2. 从干净的 `build_rknn/` 完成交叉编译、测试程序构建和打包。
 3. 要求 `build_output/rk3576/` 中只存在一个普通文件类型的发布包，并记录 SHA-256。
 4. 确认 `cosmo-tests`、`cosmo-rknn-backend-smoke` 和
    `cosmo-rknn-fastpath-qualify` 都是 ARM aarch64 程序。
-5. 在构建容器内以 `public-runtime` 配置审计安装包内容。
+5. 确认包内包含 `librkllmrt.so` 及其许可证，再以 `public-runtime` 配置审计内容。
 6. 上传发布包、校验和及三个验证程序，保留 7 天。
 
 工作流只授予 `contents: read` 权限；同一分支出现重叠运行时取消旧任务。该任务完成

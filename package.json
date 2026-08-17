@@ -19,7 +19,7 @@
     "docs:check": "node scripts/check-tutorial-docs.mjs",
     "docs:smoke": "node scripts/smoke-tutorial-pages.mjs",
     "benchmarks:v1.1:smoke": "node scripts/smoke-benchmark-pages.mjs",
-    "models:sophon:verify": "python scripts/verify_sophon_open_benchmark_models.py",
+    "models:sophon:verify": "node scripts/run-python.mjs scripts/verify_sophon_open_benchmark_models.py",
     "benchmarks:v1.1:validate": "node scripts/validate-public-v1.1-multistream-benchmark.mjs",
     "docs:verify": "npm run models:sophon:verify && npm run benchmarks:v1.1:validate && npm run macos:check && npm run docs:check && npm run docs:build && npm run docs:smoke && npm run benchmarks:v1.1:smoke"
   },

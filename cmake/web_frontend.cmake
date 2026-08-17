@@ -2,6 +2,7 @@
 # Web Frontend Build (Vue 3 + Vite)
 ##########################################################
 find_program(NPM_EXECUTABLE npm REQUIRED)
+find_program(BASH_EXECUTABLE bash REQUIRED)
 set(WEB_BUILD_DIR ${CMAKE_BINARY_DIR}/web)
 set(WEB_SRC_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/src/web)
 set(WEB_STAGE_DIR ${WEB_BUILD_DIR}/web_unified)
@@ -28,6 +29,7 @@ list(APPEND WEB_SRC_FILES
     ${WEB_SRC_DIR}/package-lock.json
     ${WEB_SRC_DIR}/package.json
     ${WEB_SRC_DIR}/vite.config.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_npm_dependencies.sh
 )
 
 file(MAKE_DIRECTORY ${WEB_BUILD_DIR})
@@ -45,8 +47,9 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/package-lock.json" "${WEB_STAGE_DIR}/package-lock.json"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/package.json" "${WEB_STAGE_DIR}/package.json"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/vite.config.js" "${WEB_STAGE_DIR}/vite.config.js"
-    COMMAND ${CMAKE_COMMAND} -E chdir "${WEB_STAGE_DIR}"
-            ${NPM_EXECUTABLE} ci --include=dev --loglevel=error --no-audit --no-fund
+    COMMAND ${BASH_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_npm_dependencies.sh"
+            "${WEB_STAGE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E chdir "${WEB_STAGE_DIR}"
             ${CMAKE_COMMAND} -E env "AIBOX_RESOURCE_DIR=${WEB_RESOURCE_DIR}"
             ${NPM_EXECUTABLE} run resource-i18n:check

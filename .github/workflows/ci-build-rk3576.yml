@@ -27,7 +27,7 @@ jobs:
       - name: Validate RK3576 Compose entry
         run: docker compose -f docker-compose.rk3576.yml config --quiet
 
-      - name: Pull public RK3576 builder
+      - name: Pull pinned RK3576 builder with RKLLM
         run: docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
 
       - name: Build RK3576 package and tests
@@ -47,6 +47,9 @@ jobs:
           digest="$(sha256sum -- "$package")"
           digest="${digest%% *}"
           printf '%s  %s\n' "$digest" "$package" | tee rk3576-package.sha256
+          package_listing="$(tar -tzf "$package")"
+          grep -Eq '/lib/librkllmrt[.]so$' <<< "$package_listing"
+          grep -Eq '/share/licenses/rkllm/LICENSE$' <<< "$package_listing"
           for binary in build_rknn/cosmo-tests build_rknn/cosmo-rknn-backend-smoke build_rknn/cosmo-rknn-fastpath-qualify; do
             binary_info="$(file "$binary")"
             printf '%s\n' "$binary_info"

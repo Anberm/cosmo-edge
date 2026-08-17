@@ -103,12 +103,12 @@ To build an upgrade package from source, select the target chip with the
 
 ```bash
 # BM1688
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
 
 # CV186X
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 
-ls -lh build_output/public-runtime/
+find build_output/public-runtime -mindepth 2 -maxdepth 2 -type f -print
 ```
 
 Omitting the chip argument defaults to `bm1688`. The build script selects the
@@ -122,7 +122,7 @@ it on a prepared Sophon Linux device over SSH:
 
 ```bash
 # Build host
-scp build_output/public-runtime/<package>.tar.gz root@<device_ip>:/tmp/
+scp build_output/public-runtime/<chip>/<package>.tar.gz root@<device_ip>:/tmp/
 
 # Device
 ssh root@<device_ip>

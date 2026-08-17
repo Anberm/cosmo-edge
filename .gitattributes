@@ -22,6 +22,9 @@
 *.css   text eol=lf
 *.scss  text eol=lf
 *.html  text eol=lf
+*.txt   text eol=lf
+*.log   text eol=lf
+*.svg   text eol=lf
 CMakeLists.txt text eol=lf
 Makefile       text eol=lf
 

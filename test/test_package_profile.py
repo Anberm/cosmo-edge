@@ -152,7 +152,52 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn('CHIP_MODEL="${CHIP_MODEL:-bm1688}"', build)
         self.assertIn('bm1688|cv186x)', build)
         self.assertIn('aiboxresource_${CHIP_MODEL}', build)
+        self.assertIn('-DCOSMO_TARGET_CHIP="${CHIP_MODEL:-unspecified}"', build)
         self.assertIn("-c and -m cannot be used together", build)
+
+    def test_container_builds_bound_and_cache_npm_connections(self) -> None:
+        npmrc = (REPOSITORY / "src/web/.npmrc").read_text(encoding="utf-8")
+        self.assertIn("registry=https://registry.npmmirror.com/", npmrc)
+        self.assertIn("maxsockets=1", npmrc)
+        self.assertIn("prefer-offline=true", npmrc)
+        self.assertIn("update-notifier=false", npmrc)
+
+        lock = json.loads(
+            (REPOSITORY / "src/web/package-lock.json").read_text(encoding="utf-8")
+        )
+        locked_packages = [
+            metadata
+            for path, metadata in lock["packages"].items()
+            if "node_modules/" in path and not metadata.get("link")
+        ]
+        self.assertTrue(locked_packages)
+        self.assertTrue(all(package.get("integrity") for package in locked_packages))
+        self.assertTrue(
+            all(
+                package.get("resolved", "").startswith(
+                    "https://cdn.npmmirror.com/packages/"
+                )
+                for package in locked_packages
+            )
+        )
+
+        npm_builder = (
+            REPOSITORY / "scripts/build_npm_dependencies.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("cache add", npm_builder)
+        self.assertIn("ci --offline", npm_builder)
+        self.assertIn("package-lock.json has incomplete entries", npm_builder)
+
+        web_cmake = (REPOSITORY / "cmake/web_frontend.cmake").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("build_npm_dependencies.sh", web_cmake)
+
+        for compose_name in ("docker-compose.sophon.yml", "docker-compose.rk3576.yml"):
+            compose = (REPOSITORY / compose_name).read_text(encoding="utf-8")
+            self.assertIn('NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-1}"', compose)
+            self.assertIn("cosmo-npm-cache:/root/.npm", compose)
+            self.assertIn('NPM_CONFIG_PREFER_OFFLINE: "${NPM_CONFIG_PREFER_OFFLINE:-true}"', compose)
 
     def test_sophon_chip_selection_preserves_package_output_contract(self) -> None:
         entrypoint = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
@@ -161,13 +206,16 @@ class PackageProfileTests(unittest.TestCase):
         cmake = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
 
         self.assertIn(
-            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
             entrypoint,
         )
         self.assertIn("package_artifacts=(build/packages/*.tar.gz)", entrypoint)
         self.assertIn(
-            'cp -f -- "${package_artifacts[0]}" "${output_dir}/"', entrypoint
+            'printf \'%s\\n\' "${chip}" > "${output_dir}/TARGET_CHIP"', entrypoint
         )
+        self.assertIn('sha256sum -- "${package_name}" > SHA256SUMS', entrypoint)
+        self.assertIn('DESTINATION share/cosmo', cmake)
+        self.assertIn('"${COSMO_TARGET_CHIP_NORMALIZED}\\n"', cmake)
         self.assertIn('set(CPACK_OUTPUT_FILE_PREFIX', cmake)
         self.assertIn('scripts/package_md5_rename.sh', cmake)
 
@@ -181,8 +229,8 @@ class PackageProfileTests(unittest.TestCase):
             encoding="utf-8"
         )
         source = source.replace(
-            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
-            'output_dir="$PWD/export/${COSMO_MODEL_GUARD_BUILD_PROFILE}"',
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
+            'output_dir="$PWD/export/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
         )
 
         with tempfile.TemporaryDirectory(dir=REPOSITORY) as temporary_directory:
@@ -224,9 +272,15 @@ class PackageProfileTests(unittest.TestCase):
             )
             exported = (
                 workspace
-                / "export/public-runtime/cosmo-V1.1.0-deadbeef.tar.gz"
+                / "export/public-runtime/bm1688/cosmo-V1.1.0-deadbeef.tar.gz"
             )
             self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+            self.assertEqual(
+                (workspace / "export/public-runtime/bm1688/TARGET_CHIP").read_text(
+                    encoding="utf-8"
+                ),
+                "bm1688\n",
+            )
 
             explicit_bm1688_result = run("--chip", "bm1688")
             self.assertEqual(
@@ -243,7 +297,17 @@ class PackageProfileTests(unittest.TestCase):
                 (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
                 "-T -c cv186x\n",
             )
-            self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+            cv186x_exported = (
+                workspace
+                / "export/public-runtime/cv186x/cosmo-V1.1.0-deadbeef.tar.gz"
+            )
+            self.assertEqual(cv186x_exported.read_text(encoding="utf-8"), "package")
+            self.assertEqual(
+                (workspace / "export/public-runtime/cv186x/TARGET_CHIP").read_text(
+                    encoding="utf-8"
+                ),
+                "cv186x\n",
+            )
 
             test_environment["COSMO_MODEL_GUARD_BUILD_PROFILE"] = (
                 "production-release"
@@ -321,6 +385,33 @@ class PackageProfileTests(unittest.TestCase):
             conflict_result = run("-c", "bm1688", "-m", "resource")
             self.assertNotEqual(conflict_result.returncode, 0)
             self.assertIn("-c and -m cannot be used together", conflict_result.stderr)
+
+    def test_rk3576_release_builder_requires_pinned_rkllm(self) -> None:
+        compose = (REPOSITORY / "docker-compose.rk3576.yml").read_text(
+            encoding="utf-8"
+        )
+        dockerfile = (REPOSITORY / "Dockerfile.rk3576").read_text(encoding="utf-8")
+        workflow = (REPOSITORY / ".github/workflows/ci-build-rk3576.yml").read_text(
+            encoding="utf-8"
+        )
+        build = (REPOSITORY / "scripts/build_rknn.sh").read_text(encoding="utf-8")
+        cmake = (REPOSITORY / "cmake/rkllm.cmake").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:"
+            "135d25d0baf14e7918726f7efb040a0627926aedd5825f52fab6c1cd208da348",
+            compose,
+        )
+        self.assertNotIn("\n    build:", compose)
+        self.assertIn("RKLLM_ROOT: /opt/rkllm", compose)
+        self.assertIn('COSMO_RKLLM_REQUIRED: "ON"', compose)
+        self.assertIn("docker compose -f docker-compose.rk3576.yml pull", workflow)
+        self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
+        self.assertIn("install_rkllm_sdk.py", dockerfile)
+        self.assertIn('lib/librkllmrt.so LICENSE', build)
+        self.assertIn("-DCOSMO_TARGET_CHIP=rk3576", build)
+        self.assertIn('-DCOSMO_RKLLM_REQUIRED="${RKLLM_REQUIRED}"', build)
+        self.assertIn('set(RKLLM_RUNTIME_LICENSE "${COSMO_RKLLM_ROOT}/LICENSE")', cmake)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ export LC_ALL=C.UTF-8
 RESOURCE_DIR=""
 RKNN_ROOT_PATH="${RKNN_ROOT:-}"
 ROCKCHIP_MEDIA_ROOT_PATH="${ROCKCHIP_MEDIA_ROOT:-}"
+RKLLM_ROOT_PATH="${RKLLM_ROOT:-}"
+RKLLM_REQUIRED="${COSMO_RKLLM_REQUIRED:-OFF}"
 DEV_MODE=OFF
 BUILD_TESTS_FLAG=OFF
 while getopts "m:r:p:tT" opt; do
@@ -32,6 +34,17 @@ if [ -z "${RKNN_ROOT_PATH}" ]; then
     echo "ERROR: pass -r <path> or set RKNN_ROOT" >&2
     exit 1
 fi
+if [ -z "${RKLLM_ROOT_PATH}" ]; then
+    RKLLM_ROOT_PATH="${RKNN_ROOT_PATH}"
+fi
+if [ "${RKLLM_REQUIRED}" = "ON" ]; then
+    for required_file in include/rkllm.h lib/librkllmrt.so LICENSE; do
+        if [ ! -f "${RKLLM_ROOT_PATH}/${required_file}" ]; then
+            echo "ERROR: RKLLM is required, but ${RKLLM_ROOT_PATH}/${required_file} is missing" >&2
+            exit 1
+        fi
+    done
+fi
 if [ -z "${RESOURCE_DIR}" ]; then
     RESOURCE_DIR="${PROJECT_ROOT_PATH}/data/resource/aiboxresource_x86"
 elif [ "${RESOURCE_DIR#/}" = "${RESOURCE_DIR}" ]; then
@@ -49,6 +62,7 @@ cmake -S "${PROJECT_ROOT_PATH}" -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
     -DCOSMO_TARGET_ARCH=aarch64 \
+    -DCOSMO_TARGET_CHIP=rk3576 \
     -DCOSMO_NN_USE_SOPHON_BACKEND=OFF \
     -DCOSMO_NN_USE_CPU_BACKEND=OFF \
     -DCOSMO_NN_USE_RKNN_BACKEND=ON \
@@ -56,6 +70,8 @@ cmake -S "${PROJECT_ROOT_PATH}" -B "${BUILD_DIR}" \
     -DCOSMO_MEDIA_USE_CPU_BACKEND="${MEDIA_CPU_BACKEND}" \
     -DCOSMO_MEDIA_USE_ROCKCHIP_BACKEND="${MEDIA_ROCKCHIP_BACKEND}" \
     -DCOSMO_RKNN_ROOT="${RKNN_ROOT_PATH}" \
+    -DCOSMO_RKLLM_ROOT="${RKLLM_ROOT_PATH}" \
+    -DCOSMO_RKLLM_REQUIRED="${RKLLM_REQUIRED}" \
     -DCOSMO_ROCKCHIP_MEDIA_ROOT="${ROCKCHIP_MEDIA_ROOT_PATH}" \
     -DCOSMO_DEV_MODE="${DEV_MODE}" \
     -DBUILD_TESTS="${BUILD_TESTS_FLAG}" \
