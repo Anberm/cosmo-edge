@@ -175,6 +175,7 @@ class PackageProfileTests(unittest.TestCase):
         bash, test_environment = self.find_bash()
         if not bash:
             self.skipTest("bash is not available")
+        test_environment.pop("COSMO_MODEL_GUARD_BUILD_PROFILE", None)
 
         source = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
             encoding="utf-8"
@@ -243,6 +244,21 @@ class PackageProfileTests(unittest.TestCase):
                 "-T -c cv186x\n",
             )
             self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+
+            test_environment["COSMO_MODEL_GUARD_BUILD_PROFILE"] = (
+                "production-release"
+            )
+            production_result = run("--chip", "bm1688")
+            self.assertEqual(
+                production_result.returncode, 0, production_result.stderr
+            )
+            production_exported = (
+                workspace
+                / "export/production-release/cosmo-V1.1.0-deadbeef.tar.gz"
+            )
+            self.assertEqual(
+                production_exported.read_text(encoding="utf-8"), "package"
+            )
 
             invalid_result = run("--chip", "unsupported-chip")
             self.assertNotEqual(invalid_result.returncode, 0)
