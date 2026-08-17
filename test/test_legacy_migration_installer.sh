@@ -74,4 +74,15 @@ COSMO_MIGRATION_TEST_ROOT="$root" CLEAN_RESOURCE=1 \
     sh "$payload/scripts/install.sh" "$root/install-clean.log"
 test ! -e "$active/resource/stale.conf"
 grep -Fxq packaged-model "$active/resource/models/model.nn"
+
+# Preserved resources must be copied into staging before the package overlays
+# them. Keeping the packaged resource tree in staging while copying the active
+# tree creates an avoidable second model-sized allocation on /appfs.
+installer="$repo/scripts/legacy_migration_install.sh"
+preserved_copy_line="$(grep -nF 'cp -a -- "${active_root}/resource/." "${staging_root}/resource/"' "$installer" | cut -d: -f1)"
+payload_copy_line="$(grep -nF 'cp -a -- "${payload_root}/." "$staging_root/"' "$installer" | cut -d: -f1)"
+test -n "$preserved_copy_line"
+test -n "$payload_copy_line"
+test "$preserved_copy_line" -lt "$payload_copy_line"
+! grep -Fq '.packaged-resource' "$installer"
 echo "legacy migration installer tests passed"

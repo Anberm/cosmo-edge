@@ -53,22 +53,16 @@ mkdir -p -- "$active_parent"
 [ ! -e "$staging_root" ] && [ ! -L "$staging_root" ] || fail "staging path already exists"
 mkdir -- "$staging_root"
 trap 'rm -rf -- "$staging_root"' EXIT
-cp -a -- "${payload_root}/." "$staging_root/"
 
 # Match the historical installer: preserve the installed resource tree by
-# default, then overlay packaged resources. CLEAN_RESOURCE=1 makes the package
-# resource tree authoritative.
+# default, then overlay packaged resources. Copying the installed tree first
+# avoids keeping a second packaged-resource copy on space-constrained /appfs.
+# CLEAN_RESOURCE=1 makes the package resource tree authoritative.
 if [ "${CLEAN_RESOURCE:-0}" != 1 ] && [ -d "${active_root}/resource" ]; then
-    packaged_resource="${staging_root}/.packaged-resource"
-    if [ -d "${staging_root}/resource" ]; then
-        mv -- "${staging_root}/resource" "$packaged_resource"
-    fi
-    cp -a -- "${active_root}/resource" "${staging_root}/resource"
-    if [ -d "$packaged_resource" ]; then
-        cp -a -- "${packaged_resource}/." "${staging_root}/resource/"
-        rm -rf -- "$packaged_resource"
-    fi
+    mkdir -- "${staging_root}/resource"
+    cp -a -- "${active_root}/resource/." "${staging_root}/resource/"
 fi
+cp -a -- "${payload_root}/." "$staging_root/"
 
 [ ! -e "$backup_root" ] && [ ! -L "$backup_root" ] || fail "stale migration backup exists"
 if [ -e "$active_root" ] || [ -L "$active_root" ]; then
