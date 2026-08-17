@@ -318,7 +318,7 @@ class PackageProfileTests(unittest.TestCase):
             )
             production_exported = (
                 workspace
-                / "export/production-release/cosmo-V1.1.0-deadbeef.tar.gz"
+                / "export/production-release/bm1688/cosmo-V1.1.0-deadbeef.tar.gz"
             )
             self.assertEqual(
                 production_exported.read_text(encoding="utf-8"), "package"
