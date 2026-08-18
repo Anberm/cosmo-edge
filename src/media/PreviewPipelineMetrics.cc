@@ -97,6 +97,24 @@ void PreviewPipelineMetrics::RecordMppCopyOut(bool success, uint64_t nanoseconds
     }
 }
 
+void PreviewPipelineMetrics::RecordMppRgaCopyOut(bool success) {
+    auto& counter = success ? mpp_rga_copy_out_frames_ : mpp_rga_copy_out_failures_;
+    counter.fetch_add(1, std::memory_order_relaxed);
+}
+
+void PreviewPipelineMetrics::RecordMppCpuCopyOutFallback() {
+    mpp_cpu_copy_out_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void PreviewPipelineMetrics::RecordMppRgaCopyIn(bool success) {
+    auto& counter = success ? mpp_rga_copy_in_frames_ : mpp_rga_copy_in_failures_;
+    counter.fetch_add(1, std::memory_order_relaxed);
+}
+
+void PreviewPipelineMetrics::RecordMppCpuCopyInFallback() {
+    mpp_cpu_copy_in_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+}
+
 void PreviewPipelineMetrics::RecordMppEarlyDrop() {
     mpp_early_dropped_frames_.fetch_add(1, std::memory_order_relaxed);
 }
@@ -130,6 +148,12 @@ PreviewPipelineMetricsSnapshot PreviewPipelineMetrics::Snapshot() const {
         mpp_copy_out_frames_.load(std::memory_order_relaxed),
         mpp_copy_out_nanoseconds_.load(std::memory_order_relaxed),
         mpp_copy_out_failures_.load(std::memory_order_relaxed),
+        mpp_rga_copy_out_frames_.load(std::memory_order_relaxed),
+        mpp_rga_copy_out_failures_.load(std::memory_order_relaxed),
+        mpp_cpu_copy_out_fallbacks_.load(std::memory_order_relaxed),
+        mpp_rga_copy_in_frames_.load(std::memory_order_relaxed),
+        mpp_rga_copy_in_failures_.load(std::memory_order_relaxed),
+        mpp_cpu_copy_in_fallbacks_.load(std::memory_order_relaxed),
         mpp_early_dropped_frames_.load(std::memory_order_relaxed),
     };
 }

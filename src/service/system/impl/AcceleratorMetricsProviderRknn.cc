@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -14,6 +16,7 @@
 #include <vector>
 
 #include "service/system/impl/AcceleratorMetricsProvider.h"
+#include "util/NnBackendConstants.h"
 
 namespace cosmo::service::detail {
 namespace {
@@ -105,13 +108,47 @@ namespace {
         return result;
     }
 
-    std::string ReadNpuFrequency() {
-        std::ifstream stream("/sys/class/devfreq/27700000.npu/cur_freq");
+    std::optional<uint64_t> ReadFrequencyFile(const std::filesystem::path& path) {
+        std::ifstream stream(path);
         uint64_t hz = 0;
-        if (!(stream >> hz))
-            return "RK3576 shared-memory NPU";
+        if (!(stream >> hz) || hz == 0)
+            return std::nullopt;
+        return hz;
+    }
+
+    std::string ReadNpuFrequency() {
+        std::vector<std::filesystem::path> candidates;
+        if (const char* configured_path = std::getenv("COSMO_RKNPU_FREQ_PATH");
+            configured_path && *configured_path) {
+            candidates.emplace_back(configured_path);
+        }
+
+        std::error_code error;
+        const std::filesystem::path devfreq_root("/sys/class/devfreq");
+        for (std::filesystem::directory_iterator it(devfreq_root, error), end; !error && it != end;
+             it.increment(error)) {
+            std::string identity = it->path().filename().string();
+            std::ifstream name_stream(it->path() / "name");
+            identity.append(std::istreambuf_iterator<char>(name_stream), std::istreambuf_iterator<char>());
+            std::transform(identity.begin(), identity.end(), identity.begin(),
+                           [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            if (identity.find("npu") != std::string::npos)
+                candidates.push_back(it->path() / "cur_freq");
+        }
+        std::sort(candidates.begin(), candidates.end());
+        candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+
+        for (const auto& path : candidates) {
+            const auto hz = ReadFrequencyFile(path);
+            if (!hz)
+                continue;
+            std::ostringstream text;
+            text << (*hz / 1000000) << " MHz";
+            return text.str();
+        }
+
         std::ostringstream text;
-        text << (hz / 1000000) << " MHz";
+        text << cosmo::util::kEngineType << " shared-memory NPU";
         return text.str();
     }
 

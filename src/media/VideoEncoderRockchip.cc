@@ -19,6 +19,7 @@
 #include <rockchip/rk_venc_rc.h>
 
 #include "media/PreviewPipelineMetrics.h"
+#include "media/RockchipRgaBuffer.h"
 #include "media/VideoEncoderCpu.h"
 #include "util/Log.h"
 
@@ -100,6 +101,8 @@ struct RockchipEncoderState {
     size_t vertical_stride{0};
     size_t frame_buffer_size{0};
     int64_t frame_pts{0};
+    ScopedRgaBufferHandle frame_rga_handle;
+    bool rga_copy_in_available{false};
     std::vector<uint8_t> codec_header;
 };
 
@@ -111,7 +114,7 @@ VideoEncoderRockchip::~VideoEncoderRockchip() {
 
 VideoEncoderCapability VideoEncoderRockchip::Probe(VideoCodecType type) {
     VideoEncoderCapability capability;
-    capability.backend        = "rockchip-copy-first";
+    capability.backend        = "rockchip-mpp-rga";
     capability.implementation = "rockchip-mpp";
 
     const auto coding = ToMppCoding(type);
@@ -131,8 +134,8 @@ VideoEncoderCapability VideoEncoderRockchip::Probe(VideoCodecType type) {
     if (device_accessible && format_supported) {
         capability.available = true;
         capability.detail =
-            "MPP encoder device and codec are available; compact I420 is copied into a "
-            "stride-aligned MPP buffer";
+            "MPP encoder device and codec are available; RGA writes compact I420 into the "
+            "stride-aligned MPP DMA-BUF with an observable CPU fallback";
         return capability;
     }
 
@@ -217,6 +220,22 @@ bool VideoEncoderRockchip::OpenMpp() {
         LOG_WARN("MPP frame buffer allocation failed: {}", ret);
         CleanMpp();
         return false;
+    }
+    auto* frame_buffer_address = static_cast<uint8_t*>(mpp_buffer_get_ptr(state_->frame_buffer));
+    if (!frame_buffer_address) {
+        LOG_WARN("{}", "MPP frame buffer is not CPU-addressable for fallback initialization");
+        CleanMpp();
+        return false;
+    }
+    mpp_buffer_sync_begin(state_->frame_buffer);
+    const size_t y_plane_size = state_->horizontal_stride * state_->vertical_stride;
+    std::memset(frame_buffer_address, 0, y_plane_size);
+    std::memset(frame_buffer_address + y_plane_size, 128, state_->frame_buffer_size - y_plane_size);
+    mpp_buffer_sync_end(state_->frame_buffer);
+    state_->rga_copy_in_available =
+        state_->frame_rga_handle.ImportFd(mpp_buffer_get_fd(state_->frame_buffer), state_->frame_buffer_size);
+    if (!state_->rga_copy_in_available) {
+        LOG_WARN("{}", "RGA could not import the MPP encoder DMA-BUF; CPU copy-in remains available");
     }
     ret = mpp_buffer_get(state_->buffer_group, &state_->packet_buffer, state_->frame_buffer_size);
     if (ret != MPP_OK) {
@@ -357,21 +376,55 @@ VideoPacketPtr VideoEncoderRockchip::SendYUVFrame(void* data) {
     const size_t mpp_uv_stride   = state_->horizontal_stride / 2;
     const size_t mpp_uv_height   = state_->vertical_stride / 2;
 
-    mpp_buffer_sync_begin(state_->frame_buffer);
-    std::memset(destination, 0, mpp_y_size);
-    std::memset(destination + mpp_y_size, 128, state_->frame_buffer_size - mpp_y_size);
-    for (size_t row = 0; row < height_; ++row) {
-        std::memcpy(destination + row * state_->horizontal_stride, source + row * width_, width_);
+    bool rga_copied = false;
+    if (state_->rga_copy_in_available) {
+        const auto rga_started = std::chrono::steady_clock::now();
+        ScopedRgaBufferHandle source_handle(const_cast<uint8_t*>(source),
+                                            compact_y_size + compact_uv_size * 2);
+        IM_STATUS status = IM_STATUS_OUT_OF_MEMORY;
+        if (source_handle) {
+            auto source_image = wrapbuffer_handle_t(source_handle.Get(), static_cast<int>(width_),
+                                                    static_cast<int>(height_), static_cast<int>(width_),
+                                                    static_cast<int>(height_), RK_FORMAT_YCbCr_420_P);
+            auto target_image =
+                wrapbuffer_handle_t(state_->frame_rga_handle.Get(), static_cast<int>(width_),
+                                    static_cast<int>(height_), static_cast<int>(state_->horizontal_stride),
+                                    static_cast<int>(state_->vertical_stride), RK_FORMAT_YCbCr_420_P);
+            const im_rect source_rect{0, 0, static_cast<int>(width_), static_cast<int>(height_)};
+            const im_rect target_rect = source_rect;
+            const im_rect empty_rect{};
+            const rga_buffer_t empty_buffer{};
+            status = improcess(source_image, target_image, empty_buffer, source_rect, target_rect, empty_rect,
+                               IM_SYNC);
+        }
+        rga_copied = RockchipRgaSucceeded(status);
+        GetPreviewPipelineMetrics().RecordRgaOperation(rga_copied, ElapsedNanoseconds(rga_started));
+        GetPreviewPipelineMetrics().RecordMppRgaCopyIn(rga_copied);
+        if (!rga_copied) {
+            LOG_WARN("MPP encoder RGA copy-in failed with status {} ({}); disabling it for this encoder",
+                     status, imStrError_t(status));
+            state_->rga_copy_in_available = false;
+        }
     }
-    auto* destination_u  = destination + mpp_y_size;
-    auto* destination_v  = destination_u + mpp_uv_stride * mpp_uv_height;
-    const auto* source_u = source + compact_y_size;
-    const auto* source_v = source_u + compact_uv_size;
-    for (size_t row = 0; row < height_ / 2; ++row) {
-        std::memcpy(destination_u + row * mpp_uv_stride, source_u + row * (width_ / 2), width_ / 2);
-        std::memcpy(destination_v + row * mpp_uv_stride, source_v + row * (width_ / 2), width_ / 2);
+
+    if (!rga_copied) {
+        GetPreviewPipelineMetrics().RecordMppCpuCopyInFallback();
+        mpp_buffer_sync_begin(state_->frame_buffer);
+        std::memset(destination, 0, mpp_y_size);
+        std::memset(destination + mpp_y_size, 128, state_->frame_buffer_size - mpp_y_size);
+        for (size_t row = 0; row < height_; ++row) {
+            std::memcpy(destination + row * state_->horizontal_stride, source + row * width_, width_);
+        }
+        auto* destination_u  = destination + mpp_y_size;
+        auto* destination_v  = destination_u + mpp_uv_stride * mpp_uv_height;
+        const auto* source_u = source + compact_y_size;
+        const auto* source_v = source_u + compact_uv_size;
+        for (size_t row = 0; row < height_ / 2; ++row) {
+            std::memcpy(destination_u + row * mpp_uv_stride, source_u + row * (width_ / 2), width_ / 2);
+            std::memcpy(destination_v + row * mpp_uv_stride, source_v + row * (width_ / 2), width_ / 2);
+        }
+        mpp_buffer_sync_end(state_->frame_buffer);
     }
-    mpp_buffer_sync_end(state_->frame_buffer);
 
     MppFrame frame = nullptr;
     auto ret       = mpp_frame_init(&frame);
@@ -458,6 +511,7 @@ void VideoEncoderRockchip::CleanMpp() {
         mpp_enc_cfg_deinit(state_->config);
         state_->config = nullptr;
     }
+    state_->frame_rga_handle.Reset();
     if (state_->frame_buffer) {
         mpp_buffer_put(state_->frame_buffer);
         state_->frame_buffer = nullptr;

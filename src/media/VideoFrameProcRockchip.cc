@@ -6,39 +6,11 @@
 #include <limits>
 
 #include "media/PreviewPipelineMetrics.h"
+#include "media/RockchipRgaBuffer.h"
 #include "util/Log.h"
 
 namespace cosmo::media {
 namespace {
-
-    class ScopedRgaHandle {
-    public:
-        ScopedRgaHandle(void* data, size_t size) {
-            if (data && size > 0 && size <= static_cast<size_t>(std::numeric_limits<int>::max())) {
-                handle_ = importbuffer_virtualaddr(data, static_cast<int>(size));
-            }
-        }
-
-        ~ScopedRgaHandle() {
-            if (handle_ != 0) {
-                releasebuffer_handle(handle_);
-            }
-        }
-
-        ScopedRgaHandle(const ScopedRgaHandle&)            = delete;
-        ScopedRgaHandle& operator=(const ScopedRgaHandle&) = delete;
-
-        [[nodiscard]] rga_buffer_handle_t Get() const {
-            return handle_;
-        }
-
-    private:
-        rga_buffer_handle_t handle_{0};
-    };
-
-    bool RgaSucceeded(IM_STATUS status) {
-        return status == IM_STATUS_SUCCESS || status == IM_STATUS_NOERROR;
-    }
 
     uint64_t ElapsedNanoseconds(std::chrono::steady_clock::time_point started) {
         return static_cast<uint64_t>(
@@ -99,8 +71,8 @@ VideoFramePtr VideoFrameProcRockchip::ConvertWithRga(const VideoFramePtr& frame,
     output->SetStreamIndex(frame->GetStreamIndex());
 
     const auto started = std::chrono::steady_clock::now();
-    ScopedRgaHandle src_handle(frame->GetData(), frame->GetSize());
-    ScopedRgaHandle dst_handle(output->GetData(), output->GetSize());
+    ScopedRgaBufferHandle src_handle(frame->GetData(), frame->GetSize());
+    ScopedRgaBufferHandle dst_handle(output->GetData(), output->GetSize());
     if (src_handle.Get() == 0 || dst_handle.Get() == 0) {
         const auto elapsed = ElapsedNanoseconds(started);
         GetPreviewPipelineMetrics().RecordRgaOperation(false, elapsed);
@@ -112,8 +84,8 @@ VideoFramePtr VideoFrameProcRockchip::ConvertWithRga(const VideoFramePtr& frame,
     auto dst           = wrapbuffer_handle_t(dst_handle.Get(), width, height, width, height, dst_rga_format);
     const auto status  = imcvtcolor_t(src, dst, src_rga_format, dst_rga_format, color_mode, 1);
     const auto elapsed = ElapsedNanoseconds(started);
-    GetPreviewPipelineMetrics().RecordRgaOperation(RgaSucceeded(status), elapsed);
-    if (!RgaSucceeded(status)) {
+    GetPreviewPipelineMetrics().RecordRgaOperation(RockchipRgaSucceeded(status), elapsed);
+    if (!RockchipRgaSucceeded(status)) {
         LogFallbackOnce(operation, status);
         return nullptr;
     }
@@ -139,8 +111,8 @@ VideoFramePtr VideoFrameProcRockchip::ResizeWithRga(const VideoFramePtr& frame, 
     output->SetStreamIndex(frame->GetStreamIndex());
 
     const auto started = std::chrono::steady_clock::now();
-    ScopedRgaHandle src_handle(frame->GetData(), frame->GetSize());
-    ScopedRgaHandle dst_handle(output->GetData(), output->GetSize());
+    ScopedRgaBufferHandle src_handle(frame->GetData(), frame->GetSize());
+    ScopedRgaBufferHandle dst_handle(output->GetData(), output->GetSize());
     if (src_handle.Get() == 0 || dst_handle.Get() == 0) {
         const auto elapsed = ElapsedNanoseconds(started);
         GetPreviewPipelineMetrics().RecordRgaOperation(false, elapsed);
@@ -154,8 +126,8 @@ VideoFramePtr VideoFrameProcRockchip::ResizeWithRga(const VideoFramePtr& frame, 
                                              RK_FORMAT_YCbCr_420_P);
     const auto status  = imresize_t(src, dst, 0.0, 0.0, INTER_LINEAR, 1);
     const auto elapsed = ElapsedNanoseconds(started);
-    GetPreviewPipelineMetrics().RecordRgaOperation(RgaSucceeded(status), elapsed);
-    if (!RgaSucceeded(status)) {
+    GetPreviewPipelineMetrics().RecordRgaOperation(RockchipRgaSucceeded(status), elapsed);
+    if (!RockchipRgaSucceeded(status)) {
         LogFallbackOnce(operation, status);
         return nullptr;
     }

@@ -12,6 +12,19 @@ enum class NativeVideoBufferFormat {
     NV21,
 };
 
+enum class NativeVideoColorSpace {
+    Unspecified = 0,
+    Bt601,
+    Bt709,
+    Bt2020,
+};
+
+enum class NativeVideoColorRange {
+    Unspecified = 0,
+    Limited,
+    Full,
+};
+
 /// Optional, backend-owned image buffer presented to a hardware consumer.
 ///
 /// The file descriptor is borrowed from owner. Keeping this object alive keeps
@@ -24,6 +37,8 @@ struct NativeVideoBuffer {
     int width_stride{0};
     int height_stride{0};
     NativeVideoBufferFormat format{NativeVideoBufferFormat::Unknown};
+    NativeVideoColorSpace color_space{NativeVideoColorSpace::Unspecified};
+    NativeVideoColorRange color_range{NativeVideoColorRange::Unspecified};
     std::shared_ptr<void> owner;
 
     [[nodiscard]] bool Valid() const {

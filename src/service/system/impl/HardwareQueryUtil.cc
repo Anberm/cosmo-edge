@@ -30,6 +30,7 @@
 #include "util/Exec.h"
 #include "util/FileUtil.h"
 #include "util/Log.h"
+#include "util/NnBackendConstants.h"
 #include "util/PathUtil.h"
 #include "util/TimingConstants.h"
 
@@ -107,7 +108,7 @@ void HardwareQueryUtil::ReadDeviceSnAndModel(std::string* device_sn, std::string
         *device_sn = QueryPrimaryMac();
     *device_model = ReadDeviceTreeText("/proc/device-tree/model");
     if (device_model->empty())
-        *device_model = "RK3576";
+        *device_model = cosmo::util::kEngineType;
     LOG_INFO("RKNN deviceSn:{} deviceModel:{}", *device_sn, *device_model);
     return;
 #elif !defined(COSMO_NN_USE_SOPHON_BACKEND)
@@ -148,7 +149,7 @@ void HardwareQueryUtil::ReadDeviceSnAndModel(std::string* device_sn, std::string
 std::string HardwareQueryUtil::ReadHardwareSpec() {
 #if defined(COSMO_NN_USE_RKNN_BACKEND)
     auto compatible = ReadDeviceTreeText("/proc/device-tree/compatible", ',');
-    return compatible.empty() ? "rockchip,rk3576" : compatible;
+    return compatible.empty() ? cosmo::util::kHardwareSpecFallback : compatible;
 #elif !defined(COSMO_NN_USE_SOPHON_BACKEND)
     return "X86_HARDWARE_SPEC";
 #else
@@ -169,7 +170,7 @@ std::string HardwareQueryUtil::ReadKernelRevision() {
     struct utsname system_info {};
     if (uname(&system_info) == 0)
         return system_info.release;
-    LOG_WARN("uname failed while querying RK3576 kernel revision: {}", std::strerror(errno));
+    LOG_WARN("uname failed while querying RKNN kernel revision: {}", std::strerror(errno));
     return {};
 #elif !defined(COSMO_NN_USE_SOPHON_BACKEND)
     return "X86-Generic-Kernel";

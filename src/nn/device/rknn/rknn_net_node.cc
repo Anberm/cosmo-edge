@@ -14,6 +14,10 @@
 #include <numeric>
 #include <unordered_map>
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
+
 #include "nn/core/inference_pipeline_metrics.h"
 #include "nn/device/rknn/rknn_yolov8_adapter.h"
 #include "nn/node/node_type_utils.h"
@@ -180,6 +184,13 @@ rknn_core_mask ResolveRknnCoreMask(RknnCoreMode mode, uint64_t context_sequence)
     }
 }
 
+bool ShouldConfigureRknnCoreMask(RknnCoreMode mode) {
+    // Leaving the runtime default untouched is the portable automatic mode.
+    // Single-core RKNPU2 devices reject even RKNN_NPU_CORE_AUTO, while
+    // multi-core targets still accept the explicit core/split modes below.
+    return mode != RknnCoreMode::Auto;
+}
+
 const char* RknnCoreModeName(RknnCoreMode mode) {
     switch (mode) {
         case RknnCoreMode::Core0:
@@ -291,24 +302,6 @@ bool IsRknnRgaBoundInputCompatible(const rknn_tensor_attr& attr, int height, int
     return IsRknnBoundInt8InputCompatible(attr, desc, reason);
 }
 
-bool ConfigureRknnRgaUint8InputAttr(const rknn_tensor_attr& native_attr, int height, int width,
-                                    rknn_tensor_attr& bound_attr, std::string* reason) {
-    if (!IsRknnRgaBoundInputCompatible(native_attr, height, width, reason))
-        return false;
-
-    // RKNN's native tensor is INT8, but the zero-copy contract permits a UINT8
-    // bound input. Runtime then fuses the model's normalize/quantize operation
-    // onto the NPU, so RGA can write RGB bytes directly without a host-wide
-    // XOR/subtract-128 pass. This mirrors Rockchip's rknpu2 zero-copy sample.
-    bound_attr              = native_attr;
-    bound_attr.type         = RKNN_TENSOR_UINT8;
-    bound_attr.fmt          = RKNN_TENSOR_NHWC;
-    bound_attr.pass_through = 0;
-    if (reason)
-        reason->clear();
-    return true;
-}
-
 bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
                              size_t destination_bytes, int height, int width, int channels, int width_stride,
                              std::string* reason) {
@@ -409,16 +402,42 @@ bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, in
     const uint64_t required = static_cast<uint64_t>(height) * effective_stride * channels;
     if (required == 0 || required > data_bytes)
         return reject("RGA bound input requantization buffer is smaller than its tensor contract");
+    const auto flip_sign_bits = [](uint8_t* bytes, size_t count) {
+        size_t index = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+        const uint8x16_t sign_bit = vdupq_n_u8(0x80);
+        for (; index + 64 <= count; index += 64) {
+            vst1q_u8(bytes + index, veorq_u8(vld1q_u8(bytes + index), sign_bit));
+            vst1q_u8(bytes + index + 16, veorq_u8(vld1q_u8(bytes + index + 16), sign_bit));
+            vst1q_u8(bytes + index + 32, veorq_u8(vld1q_u8(bytes + index + 32), sign_bit));
+            vst1q_u8(bytes + index + 48, veorq_u8(vld1q_u8(bytes + index + 48), sign_bit));
+        }
+        for (; index + 16 <= count; index += 16)
+            vst1q_u8(bytes + index, veorq_u8(vld1q_u8(bytes + index), sign_bit));
+#endif
+        for (; index < count; ++index)
+            bytes[index] ^= 0x80;
+    };
+
     const size_t row_bytes    = static_cast<size_t>(width) * static_cast<size_t>(channels);
     const size_t stride_bytes = static_cast<size_t>(effective_stride) * static_cast<size_t>(channels);
-    for (int row = 0; row < height; ++row) {
-        auto* row_data = data + static_cast<size_t>(row) * stride_bytes;
-        for (size_t index = 0; index < row_bytes; ++index)
-            row_data[index] ^= 0x80;
+    if (row_bytes == stride_bytes) {
+        flip_sign_bits(data, static_cast<size_t>(height) * row_bytes);
+    } else {
+        for (int row = 0; row < height; ++row)
+            flip_sign_bits(data + static_cast<size_t>(row) * stride_bytes, row_bytes);
     }
     if (reason)
         reason->clear();
     return true;
+}
+
+const char* RknnRgaBoundRequantizeImplementation() {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    return "arm-neon-xor-sign-bit";
+#else
+    return "scalar-xor-sign-bit";
+#endif
 }
 
 bool RknnFastOutputEnabled() {
@@ -504,7 +523,7 @@ bool RknnNetNode::AllocateAndBindInputMemory(rknn_tensor_attr attr, BoundInputMo
     bound_input_attr_   = attr;
     bound_input_memory_ = memory;
     bound_input_mode_   = mode;
-    if (mode == BoundInputMode::RgaUint8 || mode == BoundInputMode::RgaNativeInt8)
+    if (mode == BoundInputMode::RgaNativeInt8)
         PublishRgaBoundInputTarget();
     reason.clear();
     return true;
@@ -535,37 +554,17 @@ bool RknnNetNode::TryBindRgaInputMemory(int height, int width, std::string& reas
     if (!IsRknnRgaBoundInputCompatible(native_attr, height, width, &reason))
         return false;
 
-    if (IsRknnRgbUint8InputContract(input_contract_)) {
-        rknn_tensor_attr uint8_attr{};
-        if (!ConfigureRknnRgaUint8InputAttr(native_attr, height, width, uint8_attr, &reason))
-            return false;
-        std::string uint8_reason;
-        if (AllocateAndBindInputMemory(uint8_attr, BoundInputMode::RgaUint8, uint8_reason))
-            return true;
-
-        // Older or model-specific runtimes may reject the declared UINT8
-        // contract. Preserve the native-INT8 binding as a correctness fallback;
-        // telemetry keeps this CPU-requantized mode visible.
-        native_attr.pass_through = 1;
-        if (AllocateAndBindInputMemory(native_attr, BoundInputMode::RgaNativeInt8, reason)) {
-            LOG_WARN("RKNN fused UINT8 bound input unavailable ({}); using native INT8 fallback",
-                     uint8_reason);
-            return true;
-        }
-        reason = "UINT8 bound input failed: " + uint8_reason + "; native INT8 fallback failed: " + reason;
-        return false;
-    }
-
-    // A native INT8 tensor does not prove that the model embeds normalization.
-    // Host-owned models therefore retain the exact, already-qualified
-    // uint8-to-int8 conversion until their config declares the contract.
+    // RGA implementations do not universally expose NN quantization. Bind the
+    // model's native INT8 tensor and let RGA write RGB bytes into that DMA-BUF;
+    // Forward then performs the one mathematically required sign-bit transform
+    // in place. This keeps resize/color/crop and the image-sized copy off CPU
+    // while preserving the exact u8/255 -> int8(zp=-128) model contract.
     native_attr.pass_through = 1;
     return AllocateAndBindInputMemory(native_attr, BoundInputMode::RgaNativeInt8, reason);
 }
 
 void RknnNetNode::PublishRgaBoundInputTarget() {
-    const bool rga_bound_mode =
-        bound_input_mode_ == BoundInputMode::RgaUint8 || bound_input_mode_ == BoundInputMode::RgaNativeInt8;
+    const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaNativeInt8;
     if (!shared_resource || !bound_input_memory_ || !rga_bound_mode) {
         return;
     }
@@ -594,8 +593,8 @@ void RknnNetNode::ClearRgaBoundInputTarget() {
 
 bool RknnNetNode::EnsureRgaBoundInput(int height, int width, std::string& reason) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (context_ == 0 || !detector_model_) {
-        reason = "RKNN detector context is not initialized";
+    if (context_ == 0 || !IsRknnRgbUint8InputContract(input_contract_)) {
+        reason = "RKNN RGB UINT8 input context is not initialized";
         return false;
     }
     if (!RknnBoundInputEnabled() || !RknnRgaBoundInputEnabled()) {
@@ -603,8 +602,7 @@ bool RknnNetNode::EnsureRgaBoundInput(int height, int width, std::string& reason
         return false;
     }
     if (bound_input_memory_) {
-        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaUint8 ||
-                                    bound_input_mode_ == BoundInputMode::RgaNativeInt8;
+        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaNativeInt8;
         if (rga_bound_mode && shared_resource && shared_resource->rknn_bound_input_target.owner == this &&
             shared_resource->rknn_bound_input_target.Matches(height, width)) {
             reason.clear();
@@ -623,9 +621,11 @@ bool RknnNetNode::EnsureRgaBoundInput(int height, int width, std::string& reason
         rga_bound_input_eligible_ = false;
         return false;
     }
-    LOG_INFO("RKNN RGA input bound: mode={} bytes={} fd={} width_stride={}",
-             bound_input_mode_ == BoundInputMode::RgaUint8 ? "fused-uint8" : "native-int8",
-             bound_input_memory_->size, bound_input_memory_->fd, bound_input_attr_.w_stride);
+    LOG_INFO(
+        "RKNN RGA input bound: mode=native-int8+sign-bit-transform implementation={} bytes={} fd={} "
+        "width_stride={}",
+        RknnRgaBoundRequantizeImplementation(), bound_input_memory_->size, bound_input_memory_->fd,
+        bound_input_attr_.w_stride);
     return true;
 }
 
@@ -739,11 +739,14 @@ Status RknnNetNode::LoadWeight(const char* data, size_t size) {
     if (!core_mode_valid) {
         LOG_WARN("Invalid COSMO_RKNN_CORE_MODE value:{}, fallback:auto", core_mode_env ? core_mode_env : "");
     }
-    const auto core_mask = ResolveRknnCoreMask(core_mode, context_sequence);
-    result               = rknn_set_core_mask(context_, core_mask);
-    if (result != RKNN_SUCC) {
-        DestroyContext();
-        return RknnError("rknn_set_core_mask", result);
+    const auto core_mask           = ResolveRknnCoreMask(core_mode, context_sequence);
+    const bool configure_core_mask = ShouldConfigureRknnCoreMask(core_mode);
+    if (configure_core_mask) {
+        result = rknn_set_core_mask(context_, core_mask);
+        if (result != RKNN_SUCC) {
+            DestroyContext();
+            return RknnError("rknn_set_core_mask", result);
+        }
     }
 
     rknn_sdk_version version{};
@@ -766,15 +769,22 @@ Status RknnNetNode::LoadWeight(const char* data, size_t size) {
         DestroyContext();
         return Status(COSMO_NN_ERR_INVALID_CFG, "RKNN logical output count does not match config.json");
     }
-    if (detector_model_ && shared_resource)
+    // Publish the graph-local capability endpoint independently of admission.
+    // EnsureRgaBoundInput remains the single authority for the model contract,
+    // runtime tensor attributes, and allocation/binding decision. Conditional
+    // publication hides the rejection reason from an otherwise compatible
+    // producer and lets the later generic copy path win silently.
+    if (shared_resource)
         shared_resource->rknn_bound_input_provider = this;
 
     LOG_INFO(
         "RKNN model loaded: api={} driver={} inputs={} runtime_outputs={} logical_outputs={} "
-        "output_adapter={} native_int8_output={} core_mode={} core_mask={} context_sequence={}",
+        "output_adapter={} native_int8_output={} rgb_uint8_input_contract={} core_mode={} core_mask={} "
+        "core_mask_applied={} context_sequence={}",
         version.api_version, version.drv_version, io_count_.n_input, io_count_.n_output, logical_outputs,
         RknnOutputAdapterName(output_adapter_contract_.kind), native_yolov8_outputs_,
-        RknnCoreModeName(core_mode), static_cast<int>(core_mask), context_sequence);
+        IsRknnRgbUint8InputContract(input_contract_), RknnCoreModeName(core_mode),
+        static_cast<int>(core_mask), configure_core_mask, context_sequence);
     return COSMO_NN_OK;
 }
 
@@ -918,9 +928,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         shared_resource->rknn_bound_input_target.owner == this) {
         auto& target              = shared_resource->rknn_bound_input_target;
         target.frame_ready        = false;
-        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaUint8 ||
-                                    bound_input_mode_ == BoundInputMode::RgaNativeInt8;
-        const bool blob_matches = input_desc.data_type == DATA_TYPE_INT8 &&
+        const bool rga_bound_mode = bound_input_mode_ == BoundInputMode::RgaNativeInt8;
+        const bool blob_matches   = input_desc.data_type == DATA_TYPE_INT8 &&
                                   input_desc.data_format == DATA_FORMAT_NHWC &&
                                   input_desc.image_format == IMAGE_RGB && input_desc.dims.size() == 4 &&
                                   input_desc.dims[0] == 1 && input_desc.dims[1] == target.height &&
@@ -1044,9 +1053,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
             LOG_WARN("RKNN bound input unavailable; retaining rknn_inputs_set path: {}", bind_reason);
         }
     }
-    const bool runtime_uint8_contract =
-        uint8_contract_input ||
-        (native_int8 && bound_input_memory_ && bound_input_mode_ == BoundInputMode::RgaUint8);
+    const bool runtime_uint8_contract = uint8_contract_input;
     if (!rga_bound_frame)
         GetInferencePipelineMetrics().RecordRknnInputFormat(native_int8 && !runtime_uint8_contract,
                                                             compatibility_fallback, runtime_uint8_contract);
@@ -1055,17 +1062,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         const auto copy_started   = MetricsClock::now();
         const size_t source_bytes = input.size;
         bool copied               = false;
-        if (bound_input_mode_ == BoundInputMode::RgaUint8 && native_int8) {
-            copied = CopyRknnPackedNativeInt8ToUint8(
-                static_cast<const int8_t*>(input.buf), source_bytes,
-                static_cast<uint8_t*>(bound_input_memory_->virt_addr), bound_input_memory_->size,
-                input_height, input_width, 3, static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
-        } else if (bound_input_mode_ == BoundInputMode::RgaUint8 && uint8_contract_input) {
-            copied = CopyRknnPackedInt8Input(reinterpret_cast<const int8_t*>(input.buf), source_bytes,
-                                             static_cast<int8_t*>(bound_input_memory_->virt_addr),
-                                             bound_input_memory_->size, input_height, input_width, 3,
-                                             static_cast<int>(bound_input_attr_.w_stride), &copy_reason);
-        } else if (native_int8) {
+        if (native_int8) {
             copied = CopyRknnPackedInt8Input(static_cast<const int8_t*>(input.buf), source_bytes,
                                              static_cast<int8_t*>(bound_input_memory_->virt_addr),
                                              bound_input_memory_->size, input_height, input_width, 3,
@@ -1086,7 +1083,7 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         GetInferencePipelineMetrics().RecordRknnBoundInputFrame();
         use_bound_input = true;
     }
-    if (rga_bound_frame && bound_input_mode_ == BoundInputMode::RgaNativeInt8) {
+    if (rga_bound_frame) {
         const auto sync_from_started = MetricsClock::now();
         int sync_result = rknn_mem_sync(context_, bound_input_memory_, RKNN_MEMORY_SYNC_FROM_DEVICE);
         GetInferencePipelineMetrics().RecordRknnBoundInputSync(ElapsedNanoseconds(sync_from_started),
@@ -1111,10 +1108,8 @@ Status RknnNetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
         if (sync_result != RKNN_SUCC)
             return finish(RknnError("rknn_mem_sync to device", sync_result));
     }
-    if (rga_bound_frame) {
-        GetInferencePipelineMetrics().RecordRknnRgaBoundInputFrame(bound_input_mode_ ==
-                                                                   BoundInputMode::RgaUint8);
-    }
+    if (rga_bound_frame)
+        GetInferencePipelineMetrics().RecordRknnRgaBoundInputFrame(false);
     int result = RKNN_SUCC;
     if (!use_bound_input) {
         bound_input_eligible_         = false;

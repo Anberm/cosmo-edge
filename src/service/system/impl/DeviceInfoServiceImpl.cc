@@ -243,7 +243,7 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
                          FormatBinaryMebibytes(usage.available), usage.valid ? 1 : 0, memory_domain});
     };
 
-    // RK3576 has no dedicated NPU VRAM: its legacy gpumem fields describe the
+    // Rockchip RKNN devices use shared system memory: legacy gpumem fields describe the
     // same system DDR already represented above. Keep those fields for model
     // admission and wire compatibility, but never emit a second UI capacity.
     if (gpu_utl.memoryDomain != "shared-system") {

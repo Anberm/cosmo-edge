@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "nn/device/cpu/cpu_crop_resize_node.h"
 #include "nn/node/node.h"
 
 namespace cosmo::nn {
@@ -49,6 +50,32 @@ private:
     uint32_t rga_bound_target_handle_{0};
     uint64_t rga_bound_target_generation_{0};
     bool rga_bound_target_unavailable_{false};
+    bool rga_bound_guard_logged_{false};
+};
+
+class RknnCropResizeNode final : public CpuCropResizeNode {
+public:
+    RknnCropResizeNode();
+    ~RknnCropResizeNode() override;
+
+    void LoadParam(Op* op) override;
+    Status Forward(std::vector<std::shared_ptr<Blob>>& image_blobs,
+                   std::vector<std::shared_ptr<Blob>>& rect_blobs,
+                   std::vector<std::shared_ptr<Blob>>& top_blobs) override;
+
+private:
+    bool ForwardWithRga(std::vector<std::shared_ptr<Blob>>& image_blobs,
+                        std::vector<std::shared_ptr<Blob>>& rect_blobs,
+                        std::vector<std::shared_ptr<Blob>>& top_blobs);
+    bool AcquireRgaBoundTarget(uint32_t& handle);
+    void ReleaseRgaBoundTarget();
+    void InvalidateRgaBoundFrame();
+
+    bool fast_contract_{false};
+    uint32_t rga_bound_target_handle_{0};
+    uint64_t rga_bound_target_generation_{0};
+    bool rga_bound_target_unavailable_{false};
+    bool rga_bound_guard_logged_{false};
 };
 
 class RknnNormalizeNode final : public Node {

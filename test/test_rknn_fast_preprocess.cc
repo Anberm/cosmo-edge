@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <vector>
@@ -64,7 +65,7 @@ TEST_CASE("RKNN detector fast preprocessing contracts are exact", "[nn][rknn][fa
     CHECK_FALSE(IsRknnDetectorResizeContract(224, 224, 1, {114, 114, 114}));
     CHECK(IsRknnNativeNormalizeContract({0.0f, 0.0f, 0.0f}, {}, 0.00392157f, {1, 640, 640, 3}));
     CHECK_FALSE(IsRknnNativeNormalizeContract({1.0f, 0.0f, 0.0f}, {}, 0.00392157f, {1, 640, 640, 3}));
-    CHECK_FALSE(IsRknnNativeNormalizeContract({0.0f, 0.0f, 0.0f}, {}, 0.00392157f, {1, 224, 224, 3}));
+    CHECK(IsRknnNativeNormalizeContract({0.0f, 0.0f, 0.0f}, {}, 0.00392157f, {1, 224, 224, 3}));
 
     const std::array<uint8_t, 6> rgb{0, 127, 255, 255, 1, 128};
     std::array<int8_t, 6> native{};
@@ -161,20 +162,9 @@ TEST_CASE("RKNN RGA bound input validates the native tensor and DMA-BUF target s
     std::string reason;
     CHECK(IsRknnRgaBoundInputCompatible(attr, 2, 2, &reason));
 
-    rknn_tensor_attr uint8_attr{};
-    REQUIRE(ConfigureRknnRgaUint8InputAttr(attr, 2, 2, uint8_attr, &reason));
-    CHECK(uint8_attr.type == RKNN_TENSOR_UINT8);
-    CHECK(uint8_attr.fmt == RKNN_TENSOR_NHWC);
-    CHECK(uint8_attr.pass_through == 0);
-    CHECK(uint8_attr.qnt_type == attr.qnt_type);
-    CHECK(uint8_attr.zp == attr.zp);
-    CHECK(uint8_attr.scale == attr.scale);
-    CHECK(uint8_attr.size_with_stride == attr.size_with_stride);
-    CHECK(reason.empty());
-
     auto incompatible = attr;
     incompatible.zp   = 0;
-    CHECK_FALSE(ConfigureRknnRgaUint8InputAttr(incompatible, 2, 2, uint8_attr, &reason));
+    CHECK_FALSE(IsRknnRgaBoundInputCompatible(incompatible, 2, 2, &reason));
     CHECK(reason.find("quantization") != std::string::npos);
 
     StubBoundInputProvider provider;
@@ -210,6 +200,16 @@ TEST_CASE("RKNN RGA bound input requantizes UINT8 pixels in place without touchi
     CHECK(std::all_of(pixels.begin() + 6, pixels.begin() + 12, [](uint8_t value) { return value == 99; }));
     CHECK(std::all_of(pixels.begin() + 18, pixels.end(), [](uint8_t value) { return value == 99; }));
     CHECK(reason.empty());
+
+    std::array<uint8_t, 128> vector_sized{};
+    std::iota(vector_sized.begin(), vector_sized.end(), uint8_t{0});
+    auto expected = vector_sized;
+    std::transform(expected.begin(), expected.end(), expected.begin(),
+                   [](uint8_t value) { return static_cast<uint8_t>(value ^ 0x80); });
+    REQUIRE(RequantizeRknnPackedUint8ToInt8InPlace(vector_sized.data(), vector_sized.size(), 1, 128, 1, 128,
+                                                   &reason));
+    CHECK(vector_sized == expected);
+    CHECK(std::string(RknnRgaBoundRequantizeImplementation()).find("xor-sign-bit") != std::string::npos);
 
     CHECK_FALSE(RequantizeRknnPackedUint8ToInt8InPlace(pixels.data(), 8, 2, 2, 3, 2, &reason));
     CHECK(reason.find("smaller") != std::string::npos);
@@ -277,6 +277,11 @@ TEST_CASE("RKNN core scheduling maps explicit and split modes deterministically"
     CHECK(ResolveRknnCoreMask(RknnCoreMode::Split, 0) == RKNN_NPU_CORE_0);
     CHECK(ResolveRknnCoreMask(RknnCoreMode::Split, 1) == RKNN_NPU_CORE_1);
     CHECK(ResolveRknnCoreMask(RknnCoreMode::Split, 2) == RKNN_NPU_CORE_0);
+    CHECK_FALSE(ShouldConfigureRknnCoreMask(RknnCoreMode::Auto));
+    CHECK(ShouldConfigureRknnCoreMask(RknnCoreMode::Core0));
+    CHECK(ShouldConfigureRknnCoreMask(RknnCoreMode::Core1));
+    CHECK(ShouldConfigureRknnCoreMask(RknnCoreMode::Core01));
+    CHECK(ShouldConfigureRknnCoreMask(RknnCoreMode::Split));
     CHECK(std::string(RknnCoreModeName(RknnCoreMode::Core01)) == "core0_1");
 }
 
@@ -415,7 +420,7 @@ TEST_CASE("RKNN native output switch defaults on and supports explicit rollback"
     }
 }
 
-TEST_CASE("RKNN classifier-sized normalization keeps the legacy float layout",
+TEST_CASE("RKNN classifier-sized normalization uses the shared native INT8 layout",
           "[nn][rknn][fast-preprocess]") {
     using namespace cosmo::nn;
     Normalize normalize;
@@ -427,16 +432,17 @@ TEST_CASE("RKNN classifier-sized normalization keeps the legacy float layout",
     node.SetSharedResource(&resource);
     node.LoadParam(&normalize);
     REQUIRE(bool(node.InferTopShapesWithBottoms({{1, 224, 224, 3}}, {DATA_TYPE_UINT8})));
-    CHECK(node.GetTopBlobDataTypes().front() == DATA_TYPE_FLOAT);
-    CHECK((node.GetTopBlobShapes().front() == DimsVector{1, 3, 224, 224}));
+    CHECK(node.GetTopBlobDataTypes().front() == DATA_TYPE_INT8);
+    CHECK((node.GetTopBlobShapes().front() == DimsVector{1, 224, 224, 3}));
+    CHECK(resource.rknn_bound_input_preprocess_compatible);
 
-    auto bottom_desc        = PackedImageDesc(224, 224, IMAGE_BGR);
-    bottom_desc.data_format = DATA_FORMAT_NCHW;  // Legacy crop/resize nodes leave this metadata unset.
-    auto bottom             = std::make_shared<Blob>(bottom_desc, true);
+    auto bottom_desc = PackedImageDesc(224, 224, IMAGE_BGR);
+    auto bottom      = std::make_shared<Blob>(bottom_desc, true);
     BlobDesc top_desc;
     top_desc.device_type = DEVICE_NAIVE;
-    top_desc.data_type   = DATA_TYPE_FLOAT;
-    top_desc.dims        = {1, 3, 224, 224};
+    top_desc.data_type   = DATA_TYPE_INT8;
+    top_desc.data_format = DATA_FORMAT_NHWC;
+    top_desc.dims        = {1, 224, 224, 3};
     auto top             = std::make_shared<Blob>(top_desc, true);
     auto* input          = static_cast<uint8_t*>(bottom->GetHandle().base);
     for (size_t pixel = 0; pixel < static_cast<size_t>(224) * 224; ++pixel) {
@@ -447,10 +453,10 @@ TEST_CASE("RKNN classifier-sized normalization keeps the legacy float layout",
     std::vector<std::shared_ptr<Blob>> bottoms{bottom};
     std::vector<std::shared_ptr<Blob>> tops{top};
     REQUIRE(bool(node.Forward(bottoms, tops)));
-    const auto* output = static_cast<const float*>(top->GetHandle().base);
-    CHECK(output[0] == Catch::Approx(30.0f * 0.00392157f));
-    CHECK(output[224 * 224] == Catch::Approx(20.0f * 0.00392157f));
-    CHECK(output[2 * 224 * 224] == Catch::Approx(10.0f * 0.00392157f));
+    const auto* output = static_cast<const int8_t*>(top->GetHandle().base);
+    CHECK(output[0] == -98);
+    CHECK(output[1] == -108);
+    CHECK(output[2] == -118);
 }
 
 TEST_CASE("RKNN normalize bypasses host mapping for an RGA-bound frame", "[nn][rknn][bound-input][rga]") {
@@ -549,6 +555,119 @@ TEST_CASE("RKNN RGA preprocessing performs centered RGB letterbox on host buffer
     CHECK(output[center] == 30);
     CHECK(output[center + 1] == 20);
     CHECK(output[center + 2] == 10);
+}
+
+TEST_CASE("RKNN classifier crop-resize stages extreme scaling in RGA and emits packed RGB",
+          "[nn][rknn][rga][crop-resize]") {
+    using namespace cosmo::nn;
+    ScopedEnvironment no_force_fail("COSMO_RKNN_RGA_FORCE_FAIL", "0");
+    CropResize crop;
+    crop.h_top_crop    = {0.0f};
+    crop.h_bottom_crop = {0.0f};
+    crop.w_left_crop   = {0.0f};
+    crop.w_right_crop  = {0.0f};
+    crop.dsize         = {224, 224};
+    crop.gravity       = 0;
+    crop.color         = {114, 114, 114};
+
+    SharedResource resource;
+    RknnCropResizeNode node;
+    node.SetSharedResource(&resource);
+    node.LoadParam(&crop);
+    REQUIRE(bool(node.InferTopShapes()));
+
+    auto image   = std::make_shared<Blob>(PackedImageDesc(8, 8, IMAGE_BGR), true);
+    auto* pixels = static_cast<uint8_t*>(image->GetHandle().base);
+    for (size_t pixel = 0; pixel < 64; ++pixel) {
+        pixels[pixel * 3]     = 10;
+        pixels[pixel * 3 + 1] = 20;
+        pixels[pixel * 3 + 2] = 30;
+    }
+    BlobDesc rect_desc;
+    rect_desc.device_type = DEVICE_NAIVE;
+    rect_desc.data_type   = DATA_TYPE_INT32;
+    rect_desc.dims        = {1, 4};
+    auto rect             = std::make_shared<Blob>(rect_desc, true);
+    auto* rect_data       = static_cast<int32_t*>(rect->GetHandle().base);
+    const std::array<int32_t, 4> crop_rect{2, 2, 4, 4};
+    std::copy(crop_rect.begin(), crop_rect.end(), rect_data);
+
+    BlobDesc top_desc;
+    top_desc.device_type = DEVICE_NAIVE;
+    top_desc.data_type   = DATA_TYPE_UINT8;
+    top_desc.data_format = DATA_FORMAT_NHWC;
+    top_desc.dims        = node.GetTopBlobShapes().front();
+    auto top             = std::make_shared<Blob>(top_desc, true);
+    const auto before    = GetInferencePipelineMetrics().Snapshot();
+    std::vector<std::shared_ptr<Blob>> images{image};
+    std::vector<std::shared_ptr<Blob>> rects{rect};
+    std::vector<std::shared_ptr<Blob>> tops{top};
+    REQUIRE(bool(node.Forward(images, rects, tops)));
+    const auto after = GetInferencePipelineMetrics().Snapshot();
+    CHECK(after.rknn_rga_crop_resize_calls == before.rknn_rga_crop_resize_calls + 2);
+    CHECK(after.rknn_rga_crop_resize_failures == before.rknn_rga_crop_resize_failures);
+    CHECK(after.rknn_rga_crop_host_fallbacks == before.rknn_rga_crop_host_fallbacks + 1);
+    CHECK(after.rknn_cpu_crop_resize_fallback_calls == before.rknn_cpu_crop_resize_fallback_calls);
+    CHECK(top->GetBlobDesc().image_format == IMAGE_RGB);
+    const auto* output = static_cast<const uint8_t*>(top->GetHandle().base);
+    CHECK(output[0] == 30);
+    CHECK(output[1] == 20);
+    CHECK(output[2] == 10);
+}
+
+TEST_CASE("RKNN classifier crop-resize keeps an exact CPU fallback", "[nn][rknn][rga][crop-resize]") {
+    using namespace cosmo::nn;
+    ScopedEnvironment force_fail("COSMO_RKNN_RGA_FORCE_FAIL", "1");
+    CropResize crop;
+    crop.h_top_crop    = {0.0f};
+    crop.h_bottom_crop = {0.0f};
+    crop.w_left_crop   = {0.0f};
+    crop.w_right_crop  = {0.0f};
+    crop.dsize         = {4, 4};
+    crop.gravity       = 0;
+
+    SharedResource resource;
+    RknnCropResizeNode node;
+    node.SetSharedResource(&resource);
+    node.LoadParam(&crop);
+    REQUIRE(bool(node.InferTopShapes()));
+    auto image   = std::make_shared<Blob>(PackedImageDesc(4, 4, IMAGE_BGR), true);
+    auto* pixels = static_cast<uint8_t*>(image->GetHandle().base);
+    for (size_t pixel = 0; pixel < 16; ++pixel) {
+        pixels[pixel * 3]     = 10;
+        pixels[pixel * 3 + 1] = 20;
+        pixels[pixel * 3 + 2] = 30;
+    }
+    BlobDesc rect_desc;
+    rect_desc.device_type = DEVICE_NAIVE;
+    rect_desc.data_type   = DATA_TYPE_INT32;
+    rect_desc.dims        = {1, 4};
+    auto rect             = std::make_shared<Blob>(rect_desc, true);
+    auto* rect_data       = static_cast<int32_t*>(rect->GetHandle().base);
+    rect_data[0]          = 0;
+    rect_data[1]          = 0;
+    rect_data[2]          = 4;
+    rect_data[3]          = 4;
+    BlobDesc top_desc;
+    top_desc.device_type = DEVICE_NAIVE;
+    top_desc.data_type   = DATA_TYPE_UINT8;
+    top_desc.dims        = node.GetTopBlobShapes().front();
+    auto top             = std::make_shared<Blob>(top_desc, true);
+
+    const auto before = GetInferencePipelineMetrics().Snapshot();
+    std::vector<std::shared_ptr<Blob>> images{image};
+    std::vector<std::shared_ptr<Blob>> rects{rect};
+    std::vector<std::shared_ptr<Blob>> tops{top};
+    REQUIRE(bool(node.Forward(images, rects, tops)));
+    const auto after = GetInferencePipelineMetrics().Snapshot();
+    CHECK(after.rknn_rga_crop_resize_failures == before.rknn_rga_crop_resize_failures + 1);
+    CHECK(after.rknn_cpu_crop_resize_fallback_calls == before.rknn_cpu_crop_resize_fallback_calls + 1);
+    CHECK(top->GetBlobDesc().data_format == DATA_FORMAT_NHWC);
+    CHECK(top->GetBlobDesc().image_format == IMAGE_BGR);
+    const auto* output = static_cast<const uint8_t*>(top->GetHandle().base);
+    CHECK(output[0] == 10);
+    CHECK(output[1] == 20);
+    CHECK(output[2] == 30);
 }
 
 TEST_CASE("RKNN RGA failure falls back once to CPU while preserving native input mapping",

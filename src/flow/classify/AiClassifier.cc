@@ -67,6 +67,7 @@ bool AiClassifier::CheckDataAvailable(AlgDataPtr algData) {
 void AiClassifier::HandFramesEx(std::vector<AlgDataPtr> alg_datas) {
     std::vector<AlgDataPtr> alg_out_datas;
     std::vector<VideoFramePtr> in_images;
+    std::vector<media::NativeVideoBufferPtr> in_native_buffers;
     std::vector<std::vector<AiDetectRstEl>> io_puts;
     std::vector<int> img_record;
     size_t image_num              = alg_datas.size();
@@ -146,10 +147,12 @@ void AiClassifier::HandFramesEx(std::vector<AlgDataPtr> alg_datas) {
 
         io_puts.push_back(io_puts_el);
         in_images.push_back(alg_data->chanDataDec.frame);
+        in_native_buffers.push_back(alg_data->chanDataDec.native_buffer);
         img_record.push_back(i);
     }
 
-    action_status = classifier_->ClassifyMultSub(in_images, io_puts, target_have_mult_related, true);
+    action_status =
+        classifier_->ClassifyMultSub(in_images, io_puts, target_have_mult_related, true, in_native_buffers);
     for (size_t out = 0; out < io_puts.size(); out++) {
         auto classify_result = alg_out_datas[img_record[out]]->GetTaskResult(AlgDataType::TaskDataClassify);
         if (classify_result) {

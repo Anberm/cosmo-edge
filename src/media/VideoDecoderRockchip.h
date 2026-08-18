@@ -9,13 +9,13 @@ namespace cosmo::media {
 class VideoDecoderCpu;
 struct RockchipDecoderState;
 
-/// Rockchip MPP decoder with a bounded device-to-host copy boundary.
+/// Shared Rockchip MPP decoder with native DMA-BUF export and RGA materialization.
 ///
 /// Compressed H.264/H.265 packets are decoded by the VPU. A decoded MPP frame
 /// is retained on the decoder thread until the channel sampling decision; only
-/// selected outputs are copied into the compact I420 VideoFrame expected by
-/// the existing CosmoEdge pipeline. DMA-BUF zero-copy ownership is
-/// intentionally outside this phase.
+/// selected outputs are materialized into the compact I420 VideoFrame expected
+/// by host-only business consumers. RKNN preprocessing consumes the retained
+/// DMA-BUF directly; RGA performs the unavoidable host-bound materialization.
 class VideoDecoderRockchip final : public VideoDecoder {
 public:
     explicit VideoDecoderRockchip(size_t name);

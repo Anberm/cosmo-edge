@@ -4,9 +4,10 @@
 
 namespace cosmo::nn {
 
-// RKNN's copy-first backend uses graph-owned host buffers. Registering a
-// DEVICE_RKNN allocator keeps externally wrapped image blobs and BlobStore's
-// calculate-device lifecycle valid without pretending the buffers are NPU DMA.
+// Graph metadata and compatibility tensors retain the graph-owned NaiveDevice
+// lifecycle. Native input allocation and rknn_set_io_mem binding are owned by
+// RknnNetNode/RKNN preprocess, so this registration does not imply host-copy
+// inference on the admitted DMA-BUF path.
 TypeDeviceRegister<NaiveDevice> g_rknn_device_register(DEVICE_RKNN);
 
 }  // namespace cosmo::nn

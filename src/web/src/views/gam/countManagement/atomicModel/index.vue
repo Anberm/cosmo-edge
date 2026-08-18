@@ -117,11 +117,11 @@
             </template>
           </el-upload>
         </el-form-item>
-        <el-form-item v-if="isRknn && addModelForm.modelType === 'qwen3_5'" label="vision.rknn" prop="visionFile">
+        <el-form-item v-if="isRkllm && addModelForm.modelType === 'qwen3_5'" label="vision.rknn" prop="visionFile">
           <el-upload ref="uploadVisionFileRef" action="#" :file-list="addModelForm.visionFileList" :limit="1" :auto-upload="false" accept=".rknn" :on-change="handleVisionFileChange" :on-remove="handleVisionFileRemove">
             <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
             <template #tip>
-              <div class="upload-warn">RK3576 Qwen3.5 {{ t('glossary.selectModelFileTip', { ext: '.rknn' }) }}</div>
+              <div class="upload-warn">RKNN Qwen3.5 {{ t('glossary.selectModelFileTip', { ext: '.rknn' }) }}</div>
             </template>
           </el-upload>
         </el-form-item>
@@ -582,9 +582,10 @@ const topBarData = computed(() => ({
 }))
 const isX86 = ref(false)
 const isRknn = ref(false)
+const isRkllm = ref(false)
 const modelFileExtension = computed(() => isRknn.value ? '.rknn' : (isX86.value ? '.onnx' : '.bmodel'))
 const addModelPrimaryFileExtension = computed(() =>
-  isRknn.value && addModelForm.modelType === 'qwen3_5'
+  isRkllm.value && addModelForm.modelType === 'qwen3_5'
     ? '.rkllm'
     : modelFileExtension.value
 )
@@ -674,11 +675,8 @@ const modelTypeGroups = computed(() => {
   }
   ]
   if (!isRknn.value) return groups
-  const supported = new Set([
-    // RK3576 capabilities are exposed only after end-to-end validation with a
-    // real model on the device. Keep code-only integrations hidden for now.
-    'yolov8_det', 'classify', 'qwen3_5'
-  ])
+  const supported = new Set(['yolov8_det', 'classify'])
+  if (isRkllm.value) supported.add('qwen3_5')
   return groups
     .map(group => ({ ...group, children: group.children.filter(item => supported.has(item.value)) }))
     .filter(group => group.children.length > 0)
@@ -829,12 +827,12 @@ const addModelRules = {
   visionFile: [
     {
       validator: (rule, value, callback) => {
-        if (!isRknn.value || addModelForm.modelType !== 'qwen3_5') {
+        if (!isRkllm.value || addModelForm.modelType !== 'qwen3_5') {
           callback()
           return
         }
         if (!addModelForm.visionFileList || addModelForm.visionFileList.length === 0) {
-          callback(new Error('RK3576 Qwen3.5 需要上传 vision.rknn'))
+          callback(new Error('RKNN Qwen3.5 需要上传 vision.rknn'))
         } else {
           callback()
         }
@@ -1409,7 +1407,7 @@ const sureAddModel = async () => {
         proxy.$message.warning(t('validate.decoderFormatError', { ext }))
         return
       }
-    } else if (isRknn.value && addModelForm.modelType === 'qwen3_5') {
+    } else if (isRkllm.value && addModelForm.modelType === 'qwen3_5') {
       if (
         !addModelForm.modelFileList ||
         addModelForm.modelFileList.length === 0
@@ -1421,7 +1419,7 @@ const sureAddModel = async () => {
         !addModelForm.visionFileList ||
         addModelForm.visionFileList.length === 0
       ) {
-        proxy.$message.warning('RK3576 Qwen3.5 需要上传 vision.rknn')
+        proxy.$message.warning('RKNN Qwen3.5 需要上传 vision.rknn')
         return
       }
       const languageFile =
@@ -1436,7 +1434,7 @@ const sureAddModel = async () => {
         proxy.$message.warning(t('validate.uploadFormatError', { ext: '.rknn' }))
         return
       }
-    } else if (isRknn.value && addModelForm.modelType === 'qwen3_5') {
+    } else if (isRkllm.value && addModelForm.modelType === 'qwen3_5') {
       const languageFile =
         addModelForm.modelFileList[0].raw || addModelForm.modelFileList[0]
       const visionFile =
@@ -1598,11 +1596,17 @@ onMounted(() => {
     proxy.$API.queryDeviceInfo().then(res => {
       const devInfoList = res?.resData?.devInfoList || []
       const deviceTypeItem = devInfoList.find(item => item.key === 'deviceType')
-      if (deviceTypeItem) {
-        const deviceType = deviceTypeItem.value.toLowerCase()
-        isX86.value = deviceType.includes('x86')
-        isRknn.value = deviceType.includes('rk3576') || deviceType.includes('rockchip')
-      }
+      const acceleratorBackendItem = devInfoList.find(item => item.key === 'acceleratorBackend')
+      const rkllmAvailableItem = devInfoList.find(item => item.key === 'rkllmAvailable')
+      const acceleratorBackend = acceleratorBackendItem?.value?.toLowerCase() || ''
+      const deviceType = deviceTypeItem?.value?.toLowerCase() || ''
+      isX86.value = acceleratorBackend === 'onnx_runtime' || deviceType.includes('x86')
+      // Prefer the backend capability reported by new engines. Device-name
+      // fallbacks keep compatibility with older releases without adding a
+      // list of Rockchip chip names to the frontend.
+      isRknn.value = acceleratorBackend === 'rknn' ||
+        deviceType.includes('rk3576') || deviceType.includes('rockchip')
+      isRkllm.value = rkllmAvailableItem?.value?.toLowerCase() === 'true'
     }).catch(() => {})
   }
   loadModelTypes()

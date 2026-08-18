@@ -114,6 +114,10 @@ public:
 
     RknnBoundInputProvider* rknn_bound_input_provider{nullptr};
     RknnBoundInputTarget rknn_bound_input_target{};
+    // Set by the graph's normalize node after shape inference. Producers may
+    // write directly into the RKNN input DMA-BUF only when the complete
+    // preprocessing contract (RGB UINT8, 0..255 -> 0..1) is compatible.
+    bool rknn_bound_input_preprocess_compatible{false};
 };
 
 }  // namespace cosmo::nn

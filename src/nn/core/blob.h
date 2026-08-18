@@ -11,6 +11,19 @@
 
 namespace cosmo::nn {
 
+enum class NativeImageColorSpace {
+    Unspecified = 0,
+    Bt601,
+    Bt709,
+    Bt2020,
+};
+
+enum class NativeImageColorRange {
+    Unspecified = 0,
+    Limited,
+    Full,
+};
+
 struct PUBLIC BlobDesc {
     DeviceType device_type = DEVICE_NAIVE;
 
@@ -40,6 +53,8 @@ struct PUBLIC BlobHandle {
         int width_stride{0};
         int height_stride{0};
         ImageFormat format{IMAGE_UNKNOWN};
+        NativeImageColorSpace color_space{NativeImageColorSpace::Unspecified};
+        NativeImageColorRange color_range{NativeImageColorRange::Unspecified};
 
         [[nodiscard]] bool Valid() const {
             return fd >= 0 && bytes > 0 && width > 0 && height > 0 && width_stride >= width &&

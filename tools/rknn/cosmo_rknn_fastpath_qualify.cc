@@ -192,17 +192,18 @@ struct PathBuffers {
 class QualificationRunner {
 public:
     QualificationRunner(const std::vector<unsigned char>& model, int source_height, int source_width,
-                        bool qualify_rga_bound_input, bool qualify_rga_uint8_input, bool uint8_input_contract)
+                        bool isolate_rga_input, bool qualify_rga_bound_native_input,
+                        bool uint8_input_contract)
         : source_height_(source_height),
           source_width_(source_width),
-          qualify_rga_bound_input_(qualify_rga_bound_input) {
+          qualify_rga_bound_input_(isolate_rga_input) {
         ConfigurePreprocessing();
         if (uint8_input_contract)
             network_.SetInputContract(cosmo::nn::kRknnRgbUint8InputContract);
         ConfigureNetwork(network_, model, nullptr, output_);
-        if (qualify_rga_bound_input_) {
+        if (isolate_rga_input) {
             bound_network_ = std::make_unique<cosmo::nn::RknnNetNode>();
-            if (qualify_rga_uint8_input)
+            if (qualify_rga_bound_native_input)
                 bound_network_->SetInputContract(cosmo::nn::kRknnRgbUint8InputContract);
             ConfigureNetwork(*bound_network_, model, &fast_resource_, bound_output_);
         }
@@ -433,7 +434,7 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: " << argv[0]
                   << " <model.rknn> <bgr-input-list.txt> <height> <width> <output-dir> "
                      "[--direct-output-parity|--direct-output-parity-uint8-contract|"
-                     "--rga-bound-input-parity|--rga-bound-uint8-parity]\n";
+                     "--rga-host-preprocess-parity|--rga-bound-native-int8-parity]\n";
         return 2;
     }
 
@@ -448,9 +449,9 @@ int main(int argc, char** argv) {
                                            qualification_option == "--direct-output-parity-uint8-contract";
         const bool qualify_direct_output_uint8 =
             qualification_option == "--direct-output-parity-uint8-contract";
-        const bool qualify_rga_bound_input = argc == 7 && std::string(argv[6]) == "--rga-bound-input-parity";
-        const bool qualify_rga_uint8_input = argc == 7 && std::string(argv[6]) == "--rga-bound-uint8-parity";
-        if (argc == 7 && !qualify_direct_output && !qualify_rga_bound_input && !qualify_rga_uint8_input)
+        const bool qualify_rga_host_input         = qualification_option == "--rga-host-preprocess-parity";
+        const bool qualify_rga_bound_native_input = qualification_option == "--rga-bound-native-int8-parity";
+        if (argc == 7 && !qualify_direct_output && !qualify_rga_host_input && !qualify_rga_bound_native_input)
             throw std::runtime_error("unknown qualification option");
         if (height <= 0 || width <= 0)
             throw std::runtime_error("source dimensions must be positive");
@@ -463,8 +464,9 @@ int main(int argc, char** argv) {
 
         LogGuard log_guard;
         const auto metrics_before = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
-        QualificationRunner runner(model, height, width, qualify_rga_bound_input || qualify_rga_uint8_input,
-                                   qualify_rga_uint8_input, qualify_direct_output_uint8);
+        QualificationRunner runner(model, height, width,
+                                   qualify_rga_host_input || qualify_rga_bound_native_input,
+                                   qualify_rga_bound_native_input, qualify_direct_output_uint8);
         std::unique_ptr<DirectOutputQualificationRunner> direct_output_runner;
         if (qualify_direct_output)
             direct_output_runner =
@@ -533,7 +535,7 @@ int main(int argc, char** argv) {
                              metrics_before.rknn_yolov8_score_sum_points_rejected
                       << '\n';
         }
-        if (qualify_direct_output || qualify_rga_bound_input || qualify_rga_uint8_input) {
+        if (qualify_direct_output || qualify_rga_host_input || qualify_rga_bound_native_input) {
             const auto metrics_after = cosmo::nn::GetInferencePipelineMetrics().Snapshot();
             std::cout << "bound_input_bind_attempts="
                       << metrics_after.rknn_bound_input_bind_attempts -
@@ -601,6 +603,8 @@ int main(int argc, char** argv) {
                       << metrics_after.rknn_rga_bound_requantize_failures -
                              metrics_before.rknn_rga_bound_requantize_failures
                       << '\n';
+            std::cout << "rga_bound_requantize_implementation="
+                      << cosmo::nn::RknnRgaBoundRequantizeImplementation() << '\n';
             std::cout << "rga_bound_input_normalize_bypasses="
                       << metrics_after.rknn_rga_bound_input_normalize_bypasses -
                              metrics_before.rknn_rga_bound_input_normalize_bypasses

@@ -52,9 +52,9 @@ namespace ai_detector_fps {
         return {{8.0f, 3}, {12.0f, 2}, {100.0f, 1}};
     }
 
-    // RKNN CV graphs on RK3576 are admitted conservatively until a
-    // model/candidate-specific capacity result proves that sharing is safe.
-    // Environment overrides remain available for qualified models.
+    // RKNN CV graphs use a conservative default across Rockchip targets until
+    // a model/candidate-specific capacity result proves that sharing is safe.
+    // Environment overrides remain available for qualified combinations.
     inline ReuseProfile RknnDefaultReuseProfile() {
         return {{100.0f, 1}};
     }

@@ -128,9 +128,10 @@ util::ErrorEnum AiClassifierUnify::Classify(const std::vector<VideoFramePtr>& im
 util::ErrorEnum AiClassifierUnify::Forward(const std::vector<VideoFramePtr>& images,
                                            const std::vector<std::vector<std::vector<int>>>& datas,
                                            std::vector<std::vector<cosmo::nn::ObjectInfoV1>>& outputs,
-                                           bool use_box) {
+                                           bool use_box,
+                                           const std::vector<media::NativeVideoBufferPtr>& native_buffers) {
     std::vector<std::shared_ptr<cosmo::nn::Blob>> image_blobs{};
-    auto ret = ConvertImagesToBlobs(images, image_blobs);
+    auto ret = ConvertImagesToBlobs(images, native_buffers, image_blobs);
     if (util::ErrorEnum::Success != ret) {
         LOG_ERRO("ConvertImagesToBlobs Failed. Ret:{}", ret);
         return ret;
