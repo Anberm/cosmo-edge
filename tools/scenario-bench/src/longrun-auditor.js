@@ -7,6 +7,10 @@ const MIB = 1024 * 1024;
 const REQUIRED_FAILURE_COUNTERS = [
   'graphForwardFailures',
   'mppCopyOutFailures',
+  'mppRgaCopyOutFailures',
+  'mppCpuCopyOutFallbacks',
+  'mppRgaCopyInFailures',
+  'mppCpuCopyInFallbacks',
   'mppDecodeFailures',
   'mppDecodeFallbacks',
   'mppEncodeFailures',
@@ -14,9 +18,36 @@ const REQUIRED_FAILURE_COUNTERS = [
   'resultParseFailures',
   'rgaFailures',
   'rknnForwardFailures',
+  'rknnBoundInputBindFailures',
+  'rknnBoundInputCopyFailures',
+  'rknnBoundInputSyncFailures',
+  'rknnCpuResizeFallbackCalls',
+  'rknnCpuCropResizeFallbackCalls',
+  'rknnCpuNormalizeFallbackCalls',
+  'rknnDetectorForwardFailures',
+  'rknnInputCompatibilityFallbacks',
+  'rknnMppDmaBufImportFailures',
+  'rknnOutputCompatibilityFallbacks',
   'rknnRgaFailures',
+  'rknnRgaCropResizeFailures',
+  'rknnRgaCropHostFallbacks',
+  'rknnRgaBoundInputBindFailures',
   'rknnRgaBoundInputImportFailures',
   'rknnRgaBoundRequantizeFailures',
+  'rknnMppDmaBufFallbacks',
+  'rknnYolov8DirectCandidateFailures',
+];
+
+const FAILURE_COUNTER_SUFFIX = /(Failures|Fallbacks|FallbackCalls)$/;
+
+const NATIVE_BOUND_FORBIDDEN_COUNTERS = [
+  'rknnBoundInputCopyCalls',
+  'rknnBoundInputCopyBytes',
+  'rknnNativeInputMapCalls',
+  'rknnFloatInputs',
+  'rknnUint8ContractInputs',
+  'rknnInputsSetCalls',
+  'rknnDetectorInputsSetCalls',
 ];
 
 const MONOTONIC_COUNTERS = [
@@ -24,6 +55,8 @@ const MONOTONIC_COUNTERS = [
   'colorConvertFrames',
   'graphForwardFrames',
   'mppCopyOutFrames',
+  'mppRgaCopyOutFrames',
+  'mppRgaCopyInFrames',
   'mppDecodedFrames',
   'mppEarlyDroppedFrames',
   'mppEncodedFrames',
@@ -32,8 +65,17 @@ const MONOTONIC_COUNTERS = [
   'resultParseFrames',
   'rgaFrames',
   'rknnForwards',
+  'rknnRgaCropResizeCalls',
+  'rknnRgaCropDmaBufFrames',
+  'rknnRgaCropHostFallbacks',
   'rknnRgaBoundInputFrames',
   'rknnRgaBoundUint8Frames',
+  'rknnRgaBoundNativeInt8Frames',
+  'rknnRgaBoundRequantizeCalls',
+  'rknnRgaBoundRequantizeMs',
+  'rknnMppDmaBufFrames',
+  'rknnBoundInputSyncCalls',
+  'rknnMppDmaBufImportCalls',
 ];
 
 const IDENTITY_ALLOWLIST = new Set([
@@ -89,6 +131,9 @@ function counterSummary(samples, key) {
     samples: values.length,
     first: values[0] ?? null,
     last: values.at(-1) ?? null,
+    min: values.length ? Math.min(...values) : null,
+    max: values.length ? Math.max(...values) : null,
+    nonZeroSamples: values.filter((value) => value !== 0).length,
     delta: values.length ? values.at(-1) - values[0] : null,
     decreases: values.slice(1).reduce(
       (count, value, index) => count + (value < values[index] ? 1 : 0),
@@ -149,6 +194,18 @@ export function auditLongRun(runResult, options = {}) {
   const minRgaBoundUint8Frames = options.minRgaBoundUint8Frames == null
     ? null
     : Number(options.minRgaBoundUint8Frames);
+  const minRgaBoundNativeInt8Frames = options.minRgaBoundNativeInt8Frames == null
+    ? null
+    : Number(options.minRgaBoundNativeInt8Frames);
+  const minRknnMppDmaBufFrames = options.minRknnMppDmaBufFrames == null
+    ? null
+    : Number(options.minRknnMppDmaBufFrames);
+  const minRknnRgaCropDmaBufFrames = options.minRknnRgaCropDmaBufFrames == null
+    ? null
+    : Number(options.minRknnRgaCropDmaBufFrames);
+  const maxRgaBoundRequantizeAvgMs = options.maxRgaBoundRequantizeAvgMs == null
+    ? null
+    : Number(options.maxRgaBoundRequantizeAvgMs);
   const nowMs = Number(options.nowMs ?? Date.now());
   const expectedPreviewStreams = options.expectedPreviewStreams == null
     ? null
@@ -177,6 +234,19 @@ export function auditLongRun(runResult, options = {}) {
       && (!Number.isInteger(minRgaBoundUint8Frames) || minRgaBoundUint8Frames < 0)) {
     throw new Error('minRgaBoundUint8Frames must be a non-negative integer');
   }
+  for (const [name, value] of Object.entries({
+    minRgaBoundNativeInt8Frames,
+    minRknnMppDmaBufFrames,
+    minRknnRgaCropDmaBufFrames,
+  })) {
+    if (value != null && (!Number.isInteger(value) || value < 0)) {
+      throw new Error(`${name} must be a non-negative integer`);
+    }
+  }
+  if (maxRgaBoundRequantizeAvgMs != null
+      && (!Number.isFinite(maxRgaBoundRequantizeAvgMs) || maxRgaBoundRequantizeAvgMs < 0)) {
+    throw new Error('maxRgaBoundRequantizeAvgMs must be a non-negative number');
+  }
 
   const checks = [];
   const add = (...args) => checks.push(check(...args));
@@ -196,6 +266,22 @@ export function auditLongRun(runResult, options = {}) {
     : lastTs;
   const runAgeSec = Number.isFinite(startedMs) && effectiveEndMs != null
     ? (effectiveEndMs - startedMs) / 1000
+    : null;
+  const fullLoadSamples = samples.filter((sample) => {
+    const targetChannels = Number(sample?.targetChannels);
+    const activeChannels = Number(sample?.activeChannels);
+    const uniqueChannels = new Set((sample?.channels ?? []).map((channel) => channel.channelId));
+    return Number.isFinite(Number(sample?.ts))
+      && Number.isInteger(targetChannels)
+      && targetChannels > 0
+      && activeChannels === targetChannels
+      && uniqueChannels.size === targetChannels;
+  });
+  const firstFullLoadTs = Number(fullLoadSamples[0]?.ts);
+  const fullLoadCoverageSec = Number.isFinite(firstFullLoadTs)
+    && effectiveEndMs != null
+    && effectiveEndMs >= firstFullLoadTs
+    ? (effectiveEndMs - firstFullLoadTs) / 1000
     : null;
   const sampleSpanSec = firstTs != null && lastTs != null ? (lastTs - firstTs) / 1000 : null;
   const firstSampleDelaySec = Number.isFinite(startedMs) && firstTs != null ? (firstTs - startedMs) / 1000 : null;
@@ -256,12 +342,13 @@ export function auditLongRun(runResult, options = {}) {
     );
   }
 
-  const durationReached = runAgeSec != null && runAgeSec >= requiredDurationSec;
+  const durationReached = fullLoadCoverageSec != null
+    && fullLoadCoverageSec >= requiredDurationSec;
   add(
     'gate.duration',
     durationReached ? 'PASS' : (runResult.status === 'running' ? 'IN_PROGRESS' : 'FAIL'),
-    round(runAgeSec),
-    `>= ${requiredDurationSec}s (${gateHours}h)`,
+    round(fullLoadCoverageSec),
+    `>= ${requiredDurationSec}s (${gateHours}h) of observed full-load coverage`,
   );
 
   const stepIndexes = [...new Set(holdSamples.map((sample) => sample.stepIndex))];
@@ -457,21 +544,36 @@ export function auditLongRun(runResult, options = {}) {
     'accelerator telemetry present in every hold sample',
   );
 
-  const counterKeys = [...new Set([...MONOTONIC_COUNTERS, ...REQUIRED_FAILURE_COUNTERS])];
+  const dynamicFailureCounterKeys = [...new Set(accelerators.flatMap((accelerator) => (
+    accelerator
+      ? Object.keys(accelerator).filter((key) => FAILURE_COUNTER_SUFFIX.test(key))
+      : []
+  )))].sort();
+  const failureCounterKeys = [...new Set([
+    ...REQUIRED_FAILURE_COUNTERS,
+    ...dynamicFailureCounterKeys,
+  ])];
+  const gatedForbiddenCounters = minRgaBoundNativeInt8Frames == null
+    ? []
+    : NATIVE_BOUND_FORBIDDEN_COUNTERS;
+  const counterKeys = [...new Set([
+    ...MONOTONIC_COUNTERS,
+    ...failureCounterKeys,
+    ...gatedForbiddenCounters,
+  ])];
   const counters = Object.fromEntries(
     counterKeys.map((key) => [key, counterSummary(holdSamples, key)]),
   );
   const missingCounters = counterKeys.filter((key) => counters[key].samples !== holdSamples.length);
   const resetCounters = MONOTONIC_COUNTERS.filter((key) => counters[key].decreases > 0);
-  const failureDeltas = Object.fromEntries(
-    REQUIRED_FAILURE_COUNTERS.map((key) => [key, counters[key].delta]),
+  const nonZeroFailures = failureCounterKeys.filter(
+    (key) => counters[key].nonZeroSamples > 0,
   );
-  const nonZeroFailures = Object.entries(failureDeltas).filter(([, delta]) => delta !== 0);
   add(
     'native.countersPresent',
     missingCounters.length === 0 ? 'PASS' : 'FAIL',
     missingCounters,
-    'all required native-media counters present in every hold sample',
+    'all explicit, dynamically discovered, and gated native-media counters present in every hold sample',
   );
   add(
     'native.counterContinuity',
@@ -482,8 +584,8 @@ export function auditLongRun(runResult, options = {}) {
   add(
     'native.failures',
     nonZeroFailures.length === 0 ? 'PASS' : 'FAIL',
-    Object.fromEntries(nonZeroFailures),
-    'all failure/fallback counter deltas equal zero',
+    Object.fromEntries(nonZeroFailures.map((key) => [key, counters[key].max])),
+    'every failure/fallback counter equals zero in every hold sample',
   );
   if (minRgaBoundUint8Frames != null) {
     const fusedFrames = counters.rknnRgaBoundUint8Frames?.delta;
@@ -492,6 +594,100 @@ export function auditLongRun(runResult, options = {}) {
       Number.isFinite(fusedFrames) && fusedFrames >= minRgaBoundUint8Frames ? 'PASS' : 'FAIL',
       fusedFrames ?? null,
       `>= ${minRgaBoundUint8Frames} fused UINT8 bound-input frames`,
+    );
+  }
+  if (minRgaBoundNativeInt8Frames != null) {
+    const missingForbiddenCounters = NATIVE_BOUND_FORBIDDEN_COUNTERS.filter(
+      (key) => counters[key].samples !== holdSamples.length,
+    );
+    const activeForbiddenCounters = NATIVE_BOUND_FORBIDDEN_COUNTERS.filter(
+      (key) => counters[key].nonZeroSamples > 0,
+    );
+    add(
+      'native.legacyInputPaths',
+      missingForbiddenCounters.length === 0 && activeForbiddenCounters.length === 0
+        ? 'PASS'
+        : 'FAIL',
+      {
+        missing: missingForbiddenCounters,
+        nonZero: Object.fromEntries(
+          activeForbiddenCounters.map((key) => [key, counters[key].max]),
+        ),
+      },
+      'legacy host-copy, mapped-input, compatibility-input, and rknn_inputs_set paths stay present and zero in every hold sample',
+    );
+    const forwards = counters.rknnForwards?.delta;
+    const boundFrames = counters.rknnRgaBoundInputFrames?.delta;
+    const fusedFrames = counters.rknnRgaBoundUint8Frames?.delta;
+    const nativeFrames = counters.rknnRgaBoundNativeInt8Frames?.delta;
+    const requantizeCalls = counters.rknnRgaBoundRequantizeCalls?.delta;
+    const accountingTolerance = Number.isFinite(forwards)
+      ? Math.max(2, Math.ceil(forwards * 0.0001))
+      : null;
+    const forwardCoverageError = [forwards, boundFrames].every(Number.isFinite)
+      ? Math.abs(forwards - boundFrames)
+      : null;
+    const nativeCoverageError = [boundFrames, nativeFrames].every(Number.isFinite)
+      ? Math.abs(boundFrames - nativeFrames)
+      : null;
+    const requantizeCoverageError = [nativeFrames, requantizeCalls].every(Number.isFinite)
+      ? Math.abs(nativeFrames - requantizeCalls)
+      : null;
+    add(
+      'native.rgaBoundNativeInt8',
+      Number.isFinite(nativeFrames)
+        && nativeFrames >= minRgaBoundNativeInt8Frames
+        && fusedFrames === 0
+        && forwardCoverageError != null
+        && forwardCoverageError <= accountingTolerance
+        && nativeCoverageError != null
+        && nativeCoverageError <= accountingTolerance
+        && requantizeCoverageError != null
+        && requantizeCoverageError <= accountingTolerance
+        ? 'PASS'
+        : 'FAIL',
+      {
+        forwards,
+        boundFrames,
+        fusedFrames,
+        nativeFrames,
+        requantizeCalls,
+        forwardCoverageError,
+        nativeCoverageError,
+        requantizeCoverageError,
+      },
+      `>= ${minRgaBoundNativeInt8Frames} native INT8 frames, no fused UINT8 frames, and complete forward/bind/requantize accounting (tolerance ${accountingTolerance})`,
+    );
+  }
+  if (minRknnMppDmaBufFrames != null) {
+    const frames = counters.rknnMppDmaBufFrames?.delta;
+    add(
+      'native.rknnMppDmaBuf',
+      Number.isFinite(frames) && frames >= minRknnMppDmaBufFrames ? 'PASS' : 'FAIL',
+      frames ?? null,
+      `>= ${minRknnMppDmaBufFrames} RKNN frames sourced from MPP DMA-BUF`,
+    );
+  }
+  if (minRknnRgaCropDmaBufFrames != null) {
+    const frames = counters.rknnRgaCropDmaBufFrames?.delta;
+    add(
+      'native.rknnRgaCropDmaBuf',
+      Number.isFinite(frames) && frames >= minRknnRgaCropDmaBufFrames ? 'PASS' : 'FAIL',
+      frames ?? null,
+      `>= ${minRknnRgaCropDmaBufFrames} classifier crops sourced from DMA-BUF`,
+    );
+  }
+  if (maxRgaBoundRequantizeAvgMs != null) {
+    const calls = counters.rknnRgaBoundRequantizeCalls?.delta;
+    const elapsedMs = counters.rknnRgaBoundRequantizeMs?.delta;
+    const averageMs = Number.isFinite(calls) && calls > 0 && Number.isFinite(elapsedMs)
+      ? elapsedMs / calls
+      : null;
+    add(
+      'native.rgaBoundRequantizeLatency',
+      averageMs != null && averageMs <= maxRgaBoundRequantizeAvgMs ? 'PASS' : 'FAIL',
+      round(averageMs, 6),
+      `<= ${maxRgaBoundRequantizeAvgMs} ms average native U8-to-INT8 sign-bit transform`,
     );
   }
 
@@ -536,7 +732,19 @@ export function auditLongRun(runResult, options = {}) {
     { decoded, copied, earlyDropped, error: copyAccountingError },
     `decoded ~= copied + earlyDropped (tolerance ${copyAccountingTolerance})`,
   );
-  if (options.expectedDecoderBackend === 'rockchip-copy-out') {
+  const rgaCopiedOut = counters.mppRgaCopyOutFrames?.delta;
+  const cpuCopyOutFallbacks = counters.mppCpuCopyOutFallbacks?.delta;
+  const rgaCopyOutError = [copied, rgaCopiedOut].every(Number.isFinite)
+    ? Math.abs(copied - rgaCopiedOut)
+    : null;
+  add(
+    'native.rgaCopyOut',
+    rgaCopyOutError != null && rgaCopyOutError <= copyAccountingTolerance
+      && cpuCopyOutFallbacks === 0 ? 'PASS' : 'FAIL',
+    { copied, rgaCopiedOut, cpuCopyOutFallbacks, error: rgaCopyOutError },
+    `all materialized frames use RGA (tolerance ${copyAccountingTolerance})`,
+  );
+  if (options.expectedDecoderBackend?.startsWith('rockchip-')) {
     add(
       'native.earlyDropActive',
       earlyDropped > 0 ? 'PASS' : 'FAIL',
@@ -546,6 +754,21 @@ export function auditLongRun(runResult, options = {}) {
   }
 
   const encoded = counters.mppEncodedFrames?.delta;
+  const rgaCopiedIn = counters.mppRgaCopyInFrames?.delta;
+  const cpuCopyInFallbacks = counters.mppCpuCopyInFallbacks?.delta;
+  const copyInAccountingTolerance = Number.isFinite(encoded)
+    ? Math.max(8, Math.ceil(encoded * 0.001))
+    : null;
+  const copyInAccountingError = [encoded, rgaCopiedIn].every(Number.isFinite)
+    ? Math.abs(encoded - rgaCopiedIn)
+    : null;
+  add(
+    'native.rgaCopyIn',
+    copyInAccountingError != null && copyInAccountingError <= copyInAccountingTolerance
+      && cpuCopyInFallbacks === 0 ? 'PASS' : 'FAIL',
+    { encoded, rgaCopiedIn, cpuCopyInFallbacks, error: copyInAccountingError },
+    `all encoded frames use RGA copy-in (tolerance ${copyInAccountingTolerance})`,
+  );
   const osd = counters.osdFrames?.delta;
   const published = counters.publishedFrames?.delta;
   const publishRatio = Number.isFinite(encoded) && encoded > 0 && Number.isFinite(published)
@@ -618,6 +841,10 @@ export function auditLongRun(runResult, options = {}) {
       requiredDurationSec,
       reached: durationReached,
       runAgeSec: round(runAgeSec),
+      fullLoadCoverageSec: round(fullLoadCoverageSec),
+      firstFullLoadAt: Number.isFinite(firstFullLoadTs)
+        ? new Date(firstFullLoadTs).toISOString()
+        : null,
       sampleSpanSec: round(sampleSpanSec),
       firstSampleDelaySec: round(firstSampleDelaySec),
       finalSampleDelaySec: round(finalSampleDelaySec),
@@ -655,6 +882,9 @@ export function auditLongRun(runResult, options = {}) {
     nativeMedia: {
       decoderBackends,
       encoderBackends,
+      failureCounterKeys,
+      dynamicFailureCounterKeys,
+      nativeBoundForbiddenCounters: gatedForbiddenCounters,
       counters,
       copyAccountingError,
       copyAccountingTolerance,

@@ -109,7 +109,7 @@ init-scenario options:
 checkpoint options:
   --input <file>       Running metrics.partial.json or completed metrics.json
   --output <file>      Atomic JSON checkpoint output path
-  --gate-hours <n>     Required continuous runtime, e.g. 12
+  --gate-hours <n>     Required observed full-load runtime; excludes login/ramp, e.g. 12
   --identity <file>    Optional immutable candidate identity key=value file
   --source-label <s>   Canonical remote/source path recorded in evidence
   --identity-label <s> Canonical identity path recorded in evidence
@@ -121,6 +121,10 @@ checkpoint options:
   --expected-decoder-backend <s> Required decoder backend identifier
   --expected-encoder-backend <s> Required encoder backend identifier
   --min-rga-bound-uint8-frames <n> Required fused RGA-to-RKNN UINT8 frames
+  --min-rga-bound-native-int8-frames <n> Required native INT8 bound frames with full RKNN accounting
+  --min-rknn-mpp-dmabuf-frames <n> Required RKNN frames sourced from MPP DMA-BUF
+  --min-rknn-rga-crop-dmabuf-frames <n> Required classifier crops sourced from DMA-BUF
+  --max-rga-bound-requantize-avg-ms <n> Maximum average native U8-to-INT8 transform latency
 `);
 }
 
@@ -751,6 +755,10 @@ async function runCheckpoint(args) {
     maxPoolGrowthBytes: optionalNumber(args, 'max-pool-growth-bytes'),
     poolGrowthWarmupSec: optionalNumber(args, 'pool-growth-warmup-sec'),
     minRgaBoundUint8Frames: optionalNumber(args, 'min-rga-bound-uint8-frames'),
+    minRgaBoundNativeInt8Frames: optionalNumber(args, 'min-rga-bound-native-int8-frames'),
+    minRknnMppDmaBufFrames: optionalNumber(args, 'min-rknn-mpp-dmabuf-frames'),
+    minRknnRgaCropDmaBufFrames: optionalNumber(args, 'min-rknn-rga-crop-dmabuf-frames'),
+    maxRgaBoundRequantizeAvgMs: optionalNumber(args, 'max-rga-bound-requantize-avg-ms'),
     expectedPreviewStreams: optionalNumber(args, 'expected-preview-streams'),
     expectedDecoderBackend: args['expected-decoder-backend'],
     expectedEncoderBackend: args['expected-encoder-backend'],

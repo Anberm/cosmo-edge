@@ -270,8 +270,8 @@ export class ReportWriter {
         <td>${metric(m.rknnRunAvgMs)}/${metric(m.rknnOutputsGetAvgMs)}/${metric(m.rknnOutputsReleaseAvgMs)}/${metric(m.rknnOutputTransformAvgMs)}</td>
         <td>${metric(m.rknnForwardAvgMs)}/${m.rknnForwardFailures ?? '-'}</td>
         <td>${metric(m.rknnDetectorForwardAvgMs)}/${metric(m.rknnDetectorMutexWaitAvgMs)}/${m.rknnDetectorForwardFailures ?? '-'}</td>
-        <td>${metric(m.rknnRgaFillAvgMs)}/${metric(m.rknnRgaResizeColorAvgMs)}/${metric(m.rknnNativeInputMapAvgMs)}/${m.rknnPreprocessFastHits ?? '-'}/${m.rknnRgaFailures ?? '-'}</td>
-        <td>${m.rknnCpuResizeFallbacks ?? '-'}/${m.rknnCpuNormalizeFallbacks ?? '-'}/${m.rknnInputCompatibilityFallbacks ?? '-'}</td>
+        <td>${metric(m.rknnRgaFillAvgMs)}/${metric(m.rknnRgaResizeColorAvgMs)}/${metric(m.rknnRgaCropResizeAvgMs)}/${m.rknnRgaCropResizeCalls ?? '-'}/${m.rknnRgaCropDmaBufFrames ?? '-'}/${m.rknnRgaCropHostFallbacks ?? '-'}/${metric(m.rknnNativeInputMapAvgMs)}/${m.rknnPreprocessFastHits ?? '-'}/${m.rknnRgaFailures ?? '-'}/${m.rknnRgaCropResizeFailures ?? '-'}</td>
+        <td>${m.rknnCpuResizeFallbacks ?? '-'}/${m.rknnCpuCropResizeFallbacks ?? '-'}/${m.rknnCpuNormalizeFallbacks ?? '-'}/${m.rknnInputCompatibilityFallbacks ?? '-'}</td>
         <td>${m.rknnBoundInputBindAttempts ?? '-'}/${m.rknnBoundInputBindFailures ?? '-'}/${m.rknnBoundInputFrames ?? '-'}/${metric(m.rknnBoundInputCopyAvgMs)}/${metric(m.rknnBoundInputSyncAvgMs)}/${formatMib(m.rknnBoundInputCopyAvgBytes)}/${m.rknnBoundInputCopyFailures ?? '-'}/${m.rknnBoundInputSyncFailures ?? '-'}</td>
         <td>${m.rknnRgaBoundInputBindAttempts ?? '-'}/${m.rknnRgaBoundInputBindFailures ?? '-'}/${m.rknnRgaBoundInputImportCalls ?? '-'}/${metric(m.rknnRgaBoundInputImportAvgMs)}/${m.rknnRgaBoundInputImportFailures ?? '-'}/${m.rknnRgaBoundInputFrames ?? '-'}/${m.rknnRgaBoundUint8Frames ?? '-'}/${m.rknnRgaBoundNativeInt8Frames ?? '-'}/${m.rknnRgaBoundRequantizeCalls ?? '-'}/${metric(m.rknnRgaBoundRequantizeAvgMs)}/${m.rknnRgaBoundRequantizeFailures ?? '-'}/${m.rknnRgaBoundInputNormalizeBypasses ?? '-'}</td>
         <td>${m.rknnMppDmaBufImportCalls ?? '-'}/${metric(m.rknnMppDmaBufImportAvgMs)}/${m.rknnMppDmaBufImportFailures ?? '-'}/${m.rknnMppDmaBufFrames ?? '-'}/${m.rknnMppDmaBufFallbacks ?? '-'}/${formatMib(m.rknnMppDmaBufSourceAvgBytes)}</td>
@@ -280,9 +280,9 @@ export class ReportWriter {
         <td>${m.rknnYolov8DirectCandidateCalls ?? '-'}/${m.rknnYolov8DirectCandidateFailures ?? '-'}/${metric(m.rknnYolov8DirectAvgPointsScanned)}/${metric(m.rknnYolov8DirectAvgPointsDecoded)}/${metric(m.rknnYolov8ScoreSumAvgPointsRejected)}/${formatMib(m.rknnYolov8LogicalFloatBytesAvoided)}</td>
         <td>${metric(m.yolov8PostprocessAvgMs)}/${metric(m.yolov8NmsAvgMs)}</td>
         <td>${metric(m.rgaAvgMs)}/${m.rgaFailures ?? '-'}</td>
-        <td>${metric(m.mppEncodeAvgMs)}/${m.mppEncodeFailures ?? '-'}</td>
+        <td>${metric(m.mppEncodeAvgMs)}/${m.mppEncodeFailures ?? '-'}/${m.mppRgaCopyInFrames ?? '-'}/${m.mppRgaCopyInFailures ?? '-'}/${m.mppCpuCopyInFallbacks ?? '-'}</td>
         <td>${metric(m.mppDecodeAvgMs)}/${m.mppDecodeFailures ?? '-'}/${m.mppDecodeFallbacks ?? '-'}</td>
-        <td>${metric(m.mppCopyOutAvgMs)}/${m.mppDecodedFrames ?? '-'}/${m.mppCopyOutFrames ?? '-'}/${m.mppEarlyDroppedFrames ?? '-'}/${m.mppCopyOutFailures ?? '-'}</td>
+        <td>${metric(m.mppCopyOutAvgMs)}/${m.mppDecodedFrames ?? '-'}/${m.mppCopyOutFrames ?? '-'}/${m.mppRgaCopyOutFrames ?? '-'}/${m.mppCpuCopyOutFallbacks ?? '-'}/${m.mppEarlyDroppedFrames ?? '-'}/${m.mppCopyOutFailures ?? '-'}</td>
         <td>${metric(m.osdAvgMs)}</td>
         <td>${metric(m.publishAvgMs)}</td>
         <td>${metric(m.firstFrameAvgMs)}/${metric(m.firstFrameMaxMs)}</td>
@@ -326,7 +326,7 @@ ${bottleneckBanner}
 </table>
 <h2>媒体与预览分阶段指标</h2>
 <table>
-  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/释放/转换 ms</th><th>RKNN总计/失败</th><th>Detector总计/等待/失败</th><th>Fast Fill/Resize/Map/命中/失败</th><th>Fallback Resize/Normalize/Compat</th><th>绑定输入 Bind/失败/帧/Copy ms/Sync ms/CopyMiB/Copy失败/Sync失败</th><th>RGA直绑 Bind/失败/Import次数/ms/失败/帧/UINT8融合帧/INT8回退帧/Requant次数/ms/失败/Normalize绕过</th><th>MPP DMA-BUF Import/ms/失败/帧/回退/源MiB</th><th>输出 Native/Float/Compat/NativeMiB/FloatMiB</th><th>量化 DFL/Class ms</th><th>直接候选 调用/失败/扫描/解码/Sum早筛/省略MiB</th><th>YOLO Post/NMS</th><th>RGA/失败</th><th>MPP编码/失败</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
+  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/释放/转换 ms</th><th>RKNN总计/失败</th><th>Detector总计/等待/失败</th><th>Fast Fill/Resize/Crop次数/CropDMA/CropHost/Map/命中/失败</th><th>Fallback Resize/Crop/Normalize/Compat</th><th>绑定输入 Bind/失败/帧/Copy ms/Sync ms/CopyMiB/Copy失败/Sync失败</th><th>RGA直绑 Bind/失败/Import次数/ms/失败/帧/UINT8融合帧/INT8回退帧/Requant次数/ms/失败/Normalize绕过</th><th>MPP DMA-BUF Import/ms/失败/帧/回退/源MiB</th><th>输出 Native/Float/Compat/NativeMiB/FloatMiB</th><th>量化 DFL/Class ms</th><th>直接候选 调用/失败/扫描/解码/Sum早筛/省略MiB</th><th>YOLO Post/NMS</th><th>RGA/失败</th><th>MPP编码 ms/失败/RGA帧/RGA失败/CPU回退</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/RGA帧/CPU回退/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
   ${mediaRows}
 </table>
 <h2>分任务汇总</h2>
