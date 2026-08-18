@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "family": "rockchip-mpp-rga",
+  "runtimes": {
+    "rk3576-build-env-v1": {
+      "architecture": "aarch64",
+      "provenance": "legacy-build-image",
+      "sources": {
+        "builder": {
+          "repository": "ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576",
+          "revision": "sha256:135d25d0baf14e7918726f7efb040a0627926aedd5825f52fab6c1cd208da348"
+        }
+      },
+      "artifacts": {
+        "include/rockchip/rk_mpi.h": {},
+        "include/rga/im2d.h": {},
+        "lib/librockchip_mpp.so": {
+          "elf": {
+            "machine": "AArch64",
+            "soname": "librockchip_mpp.so.1"
+          }
+        },
+        "lib/librga.so": {
+          "elf": {
+            "machine": "AArch64",
+            "soname": "librga.so.2"
+          }
+        }
+      }
+    },
+    "mpp-1.1.0-rga-1.10.6": {
+      "architecture": "aarch64",
+      "provenance": "source-and-official-prebuilt",
+      "sources": {
+        "mpp": {
+          "repository": "https://github.com/rockchip-linux/mpp",
+          "revision": "c08762ebfadeb4e986d2fed993bc7a54862d3ebe",
+          "tag": "1.1.0"
+        },
+        "rga": {
+          "repository": "https://github.com/airockchip/librga",
+          "revision": "2b32edcb97b601b25683e2941d888c8515da6d55",
+          "api_version": "1.10.6_[3]",
+          "artifact": "libs/Linux/gcc-aarch64/librga.so"
+        }
+      },
+      "artifacts": {
+        "include/rockchip/rk_mpi.h": {
+          "sha256": "96dbae7d90e91baaac38821fc06c74a327cac888007841fe5937798259193646"
+        },
+        "include/rga/im2d.h": {
+          "sha256": "5ee06891775451c56e6264f5d53db0a4e948e1830287f3a5db4f75c30ac0ff11"
+        },
+        "include/rga/im2d_version.h": {
+          "sha256": "66021285feb75dc1b492345adc074722813b8945dd998357002cf5396872980c"
+        },
+        "lib/librockchip_mpp.so.0": {
+          "sha256": "c27de803917989f85c1435261ddcf4db16182bd72a6830090e98031e89700e0e",
+          "elf": {
+            "machine": "AArch64",
+            "soname": "librockchip_mpp.so.1"
+          }
+        },
+        "lib/librga.so": {
+          "sha256": "e150bda757fb5e8a649c429ec7cabaf851aa2a3be554ed494d5519e8790d943b",
+          "elf": {
+            "machine": "AArch64",
+            "soname": "librga.so"
+          }
+        }
+      },
+      "links": {
+        "lib/librockchip_mpp.so": "librockchip_mpp.so.1",
+        "lib/librockchip_mpp.so.1": "librockchip_mpp.so.0"
+      }
+    }
+  }
+}

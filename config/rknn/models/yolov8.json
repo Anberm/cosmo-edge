@@ -4,8 +4,10 @@
   "model_type": "yolov8_det",
   "source_repository_path": "data/resource/aiboxresource_x86/models/prod_X86_9275710_YOLOV8_V1.0.0/model.onnx",
   "source_sha256": "5f8e91cb4507596b66cd5e3b7193bb16f7bd4779ed3b78e3613fcc51b83db8e1",
+  "packaging": {
+    "algorithm_code": "9275710"
+  },
   "conversion": {
-    "target_platform": "rk3576",
     "input_sha256": "17a2cd603576afd1b5dd86a485933b857534355d25f517f6e1f2acd2a2fe4563",
     "maximum_onnx_opset": 19,
     "maximum_onnx_ir_version": 9,

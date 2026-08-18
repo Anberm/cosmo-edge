@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an ONNX model and run a zero-input ONNX Runtime smoke inference."""
+"""Validate an ONNX model, optionally with an ONNX Runtime smoke inference."""
 
 from __future__ import annotations
 
@@ -73,22 +73,85 @@ def _safe_shape(value: Any) -> list[Any]:
     return list(value) if isinstance(value, (list, tuple)) else []
 
 
-def inspect_model(model_path: Path, overrides: dict[str, list[int]]) -> dict[str, Any]:
+def _declared_value_info(onnx: Any, value: Any) -> dict[str, Any]:
+    tensor_type = value.type.tensor_type
+    dimensions: list[Any] = []
+    for dimension in tensor_type.shape.dim:
+        if dimension.HasField("dim_value"):
+            dimensions.append(int(dimension.dim_value))
+        elif dimension.dim_param:
+            dimensions.append(dimension.dim_param)
+        else:
+            dimensions.append(None)
     try:
-        import numpy as np
+        element_type = onnx.TensorProto.DataType.Name(tensor_type.elem_type).lower()
+    except ValueError:
+        element_type = str(tensor_type.elem_type)
+    return {
+        "name": value.name,
+        "declaredShape": dimensions,
+        "type": f"tensor({element_type})",
+    }
+
+
+def inspect_model(
+    model_path: Path,
+    overrides: dict[str, list[int]],
+    *,
+    run_runtime: bool = True,
+) -> dict[str, Any]:
+    try:
         import onnx
-        import onnxruntime as ort
     except ImportError as error:
         raise OnnxCheckError(
-            "missing dependency; use an approved environment containing numpy, onnx, and onnxruntime"
+            "missing dependency; use an approved environment containing onnx"
         ) from error
 
     try:
         model = onnx.load(str(model_path))
         onnx.checker.check_model(model)
-        session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     except Exception as error:
         raise OnnxCheckError(f"ONNX load/check failed: {error}") from error
+
+    model_identity = {
+        "path": model_path.name,
+        "sha256": sha256_file(model_path),
+        "sizeBytes": model_path.stat().st_size,
+    }
+    graph = {
+        "irVersion": int(model.ir_version),
+        "opsets": [
+            {"domain": item.domain or "ai.onnx", "version": int(item.version)}
+            for item in model.opset_import
+        ],
+    }
+    if not run_runtime:
+        if overrides:
+            raise OnnxCheckError("shape overrides require ONNX Runtime smoke validation")
+        return {
+            "schemaVersion": "1.0",
+            "status": "PASS",
+            "validationMode": "checker-only",
+            "model": model_identity,
+            "graph": graph,
+            "dependencies": {"onnx": onnx.__version__},
+            "inputs": [_declared_value_info(onnx, value) for value in model.graph.input],
+            "outputs": [_declared_value_info(onnx, value) for value in model.graph.output],
+            "note": "ONNX checker validates source structure; runtime execution is checked after target conversion-input normalization.",
+        }
+
+    try:
+        import numpy as np
+        import onnxruntime as ort
+    except ImportError as error:
+        raise OnnxCheckError(
+            "missing runtime dependency; use an approved environment containing numpy and onnxruntime"
+        ) from error
+
+    try:
+        session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+    except Exception as error:
+        raise OnnxCheckError(f"ONNX Runtime load failed: {error}") from error
 
     inputs = []
     feed = {}
@@ -139,11 +202,9 @@ def inspect_model(model_path: Path, overrides: dict[str, list[int]]) -> dict[str
     return {
         "schemaVersion": "1.0",
         "status": "PASS",
-        "model": {
-            "path": model_path.name,
-            "sha256": sha256_file(model_path),
-            "sizeBytes": model_path.stat().st_size,
-        },
+        "validationMode": "runtime-smoke",
+        "model": model_identity,
+        "graph": graph,
         "providers": session.get_providers(),
         "dependencies": {
             "numpy": np.__version__,
@@ -167,7 +228,10 @@ def write_result(result: dict[str, Any], destination: str | None) -> None:
             "outputs:",
             [(item["name"], item["declaredShape"], item["type"]) for item in result["outputs"]],
         )
-        print("runtime output shapes:", [item["runtimeShape"] for item in result["outputs"]])
+        if result.get("validationMode") == "runtime-smoke":
+            print("runtime output shapes:", [item["runtimeShape"] for item in result["outputs"]])
+        else:
+            print("validation mode:", result.get("validationMode", "checker-only"))
         return
     payload = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if destination == "-":
@@ -199,13 +263,20 @@ def main(arguments: list[str] | None = None) -> int:
         metavar="PATH",
         help="write JSON to PATH, or stdout when PATH is omitted",
     )
+    parser.add_argument(
+        "--checker-only",
+        action="store_true",
+        help="run onnx.checker without importing or executing ONNX Runtime",
+    )
     options = parser.parse_args(arguments)
     model_path = Path(options.model).expanduser().resolve()
     if not model_path.is_file():
         parser.error(f"model does not exist: {model_path}")
     overrides = dict(options.shape)
+    if options.checker_only and overrides:
+        parser.error("--shape cannot be combined with --checker-only")
     try:
-        result = inspect_model(model_path, overrides)
+        result = inspect_model(model_path, overrides, run_runtime=not options.checker_only)
     except OnnxCheckError as error:
         failure = {
             "schemaVersion": "1.0",

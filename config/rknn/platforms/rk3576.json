@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "chip": "rk3576",
+  "display_name": "RK3576",
+  "backend": "rknn",
+  "toolchain_lock": "../toolchain-lock.json",
+  "conversion": {
+    "target_platform": "rk3576"
+  },
+  "runtime": {
+    "architecture": "aarch64",
+    "default_core_mode": "auto"
+  },
+  "media": {
+    "default_backend": "rockchip",
+    "cpu_fallback": true,
+    "runtime_lock": "../../rockchip-media/runtime-lock.json",
+    "runtime_profile": "rk3576-build-env-v1",
+    "require_sealed_sysroot": false
+  },
+  "packaging": {
+    "directory_token": "RK3576",
+    "resource_template_directory": "data/resource/aiboxresource_rknn",
+    "resource_overlay_directory": "data/resource/aiboxresource_rknn",
+    "legacy_models_directory": "data/resource/aiboxresource_rknn/models"
+  },
+  "device": {
+    "compatible_tokens": ["rk3576"]
+  },
+  "qualification": {
+    "status": "candidate-validated",
+    "requires_target_bound_evidence": true
+  }
+}
