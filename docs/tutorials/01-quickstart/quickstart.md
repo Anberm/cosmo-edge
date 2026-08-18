@@ -114,21 +114,9 @@ find build_output/public-runtime -mindepth 2 -maxdepth 2 -type f -print
 
 构建包中的模型资源必须与目标芯片匹配；BM1688 与 CV186X 的产物不可互换。
 
-把构建日志列出的唯一包名代入`<安装包>`，可以通过SSH安装到已准备好的Sophon Linux设备：
-
-```bash
-# 构建主机
-scp build_output/public-runtime/<chip>/<安装包>.tar.gz root@<设备IP>:/tmp/
-
-# 设备
-ssh root@<设备IP>
-cd /tmp
-install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
-tar -xzf <安装包>.tar.gz -C "$install_dir"
-cd "$install_dir"/cosmo-V*/
-sudo ./scripts/install.sh
-sudo reboot
-```
+把构建日志列出的唯一包名用于安装。需要通过 SSH 安装到已准备好的 Sophon Linux
+设备时，请按[部署指南：SSH 安装路径](/guide/deployment#ssh安装路径)操作。文件传输、
+解压、安装、重启、基础系统前提和恢复边界统一在该章节维护。
 
 已有 CosmoEdge 正常运行时，也可以登录管理页面，进入
 **系统管理 → 系统维护 → 软件升级**，选择同一个安装包并确认。升级期间保持供电；设备重启并

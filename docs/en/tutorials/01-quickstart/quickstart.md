@@ -117,22 +117,11 @@ matching model resource directory; you do not need to provide a model path.
 The model resources in the package must match the target chip. BM1688 and
 CV186X artifacts are not interchangeable.
 
-Substitute the one package name reported by the build for `<package>` and install
-it on a prepared Sophon Linux device over SSH:
-
-```bash
-# Build host
-scp build_output/public-runtime/<chip>/<package>.tar.gz root@<device_ip>:/tmp/
-
-# Device
-ssh root@<device_ip>
-cd /tmp
-install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
-tar -xzf <package>.tar.gz -C "$install_dir"
-cd "$install_dir"/cosmo-V*/
-sudo ./scripts/install.sh
-sudo reboot
-```
+Use the one package name reported by the build for installation. To install it
+over SSH on a prepared Sophon Linux device, follow the
+[Deployment Guide: SSH Installation Path](/en/guide/deployment#ssh-installation-path).
+That section is the single source of truth for transfer, extraction, installation,
+reboot, base-system prerequisites, and recovery boundaries.
 
 When CosmoEdge is already running, you can instead open **System Management →
 System Maintenance → Software Upgrade** and upload the same package. Keep power
