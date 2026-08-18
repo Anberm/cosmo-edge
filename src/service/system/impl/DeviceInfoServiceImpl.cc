@@ -54,6 +54,20 @@ namespace {
         return result;
     }
 
+    std::string FormatBinaryBytes(int64_t bytes) {
+        constexpr double kMebibyte = 1024.0 * 1024.0;
+        constexpr double kGibibyte = 1024.0 * kMebibyte;
+        if (bytes >= static_cast<int64_t>(kGibibyte))
+            return COSMO_FORMAT("{:.2f} GiB", static_cast<double>(bytes) / kGibibyte);
+        return COSMO_FORMAT("{:.2f} MiB", static_cast<double>(bytes) / kMebibyte);
+    }
+
+    std::string FormatBinaryMebibytes(int64_t mebibytes) {
+        if (mebibytes >= 1024)
+            return COSMO_FORMAT("{:.2f} GiB", static_cast<double>(mebibytes) / 1024.0);
+        return COSMO_FORMAT("{:.2f} MiB", static_cast<double>(mebibytes));
+    }
+
 }  // namespace
 
 // Hardware info state (migrated from HwInfo singleton).
@@ -198,46 +212,60 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
     const auto cpu_utl     = ClampRatio(raw_cpu_utl);
     items.push_back({"cpuUtilization", "CPU使用率", static_cast<int>(std::lround(cpu_utl * 100)),
                      COSMO_FORMAT("{:.0f}%", cpu_utl * 100), COSMO_FORMAT("{:.0f}%", (1 - cpu_utl) * 100),
-                     std::isfinite(raw_cpu_utl) && raw_cpu_utl >= 0.0 ? 1 : 0});
+                     std::isfinite(raw_cpu_utl) && raw_cpu_utl >= 0.0 ? 1 : 0, ""});
 
     // Memory
     const auto mem_utl   = hw_res_state_->GetMemoryUtilization();
     const auto mem_usage = GetCapacityUsage(mem_utl.memtotal, mem_utl.memavailable);
-    items.push_back({"generalMemoryUtilization", "业务内存使用率", mem_usage.percent,
-                     COSMO_FORMAT("{:.2f} MB", static_cast<double>(mem_usage.used) / 1024 / 1024),
-                     COSMO_FORMAT("{:.2f} MB", static_cast<double>(mem_usage.available) / 1024 / 1024),
-                     mem_usage.valid ? 1 : 0});
+    items.push_back({"generalMemoryUtilization", "系统内存使用率", mem_usage.percent,
+                     FormatBinaryBytes(mem_usage.used), FormatBinaryBytes(mem_usage.available),
+                     mem_usage.valid ? 1 : 0, "system"});
 
     // GPU/NPU
     auto gpu_utl             = hw_res_state_->GetGpuUtilization();
     const auto raw_gpu_usage = gpu_utl.gpuusage;
     const auto gpu_usage     = ClampRatio(raw_gpu_usage);
     gpu_utl.gpuusage         = gpu_usage;
-    items.push_back({"npuUtilization", "NPU使用率", static_cast<int>(std::lround(gpu_usage * 100)),
-                     COSMO_FORMAT("{:.0f}%", gpu_usage * 100), COSMO_FORMAT("{:.0f}%", (1 - gpu_usage) * 100),
-                     std::isfinite(raw_gpu_usage) && raw_gpu_usage >= 0.0 ? 1 : 0});
+    if (gpu_utl.gpuusageAvailable) {
+        items.push_back({"npuUtilization", "NPU负载", static_cast<int>(std::lround(gpu_usage * 100)),
+                         COSMO_FORMAT("{:.0f}%", gpu_usage * 100),
+                         COSMO_FORMAT("{:.0f}%", (1 - gpu_usage) * 100),
+                         std::isfinite(raw_gpu_usage) && raw_gpu_usage >= 0.0 ? 1 : 0, ""});
+    } else {
+        items.push_back({"npuUtilization", "NPU负载", 0, "--", "--", 0, ""});
+    }
 
     // GPU memory details
-    auto add_gpu_mem_item = [&](const std::string& key, const std::string& name, const auto& dev) {
+    auto add_gpu_mem_item = [&](const std::string& key, const std::string& name,
+                                const std::string& memory_domain, const auto& dev) {
         const auto usage = GetCapacityUsage(dev.gpumemtotal, dev.gpumemavailable);
-        items.push_back(
-            {key, name, usage.percent, COSMO_FORMAT("{:.2f} GB", static_cast<double>(usage.used) / 1024),
-             COSMO_FORMAT("{:.2f} GB", static_cast<double>(usage.available) / 1024), usage.valid ? 1 : 0});
+        items.push_back({key, name, usage.percent, FormatBinaryMebibytes(usage.used),
+                         FormatBinaryMebibytes(usage.available), usage.valid ? 1 : 0, memory_domain});
     };
 
-    if (2 == gpu_utl.gpudevusage.size()) {
-        add_gpu_mem_item("modelMemoryUtilization", "模型内存使用率", gpu_utl.gpudevusage[0]);
-        add_gpu_mem_item("pictureMemoryUtilization", "图片内存使用率", gpu_utl.gpudevusage[1]);
-    } else if (3 == gpu_utl.gpudevusage.size()) {
-        add_gpu_mem_item("modelMemoryUtilization", "heap 0 内存使用率", gpu_utl.gpudevusage[0]);
-        add_gpu_mem_item("pictureMemoryUtilization", "heap 1 内存使用率", gpu_utl.gpudevusage[1]);
-        add_gpu_mem_item("TPPMemoryUtilization", "heap 2 内存使用率", gpu_utl.gpudevusage[2]);
-    } else {
-        const auto gpu_mem_usage = GetCapacityUsage(gpu_utl.gpumemtotal, gpu_utl.gpumemavailable);
-        items.push_back({"specialMemoryUtilization", "芯片内存使用率", gpu_mem_usage.percent,
-                         COSMO_FORMAT("{:.2f} GB", static_cast<double>(gpu_mem_usage.used) / 1024),
-                         COSMO_FORMAT("{:.2f} GB", static_cast<double>(gpu_mem_usage.available) / 1024),
-                         gpu_mem_usage.valid ? 1 : 0});
+    // RK3576 has no dedicated NPU VRAM: its legacy gpumem fields describe the
+    // same system DDR already represented above. Keep those fields for model
+    // admission and wire compatibility, but never emit a second UI capacity.
+    if (gpu_utl.memoryDomain != "shared-system") {
+        if (2 == gpu_utl.gpudevusage.size()) {
+            add_gpu_mem_item("modelMemoryUtilization", "模型内存使用率", "accelerator-heap-0",
+                             gpu_utl.gpudevusage[0]);
+            add_gpu_mem_item("pictureMemoryUtilization", "图片内存使用率", "accelerator-heap-1",
+                             gpu_utl.gpudevusage[1]);
+        } else if (3 == gpu_utl.gpudevusage.size()) {
+            add_gpu_mem_item("modelMemoryUtilization", "heap 0 内存使用率", "accelerator-heap-0",
+                             gpu_utl.gpudevusage[0]);
+            add_gpu_mem_item("pictureMemoryUtilization", "heap 1 内存使用率", "accelerator-heap-1",
+                             gpu_utl.gpudevusage[1]);
+            add_gpu_mem_item("TPPMemoryUtilization", "heap 2 内存使用率", "accelerator-heap-2",
+                             gpu_utl.gpudevusage[2]);
+        } else {
+            const auto gpu_mem_usage = GetCapacityUsage(gpu_utl.gpumemtotal, gpu_utl.gpumemavailable);
+            items.push_back({"specialMemoryUtilization", "芯片内存使用率", gpu_mem_usage.percent,
+                             FormatBinaryMebibytes(gpu_mem_usage.used),
+                             FormatBinaryMebibytes(gpu_mem_usage.available), gpu_mem_usage.valid ? 1 : 0,
+                             "accelerator"});
+        }
     }
 
     // Disk
@@ -247,7 +275,7 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
         {"eMMCUtilization", "eMMC使用率", disk_usage.percent,
          COSMO_FORMAT("{:.2f} GB", static_cast<double>(disk_usage.used) / 1024 / 1024 / 1024),
          COSMO_FORMAT("{:.2f} GB", static_cast<double>(disk_usage.available) / 1024 / 1024 / 1024),
-         disk_usage.valid ? 1 : 0});
+         disk_usage.valid ? 1 : 0, ""});
 
     // Packet stats
     size_t packet_total = 0, packet_proc = 0, packet_discard = 0, continues_discard_sec = 0;
@@ -261,8 +289,8 @@ std::vector<HwResourceItem> DeviceInfoServiceImpl::GetHardwareResource(double& c
     used_percent = ClampRatio(used_percent);
     items.push_back({"packetDiscardUtilization", "丢包率", static_cast<int>(std::lround(used_percent * 100)),
                      COSMO_FORMAT("{}个", packet_discard),
-                     COSMO_FORMAT("{}个", packet_total - packet_discard), 1});
-    LOG_INFO("continuesDiscardSec:{} packetDiscard:{}", continues_discard_sec, packet_discard);
+                     COSMO_FORMAT("{}个", packet_total - packet_discard), 1, ""});
+    LOG_DEBUG("continuesDiscardSec:{} packetDiscard:{}", continues_discard_sec, packet_discard);
 
     std::vector<cosmo::GpuMemSnapshot> devs;
     devs.reserve(gpu_utl.gpudevusage.size());

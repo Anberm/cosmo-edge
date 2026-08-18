@@ -16,7 +16,46 @@ const LONG_TIMEOUT_ROUTES = new Set([
   '/Camera/AddVideo',
   '/algorithm/layout/save',
   '/atomic/model/uploadTemp',
+  '/aihost/PTaskCreate',
+  '/aihost/PTaskDetectPic',
 ]);
+
+const DEFAULT_UPLOAD_CONCURRENCY = 2;
+const DEFAULT_UPLOAD_ATTEMPTS = 4;
+const DEFAULT_UPLOAD_BACKOFF_MS = 250;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function throwIfSignalAborted(signal) {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new Error('request aborted');
+}
+
+function requestAbortContext(timeout, externalSignal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onExternalAbort = () => controller.abort(externalSignal.reason);
+  if (externalSignal?.aborted) {
+    onExternalAbort();
+  } else {
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeout);
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    cleanup: () => {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
+    },
+  };
+}
 
 /** MD5-hashed + uppercased password, matching the backend's ToUpper(passwdMd5) comparison. */
 export function hashPassword(plain) {
@@ -31,13 +70,73 @@ export class CosmoClient {
    * @param {string} [opts.password] Plain-text password (hashed internally).
    * @param {string} [opts.token] Existing short-lived device token.
    * @param {string} [opts.lang] Accept-Language header value, default zh-CN.
+   * @param {AbortSignal} [opts.signal] Cancels in-flight benchmark requests.
    */
-  constructor({ base, user, password, token = null, lang = 'zh-CN' }) {
+  constructor({
+    base,
+    user,
+    password,
+    token = null,
+    lang = 'zh-CN',
+    uploadConcurrency = DEFAULT_UPLOAD_CONCURRENCY,
+    uploadAttempts = DEFAULT_UPLOAD_ATTEMPTS,
+    uploadBackoffMs = DEFAULT_UPLOAD_BACKOFF_MS,
+    fetchImpl = globalThis.fetch,
+    sleepImpl = sleep,
+    signal = null,
+  }) {
+    if (!Number.isInteger(uploadConcurrency) || uploadConcurrency < 1) {
+      throw new Error('uploadConcurrency must be a positive integer');
+    }
+    if (!Number.isInteger(uploadAttempts) || uploadAttempts < 1) {
+      throw new Error('uploadAttempts must be a positive integer');
+    }
+    if (!Number.isFinite(uploadBackoffMs) || uploadBackoffMs < 0) {
+      throw new Error('uploadBackoffMs must be a non-negative number');
+    }
+    if (typeof fetchImpl !== 'function' || typeof sleepImpl !== 'function') {
+      throw new Error('fetchImpl and sleepImpl must be functions');
+    }
     this.base = base.replace(/\/+$/, '');
     this.user = user;
     this.password = password;
     this.lang = lang;
     this.mtk = token;
+    this.uploadConcurrency = uploadConcurrency;
+    this.uploadAttempts = uploadAttempts;
+    this.uploadBackoffMs = uploadBackoffMs;
+    this.fetchImpl = fetchImpl;
+    this.sleepImpl = sleepImpl;
+    this.signal = signal;
+    this.uploadActive = 0;
+    this.uploadWaiters = [];
+    this.uploadStats = {
+      attempts: 0,
+      retries: 0,
+      busyResponses: 0,
+      maxActive: 0,
+      cleanupAttempts: 0,
+      cleanupFailures: 0,
+    };
+  }
+
+  uploadTelemetry() {
+    return {
+      ...this.uploadStats,
+      active: this.uploadActive,
+      queued: this.uploadWaiters.length,
+      concurrencyLimit: this.uploadConcurrency,
+      attemptLimit: this.uploadAttempts,
+    };
+  }
+
+  /**
+   * Detach subsequent bounded cleanup requests from the benchmark shutdown
+   * signal. Requests that are already in flight keep their own linked abort
+   * controller; task/preview/channel cleanup can then run with normal timeouts.
+   */
+  beginCleanup() {
+    this.signal = null;
   }
 
   /** Log in and store the mtk token. Returns the login response resData. */
@@ -52,6 +151,7 @@ export class CosmoClient {
     if (!this.mtk) {
       throw new Error('Login succeeded but no mtk returned');
     }
+    this.password = null;
     return res.resData;
   }
 
@@ -61,6 +161,13 @@ export class CosmoClient {
 
   async queryHardwareResource() {
     return (await this._post('/System/QueryHardwareResource', {})).resData;
+  }
+
+  async queryDeviceMemoryPool() {
+    const response = await this._post('/v1/cwai/aihost/QueryDeviceMemStatus', {});
+    // Legacy /v1 core routes serialize their payload at the response root,
+    // while /gtw/cwai routes place it under resData.
+    return response.resData ?? response;
   }
 
   /** Save or update an algorithm orchestration layout. payload = parsed export JSON. */
@@ -107,6 +214,20 @@ export class CosmoClient {
 
   async cancelUpload(uploadId) {
     return this._post('/atomic/model/cancelUpload', { uploadId });
+  }
+
+  async cancelUploadBestEffort(uploadId) {
+    if (!uploadId) return false;
+    this.uploadStats.cleanupAttempts += 1;
+    try {
+      await this.cancelUpload(uploadId);
+      return true;
+    } catch {
+      // A detect request may already have consumed the one-shot upload. That
+      // makes cancel return "missing" even though no staged payload remains.
+      this.uploadStats.cleanupFailures += 1;
+      return false;
+    }
   }
 
   /** Add an RTSP camera channel. */
@@ -174,6 +295,21 @@ export class CosmoClient {
     return (await this._post('/event/page', payload)).resData;
   }
 
+  /** Create or reuse one picture-analysis task. */
+  async pictureTaskCreate(payload) {
+    return this._post('/aihost/PTaskCreate', payload);
+  }
+
+  /** Run one authenticated, staged-image picture inference request. */
+  async pictureDetect(payload) {
+    return this._post('/aihost/PTaskDetectPic', payload);
+  }
+
+  /** Cancel one picture-analysis task and release its model/action instances. */
+  async pictureTaskCancel(payload) {
+    return this._post('/aihost/PTaskCancle', payload);
+  }
+
   /** Start or join a live preview and wait until its first frame reaches SRS. */
   async requestLiveStream({ channelId, algorithmId = '' }) {
     return (await this._post('/LiveStream/RequestLiveStream', { channelId, algorithmId })).resData?.stream;
@@ -225,49 +361,103 @@ export class CosmoClient {
       headers.mtk = this.mtk;
       headers.token = this.mtk;
     }
-    const timeout = LONG_TIMEOUT_ROUTES.has(path) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    let resp;
+    return this._withUploadSlot(() => this._sendMultipartWithRetry(path, url, headers, body));
+  }
+
+  async _withUploadSlot(operation) {
+    if (this.uploadActive >= this.uploadConcurrency) {
+      await new Promise((resolve) => this.uploadWaiters.push(resolve));
+    }
+    this.uploadActive += 1;
+    this.uploadStats.maxActive = Math.max(this.uploadStats.maxActive, this.uploadActive);
     try {
-      resp = await fetch(url, { method: 'POST', headers, body, signal: controller.signal, duplex: 'half' });
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        throw new Error(`Request timed out after ${timeout}ms: POST ${path}`);
-      }
-      throw new Error(`Network error on POST ${path}: ${err.message}`);
+      return await operation();
     } finally {
-      clearTimeout(timer);
+      this.uploadActive -= 1;
+      this.uploadWaiters.shift()?.();
     }
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} on POST ${path}`);
+  }
+
+  async _sendMultipartWithRetry(path, url, headers, body) {
+    const timeout = LONG_TIMEOUT_ROUTES.has(path) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+    for (let attempt = 1; attempt <= this.uploadAttempts; attempt += 1) {
+      throwIfSignalAborted(this.signal);
+      this.uploadStats.attempts += 1;
+      const abortContext = requestAbortContext(timeout, this.signal);
+      let resp;
+      try {
+        resp = await this.fetchImpl(url, {
+          method: 'POST', headers, body, signal: abortContext.signal, duplex: 'half',
+        });
+      } catch (err) {
+        throwIfSignalAborted(this.signal);
+        if (abortContext.timedOut()) {
+          throw new Error(`Request timed out after ${timeout}ms: POST ${path}`);
+        }
+        throw new Error(`Network error on POST ${path}: ${err.message}`);
+      } finally {
+        abortContext.cleanup();
+      }
+
+      let responseText;
+      let data;
+      try {
+        responseText = await resp.text();
+        data = JSON.parse(responseText);
+      } catch (error) {
+        throwIfSignalAborted(this.signal);
+        data = null;
+      }
+
+      if (resp.status === 503) {
+        this.uploadStats.busyResponses += 1;
+        const firstMsg = Array.isArray(data?.resMsg) ? data.resMsg[0] : null;
+        if (attempt < this.uploadAttempts) {
+          this.uploadStats.retries += 1;
+          const serverDelayMs = Number(firstMsg?.retryAfterSeconds ?? 0) * 1000;
+          const exponentialMs = this.uploadBackoffMs * (2 ** (attempt - 1));
+          await this.sleepImpl(Math.max(serverDelayMs, exponentialMs));
+          continue;
+        }
+        const error = new Error(`HTTP 503 on POST ${path} after ${attempt} attempts`);
+        error.httpStatus = 503;
+        error.retryable = firstMsg?.retryable ?? true;
+        error.msgCode = firstMsg?.msgCode ?? 'HTTP_SERVICE_BUSY';
+        throw error;
+      }
+      if (!resp.ok) {
+        const error = new Error(`HTTP ${resp.status} on POST ${path}`);
+        error.httpStatus = resp.status;
+        throw error;
+      }
+      if (!data) {
+        throw new Error(`Non-JSON response on POST ${path}`);
+      }
+      if (data.resCode !== 1) {
+        const firstMsg = Array.isArray(data.resMsg) ? data.resMsg[0] : null;
+        const text = firstMsg?.msgText || firstMsg?.msgKey || data.msg || 'unknown error';
+        const code = firstMsg?.msgCode || '';
+        const error = new Error(`API error on POST ${path}: ${text}${code ? ` (code ${code})` : ''}`);
+        error.resCode = data.resCode;
+        error.msgCode = code;
+        throw error;
+      }
+      return data;
     }
-    let data;
-    try {
-      data = await resp.json();
-    } catch {
-      throw new Error(`Non-JSON response on POST ${path}`);
-    }
-    if (data.resCode !== 1) {
-      const firstMsg = Array.isArray(data.resMsg) ? data.resMsg[0] : null;
-      const text = firstMsg?.msgText || firstMsg?.msgKey || data.msg || 'unknown error';
-      const code = firstMsg?.msgCode || '';
-      const err = new Error(`API error on POST ${path}: ${text}${code ? ` (code ${code})` : ''}`);
-      err.resCode = data.resCode;
-      err.msgCode = code;
-      throw err;
-    }
-    return data;
+    throw new Error(`Multipart retry loop exhausted on POST ${path}`);
   }
 
   /**
-   * Core POST. Prepends the /gtw/cwai prefix, injects auth headers, normalizes errors.
-   * @param {string} path route path after /gtw/cwai, e.g. /System/QueryHardwareResource
+   * Core POST. Prepends /gtw/cwai unless the caller supplies an absolute API
+   * path such as /v1/cwai/aihost/QueryDeviceMemStatus.
+   * @param {string} path route path after /gtw/cwai, or an absolute /v1 path
    * @param {object} body JSON body
    * @returns {Promise<object>} full wire response (with resCode/resData/resMsg)
    */
   async _post(path, body) {
-    const url = `${this.base}${API_PREFIX}${path}`;
+    const url = path.startsWith('/v1/')
+      ? `${this.base}${path}`
+      : `${this.base}${API_PREFIX}${path}`;
     const headers = {
       'Content-Type': 'application/json',
       'Accept-Language': this.lang,
@@ -279,23 +469,24 @@ export class CosmoClient {
       }
     }
     const timeout = LONG_TIMEOUT_ROUTES.has(path) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    throwIfSignalAborted(this.signal);
+    const abortContext = requestAbortContext(timeout, this.signal);
     let resp;
     try {
-      resp = await fetch(url, {
+      resp = await this.fetchImpl(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body ?? {}),
-        signal: controller.signal,
+        signal: abortContext.signal,
       });
     } catch (err) {
-      if (err.name === 'AbortError') {
+      throwIfSignalAborted(this.signal);
+      if (abortContext.timedOut()) {
         throw new Error(`Request timed out after ${timeout}ms: POST ${path}`);
       }
       throw new Error(`Network error on POST ${path}: ${err.message}`);
     } finally {
-      clearTimeout(timer);
+      abortContext.cleanup();
     }
 
     if (!resp.ok) {
@@ -304,7 +495,8 @@ export class CosmoClient {
     let data;
     try {
       data = await resp.json();
-    } catch {
+    } catch (error) {
+      throwIfSignalAborted(this.signal);
       throw new Error(`Non-JSON response on POST ${path}`);
     }
     // Wire contract: resCode === 1 means success.

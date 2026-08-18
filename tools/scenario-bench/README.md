@@ -65,6 +65,23 @@ node src/cli.js run \
 | `metrics.json` | 完整采样数据，包含每个 tick 的通道指标和硬件资源 |
 | `metrics.partial.json` | 运行过程中每 30 秒更新的临时采样文件，用于异常中断兜底且不让证据写盘干扰采样周期 |
 
+长稳任务运行期间可对临时采样做只读检查点审计。检查点不会停止任务，也不会把“尚未跑满时长”误判为通过：
+
+```bash
+node src/cli.js checkpoint \
+  --input reports/rk3576-12h/metrics.partial.json \
+  --identity reports/rk3576-12h/identity.txt \
+  --output reports/rk3576-12h/checkpoint-12h.json \
+  --gate-hours 12 \
+  --max-gap-sec 120 \
+  --min-fps-ratio 0.9 \
+  --expected-preview-streams 4 \
+  --expected-decoder-backend rockchip-copy-out \
+  --expected-encoder-backend rockchip-copy-first
+```
+
+输出结论只有三种：`IN_PROGRESS` 表示时长尚未达到且其余门禁正常（命令退出码 3），`FAIL` 表示连续性、负载、资源或原生媒体链路存在失败（退出码 1），`PASS` 仅在时长达到且全部必需检查通过时产生（退出码 0）。审计覆盖采样间断/新鲜度、固定路数、逐通道 FPS 与丢帧、CPU/内存/磁盘、内存池增长、MPP/RGA/RKNN 失败及计数器回退、延迟 Copy-out 记账、OSD/编码/发布帧流和 SRS 发布流；输入和候选身份文件的 SHA-256 会写入结果。
+
 ## 创建场景包
 
 场景包依赖一个预先导出的算法编排模板。该模板不是工具自动生成的，需要先在 CosmoEdge Web 页面上完成一次场景任务编排，然后从平台导出。
@@ -250,6 +267,10 @@ node src/cli.js run --device <url> --user <u> --password <p> --scenario <dir> --
 | `--preview-clients <n>` | 每路预览的并发解码客户端数；默认 1 |
 | `--media-base <url>` | HTTP-FLV 服务基址；启用预览时必填 |
 | `--srs-api <url>` | SRS API 基址，用于采集发布流和客户端数 |
+
+启用真实预览客户端时，工具会在设备登录、编排导入和通道创建之前执行
+`ffmpeg -version` 预检；专项 `preview` 命令还会同时预检 `ffprobe`。缺失或
+不可执行时会直接失败，避免测试环境问题在设备产生临时配置后才暴露。
 
 ### 预览负载矩阵
 

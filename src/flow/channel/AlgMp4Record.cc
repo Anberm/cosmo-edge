@@ -83,7 +83,7 @@ AlgMp4Record::~AlgMp4Record() {
             std::string mp4Name = mp4_name_;
 
             if (service::ServiceRegistry::Instance().Get<service::IConfigReadService>().IsNetworkModel()) {
-                LOG_INFO(" {} Wait To Upload To {}", mp4_name_, upload_url_);
+                LOG_INFO("{} Wait To Upload", mp4_name_);
 
                 service::ServiceRegistry::Instance().Get<service::IFileService>().UploadFile(
                     event_name_,

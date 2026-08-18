@@ -48,6 +48,22 @@ TEST_CASE("LiveStreamServiceImpl: 视频流管理核心逻辑", "[live-stream]")
                 cosmo::util::ErrorEnum::TaskNotExist);
     }
 
+    SECTION("ViewerCreate 快速拒绝已停止的 OSD 任务") {
+        cosmo::ActionNode dummyAction;
+        auto mockChannel =
+            std::make_shared<cosmo::AlgChannel>("channel_1", "task_1", dummyAction, "rtsp://url");
+        ALLOW_CALL(mocks.cameraSvc, GetChannelInst("channel_1")).RETURN(mockChannel);
+        cosmo::service::camera::CameraTaskDto task;
+        task.algorithmCode = "alg_code";
+        task.enable        = false;
+        ALLOW_CALL(mocks.cameraSvc, GetTasks("channel_1"))
+            .RETURN(std::vector<cosmo::service::camera::CameraTaskDto>{task});
+        FORBID_CALL(mocks.cameraSvc, AcquirePreviewChannel(trompeloeil::_));
+
+        cosmo::LiveStream::LiveStreamInfo streamInfo;
+        REQUIRE(sut.ViewerCreate("channel_1", "alg_code", streamInfo) == cosmo::util::ErrorEnum::ActionStop);
+    }
+
     SECTION("ViewerHeartBeat 返回 CameraNotExist 当 Channel 不存在") {
         ALLOW_CALL(mocks.cameraSvc, GetChannelInst(trompeloeil::_)).RETURN(nullptr);
         REQUIRE(sut.ViewerHeartBeat("non_exist_channel", "alg_code") ==
@@ -59,10 +75,13 @@ TEST_CASE("LiveStreamServiceImpl: 视频流管理核心逻辑", "[live-stream]")
     }
 
     SECTION("启动中的多客户端仅在最后一个客户端离开时取消") {
-        auto gate                  = std::make_shared<LiveStreamServiceImpl::ViewerStartGate>();
-        gate->participants         = 2;
-        const std::string key      = "pending_channel\npending_alg";
-        sut.starting_viewers_[key] = gate;
+        auto gate                    = std::make_shared<LiveStreamServiceImpl::ViewerStartGate>();
+        gate->participants           = 2;
+        gate->channel_id             = "pending_channel";
+        gate->channel_lease_acquired = true;
+        const std::string key        = "pending_channel\npending_alg";
+        sut.starting_viewers_[key]   = gate;
+        REQUIRE_CALL(mocks.cameraSvc, ReleasePreviewChannel("pending_channel"));
 
         REQUIRE(sut.ViewerDelete("pending_channel", "pending_alg"));
         REQUIRE(gate->participants == 1);
@@ -71,6 +90,7 @@ TEST_CASE("LiveStreamServiceImpl: 视频流管理核心逻辑", "[live-stream]")
         REQUIRE(sut.ViewerDelete("pending_channel", "pending_alg"));
         REQUIRE(gate->participants == 0);
         REQUIRE(gate->cancelled);
+        REQUIRE_FALSE(gate->channel_lease_acquired);
     }
 
     SECTION("SetViewCounts 不发生崩溃") {

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "service/detail/ServiceRegistry.h"
+#include "service/system/UpgradeSpace.h"
 #include "util/ErrorCode.h"
 
 namespace cosmo::service {
@@ -38,6 +39,12 @@ public:
     /// @param filePath Path to the upgrade package.
     /// @return ErrorEnum::kSuccess on success.
     virtual cosmo::util::ErrorEnum Upgrade(const std::string& filePath) = 0;
+
+    /// Check the data-volume budget required for an upgrade package. When
+    /// explicitly confirmed, event images and videos may be removed before
+    /// the budget is inspected again.
+    virtual cosmo::util::ErrorEnum CheckUpgradeSpace(std::uint64_t packageSizeBytes, bool cleanupEventMedia,
+                                                     UpgradeSpaceStatus& status) = 0;
 
     // ── Debug Tools ──
 

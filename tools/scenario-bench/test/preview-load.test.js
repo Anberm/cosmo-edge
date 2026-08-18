@@ -70,3 +70,24 @@ test('preview load does not retry non-warmup start failures', async () => {
   await assert.rejects(load.sync(entries.slice(0, 1)), /invalid algorithm/);
   assert.equal(requests, 1);
 });
+
+test('preview load preflight rejects a missing media executable before device work', async () => {
+  const load = new PreviewLoad({}, {
+    mode: 'algorithm',
+    clientsPerStream: 1,
+    mediaBase: 'http://127.0.0.1:18088',
+    ffmpeg: `scenario-bench-missing-ffmpeg-${process.pid}`,
+  });
+
+  await assert.rejects(load.preflight(), /ffmpeg preflight failed \(executable not found\)/);
+});
+
+test('preview load preflight is skipped when no media client is requested', async () => {
+  const load = new PreviewLoad({}, {
+    mode: 'algorithm',
+    clientsPerStream: 0,
+    ffmpeg: `scenario-bench-missing-ffmpeg-${process.pid}`,
+  });
+
+  await assert.doesNotReject(load.preflight());
+});

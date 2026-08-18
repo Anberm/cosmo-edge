@@ -33,6 +33,8 @@ public:
 
     void SetNetworkOutputNames(std::vector<std::string> names);
 
+    void SetInputContract(std::string contract);
+
     void SetOutputToCpu(bool v) {
         output_to_cpu_ = v;
     }
@@ -45,6 +47,7 @@ protected:
     // network actual input/output names
     std::vector<std::string> network_input_names{};
     std::vector<std::string> network_output_names{};
+    std::string input_contract_{};
 };
 
 }  // namespace cosmo::nn

@@ -6,6 +6,105 @@ This project follows a release-note style inspired by Keep a Changelog.
 
 ## [Unreleased]
 
+### 1.1.0 release candidate
+
+Multi-platform release for BM1688, CV186X, RK3576, and x86. Capacity claims remain bound to the
+models, packages, environments, thresholds, and durations recorded in their linked evidence.
+
+### Added
+
+- CV186X benchmark bindings for the open Sophon YOLOV8n detector and helmet classifier, including
+  byte-identical device/repository hashes, runtime contracts, and a dedicated CV186X Open-package
+  resource set.
+- Rockchip RK3576 integration with an RKNN inference backend, native MPP/RGA media pipeline,
+  cross-compilation toolchain, accelerator telemetry, integration assets, and
+  qualification fixtures.
+- Platform-neutral host/backend and media-factory contracts, derived model-artifact identities,
+  accelerator and preview-pipeline metrics, and ScenarioBench preview validation for additional
+  accelerator families.
+- Chip-agnostic Sophon model-directory discovery and explicit `chip_type` validation, preparing a
+  shared model metadata and import path for BM1688 and CV186X while keeping compiled artifacts
+  target-specific.
+- Model Guard 2.3 support for loading CEMC-protected commercial preset models through the CMG
+  runtime, device authorization, Open/Protected Sophon package profiles, protected-resource
+  checks, and SOURCE deployment. Open packages continue to support plaintext user models without
+  device authorization.
+- Persistent, resumable staged uploads with idempotent client requests, restart recovery,
+  cancellation, and real-time disk/memory admission. Large models, images, videos, and files now
+  stream instead of depending on fixed total-size limits; exports support single HTTP Range
+  requests (`206`/`416`) and deterministic temporary-file cleanup.
+- Detection target details in HTTP event payloads, including persistence/retry propagation and
+  target rendering in the HTTP push-test service.
+- Platform-neutral offline accuracy validation and CI gates for ScenarioBench and accuracy tools.
+- Agent-assisted secondary-development tooling for environment admission, chip compatibility,
+  measured model-conversion evidence, and evidence lifecycle governance.
+- AVI, DAV, and MKV local-video inputs, plus the restored license-plate OCR workflow.
+
+### Changed
+
+- Improved cross-platform CV detector capacity and runtime efficiency through per-task FPS-aware
+  `AiDetector` placement, platform-neutral performance telemetry, more efficient media and buffer
+  lifecycles, and backend-specific Sophon and RKNN data-path optimizations.
+- Optimized the RK3576 detector path with RGA/MPP-backed preprocessing, native quantized tensor
+  handling, persistent RKNN input memory, direct YOLOv8 output decoding, decoder reuse, and
+  qualified NPU core scheduling.
+- Improved Sophon high-rate and long-running workloads through lower detector reuse defaults,
+  glibc allocator tuning, bounded repeated-stream decoder warm-up handling, and explicit BMRuntime
+  ownership.
+- Reduced preview startup and overlay-switch latency, strengthened publisher recovery and preview
+  lifecycle handling, serialized concurrent OSD sessions, and exposed preview pipeline metrics.
+- Batched arbitrary numbers of accepted same-frame alarm targets into one event while retaining
+  per-target filtering and metadata; reset tracking and suppression state when tasks restart.
+- Expanded area-alarm rule interaction, region-rule localization, runtime translations, and task
+  category refresh behavior in the web console.
+- Unified Sophon package upgrades on the legacy-compatible permanent-MD5 lifecycle, including
+  legacy installer invocation, safe internal symlinks, upgrade recovery, and Open/Protected model
+  lifecycle checks. Application archives themselves remain unsigned.
+- Simplified linkage runtime task handling and made task saves atomic under resource pressure.
+- Hardened change validation, sharded Sophon tests, and aligned ScenarioBench capacity, VLM
+  throughput, preview-load, report, and cleanup behavior with the current staging protocol.
+
+### Fixed
+
+- RTSP URLs whose passwords contain `@`, and algorithm-file names with leading-zero prefixes.
+- HTTP, WebSocket, multicast-discovery, periodic-timer, shared-database, camera-task, task-binding,
+  memory-pool, and thread-pool lifetime/concurrency defects.
+- Live-preview playback, padded Annex-B packets, publisher recovery, unbound algorithm previews,
+  small startup keyframes, and multi-second overlay-preview black screens.
+- Sophon crop validation and odd-dimension image decoding, including even-dimension frame
+  alignment for face import.
+- Upload and extraction reserve edge cases, image-analysis JSON capacity, media MIME handling,
+  upgrade recovery, and propagation of HTTP client transfer failures.
+- Area-alarm interval handling for same-frame tracked and untracked targets, including zero track
+  IDs and restart-safe suppression state.
+- DINO model/task contract validation, HandFrame exception log storms, RKNN classifier and FP16
+  input compatibility, and shared-detector throughput accounting.
+- Windows Docker checkout/web-port handling, generated mp4v2 timestamps, and cross-backend CPU
+  allocator linkage.
+
+### Security
+
+- Blocked `pictureUrl` path traversal in image-library APIs and retained bounded request parsing
+  while routing product-sized content through resource-aware streaming paths.
+- Externalized manager signing credentials and tightened protected-resource/package admission and
+  device-authorization handling.
+- Prevented encrypted preset-model export and deletion, with an explicit factory-restore path.
+- Hardened upgrade-package verification while permitting safe package-internal symlinks.
+
+### Docs
+
+- Reworked the English and Simplified Chinese README files around the v1.1 platform matrix,
+  Open/Protected boundary, published validation baselines, and task-oriented quick starts.
+- Added official website links, certified-device purchase links, x86 first-run verification, an
+  Ultralytics YOLO deployment guide, and reusable community-case documentation.
+- Expanded and restored the bilingual system guide, region-alarm tutorials, runtime localization,
+  and model/resource references.
+- Added the bilingual CosmoEdge 1.1 multi-platform ScenarioBench report, sanitized single-detector,
+  dual-detector, and Experimental VLM attachments, environment/model identities, reproduction
+  descriptors, release manifest, and file checksums.
+- Added the agent-assisted development entry, environment and model-conversion guidance, and a
+  contributor pre-commit hook guide.
+
 ## [1.0.0] - 2026-07-03
 
 First stable public release: a security and CI hardening pass plus feature, refactor, and documentation work over the `v0.1.0` baseline.
@@ -83,12 +182,13 @@ Initial public open-source baseline.
 - Sample camera credentials and device serial values scrubbed from examples.
 - Sophon build environment Dockerfile made self-contained.
 
-[Unreleased]: https://github.com/cosmo-wander-ai/cosmo-edge/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/cosmo-wander-ai/cosmo-edge/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/cosmo-wander-ai/cosmo-edge/releases/tag/v1.0.0
 [0.1.0]: https://github.com/cosmo-wander-ai/cosmo-edge/releases
 
 <!-- Gitee mirrors -->
-[Unreleased (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/compare/v1.0.0...master
+[Unreleased (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/compare/v1.1.0...master
+[1.1.0 (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/releases
 [1.0.0 (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/releases
 [0.1.0 (Gitee)]: https://gitee.com/cosmo-wander-ai/cosmo-edge/releases
-

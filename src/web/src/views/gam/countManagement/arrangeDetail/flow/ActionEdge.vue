@@ -24,6 +24,7 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  getSmoothStepPath,
   useVueFlow
 } from '@vue-flow/core'
 import EventBus from '@/components/eventBus.js'
@@ -59,12 +60,17 @@ const props = defineProps({
     required: true
   },
   style: Object,
-  markerEnd: [String, Object]
+  markerEnd: [String, Object],
+  data: Object
 })
 
 const { addNodes, setEdges, getEdges, getNodes } = useVueFlow()
 
-const edgePath = computed(() => getBezierPath(props))
+const edgePath = computed(() =>
+  props.data?.pathType === 'smoothstep'
+    ? getSmoothStepPath(props)
+    : getBezierPath(props)
+)
 
 const path = computed(() => edgePath.value[0])
 const labelX = computed(() => edgePath.value[1])

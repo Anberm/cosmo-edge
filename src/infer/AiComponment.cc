@@ -16,6 +16,8 @@ void AppProfiler::ReportNodeTime(const char* /*node_name*/, double /*time*/) {}
 cosmo::nn::DeviceType GetDeviceType() {
 #if defined(COSMO_NN_USE_CPU_BACKEND)
     return cosmo::nn::DeviceType::DEVICE_CPU;
+#elif defined(COSMO_NN_USE_RKNN_BACKEND)
+    return cosmo::nn::DeviceType::DEVICE_RKNN;
 #else
     return cosmo::nn::DeviceType::DEVICE_SOPHON_TPU;
 #endif
@@ -29,6 +31,12 @@ cosmo::nn::ImageFormat GetImageFormatType() {
 }
 
 util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
+                                     std::vector<std::shared_ptr<cosmo::nn::Blob>>& blobs) {
+    return ConvertImagesToBlobs(images, {}, blobs);
+}
+
+util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
+                                     const std::vector<media::NativeVideoBufferPtr>& native_buffers,
                                      std::vector<std::shared_ptr<cosmo::nn::Blob>>& blobs) {
     if (images.empty()) {
         LOG_INFO("{}", "Input Images Is Empty.");
@@ -107,6 +115,22 @@ util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
         desc.device_type  = GetDeviceType();
         cosmo::nn::BlobHandle handle;
         handle.base = image->GetData();
+        if (i < native_buffers.size() && native_buffers[i] && native_buffers[i]->Valid() &&
+            native_buffers[i]->width == static_cast<int>(image->GetWidth()) &&
+            native_buffers[i]->height == static_cast<int>(image->GetHeight())) {
+            const auto& native                = *native_buffers[i];
+            handle.native_image.fd            = native.fd;
+            handle.native_image.bytes         = native.bytes;
+            handle.native_image.width         = native.width;
+            handle.native_image.height        = native.height;
+            handle.native_image.width_stride  = native.width_stride;
+            handle.native_image.height_stride = native.height_stride;
+            if (native.format == media::NativeVideoBufferFormat::NV12) {
+                handle.native_image.format = cosmo::nn::IMAGE_NV12;
+            } else if (native.format == media::NativeVideoBufferFormat::I420) {
+                handle.native_image.format = cosmo::nn::IMAGE_I420;
+            }
+        }
         blob->SetBlobDesc(desc);
         blob->SetHandle(handle);
         blobs.push_back(blob);

@@ -45,6 +45,11 @@
               <span v-for="item in scope.row.envStatus.BM1688" :class="returnSpanStyle(item)" :key="item.modelCode">{{ item.modelName }}</span>
             </template>
           </el-table-column>
+          <el-table-column v-if="engineTypeList.includes('RK3576')" :label="'RK3576 ' + t('glossary.modelStatus')">
+            <template #default="scope">
+              <span v-for="item in scope.row.envStatus.RK3576" :class="returnSpanStyle(item)" :key="item.modelCode">{{ item.modelName }}</span>
+            </template>
+          </el-table-column>
         </template>
         <el-table-column v-if="platformType ==='15'" :label="t('glossary.modelStatus')">
           <template #default="scope">

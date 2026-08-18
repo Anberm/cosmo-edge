@@ -14,7 +14,7 @@ VideoStreamPush::VideoStreamPush(const std::string& url, int width, int height, 
         width  = 1920;
         height = 1080;
     }
-    LOG_INFO("rtmp push url: {}, width: {}, height: {}, fps: {} ", push_url_, width, height, fps);
+    LOG_INFO("RTMP push configured, width:{}, height:{}, fps:{}", width, height, fps);
 
     if ((width < 64) || (height < 64) || (fps < 0.1f))
         return;

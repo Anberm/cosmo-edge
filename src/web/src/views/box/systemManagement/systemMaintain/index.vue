@@ -32,6 +32,23 @@
           <el-button type="primary" size="small" @click="downloadLog">{{ t('systemManage.downloadDeviceLog') }}</el-button>
         </div>
       </el-tab-pane>
+      <el-tab-pane v-if="authorization.supported" :label="t('systemManage.modelAuthorization')" name="authorization">
+        <div class="authorization-container">
+          <el-descriptions :column="1" border>
+            <el-descriptions-item :label="t('systemManage.authorizationStatus')">
+              <el-tag :type="authorization.authorized ? 'success' : 'warning'">
+                {{ authorization.authorized ? t('systemManage.authorized') : t('systemManage.notAuthorized') }}
+              </el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+          <div class="authorization-actions">
+            <el-button @click="downloadAuthorizationRequest">{{ t('systemManage.downloadAuthorizationRequest') }}</el-button>
+            <el-upload action="#" :auto-upload="false" :show-file-list="false" :on-change="handleCertificateChange" accept=".bin">
+              <el-button type="primary">{{ t('systemManage.uploadAuthorizationFile') }}</el-button>
+            </el-upload>
+          </div>
+        </div>
+      </el-tab-pane>
       <el-tab-pane :label="t('systemManage.taskRunningDetail')" name="task">
         <running-detail v-if="activeTab==='task'" />
       </el-tab-pane>
@@ -40,11 +57,12 @@
 </template>
 
 <script setup>
-import { ref, watch, onBeforeUnmount, getCurrentInstance } from 'vue'
+import { ref, watch, onBeforeUnmount, onMounted, getCurrentInstance } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import RunningDetail from './components/RunningDetail.vue'
 import { t } from '@/i18n'
-import { normalizeApiError } from '@/utils/apiError'
+import { formatBytes, normalizeApiError } from '@/utils/apiError'
+import { isSupportedUpgradePackageName } from '@/utils/upgradePackage'
 import {
   uploadFileInChunks,
   UploadPurpose
@@ -58,13 +76,69 @@ const uploadFile = ref(null)
 const fileName = ref('')
 const upload = ref(null)
 const checkTimer = ref(null)
-const upgradePackagePattern = /^cosmo-[Vv]\d+\.\d+\.\d+-[0-9a-fA-F]{32}\.tar\.gz$/
 const upgradeStatusPollIntervalMs = 5000
 const upgradeRecoveryTimeoutMs = 15 * 60 * 1000
 let upgradeLoading = null
+const authorization = ref({ supported: false, authorized: false, state: 'unsupported' })
+
+const refreshAuthorization = async () => {
+  try {
+    const response = await $API.queryModelAuthorization()
+    authorization.value = response?.resData?.resData || response?.resData || authorization.value
+  } catch (_) {
+    authorization.value = { supported: false, authorized: false, state: 'unsupported' }
+  }
+}
+
+const downloadAuthorizationRequest = async () => {
+  const response = await fetch('/gtw/cwai/System/DownloadModelAuthorizationRequest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', token: localStorage.getItem('mtk') || '', mtk: localStorage.getItem('mtk') || '' },
+    body: '{}'
+  })
+  if (!response.ok) throw new Error(t('systemManage.authorizationRequestFailed'))
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'device-request.cmpr'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+const handleCertificateChange = async file => {
+  const rawFile = file?.raw || file
+  if (!rawFile || rawFile.size !== 236) {
+    ElMessage.error(t('systemManage.invalidAuthorizationFile'))
+    return
+  }
+  try {
+    const staged = await uploadFileInChunks(rawFile, {
+      purpose: UploadPurpose.MODEL_AUTHORIZATION_CERTIFICATE,
+      uploadChunk: formData => $API.uploadAtomicModelTemp(formData),
+      cancelUpload: data => $API.cancelAtomicModelUpload(data),
+      getCapabilities: () => $API.getUploadCapabilities()
+    })
+    await $API.installModelAuthorization({ uploadId: staged.uploadId })
+    ElMessage.success(t('systemManage.authorizationInstalled'))
+    await refreshAuthorization()
+  } catch (_) {
+    ElMessage.error(t('systemManage.authorizationInstallFailed'))
+  }
+}
+
+onMounted(refreshAuthorization)
 
 const extractDeviceStatus = response =>
   response?.resData?.resData || response?.resData || {}
+
+const checkUpgradeSpace = async cleanupEventMedia => {
+  const response = await $API.boxCheckUpgradeSpace({
+    packageSizeBytes: uploadFile.value.size,
+    cleanupEventMedia
+  })
+  return extractDeviceStatus(response)
+}
 
 const delay = milliseconds =>
   new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -94,7 +168,9 @@ const finishUpgradeRecovery = async (loading) => {
   await delay(400)
   localStorage.removeItem('token')
   localStorage.removeItem('mtk')
-  window.location.replace('/#/boxLogin')
+  // A hash-only navigation keeps the old document and its module graph alive.
+  // Changing the query forces a fresh index.html request after the upgrade.
+  window.location.replace(`/?upgrade=${Date.now()}#/boxLogin`)
 }
 
 watch(activeTab, (newVal) => {
@@ -104,7 +180,7 @@ watch(activeTab, (newVal) => {
 }, { immediate: true })
 
 const beforeUpload = (file) => {
-  if (!upgradePackagePattern.test(file.name)) {
+  if (!isSupportedUpgradePackageName(file.name)) {
     ElMessage.error(t('systemManage.invalidUpgradeFile'))
     return false
   }
@@ -120,7 +196,7 @@ const beforeUpload = (file) => {
 const handleFileChange = (file) => {
   if (file) {
     const rawFile = file.raw || file
-    if (!upgradePackagePattern.test(rawFile.name)) {
+    if (!isSupportedUpgradePackageName(rawFile.name)) {
       ElMessage.error(t('systemManage.invalidUpgradeFile'))
       fileName.value = ''
       uploadFile.value = null
@@ -157,6 +233,48 @@ const handleUpgrade = async () => {
     )
   } catch (_) {
     return
+  }
+
+  let spaceStatus
+  try {
+    spaceStatus = await checkUpgradeSpace(false)
+  } catch (_) {
+    ElMessage.error(t('systemManage.upgradeSpaceCheckFailed'))
+    return
+  }
+
+  if (!spaceStatus.sufficient) {
+    try {
+      await ElMessageBox.confirm(
+        t('systemManage.upgradeSpaceCleanupConfirm', {
+          available: formatBytes(spaceStatus.availableBytes),
+          required: formatBytes(spaceStatus.requiredBytes),
+          reclaimable: formatBytes(spaceStatus.eventMediaBytes)
+        }),
+        t('common.notice'),
+        {
+          confirmButtonText: t('action.deleteAndContinue'),
+          cancelButtonText: t('action.cancel'),
+          type: 'warning'
+        }
+      )
+    } catch (_) {
+      return
+    }
+
+    try {
+      spaceStatus = await checkUpgradeSpace(true)
+    } catch (_) {
+      ElMessage.error(t('systemManage.upgradeEventCleanupFailed'))
+      return
+    }
+    if (!spaceStatus.sufficient) {
+      ElMessage.error(t('systemManage.upgradeSpaceStillInsufficient', {
+        available: formatBytes(spaceStatus.availableBytes),
+        required: formatBytes(spaceStatus.requiredBytes)
+      }))
+      return
+    }
   }
 
   clearCheckTimer()
@@ -347,6 +465,9 @@ onBeforeUnmount(() => {
   .upgrade-container {
     padding: 20px;
   }
+
+  .authorization-container { padding: 20px; max-width: 720px; }
+  .authorization-actions { display: flex; gap: 12px; margin-top: 20px; }
 
   .form-item {
     display: flex;

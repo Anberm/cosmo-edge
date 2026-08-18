@@ -58,6 +58,12 @@ ExternalProject_Add(
         --srtp-nasm=off
         --utest=off
         --jobs=4
+        COMMAND ${CMAKE_COMMAND}
+            "-DSRS_AUTO_HEADERS=<SOURCE_DIR>/objs/srs_auto_headers.hpp"
+            "-DSRS_BUILD_EPOCH=${COSMO_REPRODUCIBLE_BUILD_EPOCH}"
+            "-DSRS_BUILD_DATE=${COSMO_REPRODUCIBLE_BUILD_UTC}"
+            "-DSRS_BUILD_UNAME=${COSMO_REPRODUCIBLE_BUILD_UNAME}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/normalize_srs_build_metadata.cmake
 
     BUILD_COMMAND $(MAKE)
     BUILD_IN_SOURCE ON

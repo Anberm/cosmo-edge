@@ -7,10 +7,12 @@
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/utsname.h>
 #include <sys/vfs.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <climits>
 #include <cmath>
@@ -38,6 +40,18 @@ namespace {
     AcceleratorMetricsProvider& GetAcceleratorMetricsProvider() {
         static auto provider = CreateAcceleratorMetricsProvider();
         return *provider;
+    }
+
+    std::string ReadDeviceTreeText(const std::string& path, char separator = ' ') {
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream)
+            return {};
+        std::string value((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        std::replace(value.begin(), value.end(), '\0', separator);
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+            value.pop_back();
+        const auto first = value.find_first_not_of(" \t\r\n");
+        return first == std::string::npos ? std::string{} : value.substr(first);
     }
 
 }  // namespace
@@ -85,7 +99,18 @@ void HardwareQueryUtil::ReadDeviceSnAndModel(std::string* device_sn, std::string
     if (!device_sn || !device_model) {
         return;
     }
-#ifndef COSMO_NN_USE_SOPHON_BACKEND
+#if defined(COSMO_NN_USE_RKNN_BACKEND)
+    *device_sn = ReadDeviceTreeText("/proc/device-tree/serial-number");
+    if (device_sn->empty())
+        *device_sn = ReadDeviceTreeText("/sys/firmware/devicetree/base/serial-number");
+    if (device_sn->empty())
+        *device_sn = QueryPrimaryMac();
+    *device_model = ReadDeviceTreeText("/proc/device-tree/model");
+    if (device_model->empty())
+        *device_model = "RK3576";
+    LOG_INFO("RKNN deviceSn:{} deviceModel:{}", *device_sn, *device_model);
+    return;
+#elif !defined(COSMO_NN_USE_SOPHON_BACKEND)
     *device_sn    = "CA16T01-X86-TRIAL";
     *device_model = "X86-TRIAL";
     LOG_INFO("x86 trial mode - mocked deviceSn:{}", *device_sn);
@@ -121,7 +146,10 @@ void HardwareQueryUtil::ReadDeviceSnAndModel(std::string* device_sn, std::string
 }
 
 std::string HardwareQueryUtil::ReadHardwareSpec() {
-#ifndef COSMO_NN_USE_SOPHON_BACKEND
+#if defined(COSMO_NN_USE_RKNN_BACKEND)
+    auto compatible = ReadDeviceTreeText("/proc/device-tree/compatible", ',');
+    return compatible.empty() ? "rockchip,rk3576" : compatible;
+#elif !defined(COSMO_NN_USE_SOPHON_BACKEND)
     return "X86_HARDWARE_SPEC";
 #else
     auto hardware_info =
@@ -137,7 +165,13 @@ std::string HardwareQueryUtil::ReadHardwareSpec() {
 }
 
 std::string HardwareQueryUtil::ReadKernelRevision() {
-#ifndef COSMO_NN_USE_SOPHON_BACKEND
+#if defined(COSMO_NN_USE_RKNN_BACKEND)
+    struct utsname system_info {};
+    if (uname(&system_info) == 0)
+        return system_info.release;
+    LOG_WARN("uname failed while querying RK3576 kernel revision: {}", std::strerror(errno));
+    return {};
+#elif !defined(COSMO_NN_USE_SOPHON_BACKEND)
     return "X86-Generic-Kernel";
 #else
     LOG_INFO("{}", "bm_version");

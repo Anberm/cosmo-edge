@@ -54,7 +54,18 @@ bool AlgorithmLayoutMng::ResolveLayoutDirectory(const std::string& requested_pat
         return false;
     }
 
-    const std::string& selected_path = requested_path.empty() ? algorithm_path : requested_path;
+    // The Web client must not need to know the device's configured app-data
+    // root.  An empty value means the writable algorithm root, while the
+    // stable logical name selects the read-only template root.  Legacy
+    // absolute paths remain accepted when they resolve inside this runtime.
+    std::string selected_path;
+    if (requested_path.empty()) {
+        selected_path = algorithm_path;
+    } else if (requested_path == "algorithm_template") {
+        selected_path = (std::filesystem::path(resolved_resource) / "algorithm_template").string();
+    } else {
+        selected_path = requested_path;
+    }
     if (!cosmo::path::ResolveExistingPathWithinRoot(resolved_resource, selected_path,
                                                     cosmo::path::PathEntryType::kDirectory, resolved_path)) {
         return false;

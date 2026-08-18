@@ -147,6 +147,80 @@ TEST_CASE("device status exposes additive reboot identity", "[json][system][upgr
     CHECK(restored.resData.softwareVersion == original.resData.softwareVersion);
 }
 
+TEST_CASE("accelerator telemetry exposes additive load semantics", "[json][system][metrics]") {
+    cosmo::MsgGpuInfo original;
+    original.gpuusage                           = 0.42;
+    original.gpuusageAvailable                  = true;
+    original.utilizationMetric                  = "busy-time-load";
+    original.coreUtilizations                   = {0.09, 0.42};
+    original.memoryDomain                       = "shared-system";
+    original.rknnYolov8DirectCandidateCalls     = 4;
+    original.rknnYolov8DirectCandidateFailures  = 1;
+    original.rknnYolov8DirectPointsScanned      = 33'600;
+    original.rknnYolov8DirectPointsDecoded      = 68;
+    original.rknnYolov8ScoreSumPointsRejected   = 32'000;
+    original.rknnYolov8LogicalFloatBytesAvoided = 11'289'600;
+    original.rknnBoundInputBindAttempts         = 1;
+    original.rknnBoundInputCopyCalls            = 4;
+    original.rknnBoundInputCopyMs               = 1.5;
+    original.rknnBoundInputCopyBytes            = 4'915'200;
+    original.rknnBoundInputSyncCalls            = 4;
+    original.rknnBoundInputSyncMs               = 0.5;
+    original.rknnBoundInputFrames               = 4;
+    original.rknnRgaBoundInputFrames            = 4;
+    original.rknnRgaBoundUint8Frames            = 4;
+    original.rknnMppDmaBufImportCalls           = 4;
+    original.rknnMppDmaBufImportMs              = 1.25;
+    original.rknnMppDmaBufFrames                = 4;
+    original.rknnMppDmaBufSourceBytes           = 12'533'760;
+
+    std::string json;
+    REQUIRE(cosmo::util::EncodeJson(original, json));
+    const auto doc = ParseJson(json);
+    CHECK(doc["utilizationMetric"] == "busy-time-load");
+    CHECK(doc["memoryDomain"] == "shared-system");
+    REQUIRE(doc["coreUtilizations"].size() == 2);
+    CHECK(doc["coreUtilizations"][0].get<double>() == Catch::Approx(0.09));
+    CHECK(doc["coreUtilizations"][1].get<double>() == Catch::Approx(0.42));
+    CHECK(doc["rknnYolov8DirectCandidateCalls"] == 4);
+    CHECK(doc["rknnYolov8DirectPointsDecoded"] == 68);
+    CHECK(doc["rknnYolov8ScoreSumPointsRejected"] == 32'000);
+    CHECK(doc["rknnYolov8LogicalFloatBytesAvoided"] == 11'289'600);
+    CHECK(doc["rknnBoundInputBindAttempts"] == 1);
+    CHECK(doc["rknnBoundInputCopyBytes"] == 4'915'200);
+    CHECK(doc["rknnBoundInputFrames"] == 4);
+    CHECK(doc["rknnRgaBoundInputFrames"] == 4);
+    CHECK(doc["rknnRgaBoundUint8Frames"] == 4);
+    CHECK(doc["rknnMppDmaBufImportCalls"] == 4);
+    CHECK(doc["rknnMppDmaBufFrames"] == 4);
+    CHECK(doc["rknnMppDmaBufSourceBytes"] == 12'533'760);
+
+    cosmo::MsgGpuInfo restored;
+    REQUIRE(cosmo::util::DecodeJson(json, restored));
+    CHECK(restored.utilizationMetric == original.utilizationMetric);
+    CHECK(restored.coreUtilizations == original.coreUtilizations);
+    CHECK(restored.memoryDomain == original.memoryDomain);
+    CHECK(restored.rknnYolov8DirectCandidateCalls == original.rknnYolov8DirectCandidateCalls);
+    CHECK(restored.rknnYolov8DirectCandidateFailures == original.rknnYolov8DirectCandidateFailures);
+    CHECK(restored.rknnYolov8DirectPointsScanned == original.rknnYolov8DirectPointsScanned);
+    CHECK(restored.rknnYolov8DirectPointsDecoded == original.rknnYolov8DirectPointsDecoded);
+    CHECK(restored.rknnYolov8ScoreSumPointsRejected == original.rknnYolov8ScoreSumPointsRejected);
+    CHECK(restored.rknnYolov8LogicalFloatBytesAvoided == original.rknnYolov8LogicalFloatBytesAvoided);
+    CHECK(restored.rknnBoundInputBindAttempts == original.rknnBoundInputBindAttempts);
+    CHECK(restored.rknnBoundInputCopyCalls == original.rknnBoundInputCopyCalls);
+    CHECK(restored.rknnBoundInputCopyMs == original.rknnBoundInputCopyMs);
+    CHECK(restored.rknnBoundInputCopyBytes == original.rknnBoundInputCopyBytes);
+    CHECK(restored.rknnBoundInputSyncCalls == original.rknnBoundInputSyncCalls);
+    CHECK(restored.rknnBoundInputSyncMs == original.rknnBoundInputSyncMs);
+    CHECK(restored.rknnBoundInputFrames == original.rknnBoundInputFrames);
+    CHECK(restored.rknnRgaBoundInputFrames == original.rknnRgaBoundInputFrames);
+    CHECK(restored.rknnRgaBoundUint8Frames == original.rknnRgaBoundUint8Frames);
+    CHECK(restored.rknnMppDmaBufImportCalls == original.rknnMppDmaBufImportCalls);
+    CHECK(restored.rknnMppDmaBufImportMs == original.rknnMppDmaBufImportMs);
+    CHECK(restored.rknnMppDmaBufFrames == original.rknnMppDmaBufFrames);
+    CHECK(restored.rknnMppDmaBufSourceBytes == original.rknnMppDmaBufSourceBytes);
+}
+
 TEST_CASE("HTTP event targets serialize and round-trip", "[json][event][targets]") {
     cosmo::CMsgOnEventsReq event;
     event.messageId = "event-1";

@@ -139,6 +139,17 @@ public:
     /// @return true if at least one task references this schedule.
     virtual bool ScheduleInUse(const std::string& scheduleId) = 0;
 
+    /// Keep the camera channel active while a live-preview publisher exists.
+    /// The first lease starts the channel on demand; later leases share it.
+    /// @param cameraId Camera identifier.
+    /// @return ErrorEnum::Success when the channel is running or its start was accepted.
+    virtual cosmo::util::ErrorEnum AcquirePreviewChannel(const std::string& cameraId) = 0;
+
+    /// Release one live-preview lease. The last release allows the channel to
+    /// stop again when no analysis task or image capture still needs it.
+    /// @param cameraId Camera identifier.
+    virtual void ReleasePreviewChannel(const std::string& cameraId) = 0;
+
     /// Capture a single image frame from a camera channel.
     /// @param channelId Channel identifier.
     /// @param timeOutMs Timeout in milliseconds (default: 3000).

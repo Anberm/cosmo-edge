@@ -28,6 +28,7 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
       pass: null,
       reasons: ['未执行，瓶颈提前停止'],
       skipped: true,
+      qualified: step.qualified !== false,
     };
   }
 
@@ -124,6 +125,10 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
   });
   const maxCpu = peak((tick) => tick.hardware?.cpuUtilization?.usedPercent);
   const maxMem = peak((tick) => tick.hardware?.generalMemoryUtilization?.usedPercent);
+  const maxDiskUsedPercent = peak((tick) => tick.hardware?.eMMCUtilization?.usedPercent);
+  const maxPoolAllocatedBytes = peak((tick) => tick.hardware?.memoryPool?.totalAllocatedBytes);
+  const maxPoolInUseBytes = peak((tick) => tick.hardware?.memoryPool?.totalInUseBytes);
+  const maxPoolUtilizationPercent = peak((tick) => tick.hardware?.memoryPool?.utilizationPercent);
   const taskStats = summarizeTasks(channelStats);
   const mediaStages = summarizeMediaStages(ticks, maxPrimaryLat);
 
@@ -135,6 +140,24 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     if (!verdict.pass) {
       overall.pass = false;
       overall.reasons.push(...verdict.reasons);
+    }
+  }
+  const diskLimit = thresholds.pass?.maxDiskUsedPercent;
+  if (diskLimit != null) {
+    const ok = maxDiskUsedPercent == null || maxDiskUsedPercent <= diskLimit;
+    perThreshold.push({
+      taskKey: '*',
+      taskDisplayName: 'device',
+      taskType: 'system',
+      strategy: 'system',
+      name: 'maxDiskUsedPercent',
+      threshold: diskLimit,
+      actual: maxDiskUsedPercent,
+      result: maxDiskUsedPercent == null ? 'N/A' : (ok ? 'PASS' : 'FAIL'),
+    });
+    if (!ok) {
+      overall.pass = false;
+      overall.reasons.push(`设备磁盘使用率 ${maxDiskUsedPercent}%，阈值 ${diskLimit}%`);
     }
   }
   if (videoMode !== 'local') {
@@ -172,12 +195,17 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     maxAcceleratorMem,
     maxCpu,
     maxMem,
+    maxDiskUsedPercent,
+    maxPoolAllocatedBytes,
+    maxPoolInUseBytes,
+    maxPoolUtilizationPercent,
     mediaStages,
     channelStats,
     taskStats,
     perThreshold,
     pass: overall.pass,
     reasons: overall.reasons,
+    qualified: step.qualified !== false,
   };
 }
 
@@ -209,6 +237,171 @@ function summarizeMediaStages(ticks, inferMs) {
     preprocessAvgMs: nodeStages.preprocess,
     inferAvgMs: inferMs,
     postprocessAvgMs: nodeStages.postprocess,
+    colorConvertAvgMs: counterAverage('colorConvertMs', 'colorConvertFrames'),
+    blobConvertAvgMs: counterAverage('blobConvertMs', 'blobConvertFrames'),
+    graphForwardAvgMs: counterAverage('graphForwardMs', 'graphForwardFrames'),
+    resultParseAvgMs: counterAverage('resultParseMs', 'resultParseFrames'),
+    graphForwardFailures: counterDelta('graphForwardFailures'),
+    resultParseFailures: counterDelta('resultParseFailures'),
+    rknnPrepareAvgMs: counterAverage('rknnPrepareMs', 'rknnPrepareCalls'),
+    rknnInputsSetAvgMs: counterAverage('rknnInputsSetMs', 'rknnInputsSetCalls'),
+    rknnRunAvgMs: counterAverage('rknnRunMs', 'rknnRunCalls'),
+    rknnOutputsGetAvgMs: counterAverage('rknnOutputsGetMs', 'rknnOutputsGetCalls'),
+    rknnOutputsReleaseAvgMs: counterAverage(
+      'rknnOutputsReleaseMs',
+      'rknnOutputsReleaseCalls',
+    ),
+    rknnOutputTransformAvgMs: counterAverage(
+      'rknnOutputTransformMs',
+      'rknnOutputTransformCalls',
+    ),
+    rknnForwardAvgMs: counterAverage('rknnForwardMs', 'rknnForwards'),
+    rknnForwardFailures: counterDelta('rknnForwardFailures'),
+    rknnMutexWaitAvgMs: counterAverage('rknnMutexWaitMs', 'rknnMutexWaitCalls'),
+    rknnDetectorPrepareAvgMs: counterAverage(
+      'rknnDetectorPrepareMs',
+      'rknnDetectorPrepareCalls',
+    ),
+    rknnDetectorInputsSetAvgMs: counterAverage(
+      'rknnDetectorInputsSetMs',
+      'rknnDetectorInputsSetCalls',
+    ),
+    rknnDetectorRunAvgMs: counterAverage('rknnDetectorRunMs', 'rknnDetectorRunCalls'),
+    rknnDetectorOutputsGetAvgMs: counterAverage(
+      'rknnDetectorOutputsGetMs',
+      'rknnDetectorOutputsGetCalls',
+    ),
+    rknnDetectorOutputsReleaseAvgMs: counterAverage(
+      'rknnDetectorOutputsReleaseMs',
+      'rknnDetectorOutputsReleaseCalls',
+    ),
+    rknnDetectorOutputTransformAvgMs: counterAverage(
+      'rknnDetectorOutputTransformMs',
+      'rknnDetectorOutputTransformCalls',
+    ),
+    rknnDetectorForwardAvgMs: counterAverage(
+      'rknnDetectorForwardMs',
+      'rknnDetectorForwards',
+    ),
+    rknnDetectorForwardFailures: counterDelta('rknnDetectorForwardFailures'),
+    rknnDetectorMutexWaitAvgMs: counterAverage(
+      'rknnDetectorMutexWaitMs',
+      'rknnDetectorMutexWaitCalls',
+    ),
+    rknnPreprocessFastHits: counterDelta('rknnPreprocessFastHits'),
+    rknnRgaFillAvgMs: counterAverage('rknnRgaFillMs', 'rknnRgaFillCalls'),
+    rknnRgaResizeColorAvgMs: counterAverage(
+      'rknnRgaResizeColorMs',
+      'rknnRgaResizeColorCalls',
+    ),
+    rknnRgaFailures: counterDelta('rknnRgaFailures'),
+    rknnCpuResizeFallbackAvgMs: counterAverage(
+      'rknnCpuResizeFallbackMs',
+      'rknnCpuResizeFallbackCalls',
+    ),
+    rknnCpuResizeFallbacks: counterDelta('rknnCpuResizeFallbackCalls'),
+    rknnCpuNormalizeFallbackAvgMs: counterAverage(
+      'rknnCpuNormalizeFallbackMs',
+      'rknnCpuNormalizeFallbackCalls',
+    ),
+    rknnCpuNormalizeFallbacks: counterDelta('rknnCpuNormalizeFallbackCalls'),
+    rknnNativeInputMapAvgMs: counterAverage(
+      'rknnNativeInputMapMs',
+      'rknnNativeInputMapCalls',
+    ),
+    rknnNativeInt8Inputs: counterDelta('rknnNativeInt8Inputs'),
+    rknnFloatInputs: counterDelta('rknnFloatInputs'),
+    rknnInputCompatibilityFallbacks: counterDelta('rknnInputCompatibilityFallbacks'),
+    rknnBoundInputBindAttempts: counterDelta('rknnBoundInputBindAttempts'),
+    rknnBoundInputBindFailures: counterDelta('rknnBoundInputBindFailures'),
+    rknnBoundInputCopyAvgMs: counterAverage(
+      'rknnBoundInputCopyMs',
+      'rknnBoundInputCopyCalls',
+    ),
+    rknnBoundInputCopyAvgBytes: counterAverage(
+      'rknnBoundInputCopyBytes',
+      'rknnBoundInputCopyCalls',
+    ),
+    rknnBoundInputCopyFailures: counterDelta('rknnBoundInputCopyFailures'),
+    rknnBoundInputSyncAvgMs: counterAverage(
+      'rknnBoundInputSyncMs',
+      'rknnBoundInputSyncCalls',
+    ),
+    rknnBoundInputSyncFailures: counterDelta('rknnBoundInputSyncFailures'),
+    rknnBoundInputFrames: counterDelta('rknnBoundInputFrames'),
+    rknnRgaBoundInputBindAttempts: counterDelta('rknnRgaBoundInputBindAttempts'),
+    rknnRgaBoundInputBindFailures: counterDelta('rknnRgaBoundInputBindFailures'),
+    rknnRgaBoundInputImportCalls: counterDelta('rknnRgaBoundInputImportCalls'),
+    rknnRgaBoundInputImportAvgMs: counterAverage(
+      'rknnRgaBoundInputImportMs',
+      'rknnRgaBoundInputImportCalls',
+    ),
+    rknnRgaBoundInputImportFailures: counterDelta('rknnRgaBoundInputImportFailures'),
+    rknnRgaBoundInputFrames: counterDelta('rknnRgaBoundInputFrames'),
+    rknnRgaBoundUint8Frames: counterDelta('rknnRgaBoundUint8Frames'),
+    rknnRgaBoundNativeInt8Frames: counterDelta('rknnRgaBoundNativeInt8Frames'),
+    rknnRgaBoundRequantizeCalls: counterDelta('rknnRgaBoundRequantizeCalls'),
+    rknnRgaBoundRequantizeAvgMs: counterAverage(
+      'rknnRgaBoundRequantizeMs',
+      'rknnRgaBoundRequantizeCalls',
+    ),
+    rknnRgaBoundRequantizeFailures: counterDelta('rknnRgaBoundRequantizeFailures'),
+    rknnRgaBoundInputNormalizeBypasses: counterDelta(
+      'rknnRgaBoundInputNormalizeBypasses',
+    ),
+    rknnMppDmaBufImportCalls: counterDelta('rknnMppDmaBufImportCalls'),
+    rknnMppDmaBufImportAvgMs: counterAverage(
+      'rknnMppDmaBufImportMs',
+      'rknnMppDmaBufImportCalls',
+    ),
+    rknnMppDmaBufImportFailures: counterDelta('rknnMppDmaBufImportFailures'),
+    rknnMppDmaBufFrames: counterDelta('rknnMppDmaBufFrames'),
+    rknnMppDmaBufFallbacks: counterDelta('rknnMppDmaBufFallbacks'),
+    rknnMppDmaBufSourceAvgBytes: counterAverage(
+      'rknnMppDmaBufSourceBytes',
+      'rknnMppDmaBufFrames',
+    ),
+    rknnNativeInt8Outputs: counterDelta('rknnNativeInt8Outputs'),
+    rknnFloatOutputs: counterDelta('rknnFloatOutputs'),
+    rknnOutputCompatibilityFallbacks: counterDelta('rknnOutputCompatibilityFallbacks'),
+    rknnNativeOutputAvgBytes: counterAverage(
+      'rknnNativeOutputBytes',
+      'rknnNativeInt8Outputs',
+    ),
+    rknnFloatOutputAvgBytes: counterAverage('rknnFloatOutputBytes', 'rknnFloatOutputs'),
+    rknnYolov8DflAvgMs: counterAverage('rknnYolov8DflMs', 'rknnYolov8DflCalls'),
+    rknnYolov8ClassAvgMs: counterAverage('rknnYolov8ClassMs', 'rknnYolov8ClassCalls'),
+    rknnYolov8DirectCandidateCalls: counterDelta('rknnYolov8DirectCandidateCalls'),
+    rknnYolov8DirectCandidateFailures: counterDelta('rknnYolov8DirectCandidateFailures'),
+    rknnYolov8DirectAvgPointsScanned: counterAverage(
+      'rknnYolov8DirectPointsScanned',
+      'rknnYolov8DirectCandidateCalls',
+    ),
+    rknnYolov8DirectAvgPointsDecoded: counterAverage(
+      'rknnYolov8DirectPointsDecoded',
+      'rknnYolov8DirectCandidateCalls',
+    ),
+    rknnYolov8ScoreSumAvgPointsRejected: counterAverage(
+      'rknnYolov8ScoreSumPointsRejected',
+      'rknnYolov8DirectCandidateCalls',
+    ),
+    rknnYolov8LogicalFloatBytesAvoided: counterDelta(
+      'rknnYolov8LogicalFloatBytesAvoided',
+    ),
+    yolov8PostprocessAvgMs: counterAverage('yolov8PostprocessMs', 'yolov8PostprocessCalls'),
+    yolov8NmsAvgMs: counterAverage('yolov8NmsMs', 'yolov8NmsCalls'),
+    rgaAvgMs: counterAverage('rgaMs', 'rgaFrames'),
+    rgaFailures: counterDelta('rgaFailures'),
+    mppEncodeAvgMs: counterAverage('mppEncodeMs', 'mppEncodedFrames'),
+    mppEncodeFailures: counterDelta('mppEncodeFailures'),
+    mppDecodeAvgMs: counterAverage('mppDecodeMs', 'mppDecodedFrames'),
+    mppDecodedFrames: counterDelta('mppDecodedFrames'),
+    mppDecodeFailures: counterDelta('mppDecodeFailures'),
+    mppDecodeFallbacks: counterDelta('mppDecodeFallbacks'),
+    mppCopyOutAvgMs: counterAverage('mppCopyOutMs', 'mppCopyOutFrames'),
+    mppCopyOutFrames: counterDelta('mppCopyOutFrames'),
+    mppCopyOutFailures: counterDelta('mppCopyOutFailures'),
+    mppEarlyDroppedFrames: counterDelta('mppEarlyDroppedFrames'),
     osdAvgMs: counterAverage('osdMs', 'osdFrames'),
     publishAvgMs: counterAverage('publishMs', 'publishedFrames'),
     firstFrameAvgMs: counterAverage('firstFrameMs', 'firstFrames'),

@@ -29,7 +29,7 @@ namespace qwen3_5 {
         ~Qwen3_5Model();
 
         void init(int dev_id, const std::string& model_path, bool do_sample,
-                  const std::string& model_config_json_path = "");
+                  const std::string& model_config_json_path);
         void deinit();
         void forward_embed(const ArrayInt& tokens);
         void forward_vit(const float* pixel_values, const ArrayInt& position_ids, const ArrayInt& pos_idx,

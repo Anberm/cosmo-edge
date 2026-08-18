@@ -22,6 +22,9 @@
 *.css   text eol=lf
 *.scss  text eol=lf
 *.html  text eol=lf
+*.txt   text eol=lf
+*.log   text eol=lf
+*.svg   text eol=lf
 CMakeLists.txt text eol=lf
 Makefile       text eol=lf
 
@@ -31,8 +34,11 @@ Makefile       text eol=lf
 
 # 二进制文件不做转换
 *.bmodel binary
+*.nn     binary
 *.onnx   binary
+*.rknn   binary
 *.so     binary
+*.so.*   binary
 *.a      binary
 *.png    binary
 *.jpg    binary

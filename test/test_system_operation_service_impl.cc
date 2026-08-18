@@ -1,15 +1,17 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
-#include <string_view>
 
 #include "catch_amalgamated.hpp"
 #include "mock/MockServiceRegistry.h"
+#include "platform/SystemReboot.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/system/impl/PacketUpgrade.h"
 #include "service/system/impl/SystemOperationServiceImpl.h"
+#include "service/system/impl/UpgradeStorage.h"
 #include "util/Exec.h"
 #include "util/PathUtil.h"
 #include "util/ResourceBudget.h"
@@ -44,6 +46,24 @@ fs::path AddUpgradeChecksumToName(const fs::path& archive, const fs::path& desti
 }
 
 }  // namespace
+
+TEST_CASE("Factory reset preserves model authorization data", "[system][reset]") {
+    const auto root        = fs::temp_directory_path() / "cosmo_factory_reset_test";
+    const auto certificate = root / "model-guard" / "device-certificate.bin";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(certificate.parent_path());
+    fs::create_directories(root / "conf");
+    std::ofstream(certificate) << "certificate";
+    std::ofstream(root / "conf" / "config.json") << "{}";
+    std::ofstream(root / "temporary-file") << "temporary";
+
+    CHECK_FALSE(cosmo::platform::ClearFactoryResetData(root.string()));
+    CHECK(fs::is_regular_file(certificate));
+    CHECK_FALSE(fs::exists(root / "conf"));
+    CHECK_FALSE(fs::exists(root / "temporary-file"));
+    fs::remove_all(root, ec);
+}
 
 TEST_CASE("SystemOperationServiceImpl: System operations", "[system][service]") {
     cosmo::test::MockServiceRegistry mocks;
@@ -115,6 +135,72 @@ TEST_CASE("PacketUpgrade rejects missing md5", "[system][upgrade]") {
     std::string md5sum;
     auto result = cosmo::UpgradeFileNameCheck("cosmo-V1.0.0.tar.gz", md5sum);
     REQUIRE(result != cosmo::util::ErrorEnum::Success);
+}
+
+TEST_CASE("Upgrade storage requires two and a half package sizes", "[system][upgrade][storage]") {
+    CHECK(cosmo::service::RequiredUpgradeSpaceBytes(0) == 0);
+    CHECK(cosmo::service::RequiredUpgradeSpaceBytes(4) == 10);
+    CHECK(cosmo::service::RequiredUpgradeSpaceBytes(5) == 13);
+    CHECK(cosmo::service::RequiredUpgradeSpaceBytes(std::numeric_limits<std::uint64_t>::max()) ==
+          std::numeric_limits<std::uint64_t>::max());
+}
+
+TEST_CASE("Upgrade storage cleanup removes only event images and videos", "[system][upgrade][storage]") {
+    const auto root       = fs::temp_directory_path() / "cosmo_upgrade_storage_cleanup_test";
+    const auto event_root = root / "event";
+    const auto outside    = root / "outside.jpg";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(event_root / "2026/08/17");
+    std::ofstream(event_root / "2026/08/17/alarm.jpg") << "image";
+    std::ofstream(event_root / "2026/08/17/alarm.MP4") << "video";
+    std::ofstream(event_root / "2026/08/17/alarm.json") << "metadata";
+    std::ofstream(event_root / "2026/08/17/engine.log") << "log";
+    std::ofstream(outside) << "outside";
+    fs::create_symlink(outside, event_root / "2026/08/17/outside.jpg", ec);
+    REQUIRE(!ec);
+
+    const auto result = cosmo::service::DeleteEventMediaFiles(event_root);
+
+    CHECK(result.error == cosmo::util::ErrorEnum::Success);
+    CHECK(result.deleted_files == 2);
+    CHECK(result.deleted_bytes == 10);
+    CHECK_FALSE(fs::exists(event_root / "2026/08/17/alarm.jpg"));
+    CHECK_FALSE(fs::exists(event_root / "2026/08/17/alarm.MP4"));
+    CHECK(fs::is_regular_file(event_root / "2026/08/17/alarm.json"));
+    CHECK(fs::is_regular_file(event_root / "2026/08/17/engine.log"));
+    CHECK(fs::is_symlink(event_root / "2026/08/17/outside.jpg"));
+    CHECK(fs::is_regular_file(outside));
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("Upgrade storage rechecks available space after confirmed cleanup", "[system][upgrade][storage]") {
+    const auto root       = fs::temp_directory_path() / "cosmo_upgrade_storage_recheck_test";
+    const auto event_root = root / "event";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(event_root);
+    std::ofstream(event_root / "alarm.jpg") << "image";
+    std::ofstream(event_root / "alarm.json") << "metadata";
+
+    cosmo::service::UpgradeSpaceStatus status;
+    const auto inspect_result = cosmo::service::CheckUpgradeStorage(
+        root, event_root, std::numeric_limits<std::uint64_t>::max(), false, status);
+    REQUIRE(inspect_result == cosmo::util::ErrorEnum::Success);
+    CHECK_FALSE(status.sufficient);
+    CHECK(status.required_bytes == std::numeric_limits<std::uint64_t>::max());
+    CHECK(status.event_media_bytes == 5);
+    CHECK(fs::is_regular_file(event_root / "alarm.jpg"));
+
+    const auto cleanup_result = cosmo::service::CheckUpgradeStorage(
+        root, event_root, std::numeric_limits<std::uint64_t>::max(), true, status);
+    REQUIRE(cleanup_result == cosmo::util::ErrorEnum::Success);
+    CHECK_FALSE(status.sufficient);
+    CHECK(status.deleted_media_files == 1);
+    CHECK(status.deleted_media_bytes == 5);
+    CHECK_FALSE(fs::exists(event_root / "alarm.jpg"));
+    CHECK(fs::is_regular_file(event_root / "alarm.json"));
+    fs::remove_all(root, ec);
 }
 
 TEST_CASE("PacketUpgrade validates archive boundaries before extraction", "[system][upgrade][archive]") {

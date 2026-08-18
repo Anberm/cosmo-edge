@@ -35,6 +35,12 @@ Check container status:
   docker compose -f docker-compose.x86.windows.yml ps
   ```
 
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh status
+  ```
+
 View logs:
 
 - **Linux**:
@@ -47,6 +53,12 @@ View logs:
 
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## Port Conflicts
@@ -76,6 +88,15 @@ docker compose -f docker-compose.x86.windows.yml up -d --build
 
 Then open `http://127.0.0.1:8280`. The default remains `8080` when the variable is unset.
 
+The Mac Preview accepts the same web-port variable while retaining its host-only binding:
+
+```bash
+COSMO_X86_WEB_PORT=8280 ./scripts/macos-docker-preview.sh up
+```
+
+If Mac builds are unexpectedly slow, inspect Docker Desktop's VMM and Rosetta
+settings. See [macOS Docker Preview](./macos-docker-preview.md) for the full boundary.
+
 ## Windows Build Scripts Report `No such file or directory`
 
 If a Docker build reports that an existing `configure`, `config`, or `Configure` file cannot be executed, Git for Windows may have checked out the extensionless script with CRLF endings. The container then cannot parse its shebang.
@@ -88,7 +109,7 @@ git check-attr text eol -- 3rd/mp4v2-2.0.0/configure 3rd/openssl-3.5.3/config 3r
 
 All three files should report `text: auto` and `eol: lf`.
 
-## No Release Package in `build_output/`
+## No Build Artifact in `build_output/`
 
 Use the full run command:
 
@@ -104,28 +125,82 @@ Use the full run command:
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
 
-For the Sophon path, use:
+The [Build Guide](./build.md#sophon-artifacts) is the authoritative reference for
+the Sophon entry point, profiles, and output contract. For example, after the
+default BM1688 Open build, inspect the chip-scoped directory directly:
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+cat build_output/public-runtime/bm1688/TARGET_CHIP
+(cd build_output/public-runtime/bm1688 && sha256sum -c SHA256SUMS)
 ```
 
-Note: `docker compose build` only builds the image and does not necessarily execute the container command that exports the release package.
+Sophon output is not written directly to `build_output/`. Each
+`build_output/<profile>/<chip>/` directory should contain `TARGET_CHIP`,
+`SHA256SUMS`, and exactly one `cosmo-V<version>-<32-char-md5>.tar.gz`. First check
+that the selected profile and chip match the directory being inspected.
+
+Do not substitute `docker compose build` for the `run` entry point above; it does
+not execute the container command that exports the artifact.
 
 ## Sophon Build Failure
 
-The Sophon build uses a self-contained `Dockerfile.sophon` (based on `ubuntu:22.04`) and does not require an external base image.
+The `cosmo-sophon-package` service directly uses the pre-built GHCR image
+configured in `docker-compose.sophon.yml`; there is no local `Dockerfile.sophon`
+build path. The [Build Guide](./build.md#sophon-artifacts) is the single reference
+for the current image and build chain.
 
-If the build fails, check the Docker build logs:
+If the build fails, rerun the same entry point and inspect the final log lines:
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package 2>&1 | tail -50
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
 ```
+
+For BM1688, replace the final argument with `bm1688` or omit it.
 
 Common causes:
 
 - Network issues preventing apt/npm/cargo mirror downloads — check `SOPHON_APT_MIRROR` and related environment variables.
 - Insufficient disk space — the build requires approximately 3GB.
+- An unsupported `COSMO_MODEL_GUARD_BUILD_PROFILE` value — only
+  `public-runtime` and `production-release` are accepted.
+- An unsupported chip model — only `bm1688` and `cv186x` are accepted; omitting
+  it defaults to `bm1688`.
+- Selecting `production-release` outside the controlled release environment —
+  missing production SDK, provisioning, release-public-key, or bootstrap inputs is
+  rejected by design. Use SOURCE for ordinary source-code builds; do not bypass
+  the formal release checks.
+
+## Protected Presets Do Not Load
+
+The device needs exactly one Guard state file:
+
+```text
+/data/cwaiuserdata/model-guard/device-certificate.bin
+```
+
+Check certificate status and service logs first:
+
+```bash
+sudo test -f /data/cwaiuserdata/model-guard/device-certificate.bin
+sudo journalctl -u cosmo.service -b --no-pager -n 200
+```
+
+If the controlled provisioner is still present in its temporary device
+directory, run `sudo /temporary-directory/cosmo-model-provision status` to
+validate the certificate against the live device. The SOURCE package does not
+provide that tool.
+
+- `-2001` (`CMG_V2_CERTIFICATE_UNAVAILABLE`) means the certificate is missing
+  or unreadable.
+- `-2002` (`CMG_V2_CERTIFICATE_REJECTED`) means the certificate is malformed,
+  has an invalid signature, or was issued for another device.
+
+Do not create per-model licenses or copy another device's certificate. Create
+a fresh request on this device, issue its certificate in the controlled
+offline environment, and run
+`cosmo-model-provision install --certificate <absolute-certificate-path>`.
+The SOURCE installer does not create, delete, or repair this certificate.
 
 ## nginx / SRS / cosmo-engine Not Started
 
@@ -157,10 +232,10 @@ On a Sophon device, inspect:
 ```bash
 systemctl status cosmo --no-pager -l
 journalctl -u cosmo -b --no-pager -n 200
-stat -c '%F %a %U:%G %n' /data/cwaiuserdata/upload/sessions
 ```
 
-Normally `cosmo.service` is `active (running)` and the staging root is a real directory with mode `0700`. A fatal initialization exception exits non-zero so `Restart=on-failure` can retry. Do not bypass the checks by recursively widening permissions on all of `/data/cwaiuserdata`.
+Normally `cosmo.service` is `active (running)`. A fatal initialization
+exception exits non-zero so `Restart=on-failure` can retry.
 
 ## Documentation Site Build Fails
 

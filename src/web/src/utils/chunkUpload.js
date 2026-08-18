@@ -12,7 +12,8 @@ export const UploadPurpose = Object.freeze({
   AUDIO: 'audio',
   ALGORITHM: 'algorithm',
   UPGRADE: 'upgrade',
-  IMAGE: 'image'
+  IMAGE: 'image',
+  MODEL_AUTHORIZATION_CERTIFICATE: 'model-authorization-certificate'
 })
 
 const validPurposes = new Set(Object.values(UploadPurpose))

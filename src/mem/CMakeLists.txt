@@ -3,6 +3,7 @@ set(MEM_COMMON_SOURCES
     BlockFreqCalc.cc     BlockFreqCalc.h
     FixedBlockPool.cc    FixedBlockPool.h
     MemoryPoolMng.cc     MemoryPoolMng.h
+    AllocatorCpu.cc      AllocatorCpu.h
     Allocator.h
     Block.h
     IDeviceContext.h
@@ -17,7 +18,6 @@ if(COSMO_NN_USE_SOPHON_BACKEND)
     )
 else()
     set(MEM_BACKEND_SOURCES
-        AllocatorCpu.cc      AllocatorCpu.h
         DeviceContextCpu.cc
     )
 endif()

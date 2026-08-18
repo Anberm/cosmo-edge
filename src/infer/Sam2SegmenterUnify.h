@@ -40,7 +40,6 @@ private:
 
 private:
     size_t max_batch_size_ = 1;
-    std::string atomic_code_;
     std::string cfg_path_;
     std::string model_path_;
     std::unique_ptr<cosmo::nn::DefaultComponent> segmenter_;

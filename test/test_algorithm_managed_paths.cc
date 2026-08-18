@@ -184,6 +184,23 @@ TEST_CASE("Algorithm layout queries accept only the managed algorithm and templa
         REQUIRE(template_list.list.front().algorithmName == "Template");
     }
 
+    SECTION("portable logical roots resolve under the configured app-data directory") {
+        cosmo::service::algorithm::LayoutDetailResult algorithm_detail;
+        REQUIRE(service.GetLayoutDetail("101", "", algorithm_detail) == cosmo::util::ErrorEnum::Success);
+        REQUIRE(algorithm_detail.algorithmName == "Managed");
+
+        cosmo::service::algorithm::LayoutDetailResult template_detail;
+        REQUIRE(service.GetLayoutDetail("202", "algorithm_template", template_detail) ==
+                cosmo::util::ErrorEnum::Success);
+        REQUIRE(template_detail.algorithmName == "Template");
+
+        cosmo::service::algorithm::LayoutListResult template_list;
+        REQUIRE(service.GetLayoutList("", 1, "algorithm_template", template_list) ==
+                cosmo::util::ErrorEnum::Success);
+        REQUIRE(template_list.list.size() == 1);
+        REQUIRE(template_list.list.front().algorithmName == "Template");
+    }
+
     SECTION("an external directory is rejected") {
         cosmo::service::algorithm::LayoutDetailResult detail;
         REQUIRE(service.GetLayoutDetail("303", fix.outside_root.string(), detail) ==
@@ -236,6 +253,15 @@ TEST_CASE("Algorithm layout save writes only to the managed algorithm root",
 
     SECTION("the exact algorithm root is accepted") {
         request.filePath = fix.AlgorithmRoot().string();
+        REQUIRE_CALL(fix.mocks.algSvc, ReloadAlgorithmFromFile(trompeloeil::_))
+            .RETURN(cosmo::util::ErrorEnum::Success);
+        REQUIRE(service.LayoutSave(request) == cosmo::util::ErrorEnum::Success);
+        REQUIRE(CountRegularFiles(fix.AlgorithmRoot()) == 1);
+        REQUIRE(CountRegularFiles(fix.outside_root) == 0);
+    }
+
+    SECTION("the portable default algorithm root is accepted") {
+        request.filePath.clear();
         REQUIRE_CALL(fix.mocks.algSvc, ReloadAlgorithmFromFile(trompeloeil::_))
             .RETURN(cosmo::util::ErrorEnum::Success);
         REQUIRE(service.LayoutSave(request) == cosmo::util::ErrorEnum::Success);

@@ -26,6 +26,13 @@ if [ -z "${INSTALLPATH}" ]; then
     cosmo_log "$logTag" "INSTALLPATH=${INSTALLPATH}" "$logFile"
 fi
 
+# Keep mutable runtime data separate from packaged, read-only resources.  The
+# application root must follow the actual installation path, including
+# side-by-side validation installs, instead of silently falling back to the
+# production default when INSTALLPATH is overridden.
+export COSMO_DATA_DIR
+export COSMO_APP_DATA_DIR="${COSMO_APP_DATA_DIR:-${INSTALLPATH}}"
+
 if [ "$1" != "start" ]; then
     cosmo_log "$logTag" "Unsupported action: [$1], use 'start'" "$logFile"
     exit 1
@@ -42,6 +49,19 @@ case "${PLTFORM_TYPE}" in
 esac
 cosmo_log "$logTag" "Install path=${INSTALLPATH}, platform=${PLTFORM_TYPE}" "$logFile"
 
+# On Rockchip kernels debugfs itself is root-only even though the NPU load file
+# is read-only. Prepare a narrow bind mount when startup has sufficient rights;
+# metric failure must not prevent the inference service from starting.
+if [ -x "${SCRIPT_DIR}/prepare_rknpu_metrics.sh" ]; then
+    if rknpu_metrics_status="$("${SCRIPT_DIR}/prepare_rknpu_metrics.sh" 2>&1)"; then
+        if [ -n "${rknpu_metrics_status}" ]; then
+            cosmo_log "$logTag" "${rknpu_metrics_status}" "$logFile"
+        fi
+    else
+        cosmo_log "$logTag" "WARNING: ${rknpu_metrics_status}" "$logFile"
+    fi
+fi
+
 # Set multicast options
 sysctl -w net.ipv4.igmp_max_memberships=20 2>/dev/null || true
 
@@ -53,10 +73,28 @@ export LD_LIBRARY_PATH="${IED_LIB}:${LD_LIBRARY_PATH:-}:/usr/lib"
 BINPATH="${INSTALLPATH}/bin"
 NGINX_PREFIX="${BINPATH}/nginx_conf"
 NGINX_CONF="${NGINX_PREFIX}/conf/nginx.conf"
+NGINX_UPSTREAM_CONF="${NGINX_PREFIX}/conf/conf.d/default.conf"
+
+export COSMO_HTTP_PORT="${COSMO_HTTP_PORT:-8000}"
+export COSMO_WEBSOCKET_PORT="${COSMO_WEBSOCKET_PORT:-9000}"
+
+# Validate the reverse-proxy/backend contract before stopping the currently
+# running service. A bad override or stale Nginx config must fail closed.
+if ! port_contract="$(verify_nginx_engine_port_contract "$NGINX_UPSTREAM_CONF" \
+    "$COSMO_HTTP_PORT" "$COSMO_WEBSOCKET_PORT" 2>&1)"; then
+    cosmo_log "$logTag" "Port contract check failed: ${port_contract}" "$logFile"
+    exit 1
+fi
+cosmo_log "$logTag" "Port contract OK: ${port_contract}" "$logFile"
 
 # Stop all running processes before starting (including nginx)
 cosmo_log "$logTag" "Stopping all running processes before start..." "$logFile"
-"${INSTALLPATH}/scripts/stop.sh"
+TRUSTED_STOP_SCRIPT="${COSMO_TRUSTED_STOP_SCRIPT:-${INSTALLPATH}/scripts/stop.sh}"
+if [ ! -f "${TRUSTED_STOP_SCRIPT}" ] || [ ! -x "${TRUSTED_STOP_SCRIPT}" ]; then
+    cosmo_log "$logTag" "Stop script is unavailable" "$logFile"
+    exit 1
+fi
+"${TRUSTED_STOP_SCRIPT}"
 
 # Add iptables rule (idempotent - skips if already exists)
 if hash iptables 2>/dev/null; then
@@ -74,11 +112,13 @@ fi
 
 cd "${BINPATH}" || exit 1
 
-# SRS streaming environment
-export COSMO_STREAM_PLAY_MODE=srs
-export COSMO_STREAM_RTMP_BASE=rtmp://127.0.0.1:1936/live
-export COSMO_STREAM_RTC_API_PORT=1985
-export COSMO_STREAM_HTTP_PORT=18088
+# SRS streaming environment. Deployment-specific values (for example the
+# deterministic HTTP-FLV path used by the macOS Preview) take precedence over
+# these defaults.
+export COSMO_STREAM_PLAY_MODE="${COSMO_STREAM_PLAY_MODE:-srs}"
+export COSMO_STREAM_RTMP_BASE="${COSMO_STREAM_RTMP_BASE:-rtmp://127.0.0.1:1936/live}"
+export COSMO_STREAM_RTC_API_PORT="${COSMO_STREAM_RTC_API_PORT:-1985}"
+export COSMO_STREAM_HTTP_PORT="${COSMO_STREAM_HTTP_PORT:-18088}"
 
 # Start nginx
 cosmo_log "$logTag" "Starting nginx..." "$logFile"

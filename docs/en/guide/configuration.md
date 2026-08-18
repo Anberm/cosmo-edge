@@ -19,6 +19,7 @@ x86 development runtime:
 
 - Linux: `docker-compose.x86.yml`
 - Windows: `docker-compose.x86.windows.yml`
+- Apple Silicon macOS Preview: `docker-compose.x86.macos.yml`
 
 Sophon release package build:
 
@@ -58,6 +59,10 @@ When both variables are absent, signed manager requests remain disabled. A parti
 
 `docker-compose.sophon.yml` supports the following build arguments:
 
+Pass the chip model as `--chip <model>` after the Compose service name.
+Supported values are `bm1688` and `cv186x`; omitting `--chip` defaults to
+`bm1688`. The build script automatically selects the matching resource directory.
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SOPHON_APT_MIRROR` | `https://mirrors.aliyun.com/ubuntu` | apt mirror |
@@ -71,7 +76,8 @@ When both variables are absent, signed manager requests remain disabled. A parti
 | Build Path | Resource Directory |
 | --- | --- |
 | x86 Docker | `data/resource/aiboxresource_x86` |
-| Sophon package | `data/resource/aiboxresource` |
+| Sophon BM1688 package | `data/resource/aiboxresource_bm1688` |
+| Sophon CV186X package | `data/resource/aiboxresource_cv186x` |
 
 CMake installs resources via `RESOURCE_DIR`.
 

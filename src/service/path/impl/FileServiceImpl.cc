@@ -309,13 +309,13 @@ bool FileServiceImpl::DownloadFile(const std::string& url, std::vector<uint8_t>&
     http_req.SetTimeout(200);
     auto ret_code = static_cast<int>(http_req.Submit(cosmo::network::http::HttpRequestMethod::kGet));
     if (ret_code != 200) {
-        LOG_ERRO("{} Download[{}] Fail! curl return [{}]", kTag, url, ret_code);
+        LOG_ERRO("{} Download failed, status:{}", kTag, ret_code);
         return false;
     }
 
     data = http_hnd.GetImageData();
     if (data.empty()) {
-        LOG_WARN("{} Download[{}] returned an empty body", kTag, url);
+        LOG_WARN("{} Download returned an empty body", kTag);
         return false;
     }
     return true;

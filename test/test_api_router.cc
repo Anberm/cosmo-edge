@@ -6,6 +6,7 @@
 #include "api/ApiRouterInternal.h"
 #include "catch_amalgamated.hpp"
 #include "mock/MockAuthService.h"
+#include "mock/MockModelAuthorizationService.h"
 #include "mock/MockModelService.h"
 #include "mock/MockScheduleService.h"
 #include "mock/MockServiceRegistry.h"
@@ -134,6 +135,38 @@ TEST_CASE("ApiRouter: Basic Routing and Dispatch", "[ApiRouter]") {
 
         std::error_code cleanup_error;
         fs::remove(export_path, cleanup_error);
+    }
+
+    SECTION("HTTP model authorization requests stream the raw CMPR file") {
+        namespace fs = std::filesystem;
+
+        const std::string valid_token = "model-authorization-request-token";
+        ALLOW_CALL(mocks.authSvc, IsValidToken(valid_token)).RETURN(true);
+
+        const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        const fs::path request_path = fs::path(cosmo::path::GetTemporaryDirPath()) /
+                                      ("model-authorization-request-" + suffix + ".cmpr");
+        std::ofstream(request_path, std::ios::binary) << std::string(48, '\x01');
+
+        REQUIRE_CALL(mocks.modelAuthorizationSvc, CreateDeviceRequest(trompeloeil::_, trompeloeil::_))
+            .SIDE_EFFECT(_1 = request_path.string())
+            .SIDE_EFFECT(_2 = "device-request.cmpr")
+            .RETURN(util::ErrorEnum::Success);
+
+        RequestDispatchContext context;
+        context.uri        = "/gtw/cwai/System/DownloadModelAuthorizationRequest";
+        context.credential = valid_token;
+        context.transport  = RequestTransport::kHttp;
+        RequestDispatchResponse response;
+        REQUIRE(router.DispatchRequestResponse(context, R"({"msgId":"1"})", response));
+        CHECK(response.body.empty());
+        CHECK(response.file_path == request_path.string());
+        CHECK(response.file_name == "device-request.cmpr");
+        CHECK(response.delete_file_after_send);
+        CHECK(fs::file_size(request_path) == 48);
+
+        std::error_code cleanup_error;
+        fs::remove(request_path, cleanup_error);
     }
 
     SECTION("HTTP file exports reject unmanaged paths without leaking them") {

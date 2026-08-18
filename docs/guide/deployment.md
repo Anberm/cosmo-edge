@@ -2,8 +2,8 @@
 title: 部署指南
 description: 当前运行目录、服务进程、端口、升级包和 systemd 行为。
 prev:
-  text: 构建指南
-  link: /guide/build
+  text: macOS Docker Preview
+  link: /guide/macos-docker-preview
 next:
   text: 架构概览
   link: /guide/architecture
@@ -30,6 +30,10 @@ next:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh up
+  ```
 
 停止：
 
@@ -41,6 +45,10 @@ next:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml down
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh down
+  ```
 
 查看日志：
 
@@ -51,6 +59,10 @@ next:
 - **Windows (PowerShell/CMD)**:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## 运行目录
@@ -86,7 +98,7 @@ ${INSTALLPATH}/bin/cosmo-engine
 
 | 端口 | 来源 | 用途 |
 | --- | --- | --- |
-| `8080 -> 80` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | x86 Docker Web 控制台 |
+| `8080 -> 80` | x86 Compose 文件；Mac Preview 仅绑定 `127.0.0.1` | x86 Docker Web 控制台 |
 | `1936` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | RTMP |
 | `1985` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | SRS API |
 | `18088` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | HTTP stream |
@@ -121,7 +133,7 @@ COSMO_STREAM_HTTP_PORT=18088
 - `lib`
 - `resource`
 
-升级包文件名匹配：
+升级包文件名必须匹配以下格式：
 
 ```text
 cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz
@@ -132,26 +144,40 @@ Web 控制台的本地升级流程如下：
 1. 查询设备状态并记录当前 Linux `bootId`。
 2. 按设备返回的上传能力分片传输安装包，界面显示实际上传百分比。
 3. 后端校验文件名、MD5、归档安全、目录结构和实时磁盘预算。
-4. Sophon 设备重启后，启动脚本再次校验 MD5、安装发布包并启动服务。
+4. Sophon 设备重启后，启动脚本再次校验 MD5 并安装。Open 与 Protected 包永久使用同一升级流程。
 5. 页面在看到新的 `bootId` 后返回登录页。如果重启使登录会话失效，则必须先观察到设备离线，再收到新服务的鉴权响应，才能判定服务已恢复并返回登录页。
 
 页面等待恢复的 15 分钟是交互超时，不会中止设备端已经开始的升级。超时后应保持供电，并通过设备网络和 systemd 日志确认状态。重新登录后还应核对软件版本与本次发布包；页面恢复只证明重启与服务恢复，不替代版本验收。
 
+## SSH安装路径
+
+除了Web升级，包内`scripts/install.sh`还提供从main版本迁移及后续兼容安装的SSH入口。
+它会安装应用、替换并启用`cosmo.service`，然后由重启启动服务：
+
+```bash
+scp build_output/public-runtime/<chip>/<安装包>.tar.gz root@<设备IP>:/tmp/
+ssh root@<设备IP>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <安装包>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+该路径假设Sophon Linux基础系统和运行依赖已经准备好，不是任意空白硬件的操作系统
+镜像安装流程。安装前记录当前版本和恢复方案；安装器会替换当前应用树。
+
 ## systemd 服务
 
-`scripts/install.sh` 会创建：
+已配置设备的服务启动命令为：
 
 ```text
-/etc/systemd/system/cosmo.service
+ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh
 ```
 
-服务启动命令：
-
-```text
-ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
-```
-
-服务以 `root` 运行并使用 `Restart=on-failure`。致命初始化异常会返回非零状态，使 systemd 能够重试，而不会把异常退出误判为正常停止。
+`scripts/install.sh`负责升级事务，不创建空白设备的systemd unit。服务以`root`
+运行并使用`Restart=on-failure`。
 
 部分 Sophon 系统会在启动时把持久化数据树的属主恢复为设备管理账户。上传暂存服务允许 `sessions` 目录继承一个不可被 group/other 写入的直接父目录属主，同时继续要求：
 

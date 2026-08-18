@@ -110,8 +110,9 @@ void LinkageServiceImpl::LoadConfig() {
             LOG_WARN("Read strategy {}/{} failed", strategy.strategy_id, strategy.name);
             continue;
         }
-        strategy.task = MakeTask(strategy.name, strategy.strategy);
-        if (!strategy.task) {
+        strategy.task =
+            strategy.strategy.workflow.empty() ? nullptr : MakeTask(strategy.name, strategy.strategy);
+        if (!strategy.strategy.workflow.empty() && !strategy.task) {
             LOG_WARN("Reject invalid linkage strategy {}/{}", strategy.strategy_id, strategy.name);
             continue;
         }

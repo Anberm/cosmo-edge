@@ -1,0 +1,418 @@
+#!/usr/bin/python3
+"""Regression tests for Open/Protected permanent MD5 package policy."""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import io
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import unittest
+
+
+REPOSITORY = pathlib.Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location(
+    "package_verifier", REPOSITORY / "scripts/verify_package_contents.py"
+)
+assert spec and spec.loader
+verifier = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verifier)
+
+
+class PackageProfileTests(unittest.TestCase):
+    @staticmethod
+    def find_bash() -> tuple[str | None, dict[str, str]]:
+        bash = shutil.which("bash")
+        environment = os.environ.copy()
+        if os.name == "nt":
+            git = shutil.which("git")
+            if git:
+                git_root = pathlib.Path(git).resolve().parents[1]
+                git_bash = git_root / "bin" / "bash.exe"
+                if git_bash.is_file():
+                    bash = str(git_bash)
+                    environment["PATH"] = os.pathsep.join(
+                        [
+                            str(git_root / "usr" / "bin"),
+                            str(git_root / "mingw32" / "bin"),
+                            environment.get("PATH", ""),
+                        ]
+                    )
+        return bash, environment
+
+    def make_package(
+        self,
+        profile: str,
+        model: bytes = b"plain-model",
+        model_type: str = "yolov8_det",
+    ) -> pathlib.Path:
+        root = "cosmo-V1.5.0"
+        directory = pathlib.Path(tempfile.mkdtemp())
+        initial = directory / f"{root}.tar.gz"
+        executable_files = verifier.REQUIRED_EXECUTABLES
+        regular_files = verifier.REQUIRED_FILES
+        with tarfile.open(initial, "w:gz") as archive:
+            root_info = tarfile.TarInfo(root)
+            root_info.type = tarfile.DIRTYPE
+            root_info.mode = 0o755
+            archive.addfile(root_info)
+            for name in sorted(verifier.REQUIRED_DIRS):
+                info = tarfile.TarInfo(f"{root}/{name}")
+                info.type = tarfile.DIRTYPE
+                info.mode = 0o755
+                archive.addfile(info)
+            files = set(executable_files) | set(regular_files)
+            if profile == "production-release":
+                files.add("bin/cosmo-model-provision")
+            for name in sorted(files):
+                data = b"#!/bin/sh\n" if name in executable_files or name.endswith("provision") else b"V1.5.0\n"
+                info = tarfile.TarInfo(f"{root}/{name}")
+                info.size = len(data)
+                info.mode = 0o755 if name in executable_files or name.endswith("provision") else 0o644
+                archive.addfile(info, io.BytesIO(data))
+            model_path = f"{root}/resource/models/preset/model.nn"
+            info = tarfile.TarInfo(model_path)
+            info.size = len(model)
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(model))
+            config = json.dumps({"model_type": model_type}).encode()
+            info = tarfile.TarInfo(f"{root}/resource/models/preset/config.json")
+            info.size = len(config)
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(config))
+        digest = hashlib.md5(initial.read_bytes(), usedforsecurity=False).hexdigest()
+        final = directory / f"{root}-{digest}.tar.gz"
+        initial.rename(final)
+        return final
+
+    def test_open_accepts_plain_model(self) -> None:
+        verifier.verify_package(self.make_package("public-runtime"), "public-runtime")
+
+    def test_protected_accepts_encrypted_model(self) -> None:
+        verifier.verify_package(
+            self.make_package("production-release", b"CEMC" + b"encrypted"),
+            "production-release",
+        )
+
+    def test_protected_rejects_plain_vllm_model(self) -> None:
+        for model_type in ("qwen3vl", "qwen3_5"):
+            with self.subTest(model_type=model_type):
+                with self.assertRaises(verifier.PackageAuditError):
+                    verifier.verify_package(
+                        self.make_package("production-release", model_type=model_type),
+                        "production-release",
+                    )
+
+    def test_channels_reject_each_others_model_format(self) -> None:
+        with self.assertRaises(verifier.PackageAuditError):
+            verifier.verify_package(
+                self.make_package("public-runtime", b"CEMCencrypted"), "public-runtime"
+            )
+        with self.assertRaises(verifier.PackageAuditError):
+            verifier.verify_package(
+                self.make_package("production-release", b"plain"), "production-release"
+            )
+
+    def test_build_has_no_signed_release_switches(self) -> None:
+        build_inputs = (
+            (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
+            + (REPOSITORY / "scripts/build.sh").read_text(encoding="utf-8")
+            + (REPOSITORY / "docker-compose.sophon.yml").read_text(encoding="utf-8")
+        )
+        for obsolete in (
+            "COSMO_RELEASE_PUBLIC_KEY_OBJECT",
+            "COSMO_REQUIRE_RELEASE_BOOTSTRAP",
+            "COSMO_LEGACY_MIGRATION_PACKAGE",
+            "cosmo-release-bootstrap",
+        ):
+            self.assertNotIn(obsolete, build_inputs)
+
+    def test_sophon_compose_selects_resources_by_chip_model(self) -> None:
+        compose = (REPOSITORY / "docker-compose.sophon.yml").read_text(
+            encoding="utf-8"
+        )
+        entrypoint = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("scripts/build_sophon_package.sh", compose)
+        self.assertIn("command: []", compose)
+        self.assertNotIn("COSMO_SOPHON_RESOURCE_DIR", compose)
+        self.assertIn('bm1688|cv186x)', entrypoint)
+        self.assertIn("unsupported Sophon chip", entrypoint)
+        self.assertIn('./scripts/build.sh -T -c "${chip}"', entrypoint)
+
+        build = (REPOSITORY / "scripts/build.sh").read_text(encoding="utf-8")
+        self.assertIn('CHIP_MODEL="${CHIP_MODEL:-bm1688}"', build)
+        self.assertIn('bm1688|cv186x)', build)
+        self.assertIn('aiboxresource_${CHIP_MODEL}', build)
+        self.assertIn('-DCOSMO_TARGET_CHIP="${CHIP_MODEL:-unspecified}"', build)
+        self.assertIn("-c and -m cannot be used together", build)
+
+    def test_container_builds_bound_and_cache_npm_connections(self) -> None:
+        npmrc = (REPOSITORY / "src/web/.npmrc").read_text(encoding="utf-8")
+        self.assertIn("registry=https://registry.npmmirror.com/", npmrc)
+        self.assertIn("maxsockets=1", npmrc)
+        self.assertIn("prefer-offline=true", npmrc)
+        self.assertIn("update-notifier=false", npmrc)
+
+        lock = json.loads(
+            (REPOSITORY / "src/web/package-lock.json").read_text(encoding="utf-8")
+        )
+        locked_packages = [
+            metadata
+            for path, metadata in lock["packages"].items()
+            if "node_modules/" in path and not metadata.get("link")
+        ]
+        self.assertTrue(locked_packages)
+        self.assertTrue(all(package.get("integrity") for package in locked_packages))
+        self.assertTrue(
+            all(
+                package.get("resolved", "").startswith(
+                    "https://cdn.npmmirror.com/packages/"
+                )
+                for package in locked_packages
+            )
+        )
+
+        npm_builder = (
+            REPOSITORY / "scripts/build_npm_dependencies.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("cache add", npm_builder)
+        self.assertIn("ci --offline", npm_builder)
+        self.assertIn("package-lock.json has incomplete entries", npm_builder)
+
+        web_cmake = (REPOSITORY / "cmake/web_frontend.cmake").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("build_npm_dependencies.sh", web_cmake)
+
+        for compose_name in ("docker-compose.sophon.yml", "docker-compose.rk3576.yml"):
+            compose = (REPOSITORY / compose_name).read_text(encoding="utf-8")
+            self.assertIn('NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-1}"', compose)
+            self.assertIn("cosmo-npm-cache:/root/.npm", compose)
+            self.assertIn('NPM_CONFIG_PREFER_OFFLINE: "${NPM_CONFIG_PREFER_OFFLINE:-true}"', compose)
+
+    def test_sophon_chip_selection_preserves_package_output_contract(self) -> None:
+        entrypoint = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
+            encoding="utf-8"
+        )
+        cmake = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
+            entrypoint,
+        )
+        self.assertIn("package_artifacts=(build/packages/*.tar.gz)", entrypoint)
+        self.assertIn(
+            'printf \'%s\\n\' "${chip}" > "${output_dir}/TARGET_CHIP"', entrypoint
+        )
+        self.assertIn('sha256sum -- "${package_name}" > SHA256SUMS', entrypoint)
+        self.assertIn('DESTINATION share/cosmo', cmake)
+        self.assertIn('"${COSMO_TARGET_CHIP_NORMALIZED}\\n"', cmake)
+        self.assertIn('set(CPACK_OUTPUT_FILE_PREFIX', cmake)
+        self.assertIn('scripts/package_md5_rename.sh', cmake)
+
+    def test_sophon_package_entrypoint_behavior(self) -> None:
+        bash, test_environment = self.find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+        test_environment.pop("COSMO_MODEL_GUARD_BUILD_PROFILE", None)
+
+        source = (REPOSITORY / "scripts/build_sophon_package.sh").read_text(
+            encoding="utf-8"
+        )
+        source = source.replace(
+            'output_dir="/build_output/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
+            'output_dir="$PWD/export/${COSMO_MODEL_GUARD_BUILD_PROFILE}/${chip}"',
+        )
+
+        with tempfile.TemporaryDirectory(dir=REPOSITORY) as temporary_directory:
+            workspace = pathlib.Path(temporary_directory)
+            scripts = workspace / "scripts"
+            scripts.mkdir()
+            (workspace / "build/packages").mkdir(parents=True)
+            entrypoint = scripts / "build_sophon_package.sh"
+            entrypoint.write_text(source, encoding="utf-8", newline="\n")
+            build_stub = scripts / "build.sh"
+            build_stub.write_text(
+                "#!/bin/bash\n"
+                "set -euo pipefail\n"
+                'printf "%s\\n" "$*" > build-invocation.txt\n'
+                "printf package > "
+                "build/packages/cosmo-V1.1.0-deadbeef.tar.gz\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            entrypoint.chmod(0o755)
+            build_stub.chmod(0o755)
+
+            def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [bash, "scripts/build_sophon_package.sh", *arguments],
+                    cwd=workspace,
+                    env=test_environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+
+            default_result = run()
+            self.assertEqual(default_result.returncode, 0, default_result.stderr)
+            self.assertEqual(
+                (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
+                "-T -c bm1688\n",
+            )
+            exported = (
+                workspace
+                / "export/public-runtime/bm1688/cosmo-V1.1.0-deadbeef.tar.gz"
+            )
+            self.assertEqual(exported.read_text(encoding="utf-8"), "package")
+            self.assertEqual(
+                (workspace / "export/public-runtime/bm1688/TARGET_CHIP").read_text(
+                    encoding="utf-8"
+                ),
+                "bm1688\n",
+            )
+
+            explicit_bm1688_result = run("--chip", "bm1688")
+            self.assertEqual(
+                explicit_bm1688_result.returncode, 0, explicit_bm1688_result.stderr
+            )
+            self.assertEqual(
+                (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
+                "-T -c bm1688\n",
+            )
+
+            cv186x_result = run("--chip", "cv186x")
+            self.assertEqual(cv186x_result.returncode, 0, cv186x_result.stderr)
+            self.assertEqual(
+                (workspace / "build-invocation.txt").read_text(encoding="utf-8"),
+                "-T -c cv186x\n",
+            )
+            cv186x_exported = (
+                workspace
+                / "export/public-runtime/cv186x/cosmo-V1.1.0-deadbeef.tar.gz"
+            )
+            self.assertEqual(cv186x_exported.read_text(encoding="utf-8"), "package")
+            self.assertEqual(
+                (workspace / "export/public-runtime/cv186x/TARGET_CHIP").read_text(
+                    encoding="utf-8"
+                ),
+                "cv186x\n",
+            )
+
+            test_environment["COSMO_MODEL_GUARD_BUILD_PROFILE"] = (
+                "production-release"
+            )
+            production_result = run("--chip", "bm1688")
+            self.assertEqual(
+                production_result.returncode, 0, production_result.stderr
+            )
+            production_exported = (
+                workspace
+                / "export/production-release/bm1688/cosmo-V1.1.0-deadbeef.tar.gz"
+            )
+            self.assertEqual(
+                production_exported.read_text(encoding="utf-8"), "package"
+            )
+
+            invalid_result = run("--chip", "unsupported-chip")
+            self.assertNotEqual(invalid_result.returncode, 0)
+            self.assertIn("unsupported Sophon chip", invalid_result.stderr)
+
+    def test_sophon_build_resolves_chip_resource_directory(self) -> None:
+        bash, test_environment = self.find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+
+        with tempfile.TemporaryDirectory(dir=REPOSITORY) as temporary_directory:
+            project_root = pathlib.Path(temporary_directory)
+            scripts = project_root / "scripts"
+            scripts.mkdir()
+            build_script = scripts / "build.sh"
+            build_script.write_text(
+                (REPOSITORY / "scripts/build.sh")
+                .read_text(encoding="utf-8")
+                .replace(
+                    'if [ -z "${PROJECT_ROOT_PATH:-}" ]; then',
+                    'PROJECT_ROOT_PATH="$(cd "$(dirname "$0")/.." && pwd -P)"\n'
+                    'if [ -z "${PROJECT_ROOT_PATH:-}" ]; then',
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+            build_script.chmod(0o755)
+            for chip in ("bm1688", "cv186x"):
+                (project_root / f"data/resource/aiboxresource_{chip}").mkdir(
+                    parents=True
+                )
+
+            def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [bash, "scripts/build.sh", *arguments],
+                    cwd=project_root,
+                    env=test_environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+
+            default_result = run()
+            self.assertIn(
+                "Sophon chip: bm1688",
+                default_result.stdout,
+                default_result.stderr,
+            )
+            self.assertIn("aiboxresource_bm1688", default_result.stdout)
+
+            cv186x_result = run("-c", "cv186x")
+            self.assertIn("Sophon chip: cv186x", cv186x_result.stdout)
+            self.assertIn("aiboxresource_cv186x", cv186x_result.stdout)
+
+            invalid_result = run("-c", "unsupported-chip")
+            self.assertNotEqual(invalid_result.returncode, 0)
+            self.assertIn("unsupported Sophon chip", invalid_result.stderr)
+
+            conflict_result = run("-c", "bm1688", "-m", "resource")
+            self.assertNotEqual(conflict_result.returncode, 0)
+            self.assertIn("-c and -m cannot be used together", conflict_result.stderr)
+
+    def test_rk3576_release_builder_requires_pinned_rkllm(self) -> None:
+        compose = (REPOSITORY / "docker-compose.rk3576.yml").read_text(
+            encoding="utf-8"
+        )
+        dockerfile = (REPOSITORY / "Dockerfile.rk3576").read_text(encoding="utf-8")
+        workflow = (REPOSITORY / ".github/workflows/ci-build-rk3576.yml").read_text(
+            encoding="utf-8"
+        )
+        build = (REPOSITORY / "scripts/build_rknn.sh").read_text(encoding="utf-8")
+        cmake = (REPOSITORY / "cmake/rkllm.cmake").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:"
+            "135d25d0baf14e7918726f7efb040a0627926aedd5825f52fab6c1cd208da348",
+            compose,
+        )
+        self.assertNotIn("\n    build:", compose)
+        self.assertIn("RKLLM_ROOT: /opt/rkllm", compose)
+        self.assertIn('COSMO_RKLLM_REQUIRED: "ON"', compose)
+        self.assertIn("docker compose -f docker-compose.rk3576.yml pull", workflow)
+        self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
+        self.assertIn("install_rkllm_sdk.py", dockerfile)
+        self.assertIn('lib/librkllmrt.so LICENSE', build)
+        self.assertIn("-DCOSMO_TARGET_CHIP=rk3576", build)
+        self.assertIn('-DCOSMO_RKLLM_REQUIRED="${RKLLM_REQUIRED}"', build)
+        self.assertIn('set(RKLLM_RUNTIME_LICENSE "${COSMO_RKLLM_ROOT}/LICENSE")', cmake)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -2,8 +2,8 @@
 title: Deployment Guide
 description: Runtime directories, service processes, ports, upgrade packages, and systemd behavior.
 prev:
-  text: Build Guide
-  link: /en/guide/build
+  text: macOS Docker Preview
+  link: /en/guide/macos-docker-preview
 next:
   text: Runtime Configuration
   link: /en/guide/configuration
@@ -30,6 +30,10 @@ Start:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh up
+  ```
 
 Stop:
 
@@ -41,6 +45,10 @@ Stop:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml down
   ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh down
+  ```
 
 View logs:
 
@@ -51,6 +59,10 @@ View logs:
 - **Windows (PowerShell/CMD)**:
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+- **Apple Silicon macOS (Preview)**:
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## Runtime Directories
@@ -86,7 +98,7 @@ ${INSTALLPATH}/bin/cosmo-engine
 
 | Port | Source | Purpose |
 | --- | --- | --- |
-| `8080 -> 80` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | x86 Docker web console |
+| `8080 -> 80` | x86 Compose files; the Mac Preview binds only to `127.0.0.1` | x86 Docker web console |
 | `1936` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | RTMP |
 | `1985` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | SRS API |
 | `18088` | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` / SRS | HTTP stream |
@@ -121,7 +133,7 @@ Optional or handled by presence:
 - `lib`
 - `resource`
 
-Upgrade package filename pattern:
+The upgrade package filename must match this pattern:
 
 ```text
 cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz
@@ -132,26 +144,45 @@ The web console performs a local upgrade as follows:
 1. Query device status and record the current Linux `bootId`.
 2. Transfer the package in chunks according to live device capabilities while showing actual upload progress.
 3. Validate the filename, MD5, archive safety, package layout, and live disk budget.
-4. After a Sophon reboot, validate the MD5 again, install the release package, and start the services.
+4. After a Sophon reboot, the startup script revalidates the MD5 and installs the package. Open and Protected packages permanently use this same upgrade flow.
 5. Return to login after observing a new `bootId`. If reboot invalidates the login session, first observe the device offline and then require an authentication response from the recovered service before returning to login.
 
 The 15-minute recovery wait is a UI timeout; it does not cancel an upgrade already running on the device. Keep power connected and inspect device networking and systemd logs if it expires. After signing in again, verify the software version against the release package; UI recovery proves reboot and service recovery, not version acceptance.
 
+## SSH Installation Path
+
+In addition to web upgrade, packaged `scripts/install.sh` is the SSH entry point
+for migration from main and later compatible installations. It installs the
+application, replaces and enables `cosmo.service`, and relies on reboot to start
+the service:
+
+```bash
+scp build_output/public-runtime/<chip>/<package>.tar.gz root@<device_ip>:/tmp/
+ssh root@<device_ip>
+cd /tmp
+install_dir=$(mktemp -d /tmp/cosmo-install.XXXXXX)
+tar -xzf <package>.tar.gz -C "$install_dir"
+cd "$install_dir"/cosmo-V*/
+sudo ./scripts/install.sh
+sudo reboot
+```
+
+This path assumes that the Sophon Linux base system and runtime dependencies are
+already prepared. It is not an OS-image installation procedure for arbitrary
+blank hardware. Record the current version and recovery plan first; the
+installer replaces the active application tree.
+
 ## systemd Service
 
-`scripts/install.sh` creates:
+The configured device uses this service start command:
 
 ```text
-/etc/systemd/system/cosmo.service
+ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh
 ```
 
-Service start command:
-
-```text
-ExecStart=${INSTALLPATH}/scripts/inte_run_start.sh
-```
-
-The service runs as `root` with `Restart=on-failure`. A fatal initialization exception returns a non-zero status so systemd retries it instead of treating the process as a clean stop.
+`scripts/install.sh` implements the upgrade transaction; it does not create the
+systemd unit for a blank device. The service runs as `root` with
+`Restart=on-failure`.
 
 Some Sophon images restore the persistent data tree to the appliance administrator at boot. The upload staging service therefore allows `sessions` to inherit the owner of an immediate parent that is not writable by group/other, while still requiring:
 

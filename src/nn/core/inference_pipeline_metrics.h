@@ -1,0 +1,285 @@
+#pragma once
+
+#include <atomic>
+#include <cstdint>
+
+namespace cosmo::nn {
+
+enum class RknnModelScope : uint8_t {
+    Other = 0,
+    Detector,
+};
+
+struct InferencePipelineMetricsSnapshot {
+    uint64_t color_convert_frames{0};
+    uint64_t color_convert_nanoseconds{0};
+    uint64_t blob_convert_frames{0};
+    uint64_t blob_convert_nanoseconds{0};
+    uint64_t graph_forward_frames{0};
+    uint64_t graph_forward_nanoseconds{0};
+    uint64_t graph_forward_failures{0};
+    uint64_t result_parse_frames{0};
+    uint64_t result_parse_nanoseconds{0};
+    uint64_t result_parse_failures{0};
+    uint64_t rknn_forwards{0};
+    uint64_t rknn_forward_nanoseconds{0};
+    uint64_t rknn_forward_failures{0};
+    uint64_t rknn_prepare_calls{0};
+    uint64_t rknn_prepare_nanoseconds{0};
+    uint64_t rknn_inputs_set_calls{0};
+    uint64_t rknn_inputs_set_nanoseconds{0};
+    uint64_t rknn_run_calls{0};
+    uint64_t rknn_run_nanoseconds{0};
+    uint64_t rknn_outputs_get_calls{0};
+    uint64_t rknn_outputs_get_nanoseconds{0};
+    uint64_t rknn_outputs_release_calls{0};
+    uint64_t rknn_outputs_release_nanoseconds{0};
+    uint64_t rknn_output_transform_calls{0};
+    uint64_t rknn_output_transform_nanoseconds{0};
+    uint64_t rknn_mutex_wait_calls{0};
+    uint64_t rknn_mutex_wait_nanoseconds{0};
+    uint64_t rknn_detector_forwards{0};
+    uint64_t rknn_detector_forward_nanoseconds{0};
+    uint64_t rknn_detector_forward_failures{0};
+    uint64_t rknn_detector_prepare_calls{0};
+    uint64_t rknn_detector_prepare_nanoseconds{0};
+    uint64_t rknn_detector_inputs_set_calls{0};
+    uint64_t rknn_detector_inputs_set_nanoseconds{0};
+    uint64_t rknn_detector_run_calls{0};
+    uint64_t rknn_detector_run_nanoseconds{0};
+    uint64_t rknn_detector_outputs_get_calls{0};
+    uint64_t rknn_detector_outputs_get_nanoseconds{0};
+    uint64_t rknn_detector_outputs_release_calls{0};
+    uint64_t rknn_detector_outputs_release_nanoseconds{0};
+    uint64_t rknn_detector_output_transform_calls{0};
+    uint64_t rknn_detector_output_transform_nanoseconds{0};
+    uint64_t rknn_detector_mutex_wait_calls{0};
+    uint64_t rknn_detector_mutex_wait_nanoseconds{0};
+    uint64_t rknn_preprocess_fast_hits{0};
+    uint64_t rknn_rga_fill_calls{0};
+    uint64_t rknn_rga_fill_nanoseconds{0};
+    uint64_t rknn_rga_resize_color_calls{0};
+    uint64_t rknn_rga_resize_color_nanoseconds{0};
+    uint64_t rknn_rga_failures{0};
+    uint64_t rknn_cpu_resize_fallback_calls{0};
+    uint64_t rknn_cpu_resize_fallback_nanoseconds{0};
+    uint64_t rknn_cpu_normalize_fallback_calls{0};
+    uint64_t rknn_cpu_normalize_fallback_nanoseconds{0};
+    uint64_t rknn_native_input_map_calls{0};
+    uint64_t rknn_native_input_map_nanoseconds{0};
+    uint64_t rknn_native_int8_inputs{0};
+    uint64_t rknn_float_inputs{0};
+    uint64_t rknn_uint8_contract_inputs{0};
+    uint64_t rknn_input_compatibility_fallbacks{0};
+    uint64_t rknn_bound_input_bind_attempts{0};
+    uint64_t rknn_bound_input_bind_failures{0};
+    uint64_t rknn_bound_input_copy_calls{0};
+    uint64_t rknn_bound_input_copy_nanoseconds{0};
+    uint64_t rknn_bound_input_copy_bytes{0};
+    uint64_t rknn_bound_input_copy_failures{0};
+    uint64_t rknn_bound_input_sync_calls{0};
+    uint64_t rknn_bound_input_sync_nanoseconds{0};
+    uint64_t rknn_bound_input_sync_failures{0};
+    uint64_t rknn_bound_input_frames{0};
+    uint64_t rknn_rga_bound_input_bind_attempts{0};
+    uint64_t rknn_rga_bound_input_bind_failures{0};
+    uint64_t rknn_rga_bound_input_import_calls{0};
+    uint64_t rknn_rga_bound_input_import_nanoseconds{0};
+    uint64_t rknn_rga_bound_input_import_failures{0};
+    uint64_t rknn_rga_bound_input_frames{0};
+    uint64_t rknn_rga_bound_uint8_frames{0};
+    uint64_t rknn_rga_bound_native_int8_frames{0};
+    uint64_t rknn_rga_bound_requantize_calls{0};
+    uint64_t rknn_rga_bound_requantize_nanoseconds{0};
+    uint64_t rknn_rga_bound_requantize_failures{0};
+    uint64_t rknn_rga_bound_input_normalize_bypasses{0};
+    uint64_t rknn_mpp_dmabuf_import_calls{0};
+    uint64_t rknn_mpp_dmabuf_import_nanoseconds{0};
+    uint64_t rknn_mpp_dmabuf_import_failures{0};
+    uint64_t rknn_mpp_dmabuf_frames{0};
+    uint64_t rknn_mpp_dmabuf_fallbacks{0};
+    uint64_t rknn_mpp_dmabuf_source_bytes{0};
+    uint64_t rknn_native_int8_outputs{0};
+    uint64_t rknn_float_outputs{0};
+    uint64_t rknn_output_compatibility_fallbacks{0};
+    uint64_t rknn_native_output_bytes{0};
+    uint64_t rknn_float_output_bytes{0};
+    uint64_t rknn_yolov8_dfl_calls{0};
+    uint64_t rknn_yolov8_dfl_nanoseconds{0};
+    uint64_t rknn_yolov8_class_calls{0};
+    uint64_t rknn_yolov8_class_nanoseconds{0};
+    uint64_t rknn_yolov8_direct_candidate_calls{0};
+    uint64_t rknn_yolov8_direct_candidate_failures{0};
+    uint64_t rknn_yolov8_direct_points_scanned{0};
+    uint64_t rknn_yolov8_direct_points_decoded{0};
+    uint64_t rknn_yolov8_score_sum_points_rejected{0};
+    uint64_t rknn_yolov8_logical_float_bytes_avoided{0};
+    uint64_t yolov8_postprocess_calls{0};
+    uint64_t yolov8_postprocess_nanoseconds{0};
+    uint64_t yolov8_nms_calls{0};
+    uint64_t yolov8_nms_nanoseconds{0};
+};
+
+// Process-wide cumulative counters. Consumers derive interval averages from two
+// snapshots, which keeps sampling independent from the inference threads.
+class InferencePipelineMetrics {
+public:
+    void RecordColorConvert(uint64_t nanoseconds, uint64_t frames = 1);
+    void RecordBlobConvert(uint64_t nanoseconds, uint64_t frames);
+    void RecordGraphForward(uint64_t nanoseconds, uint64_t frames, bool success);
+    void RecordResultParse(uint64_t nanoseconds, uint64_t frames, bool success);
+    void RecordRknnForward(uint64_t nanoseconds, bool success, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnPrepare(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnInputsSet(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnRun(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnOutputsGet(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnOutputsRelease(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnOutputTransform(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnMutexWait(uint64_t nanoseconds, RknnModelScope scope = RknnModelScope::Other);
+    void RecordRknnPreprocessFastHit();
+    void RecordRknnRgaFill(uint64_t nanoseconds);
+    void RecordRknnRgaResizeColor(uint64_t nanoseconds);
+    void RecordRknnRgaFailure();
+    void RecordRknnCpuResizeFallback(uint64_t nanoseconds);
+    void RecordRknnCpuNormalizeFallback(uint64_t nanoseconds);
+    void RecordRknnNativeInputMap(uint64_t nanoseconds);
+    void RecordRknnInputFormat(bool native_int8, bool compatibility_fallback = false,
+                               bool uint8_contract = false);
+    void RecordRknnBoundInputBind(bool success);
+    void RecordRknnBoundInputCopy(uint64_t nanoseconds, uint64_t bytes, bool success);
+    void RecordRknnBoundInputSync(uint64_t nanoseconds, bool success);
+    void RecordRknnBoundInputFrame();
+    void RecordRknnRgaBoundInputBind(bool success);
+    void RecordRknnRgaBoundInputImport(uint64_t nanoseconds, bool success);
+    void RecordRknnRgaBoundInputRequantize(uint64_t nanoseconds, bool success);
+    void RecordRknnRgaBoundInputFrame(bool fused_uint8 = false);
+    void RecordRknnRgaBoundInputNormalizeBypass();
+    void RecordRknnMppDmaBufImport(uint64_t nanoseconds, bool success);
+    void RecordRknnMppDmaBufFrame(uint64_t source_bytes);
+    void RecordRknnMppDmaBufFallback();
+    void RecordRknnOutputFormat(bool native_int8, uint64_t bytes, bool compatibility_fallback = false);
+    void RecordRknnYolov8Transform(uint64_t dfl_nanoseconds, uint64_t class_nanoseconds);
+    void RecordRknnYolov8DirectCandidates(bool success, uint64_t points_scanned, uint64_t points_decoded,
+                                          uint64_t logical_float_bytes_avoided,
+                                          uint64_t score_sum_points_rejected = 0);
+    void RecordYolov8Postprocess(uint64_t nanoseconds);
+    void RecordYolov8Nms(uint64_t nanoseconds);
+
+    [[nodiscard]] InferencePipelineMetricsSnapshot Snapshot() const;
+
+private:
+    static void RecordStage(std::atomic<uint64_t>& count, std::atomic<uint64_t>& duration, uint64_t samples,
+                            uint64_t nanoseconds);
+
+    std::atomic<uint64_t> color_convert_frames_{0};
+    std::atomic<uint64_t> color_convert_nanoseconds_{0};
+    std::atomic<uint64_t> blob_convert_frames_{0};
+    std::atomic<uint64_t> blob_convert_nanoseconds_{0};
+    std::atomic<uint64_t> graph_forward_frames_{0};
+    std::atomic<uint64_t> graph_forward_nanoseconds_{0};
+    std::atomic<uint64_t> graph_forward_failures_{0};
+    std::atomic<uint64_t> result_parse_frames_{0};
+    std::atomic<uint64_t> result_parse_nanoseconds_{0};
+    std::atomic<uint64_t> result_parse_failures_{0};
+    std::atomic<uint64_t> rknn_forwards_{0};
+    std::atomic<uint64_t> rknn_forward_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_forward_failures_{0};
+    std::atomic<uint64_t> rknn_prepare_calls_{0};
+    std::atomic<uint64_t> rknn_prepare_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_inputs_set_calls_{0};
+    std::atomic<uint64_t> rknn_inputs_set_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_run_calls_{0};
+    std::atomic<uint64_t> rknn_run_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_outputs_get_calls_{0};
+    std::atomic<uint64_t> rknn_outputs_get_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_outputs_release_calls_{0};
+    std::atomic<uint64_t> rknn_outputs_release_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_output_transform_calls_{0};
+    std::atomic<uint64_t> rknn_output_transform_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_mutex_wait_calls_{0};
+    std::atomic<uint64_t> rknn_mutex_wait_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_forwards_{0};
+    std::atomic<uint64_t> rknn_detector_forward_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_forward_failures_{0};
+    std::atomic<uint64_t> rknn_detector_prepare_calls_{0};
+    std::atomic<uint64_t> rknn_detector_prepare_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_inputs_set_calls_{0};
+    std::atomic<uint64_t> rknn_detector_inputs_set_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_run_calls_{0};
+    std::atomic<uint64_t> rknn_detector_run_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_outputs_get_calls_{0};
+    std::atomic<uint64_t> rknn_detector_outputs_get_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_outputs_release_calls_{0};
+    std::atomic<uint64_t> rknn_detector_outputs_release_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_output_transform_calls_{0};
+    std::atomic<uint64_t> rknn_detector_output_transform_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_detector_mutex_wait_calls_{0};
+    std::atomic<uint64_t> rknn_detector_mutex_wait_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_preprocess_fast_hits_{0};
+    std::atomic<uint64_t> rknn_rga_fill_calls_{0};
+    std::atomic<uint64_t> rknn_rga_fill_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_resize_color_calls_{0};
+    std::atomic<uint64_t> rknn_rga_resize_color_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_failures_{0};
+    std::atomic<uint64_t> rknn_cpu_resize_fallback_calls_{0};
+    std::atomic<uint64_t> rknn_cpu_resize_fallback_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_cpu_normalize_fallback_calls_{0};
+    std::atomic<uint64_t> rknn_cpu_normalize_fallback_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_native_input_map_calls_{0};
+    std::atomic<uint64_t> rknn_native_input_map_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_native_int8_inputs_{0};
+    std::atomic<uint64_t> rknn_float_inputs_{0};
+    std::atomic<uint64_t> rknn_uint8_contract_inputs_{0};
+    std::atomic<uint64_t> rknn_input_compatibility_fallbacks_{0};
+    std::atomic<uint64_t> rknn_bound_input_bind_attempts_{0};
+    std::atomic<uint64_t> rknn_bound_input_bind_failures_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_calls_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_bytes_{0};
+    std::atomic<uint64_t> rknn_bound_input_copy_failures_{0};
+    std::atomic<uint64_t> rknn_bound_input_sync_calls_{0};
+    std::atomic<uint64_t> rknn_bound_input_sync_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_bound_input_sync_failures_{0};
+    std::atomic<uint64_t> rknn_bound_input_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_bind_attempts_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_bind_failures_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_import_calls_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_import_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_import_failures_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_uint8_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_native_int8_frames_{0};
+    std::atomic<uint64_t> rknn_rga_bound_requantize_calls_{0};
+    std::atomic<uint64_t> rknn_rga_bound_requantize_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_bound_requantize_failures_{0};
+    std::atomic<uint64_t> rknn_rga_bound_input_normalize_bypasses_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_import_calls_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_import_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_import_failures_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_frames_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_fallbacks_{0};
+    std::atomic<uint64_t> rknn_mpp_dmabuf_source_bytes_{0};
+    std::atomic<uint64_t> rknn_native_int8_outputs_{0};
+    std::atomic<uint64_t> rknn_float_outputs_{0};
+    std::atomic<uint64_t> rknn_output_compatibility_fallbacks_{0};
+    std::atomic<uint64_t> rknn_native_output_bytes_{0};
+    std::atomic<uint64_t> rknn_float_output_bytes_{0};
+    std::atomic<uint64_t> rknn_yolov8_dfl_calls_{0};
+    std::atomic<uint64_t> rknn_yolov8_dfl_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_yolov8_class_calls_{0};
+    std::atomic<uint64_t> rknn_yolov8_class_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_candidate_calls_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_candidate_failures_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_points_scanned_{0};
+    std::atomic<uint64_t> rknn_yolov8_direct_points_decoded_{0};
+    std::atomic<uint64_t> rknn_yolov8_score_sum_points_rejected_{0};
+    std::atomic<uint64_t> rknn_yolov8_logical_float_bytes_avoided_{0};
+    std::atomic<uint64_t> yolov8_postprocess_calls_{0};
+    std::atomic<uint64_t> yolov8_postprocess_nanoseconds_{0};
+    std::atomic<uint64_t> yolov8_nms_calls_{0};
+    std::atomic<uint64_t> yolov8_nms_nanoseconds_{0};
+};
+
+InferencePipelineMetrics& GetInferencePipelineMetrics();
+
+}  // namespace cosmo::nn

@@ -6,7 +6,6 @@
 
 #include "bmlib_runtime.h"
 #include "bmruntime_interface.h"
-
 namespace cosmo::nn {
 namespace qwen3vl {
 
@@ -35,7 +34,7 @@ namespace qwen3vl {
          * reads from config.generation for generation params; tokenizer etc. loaded by runner from
          * config_dir, no directory passed here */
         void init(int dev_id, const std::string& model_path, bool do_sample,
-                  const std::string& model_config_json_path = "");
+                  const std::string& model_config_json_path);
         void deinit();
         void forward_embed(const ArrayInt& tokens);
         void forward_vit(const float* pixel_values, const ArrayInt& position_ids, const ArrayInt& pos_idx,

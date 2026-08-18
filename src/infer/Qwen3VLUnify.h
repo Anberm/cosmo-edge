@@ -12,6 +12,9 @@
 #include "nn/utils/default_component.h"
 
 namespace cosmo {
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+class RkllmVlmBackend;
+#endif
 struct Qwen3VLGenerationParam {
     bool do_sample{true};
     int top_k{20};
@@ -46,11 +49,14 @@ private:
 
 private:
     size_t max_batch_size_{1};
-    std::string atomic_code_;
     std::string cfg_path_;
     std::string model_path_;
     std::string tokenizer_path_;
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    std::unique_ptr<RkllmVlmBackend> rkllm_backend_;
+#else
     std::unique_ptr<cosmo::nn::DefaultComponent> generator_;
+#endif
     AppProfiler profiler_;
 };
 

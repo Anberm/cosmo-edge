@@ -30,6 +30,7 @@ struct MsgQueryHardwareResourceSend : public MsgSendHead {
         std::string usedSize;
         std::string unusedSize;
         int available{0};
+        std::string memoryDomain;
         friend void to_json(nlohmann::json& j, const Item& v);
         friend void from_json(const nlohmann::json& j, Item& v);
     };

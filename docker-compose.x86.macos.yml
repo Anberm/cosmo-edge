@@ -1,0 +1,49 @@
+name: cosmo-x86-macos-preview
+
+services:
+  cosmo-x86-macos:
+    # The x86 backend and its prebuilt dependencies are amd64-only today.
+    # Docker Desktop emulates this platform on Apple Silicon.
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.x86
+      args:
+        BUILD_ENV_IMAGE: "ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_x86:v1@sha256:3345825c9255b9b73369af7ab6346c2cc7079786eb23309258acf7212ca03c1d"
+        RUNTIME_BASE_IMAGE: "debian:12-slim@sha256:a7ffa3fd2ba09498788cd398575f4340599626c37610af57cc368e70fd564d75"
+        RESOURCE_DIR: data/resource/aiboxresource_x86
+        # Nested GNU Make jobservers can lose pipe descriptors under amd64
+        # emulation. Serial is slower but is the reproducible Preview default.
+        COSMO_BUILD_JOBS: "${COSMO_X86_BUILD_JOBS:-1}"
+    image: cosmo:x86-macos-preview
+    container_name: cosmo-x86-macos-preview
+    init: true
+    restart: unless-stopped
+    environment:
+      # Loopback HTTP-FLV avoids the long WebRTC ICE/media fallback window on
+      # Docker Desktop while preserving SRS as the media server.
+      COSMO_STREAM_PLAY_MODE: httpflv-srs
+      COSMO_STREAM_HTTP_PORT: "18088"
+    ports:
+      # Preview services are intentionally local-only. Do not remove the
+      # 127.0.0.1 bindings without a separate network and authentication review.
+      - "127.0.0.1:${COSMO_X86_WEB_PORT:-8080}:80"
+      - "127.0.0.1:1936:1936"
+      - "127.0.0.1:1985:1985"
+      - "127.0.0.1:18088:18088"
+    volumes:
+      - cosmo-x86-macos-data:/data/cwaiuserdata
+      - cosmo-x86-macos-app-resource:/appfs/cosmo_wander/cwai_data/resource
+      - ./build_output/macos-x86:/build_output
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cosmo-x86-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+volumes:
+  cosmo-x86-macos-data:
+    name: cosmo-x86-macos-preview-data
+  cosmo-x86-macos-app-resource:
+    name: cosmo-x86-macos-preview-app-resource

@@ -9,6 +9,16 @@ TEST_CASE("Preview pipeline metrics expose lifecycle and stage timings", "[media
     metrics.PreviewStarted(true, 25'000'000);
     metrics.RecordOsdFrame(2'000'000);
     metrics.RecordPublishedFrame(3'000'000);
+    metrics.RecordRgaOperation(true, 4'000'000);
+    metrics.RecordRgaOperation(false, 5'000'000);
+    metrics.RecordMppEncode(true, 6'000'000);
+    metrics.RecordMppEncode(false, 7'000'000);
+    metrics.RecordMppDecode(true, 8'000'000);
+    metrics.RecordMppDecode(false, 9'000'000);
+    metrics.RecordMppDecodeFallback();
+    metrics.RecordMppCopyOut(true, 11'000'000);
+    metrics.RecordMppCopyOut(false, 12'000'000);
+    metrics.RecordMppEarlyDrop();
     metrics.PreviewFailed();
 
     auto during = metrics.Snapshot();
@@ -25,6 +35,20 @@ TEST_CASE("Preview pipeline metrics expose lifecycle and stage timings", "[media
     CHECK(during.first_frames == 2);
     CHECK(during.first_frame_nanoseconds == 35'000'000);
     CHECK(during.first_frame_max_nanoseconds == 25'000'000);
+    CHECK(during.rga_frames == 1);
+    CHECK(during.rga_nanoseconds == 4'000'000);
+    CHECK(during.rga_failures == 1);
+    CHECK(during.mpp_encoded_frames == 1);
+    CHECK(during.mpp_encode_nanoseconds == 6'000'000);
+    CHECK(during.mpp_encode_failures == 1);
+    CHECK(during.mpp_decoded_frames == 1);
+    CHECK(during.mpp_decode_nanoseconds == 8'000'000);
+    CHECK(during.mpp_decode_failures == 1);
+    CHECK(during.mpp_decode_fallbacks == 1);
+    CHECK(during.mpp_copy_out_frames == 1);
+    CHECK(during.mpp_copy_out_nanoseconds == 11'000'000);
+    CHECK(during.mpp_copy_out_failures == 1);
+    CHECK(during.mpp_early_dropped_frames == 1);
 
     metrics.PreviewStopped(false);
     metrics.PreviewStopped(true);

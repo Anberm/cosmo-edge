@@ -146,6 +146,13 @@ Control-plane JSON requests are limited to 1 MB by default. A regular single mul
 
 ### Upgrade Recovery Status
 
+The upgrade request accepts an `uploadId` whose original filename matches
+`cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz`. Before reboot, the backend
+validates the filename, MD5, archive safety, and package layout. After reboot,
+the common startup script revalidates the MD5 and installs the package. Open and
+Protected packages use the same application-upgrade protocol; model authorization
+is independent.
+
 `POST /gtw/cwai/System/QueryDeviceStatus` returns these fields on success:
 
 | Field | Meaning |

@@ -22,7 +22,7 @@ If you are new to the project, start with the smallest path that matches your ch
 | Frontend web console | `cd src/web`, `npm ci`, `npm run build` |
 | C++ backend or tests | `bash scripts/format_check.sh --staged --check`, `bash scripts/build_cpu_test.sh`, `./build_cpu/cosmo-tests` |
 | Runtime smoke test | `docker compose -f docker-compose.x86.yml up -d --build` on Linux, or `docker compose -f docker-compose.x86.windows.yml up -d --build` on Windows |
-| Sophon release package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package`, or `.\scripts\build_sophon_package.ps1` on Windows |
+| Sophon release package | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <model>]`, or `.\scripts\build_sophon_package.ps1 [-Chip <model>]` on Windows; models are `bm1688` / `cv186x`, defaulting to `bm1688` |
 
 For a fuller contributor-oriented walkthrough, see:
 

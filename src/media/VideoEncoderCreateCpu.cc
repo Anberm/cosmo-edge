@@ -12,5 +12,9 @@ namespace media {
         return std::make_shared<VideoEncoderCpu>();
     }
 
+    VideoEncoderCapability VideoEncoder::Probe(VideoCodecType type) {
+        return VideoEncoderCpu::Probe(type);
+    }
+
 }  // namespace media
 }  // namespace cosmo

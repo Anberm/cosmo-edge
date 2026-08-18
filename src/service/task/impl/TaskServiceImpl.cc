@@ -592,8 +592,8 @@ cosmo::MsgTaskCreateSend TaskServiceImpl::ProcessTaskCreate(cosmo::MsgTaskCreate
             LOG_WARN("{}/{}  AlgCode:{} Name:{} Version:{} GetVideoPlay Failed", data.videoChannelId,
                      data.taskId, data.algorithmCode, data.algorithmName, data.algorithmUpdateTime);
         } else {
-            LOG_INFO("{}/{}  AlgCode:{} Name:{} GetVideoPlay Url:{} ", data.videoChannelId, data.taskId,
-                     data.algorithmCode, data.algorithmName, get_video_rsp.resData.streamUrl);
+            LOG_INFO("{}/{} AlgCode:{} Name:{} GetVideoPlay OK", data.videoChannelId, data.taskId,
+                     data.algorithmCode, data.algorithmName);
             data.streamUrl = get_video_rsp.resData.streamUrl;
         }
     }
@@ -617,8 +617,8 @@ cosmo::MsgTaskCreateSend TaskServiceImpl::ProcessTaskCreate(cosmo::MsgTaskCreate
         return ret_data;
     }
     // 3. Set task parameters
-    LOG_INFO("{}/{} Create {} Task, Set Params streamUrl:{}", data.videoChannelId, data.taskId,
-             action_alg->algorithmName, data.streamUrl);
+    LOG_INFO("{}/{} Create {} Task, stream URL present:{}", data.videoChannelId, data.taskId,
+             action_alg->algorithmName, !data.streamUrl.empty());
     if (!data.streamUrl.empty()) {
         cosmo::MsgDynamicKeyValue url;
         url.key   = std::string(cosmo::key::CHANNEL_URL);

@@ -8,6 +8,10 @@ namespace cosmo {
 AiRecognizerUnify::AiRecognizerUnify(const std::string& json_path, const std::string& model_path)
     : cfg_path_(json_path), model_path_(model_path) {}
 
+AiRecognizerUnify::AiRecognizerUnify(const std::string&, const std::string& json_path,
+                                     const std::string& model_path)
+    : cfg_path_(json_path), model_path_(model_path) {}
+
 AiRecognizerUnify::~AiRecognizerUnify() {
     LOG_INFO("{}", "AiRecognizerUnify Delete");
 }
@@ -19,8 +23,10 @@ util::ErrorEnum AiRecognizerUnify::Init() {
     }
 
     try {
-        recognizer_ = std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(),
-                                                                    &profiler_);
+        cosmo::nn::DefaultComponent::Options options;
+        options.profiler = &profiler_;
+        recognizer_ =
+            std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     } catch (const std::exception& e) {
         LOG_ERRO("Init SDK Recognizer Failed. CfgPath:{} ModelPath:{}, {}", cfg_path_, model_path_, e.what());
         recognizer_.reset();

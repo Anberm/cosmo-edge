@@ -6,6 +6,7 @@ import { formatActionableApiError, normalizeApiError } from '@/utils/apiError'
 
 const longTimeoutApi = [
   '/gtw/cwai/System/Upgrade',
+  '/gtw/cwai/System/CheckUpgradeSpace',
   '/gtw/cwai/File/ImportFile',
   '/gtw/cwai/Camera/AddVideo',
   '/gtw/cwai/atomic/model/uploadTemp',
@@ -18,6 +19,7 @@ const longTimeoutApi = [
 
 const silentApi = [
   '/gtw/cwai/System/Upgrade',
+  '/gtw/cwai/System/CheckUpgradeSpace',
   '/gtw/cwai/System/QueryHardwareResource',
   '/gtw/cwai/network/IpAccessibleCheck',
   '/gtw/cwai/System/QueryDeviceStatus',

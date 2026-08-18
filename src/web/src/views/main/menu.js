@@ -108,7 +108,6 @@ export default [
     icon: 'el-icon-mobile',
     section: 'system',
     runMode: 1,
-    hidden: true,
     children: [
       {
         index: '/peripheralManagement/sound',
@@ -121,8 +120,7 @@ export default [
     titleKey: 'nav.linkageManagement',
     icon: 'el-icon-link',
     section: 'system',
-    runMode: 1,
-    hidden: true
+    runMode: 1
   },
   {
     index: '/systemManagement',

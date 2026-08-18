@@ -27,9 +27,10 @@
 #include "nn/utils/string_format.h"
 #include "util/DurationLogger.h"
 
-#if defined(COSMO_NN_USE_SOPHON_BACKEND) && defined(COSMO_HAS_MODEL_GUARD)
+#ifdef COSMO_NN_USE_SOPHON_BACKEND
 #include "nn/device/sophon/sophon_net_node.h"
-#include "nn/guard/cosmo_model_guard.h"
+#include "nn/guard/CemV2SophonLoader.h"
+#include "nn/guard/ModelLoadPolicy.h"
 #endif
 
 namespace cosmo::nn {
@@ -410,6 +411,7 @@ Status Graph::WireNetNode(const ModelInfo& model, const std::vector<std::string>
     }
     net_ptr->SetNetworkInputNames(actual_input_names);
     net_ptr->SetNetworkOutputNames(actual_output_names);
+    net_ptr->SetInputContract(model.input_contract);
 
     // Insert copy nodes right before net_node (after all preprocess nodes)
     for (auto& copy_node : new_copy_nodes) {
@@ -622,79 +624,101 @@ Status Graph::LoadWeight(const std::string& model_path) {
 
     int net_node_num = NodeTypeUtils::TypedNodeCount(nodes, NODE_NET);
 
-    std::ifstream stream(model_path, std::ios::in | std::ios::binary);
-#ifdef COSMO_NN_USE_ONNX_BACKEND
-    if (stream.fail() && !std::filesystem::is_directory(model_path))
+    std::string authorized_model_path;
+
+#ifdef COSMO_NN_USE_SOPHON_BACKEND
+    // CEMC authorization belongs exclusively to Guard. Edge only routes by
+    // file format and does not derive a second model identity.
+    const ModelLoadDecision load_decision =
+        ModelLoadPolicy::Production().Evaluate(model_path, ModelLoadIntent::kCosmoNn);
+    if (!load_decision.IsAllowed()) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "model format is not supported");
+    }
+    authorized_model_path = load_decision.model_path;
+
+    if (load_decision.action == ModelLoadAction::kGuardV2) {
+        if (net_node_num <= 0 || shared_resource == nullptr || shared_resource->m_handle == nullptr) {
+            return Status(COSMO_NN_ERR_LOAD_MODEL, "protected model graph shape is invalid");
+        }
+
+        // Validate every ownership destination before opening the artifact. The
+        // guard then authenticates once and loads every segment through the
+        // same immutable artifact handle.
+        std::vector<SophonNetNode*> target_nodes;
+        try {
+            target_nodes.reserve(static_cast<size_t>(net_node_num));
+        } catch (const std::bad_alloc&) {
+            return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "protected model graph allocation failed");
+        }
+        for (int index = 0; index < net_node_num; ++index) {
+            Node* node        = GetNodeByName("net_" + std::to_string(index));
+            auto* sophon_node = dynamic_cast<SophonNetNode*>(node);
+            if (sophon_node == nullptr) {
+                return Status(COSMO_NN_ERR_LOAD_MODEL, "protected model requires Sophon network nodes");
+            }
+            target_nodes.push_back(sophon_node);
+        }
+
+        SophonModelLoadResult loaded;
+        {
+            cosmo::util::DurationLogger logger("Load protected CEM v2 artifact");
+            loaded =
+                LoadCemV2SophonArtifact(FrozenCemV2Api(), NativeSophonRuntimeApi(), authorized_model_path,
+                                        CMG_V2_SOURCE_COSMO_NN_V1, shared_resource->m_handle, 0);
+        }
+        if (!loaded.IsSuccess() || loaded.runtimes.size() != target_nodes.size()) {
+            if (loaded.IsOutOfMemory()) {
+                return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "protected model load ran out of memory");
+            }
+            return Status(COSMO_NN_ERR_LOAD_MODEL, "protected model load failed");
+        }
+
+        for (size_t index = 0; index < target_nodes.size(); ++index) {
+            OwnedBmrt runtime(loaded.runtimes[index].release());
+            Status attach_status = target_nodes[index]->AttachOwnedBmrt(std::move(runtime));
+            if (!bool(attach_status)) {
+                // Some earlier runtimes may already have transferred to their
+                // nodes. Destroy the whole failed graph immediately so later
+                // segments and attached runtimes cannot survive partial init.
+                nodes.clear();
+                return attach_status;
+            }
+        }
+        return COSMO_NN_OK;
+    }
+
+    // A protected CEMC decision is handled above and every failure returns.
+    if (load_decision.action != ModelLoadAction::kNativeCenn) {
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "model loader action is not available");
+    }
+#else
+    authorized_model_path = model_path;
+#endif
+
+    std::ifstream stream(authorized_model_path, std::ios::in | std::ios::binary);
+#if defined(COSMO_NN_USE_ONNX_BACKEND) || defined(COSMO_NN_USE_RKNN_BACKEND)
+    if (stream.fail() && !std::filesystem::is_directory(authorized_model_path))
         return Status(COSMO_NN_ERR_LOAD_MODEL, "open model file failed");
 #else
     if (stream.fail())
         return Status(COSMO_NN_ERR_LOAD_MODEL, "open model file failed");
 #endif
 
-#if defined(COSMO_NN_USE_SOPHON_BACKEND) && defined(COSMO_HAS_MODEL_GUARD)
-    // Peek first 4 bytes to detect encrypted model.
-    uint32_t magic = 0;
-    stream.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-    stream.seekg(0);
-
-    if (cosmo::guard::IsEncryptedModel(magic)) {
-        // File-based guard API: the .so reads segments on demand from disk.
-        // No need to load the entire encrypted file into memory.
-        stream.close();
-
-        // Validate segment count matches graph structure.
-        int seg_count = cosmo::guard::GetEncryptedSegmentCountFromFile(model_path.c_str());
-        if (seg_count < 0)
-            return Status(COSMO_NN_ERR_LOAD_MODEL, "Failed to read encrypted segment count (error: " +
-                                                       std::to_string(seg_count) + ")");
-        if (seg_count != net_node_num)
-            return Status(COSMO_NN_ERR_LOAD_MODEL, "Encrypted segment count (" + std::to_string(seg_count) +
-                                                       ") does not match graph net nodes (" +
-                                                       std::to_string(net_node_num) + ")");
-
-        // Decrypt and load each segment into its own independent bmrt,
-        // mirroring the plaintext path where each NetNode has its own bmrt.
-        for (int i = 0; i < net_node_num; i++) {
-            auto net_node = GetNodeByName("net_" + std::to_string(i));
-            if (!net_node)
-                return Status(COSMO_NN_ERR_LOAD_MODEL, "Can not find net node");
-
-            // The .so handles everything internally per segment:
-            //   open file → seek to segment → read ciphertext
-            //   → SN validation → key derivation → decrypt → bmrt_create → bmrt_load → wipe
-            void* bmrt = nullptr;
-            int ret    = 0;
-            {
-                cosmo::util::DurationLogger logger("DecryptAndLoadSegmentFromFile net_" + std::to_string(i));
-                ret = cosmo::guard::DecryptAndLoadSegmentFromFile(
-                    model_path.c_str(), shared_resource->m_handle, static_cast<uint32_t>(i), &bmrt);
-            }
-            if (ret != 0 || !bmrt)
-                return Status(COSMO_NN_ERR_LOAD_MODEL,
-                              "Encrypted segment " + std::to_string(i) +
-                                  " load failed (guard error: " + std::to_string(ret) + ")");
-
-            // AttachBmrt is on SophonNetNode only (ISP: not on NetNode base class).
-            // Within this #ifdef block, the node is guaranteed to be SophonNetNode.
-            auto* sophon_node = dynamic_cast<SophonNetNode*>(net_node);
-            if (!sophon_node) {
-                bmrt_destroy(bmrt);
-                return Status(COSMO_NN_ERR_LOAD_MODEL, "Expected SophonNetNode for encrypted model");
-            }
-            RETURN_ON_FAIL(sophon_node->AttachBmrt(bmrt));
-        }
-        return COSMO_NN_OK;
-    }
-#endif
-
-#ifdef COSMO_NN_USE_ONNX_BACKEND
+#if defined(COSMO_NN_USE_ONNX_BACKEND) || defined(COSMO_NN_USE_RKNN_BACKEND)
     stream.close();
 
     namespace fs = std::filesystem;
-    fs::path base_path(model_path);
+    fs::path base_path(authorized_model_path);
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+    constexpr const char* model_extension = ".rknn";
+    constexpr const char* backend_name    = "RKNN";
+#else
+    constexpr const char* model_extension = ".onnx";
+    constexpr const char* backend_name    = "ONNX";
+#endif
 
     if (net_node_num == 1 && fs::is_regular_file(base_path)) {
-        std::ifstream model_stream(model_path, std::ios::in | std::ios::binary);
+        std::ifstream model_stream(authorized_model_path, std::ios::in | std::ios::binary);
         if (model_stream.fail())
             return Status(COSMO_NN_ERR_LOAD_MODEL, "open model file failed");
 
@@ -726,51 +750,55 @@ Status Graph::LoadWeight(const std::string& model_path) {
 
     if (!fs::is_directory(base_path)) {
         return Status(COSMO_NN_ERR_LOAD_MODEL,
-                      "ONNX backend expects a model directory with per-net ONNX files");
+                      std::string(backend_name) + " backend expects a model directory with per-net files");
     }
 
     if (net_node_num != static_cast<int>(model_infos_.size())) {
-        return Status(COSMO_NN_ERR_LOAD_MODEL, "ONNX graph net nodes (" + std::to_string(net_node_num) +
-                                                   ") do not match config models (" +
-                                                   std::to_string(model_infos_.size()) + ")");
+        return Status(COSMO_NN_ERR_LOAD_MODEL,
+                      std::string(backend_name) + " graph net nodes (" + std::to_string(net_node_num) +
+                          ") do not match config models (" + std::to_string(model_infos_.size()) + ")");
     }
 
-    std::vector<fs::path> onnx_files;
+    std::vector<fs::path> model_files;
     for (const auto& entry : fs::directory_iterator(base_path)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".onnx")
-            onnx_files.push_back(entry.path());
+        if (entry.is_regular_file() && entry.path().extension() == model_extension)
+            model_files.push_back(entry.path());
     }
-    std::sort(onnx_files.begin(), onnx_files.end());
+    std::sort(model_files.begin(), model_files.end());
 
     for (int i = 0; i < net_node_num; i++) {
         fs::path part_path;
         if (!model_infos_.at(i).filename.empty()) {
             part_path = base_path / model_infos_.at(i).filename;
-        } else if (static_cast<size_t>(i) < onnx_files.size()) {
-            part_path = onnx_files.at(i);
+        } else if (static_cast<size_t>(i) < model_files.size()) {
+            part_path = model_files.at(i);
         } else {
-            return Status(COSMO_NN_ERR_LOAD_MODEL,
-                          "Multi-net ONNX model missing file_name for net_" + std::to_string(i));
+            return Status(COSMO_NN_ERR_LOAD_MODEL, "Multi-net " + std::string(backend_name) +
+                                                       " model missing file_name for net_" +
+                                                       std::to_string(i));
         }
 
         std::ifstream model_stream(part_path, std::ios::in | std::ios::binary);
         if (model_stream.fail()) {
-            return Status(COSMO_NN_ERR_LOAD_MODEL, "open ONNX model file failed: " + part_path.string());
+            return Status(COSMO_NN_ERR_LOAD_MODEL,
+                          "open " + std::string(backend_name) + " model file failed: " + part_path.string());
         }
 
         model_stream.seekg(0, std::ios::end);
         long int model_size = static_cast<long int>(model_stream.tellg());
         model_stream.seekg(0, std::ios::beg);
         if (model_size <= 0) {
-            return Status(COSMO_NN_ERR_LOAD_MODEL,
-                          "ONNX model file is empty or unreadable: " + part_path.string());
+            return Status(
+                COSMO_NN_ERR_LOAD_MODEL,
+                std::string(backend_name) + " model file is empty or unreadable: " + part_path.string());
         }
 
         std::unique_ptr<char[]> model_data;
         try {
             model_data.reset(new char[static_cast<size_t>(model_size)]);
         } catch (const std::bad_alloc&) {
-            return Status(COSMO_NN_ERR_OUT_OF_MEMORY, "not enough memory to load ONNX model");
+            return Status(COSMO_NN_ERR_OUT_OF_MEMORY,
+                          "not enough memory to load " + std::string(backend_name) + " model");
         }
         model_stream.read(model_data.get(), model_size);
 

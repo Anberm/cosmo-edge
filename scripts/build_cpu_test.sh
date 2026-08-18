@@ -9,6 +9,12 @@ then
 fi
 
 BUILD_DIR=${PROJECT_ROOT_PATH}/build_cpu
+BUILD_JOBS="${COSMO_BUILD_JOBS:-$(nproc)}"
+
+if [[ ! "${BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: COSMO_BUILD_JOBS must be a positive integer; got '${BUILD_JOBS}'" >&2
+    exit 1
+fi
 
 clean_external_project() {
     local name="$1"
@@ -43,6 +49,7 @@ cd ${BUILD_DIR}
 
 echo "Configuring with tests enabled (CPU backend)..."
 echo "Requires: pkg-config and openh264 development package (for x86 realtime OSD H264 encoding)"
+echo "Parallel build jobs: ${BUILD_JOBS}"
 cmake   -DCMAKE_BUILD_TYPE=Release \
         -U CMAKE_TOOLCHAIN_FILE \
         -DCOSMO_TARGET_ARCH=x86_64 \
@@ -59,7 +66,7 @@ cmake   -DCMAKE_BUILD_TYPE=Release \
 ln -sf "${BUILD_DIR}/compile_commands.json" "${PROJECT_ROOT_PATH}/compile_commands.json" 2>/dev/null || true
 
 echo "Building cosmo-tests (CPU backend)..."
-cmake --build . --target cosmo-tests -j$(nproc)
+cmake --build . --target cosmo-tests -j"${BUILD_JOBS}"
 
 echo ""
 echo "Build complete: ${BUILD_DIR}/cosmo-tests"

@@ -1,0 +1,52 @@
+services:
+  cosmo-rk3576-package:
+    image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:135d25d0baf14e7918726f7efb040a0627926aedd5825f52fab6c1cd208da348
+    platform: linux/amd64
+    network_mode: host
+    volumes:
+      - .:/workspace
+      - ./build_output:/build_output
+      - cosmo-npm-cache:/root/.npm
+    working_dir: /workspace
+    environment:
+      RKNN_ROOT: /opt/rknn
+      RKLLM_ROOT: /opt/rkllm
+      ROCKCHIP_MEDIA_ROOT: /opt/rockchip-media
+      COSMO_RKLLM_REQUIRED: "ON"
+      NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-1}"
+      NPM_CONFIG_PROGRESS: "${NPM_CONFIG_PROGRESS:-false}"
+      NPM_CONFIG_FETCH_RETRIES: "${NPM_CONFIG_FETCH_RETRIES:-3}"
+      NPM_CONFIG_FETCH_TIMEOUT: "${NPM_CONFIG_FETCH_TIMEOUT:-120000}"
+      NPM_CONFIG_PREFER_OFFLINE: "${NPM_CONFIG_PREFER_OFFLINE:-true}"
+      NPM_CONFIG_UPDATE_NOTIFIER: "${NPM_CONFIG_UPDATE_NOTIFIER:-false}"
+    command: >
+      bash -lc "
+      set -euo pipefail;
+      echo 'Starting RK3576 Release cross-compilation...';
+      rm -rf -- build_rknn;
+      ./scripts/build_rknn.sh -T;
+      output_dir=/build_output/rk3576;
+      rm -rf -- \"$${output_dir}\";
+      mkdir -p -- \"$${output_dir}\";
+      set -- build_rknn/packages/*.tar.gz;
+      if [ \"$${#}\" -ne 1 ] || [ ! -f \"$${1}\" ]; then
+        echo 'ERROR: expected exactly one RK3576 package artifact' >&2;
+        exit 1;
+      fi;
+      package_listing=$$(tar -tzf \"$${1}\");
+      if ! grep -Eq '/lib/librkllmrt[.]so$$' <<<\"$${package_listing}\"; then
+        echo 'ERROR: RK3576 package is missing librkllmrt.so' >&2;
+        exit 1;
+      fi;
+      if ! grep -Eq '/share/licenses/rkllm/LICENSE$$' <<<\"$${package_listing}\"; then
+        echo 'ERROR: RK3576 package is missing the RKLLM license' >&2;
+        exit 1;
+      fi;
+      cp -f -- \"$${1}\" \"$${output_dir}/\";
+      sha256sum -- \"$${output_dir}/\"*.tar.gz;
+      ls -lh \"$${output_dir}\";
+      echo 'RK3576 build finished.'
+      "
+
+volumes:
+  cosmo-npm-cache:

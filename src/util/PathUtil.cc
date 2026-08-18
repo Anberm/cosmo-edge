@@ -185,9 +185,18 @@ void Init() {
     EnsureDir(cwaiRuntimePath);
 }
 
+void OverrideRootPaths(const std::string& dataPath, const std::string& appDataPath) {
+    const fs::path data_root(dataPath);
+    const fs::path app_data_root(appDataPath);
+    if (dataPath.empty() || appDataPath.empty() || !data_root.is_absolute() || !app_data_root.is_absolute()) {
+        throw std::invalid_argument("Cosmo data roots must be non-empty absolute paths");
+    }
+    g_dataPath    = data_root.lexically_normal().string();
+    g_appDataPath = app_data_root.lexically_normal().string();
+}
+
 void OverrideRootPathForTest(const std::string& dataPath, const std::string& appDataPath) {
-    g_dataPath    = dataPath;
-    g_appDataPath = appDataPath;
+    OverrideRootPaths(dataPath, appDataPath);
 }
 
 // ── Configuration paths ───────────────────────────────────────────────────────
@@ -291,6 +300,10 @@ std::string GetDbBackUpPath() {
 std::string GetBaseDir() {
     EnsureDir(g_dataPath);
     return g_dataPath;
+}
+
+std::string GetAppBaseDir() {
+    return g_appDataPath;
 }
 
 [[nodiscard]] bool IsWithinRoot(const std::string& root, const std::string& candidate) {

@@ -13,6 +13,8 @@
 
 namespace {
 
+constexpr char kModelAuthorizationDirectory[] = "model-guard";
+
 // Execute an immediate system reboot via the `reboot` command.
 void ImmReboot() {
 #ifndef COSMO_NN_USE_SOPHON_BACKEND
@@ -28,6 +30,18 @@ void ImmReboot() {
 }  // namespace
 
 namespace cosmo::platform {
+
+std::error_code ClearFactoryResetData(const std::string& baseDir) {
+    std::error_code ec;
+    for (std::filesystem::directory_iterator entry(baseDir, ec), end; !ec && entry != end;) {
+        const auto path = entry->path();
+        entry.increment(ec);
+        if (!ec && path.filename() != kModelAuthorizationDirectory) {
+            std::filesystem::remove_all(path, ec);
+        }
+    }
+    return ec;
+}
 
 RebootManager::~RebootManager() {
     std::lock_guard<std::mutex> lock(mtx_);
@@ -67,11 +81,10 @@ void RebootManager::Reset(const std::string& reason, const std::string& baseDir)
                  baseDir);
         return;
 #else
-        LOG_INFO("Removing base dir: {}", baseDir);
-        std::error_code ec;
-        std::filesystem::remove_all(baseDir, ec);
+        LOG_INFO("Clearing factory-resettable data in: {}", baseDir);
+        const auto ec = ClearFactoryResetData(baseDir);
         if (ec) {
-            LOG_ERRO("Failed to remove {}: {}", baseDir, ec.message());
+            LOG_ERRO("Failed to clear resettable data in {}: {}", baseDir, ec.message());
         }
 
         ImmReboot();

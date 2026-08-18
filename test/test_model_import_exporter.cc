@@ -71,6 +71,10 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
                               [&]() { return std::string("1234567"); }, [&](const nlohmann::json&) {},
                               [&](const std::string&, const std::string&) {});
 
+#ifndef COSMO_NN_USE_RKNN_BACKEND
+    // RKNN P0 intentionally admits only classify/yolov8_det and validates the
+    // device model with rknn_init, so a fake qwen3vl payload is not a portable
+    // success fixture for that backend.
     SECTION("2.1 AddAtomicModel：验证目录创建、config.json 生成、model.nn 创建") {
         std::string bmodelSrc = testUploadDir + "/source.bmodel";
         std::ofstream out(bmodelSrc);
@@ -142,6 +146,7 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         fs::remove(bmodelSrc);
         fs::remove(invalidTable);
     }
+#endif
 
     SECTION("OCR character table config binds the legacy 6624-entry table to 6625 CTC classes") {
         const std::string characterTable = testUploadDir + "/legacy_character_table.txt";
@@ -470,7 +475,8 @@ TEST_CASE("ModelImportExporter Tests", "[model]") {
         std::ofstream(outsideFile) << "must survive";
         std::vector<cosmo::Model::BmodelFileInfo> files = {{"main", outsideFile}};
 
-        auto result = importExporter.AddAtomicModel("", "OutsideModel", "DET", "", files, "", "", "", "", "");
+        auto result =
+            importExporter.AddAtomicModel("", "OutsideModel", "classify", "", files, "", "", "", "", "");
         REQUIRE(result == cosmo::util::ErrorEnum::FileNotExist);
         REQUIRE(fs::exists(outsideFile));
 

@@ -20,12 +20,15 @@ public:
     ~PClassifier();
 
     bool ActionInit() override;
+    void ActionDestroy() override;
     util::ErrorEnum HandPic(AlgDataPtr algData) override;
 
     // Modify parameters - update existing parameters incrementally.
     bool ModifyParam(const std::string& taskId, std::vector<MsgDynamicKeyValue>& params) override;
     // Set parameters - clear all existing parameters and apply new ones.
     bool SetParam(const std::string& taskId, std::vector<MsgDynamicKeyValue>& params) override;
+    bool SetArea(const std::string& taskId, std::vector<MsgTaskArea>& areas,
+                 std::vector<MsgTaskArea>& shieldedAreas) override;
 
 private:
     bool ValidKey(MsgDynamicKeyValue& param);

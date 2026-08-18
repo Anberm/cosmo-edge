@@ -1,5 +1,7 @@
 #include "nn/node/net_node.h"
 
+#include <utility>
+
 #include "nn/node/node_type_utils.h"
 
 namespace cosmo::nn {
@@ -29,6 +31,10 @@ void NetNode::SetNetworkInputNames(std::vector<std::string> names) {
 void NetNode::SetNetworkOutputNames(std::vector<std::string> names) {
     network_output_names = names;
     top_count            = names.size();
+}
+
+void NetNode::SetInputContract(std::string contract) {
+    input_contract_ = std::move(contract);
 }
 
 Status NetNode::Forward(std::vector<std::shared_ptr<Blob>>& bottom_blob,

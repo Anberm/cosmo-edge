@@ -17,6 +17,8 @@ public:
     void ResetDevice(const std::string& reason) override;
     cosmo::util::ErrorEnum ExportLogs(std::string& fileName, std::string& fileUrl) override;
     cosmo::util::ErrorEnum Upgrade(const std::string& filePath) override;
+    cosmo::util::ErrorEnum CheckUpgradeSpace(std::uint64_t packageSizeBytes, bool cleanupEventMedia,
+                                             UpgradeSpaceStatus& status) override;
     void ShowThreadDebugInfo() override;
 
 private:

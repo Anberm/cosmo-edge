@@ -108,29 +108,37 @@
             <el-option label="BGR" value="bgr"></el-option>
           </el-select>
         </el-form-item>
-        <!-- 非SAM2类型：单个模型文件上传 -->
+        <!-- 普通类型或 RKLLM 语言模型：单个主模型文件上传 -->
         <el-form-item v-if="addModelForm.modelType !== 'sam2'" :label="t('glossary.modelFile')" prop="modelFile">
-          <el-upload ref="uploadModelFileRef" action="#" :file-list="addModelForm.modelFileList" :limit="1" :auto-upload="false" :accept="isX86 ? '.onnx' : '.bmodel'" :on-change="handleModelFileChange" :on-remove="handleModelFileRemove">
+          <el-upload ref="uploadModelFileRef" action="#" :file-list="addModelForm.modelFileList" :limit="1" :auto-upload="false" :accept="addModelPrimaryFileExtension" :on-change="handleModelFileChange" :on-remove="handleModelFileRemove">
             <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
             <template #tip>
-              <div class="upload-warn">{{ t('glossary.selectModelFileTip', { ext: isX86 ? '.onnx' : '.bmodel' }) }}</div>
+              <div class="upload-warn">{{ t('glossary.selectModelFileTip', { ext: addModelPrimaryFileExtension }) }}</div>
+            </template>
+          </el-upload>
+        </el-form-item>
+        <el-form-item v-if="isRknn && addModelForm.modelType === 'qwen3_5'" label="vision.rknn" prop="visionFile">
+          <el-upload ref="uploadVisionFileRef" action="#" :file-list="addModelForm.visionFileList" :limit="1" :auto-upload="false" accept=".rknn" :on-change="handleVisionFileChange" :on-remove="handleVisionFileRemove">
+            <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
+            <template #tip>
+              <div class="upload-warn">RK3576 Qwen3.5 {{ t('glossary.selectModelFileTip', { ext: '.rknn' }) }}</div>
             </template>
           </el-upload>
         </el-form-item>
         <!-- SAM2类型：两个模型文件上传 -->
         <el-form-item v-if="addModelForm.modelType === 'sam2'" label="Encoder" prop="encoderFile">
-          <el-upload ref="uploadEncoderFileRef" action="#" :file-list="addModelForm.encoderFileList" :limit="1" :auto-upload="false" :accept="isX86 ? '.onnx' : '.bmodel'" :on-change="handleEncoderFileChange" :on-remove="handleEncoderFileRemove">
+          <el-upload ref="uploadEncoderFileRef" action="#" :file-list="addModelForm.encoderFileList" :limit="1" :auto-upload="false" :accept="modelFileExtension" :on-change="handleEncoderFileChange" :on-remove="handleEncoderFileRemove">
             <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
             <template #tip>
-              <div class="upload-warn">{{ t('glossary.selectEncoderTip', { ext: isX86 ? '.onnx' : '.bmodel' }) }}</div>
+              <div class="upload-warn">{{ t('glossary.selectEncoderTip', { ext: modelFileExtension }) }}</div>
             </template>
           </el-upload>
         </el-form-item>
         <el-form-item v-if="addModelForm.modelType === 'sam2'" label="Decoder" prop="decoderFile">
-          <el-upload ref="uploadDecoderFileRef" action="#" :file-list="addModelForm.decoderFileList" :limit="1" :auto-upload="false" :accept="isX86 ? '.onnx' : '.bmodel'" :on-change="handleDecoderFileChange" :on-remove="handleDecoderFileRemove">
+          <el-upload ref="uploadDecoderFileRef" action="#" :file-list="addModelForm.decoderFileList" :limit="1" :auto-upload="false" :accept="modelFileExtension" :on-change="handleDecoderFileChange" :on-remove="handleDecoderFileRemove">
             <el-button size="small" type="primary">{{ t('action.browse') }}</el-button>
             <template #tip>
-              <div class="upload-warn">{{ t('glossary.selectDecoderTip', { ext: isX86 ? '.onnx' : '.bmodel' }) }}</div>
+              <div class="upload-warn">{{ t('glossary.selectDecoderTip', { ext: modelFileExtension }) }}</div>
             </template>
           </el-upload>
         </el-form-item>
@@ -308,7 +316,7 @@
             <el-button size="small">{{ t('action.browse') }}</el-button>
           </el-upload>
         </div>
-        <div class="upload-warn" style="margin-left: 20px;">{{ t('glossary.importModelTip', { modelFile: isX86 ? 'model.onnx' : 'model.nn' }) }}</div>
+        <div class="upload-warn" style="margin-left: 20px;">{{ t('glossary.importModelTip', { modelFile: importedModelFileName }) }}</div>
       </div>
       <template #footer>
         <div class="dialog-footer">
@@ -573,6 +581,14 @@ const topBarData = computed(() => ({
   ]
 }))
 const isX86 = ref(false)
+const isRknn = ref(false)
+const modelFileExtension = computed(() => isRknn.value ? '.rknn' : (isX86.value ? '.onnx' : '.bmodel'))
+const addModelPrimaryFileExtension = computed(() =>
+  isRknn.value && addModelForm.modelType === 'qwen3_5'
+    ? '.rkllm'
+    : modelFileExtension.value
+)
+const importedModelFileName = computed(() => isRknn.value ? 'model.rknn' : (isX86.value ? 'model.onnx' : 'model.nn'))
 const addModelDialogTitle = computed(() => addModelMode.value === 'edit' ? t('action.editModel') : t('action.addModel'))
 const addModelMode = ref('add')
 const isMultiple = ref(false)
@@ -587,6 +603,7 @@ const uploadDecoderFileRef = ref(null)
 const uploadVocabFileRef = ref(null)
 const uploadCharacterTableFileRef = ref(null)
 const uploadTokenizerFileRef = ref(null)
+const uploadVisionFileRef = ref(null)
 
 const addModelForm = reactive({
   modelMainType: '',
@@ -605,11 +622,14 @@ const addModelForm = reactive({
   characterTableFileList: [],
   tokenizerFile: '',
   tokenizerFileList: [],
+  visionFile: '',
+  visionFileList: [],
   normalizationMode: '0-1',
   colorChannel: 'rgb'
 })
 
-const modelTypeGroups = computed(() => [
+const modelTypeGroups = computed(() => {
+  const groups = [
   {
     label: t('glossary.detectAlg'),
     value: 'detect',
@@ -652,7 +672,17 @@ const modelTypeGroups = computed(() => [
       { label: 'qwen3_5', value: 'qwen3_5' }
     ]
   }
-])
+  ]
+  if (!isRknn.value) return groups
+  const supported = new Set([
+    // RK3576 capabilities are exposed only after end-to-end validation with a
+    // real model on the device. Keep code-only integrations hidden for now.
+    'yolov8_det', 'classify', 'qwen3_5'
+  ])
+  return groups
+    .map(group => ({ ...group, children: group.children.filter(item => supported.has(item.value)) }))
+    .filter(group => group.children.length > 0)
+})
 
 const currentSubModelTypes = computed(() => {
   return (
@@ -789,6 +819,22 @@ const addModelRules = {
           addModelForm.tokenizerFileList.length === 0
         ) {
           callback(new Error(t('validate.uploadTokenizerFile')))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'change'
+    }
+  ],
+  visionFile: [
+    {
+      validator: (rule, value, callback) => {
+        if (!isRknn.value || addModelForm.modelType !== 'qwen3_5') {
+          callback()
+          return
+        }
+        if (!addModelForm.visionFileList || addModelForm.visionFileList.length === 0) {
+          callback(new Error('RK3576 Qwen3.5 需要上传 vision.rknn'))
         } else {
           callback()
         }
@@ -1160,10 +1206,13 @@ const uploadAlgorithmicClosed = () => {
   addModelForm.characterTableFile = ''
   addModelForm.tokenizerFileList = []
   addModelForm.tokenizerFile = ''
+  addModelForm.visionFileList = []
+  addModelForm.visionFile = ''
   addModelForm.normalizationMode = '0-1'
   addModelForm.colorChannel = 'rgb'
   addModelFormRef.value && addModelFormRef.value.resetFields()
   uploadCharacterTableFileRef.value && uploadCharacterTableFileRef.value.clearFiles()
+  uploadVisionFileRef.value && uploadVisionFileRef.value.clearFiles()
 }
 
 const handleModelTypeChange = () => {
@@ -1179,6 +1228,8 @@ const handleModelTypeChange = () => {
   addModelForm.characterTableFile = ''
   addModelForm.tokenizerFileList = []
   addModelForm.tokenizerFile = ''
+  addModelForm.visionFileList = []
+  addModelForm.visionFile = ''
   addModelForm.normalizationMode = '0-1'
   addModelForm.colorChannel = 'rgb'
   nextTick(() => {
@@ -1188,6 +1239,7 @@ const handleModelTypeChange = () => {
     uploadVocabFileRef.value && uploadVocabFileRef.value.clearFiles()
     uploadCharacterTableFileRef.value && uploadCharacterTableFileRef.value.clearFiles()
     uploadTokenizerFileRef.value && uploadTokenizerFileRef.value.clearFiles()
+    uploadVisionFileRef.value && uploadVisionFileRef.value.clearFiles()
   })
 }
 
@@ -1266,6 +1318,19 @@ const handleTokenizerFileRemove = (file, fileList) => {
     fileList && fileList.length > 0 ? 'file_selected' : ''
   addModelFormRef.value && addModelFormRef.value.validateField('tokenizerFile')
 }
+const handleVisionFileChange = (file, fileList) => {
+  addModelForm.visionFileList =
+    fileList.length > 0 ? [fileList[fileList.length - 1]] : []
+  addModelForm.visionFile =
+    addModelForm.visionFileList.length > 0 ? 'file_selected' : ''
+  addModelFormRef.value && addModelFormRef.value.validateField('visionFile')
+}
+const handleVisionFileRemove = (file, fileList) => {
+  addModelForm.visionFileList = fileList || []
+  addModelForm.visionFile =
+    fileList && fileList.length > 0 ? 'file_selected' : ''
+  addModelFormRef.value && addModelFormRef.value.validateField('visionFile')
+}
 
 const uploadSingleFile = async (file, purpose = UploadPurpose.MODEL_COMPONENT) => {
   const result = await uploadFileInChunks(file, {
@@ -1335,7 +1400,7 @@ const sureAddModel = async () => {
         addModelForm.encoderFileList[0].raw || addModelForm.encoderFileList[0]
       const decoderFile =
         addModelForm.decoderFileList[0].raw || addModelForm.decoderFileList[0]
-      const ext = isX86.value ? '.onnx' : '.bmodel'
+      const ext = modelFileExtension.value
       if (!encoderFile.name.endsWith(ext)) {
         proxy.$message.warning(t('validate.encoderFormatError', { ext }))
         return
@@ -1344,6 +1409,44 @@ const sureAddModel = async () => {
         proxy.$message.warning(t('validate.decoderFormatError', { ext }))
         return
       }
+    } else if (isRknn.value && addModelForm.modelType === 'qwen3_5') {
+      if (
+        !addModelForm.modelFileList ||
+        addModelForm.modelFileList.length === 0
+      ) {
+        proxy.$message.warning(t('validate.uploadModelFile'))
+        return
+      }
+      if (
+        !addModelForm.visionFileList ||
+        addModelForm.visionFileList.length === 0
+      ) {
+        proxy.$message.warning('RK3576 Qwen3.5 需要上传 vision.rknn')
+        return
+      }
+      const languageFile =
+        addModelForm.modelFileList[0].raw || addModelForm.modelFileList[0]
+      const visionFile =
+        addModelForm.visionFileList[0].raw || addModelForm.visionFileList[0]
+      if (!languageFile.name || !languageFile.name.toLowerCase().endsWith('.rkllm')) {
+        proxy.$message.warning(t('validate.uploadFormatError', { ext: '.rkllm' }))
+        return
+      }
+      if (!visionFile.name || !visionFile.name.toLowerCase().endsWith('.rknn')) {
+        proxy.$message.warning(t('validate.uploadFormatError', { ext: '.rknn' }))
+        return
+      }
+    } else if (isRknn.value && addModelForm.modelType === 'qwen3_5') {
+      const languageFile =
+        addModelForm.modelFileList[0].raw || addModelForm.modelFileList[0]
+      const visionFile =
+        addModelForm.visionFileList[0].raw || addModelForm.visionFileList[0]
+      const languageUploadId = await stageForAdd(languageFile)
+      const visionUploadId = await stageForAdd(visionFile)
+      addModelParams.bmodelFiles = [
+        { role: 'language', uploadId: languageUploadId },
+        { role: 'vision', uploadId: visionUploadId }
+      ]
     } else {
       if (
         !addModelForm.modelFileList ||
@@ -1354,7 +1457,7 @@ const sureAddModel = async () => {
       }
       const file =
         addModelForm.modelFileList[0].raw || addModelForm.modelFileList[0]
-      const ext = isX86.value ? '.onnx' : '.bmodel'
+      const ext = modelFileExtension.value
       if (!file.name.endsWith(ext)) {
         proxy.$message.warning(t('validate.uploadFormatError', { ext }))
         return
@@ -1495,8 +1598,10 @@ onMounted(() => {
     proxy.$API.queryDeviceInfo().then(res => {
       const devInfoList = res?.resData?.devInfoList || []
       const deviceTypeItem = devInfoList.find(item => item.key === 'deviceType')
-      if (deviceTypeItem && deviceTypeItem.value.toLowerCase().includes('x86')) {
-        isX86.value = true
+      if (deviceTypeItem) {
+        const deviceType = deviceTypeItem.value.toLowerCase()
+        isX86.value = deviceType.includes('x86')
+        isRknn.value = deviceType.includes('rk3576') || deviceType.includes('rockchip')
       }
     }).catch(() => {})
   }

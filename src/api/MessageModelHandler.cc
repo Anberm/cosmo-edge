@@ -50,10 +50,11 @@ namespace {
         std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(),
                        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
 
-        const bool is_video           = HasAnySuffix(lower_name, {".mp4", ".mkv", ".avi", ".dav"});
-        const bool is_model_component = HasAnySuffix(lower_name, {".bmodel", ".onnx", ".txt", ".json"});
-        const bool is_model_archive   = HasAnySuffix(lower_name, {".zip", ".tgz", ".tar.gz"});
-        const int match_count         = static_cast<int>(is_video) + static_cast<int>(is_model_component) +
+        const bool is_video = HasAnySuffix(lower_name, {".mp4", ".mkv", ".avi", ".dav"});
+        const bool is_model_component =
+            HasAnySuffix(lower_name, {".bmodel", ".onnx", ".rknn", ".txt", ".json"});
+        const bool is_model_archive = HasAnySuffix(lower_name, {".zip", ".tgz", ".tar.gz"});
+        const int match_count       = static_cast<int>(is_video) + static_cast<int>(is_model_component) +
                                 static_cast<int>(is_model_archive);
         if (match_count != 1) {
             return false;
