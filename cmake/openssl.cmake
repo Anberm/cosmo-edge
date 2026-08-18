@@ -20,6 +20,9 @@ set(OPENSSL_REPRODUCIBLE_ENV
     ${CMAKE_COMMAND} -E env
     SOURCE_DATE_EPOCH=${COSMO_REPRODUCIBLE_BUILD_EPOCH}
 )
+set(OPENSSL_REPRODUCIBLE_MAKE_ARGS
+    SOURCE_DATE_EPOCH=${COSMO_REPRODUCIBLE_BUILD_EPOCH}
+)
 
 if(COSMO_TARGET_ARCH STREQUAL "x86_64")
     set(OPENSSL_SOURCE_DIR ${CMAKE_BINARY_DIR}/openssl_source)
@@ -66,9 +69,12 @@ ExternalProject_Add(
     CONFIGURE_COMMAND ${OPENSSL_REPRODUCIBLE_ENV}
         ${OPENSSL_CONFIGURE_COMMAND}
     
-    BUILD_COMMAND ${OPENSSL_REPRODUCIBLE_ENV} ${CMAKE_MAKE_PROGRAM}
-    INSTALL_COMMAND ${OPENSSL_REPRODUCIBLE_ENV}
-        ${CMAKE_MAKE_PROGRAM} install_sw
+    # Keep $(MAKE) literal so the generated parent recipe forwards GNU Make's
+    # jobserver to OpenSSL's recursive _build_sw invocation. Passing the epoch
+    # as a make variable preserves the reproducible-build environment without
+    # inserting a process wrapper that closes the jobserver file descriptors.
+    BUILD_COMMAND $(MAKE) ${OPENSSL_REPRODUCIBLE_MAKE_ARGS}
+    INSTALL_COMMAND $(MAKE) ${OPENSSL_REPRODUCIBLE_MAKE_ARGS} install_sw
     
     UPDATE_COMMAND ""
     BUILD_ALWAYS OFF
