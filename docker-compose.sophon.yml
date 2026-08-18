@@ -2,6 +2,7 @@ services:
   cosmo-sophon-package:
     image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_sophon:v1
     container_name: cosmo-sophon-package
+    network_mode: host
     volumes:
       - .:/workspace
       - ./build_output:/build_output
