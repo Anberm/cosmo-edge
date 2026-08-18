@@ -6,12 +6,12 @@
 
 namespace cosmo::media {
 
-/// Rockchip Copy-first frame processor.
+/// General-purpose Rockchip RGA frame processor.
 ///
-/// Frames remain owned by CosmoEdge's host memory pool. Each admitted RGA
-/// operation imports the host buffers for the duration of one synchronous
-/// operation and releases the handles before returning. This deliberately
-/// does not introduce DMA-BUF ownership or zero-copy lifetime coupling.
+/// Frames exposed through the generic VideoFrame API remain owned by
+/// CosmoEdge's host memory pool. Each admitted RGA operation imports those
+/// buffers for one synchronous operation. Detector and classifier fast paths
+/// bypass this host-facing API and bind their MPP/RGA DMA-BUF inputs directly.
 class VideoFrameProcRockchip final : public VideoFrameProcCpu {
 public:
     explicit VideoFrameProcRockchip(IOsdTextRenderer& osd_service);

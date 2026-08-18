@@ -96,12 +96,28 @@ void InferencePipelineMetrics::RecordRknnRgaResizeColor(uint64_t nanoseconds) {
     RecordStage(rknn_rga_resize_color_calls_, rknn_rga_resize_color_nanoseconds_, 1, nanoseconds);
 }
 
+void InferencePipelineMetrics::RecordRknnRgaCropResize(uint64_t nanoseconds, bool success) {
+    RecordStage(rknn_rga_crop_resize_calls_, rknn_rga_crop_resize_nanoseconds_, 1, nanoseconds);
+    if (!success)
+        rknn_rga_crop_resize_failures_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void InferencePipelineMetrics::RecordRknnRgaCropSource(bool dmabuf) {
+    auto& counter = dmabuf ? rknn_rga_crop_dmabuf_frames_ : rknn_rga_crop_host_fallbacks_;
+    counter.fetch_add(1, std::memory_order_relaxed);
+}
+
 void InferencePipelineMetrics::RecordRknnRgaFailure() {
     rknn_rga_failures_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void InferencePipelineMetrics::RecordRknnCpuResizeFallback(uint64_t nanoseconds) {
     RecordStage(rknn_cpu_resize_fallback_calls_, rknn_cpu_resize_fallback_nanoseconds_, 1, nanoseconds);
+}
+
+void InferencePipelineMetrics::RecordRknnCpuCropResizeFallback(uint64_t nanoseconds) {
+    RecordStage(rknn_cpu_crop_resize_fallback_calls_, rknn_cpu_crop_resize_fallback_nanoseconds_, 1,
+                nanoseconds);
 }
 
 void InferencePipelineMetrics::RecordRknnCpuNormalizeFallback(uint64_t nanoseconds) {
@@ -284,9 +300,16 @@ InferencePipelineMetricsSnapshot InferencePipelineMetrics::Snapshot() const {
     SNAPSHOT_FIELD(rknn_rga_fill_nanoseconds);
     SNAPSHOT_FIELD(rknn_rga_resize_color_calls);
     SNAPSHOT_FIELD(rknn_rga_resize_color_nanoseconds);
+    SNAPSHOT_FIELD(rknn_rga_crop_resize_calls);
+    SNAPSHOT_FIELD(rknn_rga_crop_resize_nanoseconds);
+    SNAPSHOT_FIELD(rknn_rga_crop_resize_failures);
+    SNAPSHOT_FIELD(rknn_rga_crop_dmabuf_frames);
+    SNAPSHOT_FIELD(rknn_rga_crop_host_fallbacks);
     SNAPSHOT_FIELD(rknn_rga_failures);
     SNAPSHOT_FIELD(rknn_cpu_resize_fallback_calls);
     SNAPSHOT_FIELD(rknn_cpu_resize_fallback_nanoseconds);
+    SNAPSHOT_FIELD(rknn_cpu_crop_resize_fallback_calls);
+    SNAPSHOT_FIELD(rknn_cpu_crop_resize_fallback_nanoseconds);
     SNAPSHOT_FIELD(rknn_cpu_normalize_fallback_calls);
     SNAPSHOT_FIELD(rknn_cpu_normalize_fallback_nanoseconds);
     SNAPSHOT_FIELD(rknn_native_input_map_calls);

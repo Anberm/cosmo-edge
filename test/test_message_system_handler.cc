@@ -77,11 +77,19 @@ TEST_CASE("SystemHandler: QueryHardwareResource exposes accelerator preview tele
     CHECK(ret.resData.accelerator.mppEncodedFrames == preview.mpp_encoded_frames);
     CHECK(ret.resData.accelerator.mppDecodedFrames == preview.mpp_decoded_frames);
     CHECK(ret.resData.accelerator.mppCopyOutFrames == preview.mpp_copy_out_frames);
+    CHECK(ret.resData.accelerator.mppRgaCopyOutFrames == preview.mpp_rga_copy_out_frames);
+    CHECK(ret.resData.accelerator.mppRgaCopyInFrames == preview.mpp_rga_copy_in_frames);
     CHECK(ret.resData.accelerator.mppEarlyDroppedFrames == preview.mpp_early_dropped_frames);
     CHECK(ret.resData.accelerator.colorConvertFrames == inference.color_convert_frames);
     CHECK(ret.resData.accelerator.rknnForwards == inference.rknn_forwards);
     CHECK(ret.resData.accelerator.rknnDetectorForwards == inference.rknn_detector_forwards);
     CHECK(ret.resData.accelerator.rknnPreprocessFastHits == inference.rknn_preprocess_fast_hits);
+    CHECK(ret.resData.accelerator.rknnRgaCropResizeCalls == inference.rknn_rga_crop_resize_calls);
+    CHECK(ret.resData.accelerator.rknnRgaCropResizeFailures == inference.rknn_rga_crop_resize_failures);
+    CHECK(ret.resData.accelerator.rknnRgaCropDmaBufFrames == inference.rknn_rga_crop_dmabuf_frames);
+    CHECK(ret.resData.accelerator.rknnRgaCropHostFallbacks == inference.rknn_rga_crop_host_fallbacks);
+    CHECK(ret.resData.accelerator.rknnCpuCropResizeFallbackCalls ==
+          inference.rknn_cpu_crop_resize_fallback_calls);
     CHECK(ret.resData.accelerator.rknnOutputsReleaseCalls == inference.rknn_outputs_release_calls);
     CHECK(ret.resData.accelerator.rknnNativeInt8Outputs == inference.rknn_native_int8_outputs);
     CHECK(ret.resData.accelerator.rknnBoundInputBindAttempts == inference.rknn_bound_input_bind_attempts);

@@ -47,10 +47,12 @@ set(MEDIA_CPU_SRC
     VideoFrameProcCpu.cc         VideoFrameProcCpu.h
 )
 
-# Rockchip Copy-first backend. MPP handles H.264/H.265 decode and H.264 encode,
-# RGA handles admitted color-conversion/resize operations, and FFmpeg remains a
-# deterministic fallback. No DMA-BUF zero-copy path is compiled in this phase.
+# Rockchip hardware backend. MPP handles H.264/H.265 decode and H.264 encode,
+# RGA handles admitted color-conversion/resize operations, and the RKNN fast
+# path can bind MPP/RGA DMA-BUF inputs directly. FFmpeg and CPU transforms
+# remain explicit fault-tolerance fallbacks.
 set(MEDIA_ROCKCHIP_SRC
+    RockchipRgaBuffer.h
     VideoDecoderCpu.cc           VideoDecoderCpu.h
     VideoDecoderCreateRockchip.cc
     VideoDecoderRockchip.cc      VideoDecoderRockchip.h

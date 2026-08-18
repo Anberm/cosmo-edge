@@ -19,6 +19,8 @@ std::unique_ptr<Node> RknnNodeCreator::CreateNode(NodeType type) {
     if (RknnFastPreprocessEnabled()) {
         if (type == NODE_RESIZE)
             return std::make_unique<RknnResizeNode>();
+        if (type == NODE_CROP_RESIZE)
+            return std::make_unique<RknnCropResizeNode>();
         if (type == NODE_NORMALIZE)
             return std::make_unique<RknnNormalizeNode>();
     }

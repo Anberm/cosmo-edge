@@ -309,9 +309,6 @@ void AiDetector::HandFrames(std::vector<AlgDataPtr> alg_datas) {
     }
     action_status = detector_->Detect(images, native_buffers, confThres, detRsts);
     native_buffers.clear();
-    for (auto& alg_data : activeAlgDatas) {
-        alg_data->chanDataDec.native_buffer.reset();
-    }
     if (util::ErrorEnum::Success != action_status) {
         LOG_ERRO("{}[{} {}] Detect Failed. Ret:{} images:{} confThres:{}", kTag, name_, uuid, action_status,
                  images.size(), confThres.size());

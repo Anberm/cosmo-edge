@@ -57,6 +57,7 @@ AUTHORITY_GRANTS = {
     "device-deployment",
 }
 TPU_MLIR_OFFICIAL_REFERENCE = "https://github.com/sophgo/tpu-mlir#-installation"
+RKNN_TOOLKIT2_OFFICIAL_REFERENCE = "https://github.com/airockchip/rknn-toolkit2"
 TOOLCHAIN_PROBE_SCRIPT = r"""
 import hashlib
 import importlib
@@ -69,8 +70,10 @@ import sys
 
 package = sys.argv[1]
 tool_paths = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+family = sys.argv[3] if len(sys.argv) > 3 else "sophon"
+module_name = sys.argv[4] if len(sys.argv) > 4 else package.replace("-", "_")
 distribution = importlib.metadata.distribution(package)
-module = importlib.import_module(package.replace("-", "_"))
+module = importlib.import_module(module_name)
 bin_dir = pathlib.Path(sys.executable).absolute().parent
 
 def tool(key, names, required=True):
@@ -132,11 +135,15 @@ for path in package_root.rglob("*"):
     if target.is_file():
         item["targetSha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
     runtime_links[relative] = item
-required_runtime_links = {
-    "lib/libcmodel.so",
-    "lib/libbmlib.so",
-    "lib/libbmlib.so.0",
-}
+required_runtime_links = (
+    {
+        "lib/libcmodel.so",
+        "lib/libbmlib.so",
+        "lib/libbmlib.so.0",
+    }
+    if family == "sophon"
+    else set()
+)
 broken_required = [
     relative + " -> " + target
     for relative, target in broken_links.items()
@@ -147,7 +154,27 @@ if broken_required:
         "installed distribution has broken required links: " + "; ".join(broken_required)
     )
 
+if family == "rknn":
+    rknn_class = getattr(module, "RKNN", None)
+    if rknn_class is None:
+        raise RuntimeError("rknn.api does not expose RKNN")
+    missing_methods = [
+        name
+        for name in ("config", "load_onnx", "build", "export_rknn", "release")
+        if not callable(getattr(rknn_class, name, None))
+    ]
+    if missing_methods:
+        raise RuntimeError("RKNN API is missing methods: " + ", ".join(missing_methods))
+    tools = {}
+else:
+    tools = {
+        "modelTransform": tool("modelTransform", ["model_transform.py", "model_transform"]),
+        "modelDeploy": tool("modelDeploy", ["model_deploy.py", "model_deploy"]),
+        "modelTool": tool("modelTool", ["model_tool"], required=False),
+    }
+
 print(json.dumps({
+    "family": family,
     "pythonExecutable": str(pathlib.Path(sys.executable).absolute()),
     "pythonVersion": sys.version.split()[0],
     "sysPrefix": str(pathlib.Path(sys.prefix).absolute()),
@@ -158,11 +185,8 @@ print(json.dumps({
         "version": distribution.version,
         "recordSha256": hashlib.sha256(record.read_bytes()).hexdigest(),
     },
-    "tools": {
-        "modelTransform": tool("modelTransform", ["model_transform.py", "model_transform"]),
-        "modelDeploy": tool("modelDeploy", ["model_deploy.py", "model_deploy"]),
-        "modelTool": tool("modelTool", ["model_tool"], required=False),
-    },
+    "module": {"name": module_name, "path": str(pathlib.Path(module.__file__).resolve())},
+    "tools": tools,
     "runtimeLinks": runtime_links,
     "brokenOptionalLinks": broken_links,
 }, sort_keys=True))
@@ -483,8 +507,22 @@ def _objective_target_chip(contract: dict[str, Any]) -> str | None:
         if isinstance(mapped, str) and mapped.strip():
             return mapped.strip().lower()
     objective = str(contract.get("userObjective", ""))
-    match = re.search(r"(?i)\b((?:bm|cv)\d+[a-z0-9]*)\b", objective)
+    match = re.search(r"(?i)\b((?:bm|cv|rk|rv)\d+[a-z0-9]*)\b", objective)
     return match.group(1).lower() if match else None
+
+
+def _conversion_toolchain_family(target_chip: str | None) -> str | None:
+    """Map a target chip to its compiler family without implying product support."""
+    normalized = str(target_chip or "").strip().lower()
+    if normalized.startswith(("rk", "rv")):
+        return "rknn"
+    if normalized.startswith(("bm", "cv")):
+        return "sophon"
+    return None
+
+
+def _conversion_toolchain_label(family: str | None) -> str:
+    return "RKNN Toolkit2" if family == "rknn" else "TPU-MLIR"
 
 
 def _material_observations(contract: dict[str, Any], run_dir: Path) -> list[dict[str, Any]]:
@@ -592,18 +630,30 @@ def assess_task_report(
                 _needs_input(
                     "onnx-material",
                     "当前物料不是 ONNX。请提供可用的 ONNX，或授权智能体把“从原训练工程导出 ONNX”作为单独交付阶段评估。",
-                    "本版本只执行 ONNX 到 Sophon 产物的转换，不能把未实现的导出步骤当作已经支持。",
+                    "本版本只执行 ONNX 到目标加速器产物的转换，不能把未实现的导出步骤当作已经支持。",
                     required_before="route",
                 )
             )
 
         target_chip = _objective_target_chip(contract)
+        toolchain_family = _conversion_toolchain_family(target_chip) or (
+            "sophon" if not target_chip else None
+        )
         if not target_chip:
             needs_input.append(
                 _needs_input(
                     "target-device",
                     "请说明最终要运行模型的测试设备型号，或提供不含序列号和凭据的设备信息。",
                     "目标设备会改变产物，智能体不能仅凭示例替用户决定芯片映射。",
+                )
+            )
+        elif not toolchain_family:
+            needs_input.append(
+                _needs_input(
+                    "target-toolchain",
+                    "当前目标芯片尚未映射到仓库支持的模型编译工具链，请提供官方工具链依据或调整目标。",
+                    "未知芯片不能默认套用 Sophon 或 Rockchip 的转换路径。",
+                    required_before="route",
                 )
             )
 
@@ -616,32 +666,44 @@ def assess_task_report(
             str(environment.get("os", "")).lower() == "linux"
             and str(environment.get("architecture", "x86_64")).lower() in {"x86_64", "amd64"}
         )
-        route_candidates.append(
-            {
-                "id": "local-linux-tpu-mlir",
-                "title": "在隔离的 Linux x86_64 开发环境中使用 TPU-MLIR",
-                "eligibility": "ELIGIBLE" if linux_local else "NEEDS_ENVIRONMENT",
-                "officialReference": TPU_MLIR_OFFICIAL_REFERENCE,
-                "detail": (
-                    "当前宿主满足官方工具链的操作系统与架构方向；后续仍需 doctor 核验实际能力。"
-                    if linux_local
-                    else "当前宿主不是 Linux x86_64；这不等于 CosmoEdge 不支持 Windows，而是该 Sophon 工具链路径需要 Linux。"
-                ),
-            }
-        )
-        if not linux_local:
+        if toolchain_family:
+            route_suffix = "rknn-toolkit2" if toolchain_family == "rknn" else "tpu-mlir"
+            toolchain_label = _conversion_toolchain_label(toolchain_family)
+            official_reference = (
+                RKNN_TOOLKIT2_OFFICIAL_REFERENCE
+                if toolchain_family == "rknn"
+                else TPU_MLIR_OFFICIAL_REFERENCE
+            )
             route_candidates.append(
                 {
-                    "id": "remote-linux-tpu-mlir",
-                    "title": "从当前机器编排隔离的 Linux x86_64 开发环境",
-                    "eligibility": "ELIGIBLE" if remote_linux else "NEEDS_ENVIRONMENT",
-                    "officialReference": TPU_MLIR_OFFICIAL_REFERENCE,
-                    "detail": "当前机器可保留为材料整理和任务编排入口，转换在 Linux 开发环境执行。",
+                    "id": f"local-linux-{route_suffix}",
+                    "title": f"在隔离的 Linux x86_64 开发环境中使用 {toolchain_label}",
+                    "eligibility": "ELIGIBLE" if linux_local else "NEEDS_ENVIRONMENT",
+                    "officialReference": official_reference,
+                    "detail": (
+                        "当前宿主满足已选工具链的操作系统与架构方向；后续仍需 doctor 核验实际能力。"
+                        if linux_local
+                        else (
+                            "当前宿主不是 Linux x86_64；这不等于 CosmoEdge 不支持 Windows，而是该 Sophon 工具链路径需要 Linux。"
+                            if toolchain_family == "sophon"
+                            else f"当前宿主不是 Linux x86_64；这不等于 CosmoEdge 不支持当前宿主，而是本次 {toolchain_label} 路径在隔离 Linux 环境执行。"
+                        )
+                    ),
                 }
             )
-        recommended_route = (
-            "local-linux-tpu-mlir" if linux_local else "remote-linux-tpu-mlir"
-        )
+            if not linux_local:
+                route_candidates.append(
+                    {
+                        "id": f"remote-linux-{route_suffix}",
+                        "title": f"从当前机器编排隔离的 Linux x86_64 {toolchain_label} 环境",
+                        "eligibility": "ELIGIBLE" if remote_linux else "NEEDS_ENVIRONMENT",
+                        "officialReference": official_reference,
+                        "detail": "当前机器保留为材料整理和任务编排入口，转换在隔离 Linux 开发环境执行。",
+                    }
+                )
+            recommended_route = (
+                f"local-linux-{route_suffix}" if linux_local else f"remote-linux-{route_suffix}"
+            )
 
         required_grants: set[str] = set()
         if not linux_local and remote_linux:
@@ -663,11 +725,12 @@ def assess_task_report(
 
         if not linux_local and not remote_linux:
             verdict = "NEEDS_ENVIRONMENT"
+            toolchain_label = _conversion_toolchain_label(toolchain_family)
             needs_input.append(
                 _needs_input(
                     "linux-development-environment",
                     "请提供一台隔离的 Linux x86_64 开发环境，或允许智能体先给出可复用的 Docker/远程 Linux 准备方案；不要在生产设备上补环境。",
-                    "Sophon TPU-MLIR 的官方开发路径以 Linux 环境为基础，当前宿主只适合作为编排入口。",
+                    f"本次 {toolchain_label} 路径以隔离 Linux 环境为执行面，当前宿主只作为编排入口。",
                     category="environment",
                     required_before="doctor",
                 )
@@ -802,6 +865,12 @@ def _resolve_executable(raw_value: str) -> str | None:
 
 
 def _toolchain_spec(parameters: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    family = _conversion_toolchain_family(str(parameters.get("targetChip", ""))) or "sophon"
+    default_package = "rknn-toolkit2" if family == "rknn" else "tpu_mlir"
+    default_module = "rknn.api" if family == "rknn" else "tpu_mlir"
+    official_reference = (
+        RKNN_TOOLKIT2_OFFICIAL_REFERENCE if family == "rknn" else TPU_MLIR_OFFICIAL_REFERENCE
+    )
     raw = parameters.get("toolchain")
     if not isinstance(raw, dict):
         if "toolchain" in parameters and raw is not None:
@@ -810,23 +879,28 @@ def _toolchain_spec(parameters: dict[str, Any]) -> tuple[dict[str, Any] | None, 
         if legacy:
             return None, (
                 "parameters.toolchainImage identifies only an execution image, not the "
-                "TPU-MLIR compiler package."
+                "complete compiler package."
             )
         raw = {"kind": "auto"}
     kind = raw.get("kind", "auto")
     if kind not in TOOLCHAIN_KINDS:
         return None, "parameters.toolchain.kind must be auto, python-package, or container-image."
-    package = str(raw.get("package", "tpu_mlir")).strip()
+    package = str(raw.get("package", default_package)).strip()
     if not TOOLCHAIN_PACKAGE_PATTERN.fullmatch(package):
         return None, "parameters.toolchain.package contains unsupported characters."
+    module = str(raw.get("module", default_module)).strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", module):
+        return None, "parameters.toolchain.module must be a valid Python module name."
     version = raw.get("version")
     if version is not None and (not isinstance(version, str) or not version.strip()):
         return None, "parameters.toolchain.version must be a non-empty version requirement."
     normalized: dict[str, Any] = {
+        "family": family,
         "kind": kind,
         "package": package,
+        "module": module,
         "version": version.strip() if isinstance(version, str) else None,
-        "officialReference": TPU_MLIR_OFFICIAL_REFERENCE,
+        "officialReference": official_reference,
     }
     tool_paths = raw.get("toolPaths", {})
     if not isinstance(tool_paths, dict) or any(
@@ -866,13 +940,13 @@ def _parse_toolchain_probe(
     image: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     if process.returncode != 0:
-        return None, _last_line(process.stderr) or "TPU-MLIR package inspection failed"
+        return None, _last_line(process.stderr) or "compiler package inspection failed"
     try:
         payload = json.loads(process.stdout)
     except json.JSONDecodeError:
-        return None, "TPU-MLIR package inspection returned unreadable output"
+        return None, "compiler package inspection returned unreadable output"
     if not isinstance(payload, dict):
-        return None, "TPU-MLIR package inspection returned an invalid identity"
+        return None, "compiler package inspection returned an invalid identity"
     identity: dict[str, Any] = {"kind": kind, **payload}
     if image is not None:
         identity["image"] = image
@@ -884,6 +958,8 @@ def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | N
     package = str(specification["package"])
     expected_version = specification.get("version")
     tool_paths = json.dumps(specification.get("toolPaths", {}), sort_keys=True)
+    family = str(specification.get("family", "sophon"))
+    module = str(specification.get("module", package.replace("-", "_")))
     if specification["kind"] in {"auto", "python-package"}:
         declared = specification.get("pythonExecutable")
         candidates = [declared] if declared else [sys.executable, "python3"]
@@ -901,7 +977,7 @@ def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | N
                 continue
             seen_executables.add(executable_key)
             process = _run(
-                [executable, "-c", TOOLCHAIN_PROBE_SCRIPT, package, tool_paths],
+                [executable, "-c", TOOLCHAIN_PROBE_SCRIPT, package, tool_paths, family, module],
                 timeout=90,
             )
             identity, error = _parse_toolchain_probe(process, kind="python-package")
@@ -933,6 +1009,8 @@ def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | N
                 TOOLCHAIN_PROBE_SCRIPT,
                 package,
                 tool_paths,
+                family,
+                module,
             ],
             timeout=120,
         )
@@ -944,7 +1022,8 @@ def inspect_toolchain(specification: dict[str, Any]) -> tuple[dict[str, Any] | N
     if not identity:
         return None, error
     identity["officialReference"] = specification.get(
-        "officialReference", TPU_MLIR_OFFICIAL_REFERENCE
+        "officialReference",
+        RKNN_TOOLKIT2_OFFICIAL_REFERENCE if family == "rknn" else TPU_MLIR_OFFICIAL_REFERENCE,
     )
     actual_version = str(identity.get("package", {}).get("version", ""))
     if not _version_satisfies(actual_version, expected_version):
@@ -983,6 +1062,11 @@ def toolchain_environment(identity: dict[str, Any]) -> dict[str, str] | None:
 
 
 def _toolchain_tools_respond(identity: dict[str, Any]) -> tuple[bool, str]:
+    if identity.get("family") == "rknn":
+        module = identity.get("module", {})
+        if isinstance(module, dict) and module.get("name") == "rknn.api":
+            return True, ""
+        return False, "admitted RKNN toolchain does not expose the rknn.api module"
     failures = []
     for key in ("modelTransform", "modelDeploy"):
         tool = identity.get("tools", {}).get(key, {})
@@ -1081,7 +1165,9 @@ def _repository_compatibility_facts(project_root: Path) -> dict[str, Any]:
     header_path = project_root / "src" / "util" / "NnBackendConstants.h"
     guide_path = project_root / "docs" / "tutorials" / "05-model-porting" / "model-porting.md"
     resource_root = project_root / "data" / "resource"
+    rknn_profiles_root = project_root / "config" / "rknn" / "platforms"
     supported_chips: set[str] = set()
+    platform_profile_chips: set[str] = set()
     resource_chips: set[str] = set()
     guide_text = ""
     missing_sources: list[str] = []
@@ -1102,6 +1188,23 @@ def _repository_compatibility_facts(project_root: Path) -> dict[str, Any]:
     else:
         missing_sources.append("src/util/NnBackendConstants.h")
 
+    if rknn_profiles_root.is_dir():
+        for profile_path in rknn_profiles_root.glob("*.json"):
+            try:
+                profile = load_json(profile_path)
+            except WorkflowError:
+                continue
+            if (
+                isinstance(profile, dict)
+                and profile.get("backend") == "rknn"
+                and isinstance(profile.get("chip"), str)
+            ):
+                chip = profile["chip"].strip().upper()
+                supported_chips.add(chip)
+                platform_profile_chips.add(chip)
+    else:
+        missing_sources.append("config/rknn/platforms")
+
     if resource_root.is_dir():
         for config_path in resource_root.rglob("*.json"):
             try:
@@ -1119,6 +1222,7 @@ def _repository_compatibility_facts(project_root: Path) -> dict[str, Any]:
         missing_sources.append("model-porting guide")
     return {
         "supportedChips": supported_chips,
+        "platformProfileChips": platform_profile_chips,
         "resourceChips": resource_chips,
         "guideText": guide_text,
         "missingSources": missing_sources,
@@ -1189,16 +1293,24 @@ def compatibility_matrix_check(
     unknown = list(facts["missingSources"])
     if target not in facts["supportedChips"]:
         unknown.append(f"code support for targetChip={target}")
-    if target not in facts["resourceChips"]:
+    if _conversion_toolchain_family(target) == "rknn":
+        if target not in facts["platformProfileChips"]:
+            unknown.append(f"an RKNN platform profile for targetChip={target}")
+    elif target not in facts["resourceChips"]:
         unknown.append(f"a repository resource example for targetChip={target}")
     guide_text = facts["guideText"]
-    if target not in guide_text or not all(token in guide_text for token in (".ONNX", ".BMODEL", "MODEL.NN")):
+    required_guide_tokens = (
+        (".ONNX", ".RKNN")
+        if _conversion_toolchain_family(target) == "rknn"
+        else (".ONNX", ".BMODEL", "MODEL.NN")
+    )
+    if target not in guide_text or not all(token in guide_text for token in required_guide_tokens):
         unknown.append(f"model-porting documentation for targetChip={target} and artifact types")
     if suffix == ".bmodel" and not artifact_chip:
         unknown.append("inspected chip metadata for the .bmodel artifact")
     elif suffix == ".nn" and not artifact_chip:
         unknown.append(artifact_source or "chip_type for the model.nn artifact")
-    elif suffix not in {".onnx", ".bmodel", ".nn"}:
+    elif suffix not in {".onnx", ".bmodel", ".nn", ".rknn"}:
         unknown.append(f"repository mapping for artifact type {artifact_type}")
     if unknown:
         return _check(
@@ -1225,7 +1337,7 @@ def compatibility_matrix_check(
         "PASS",
         (
             f"targetChip={target} matches the {artifact_detail}, toolchainChip={toolchain_chip}, "
-            "and repository code, resource, and model-porting facts."
+            "and repository code, platform/resource mapping, and model-porting facts."
         ),
     )
 
@@ -1247,6 +1359,12 @@ def task_environment_report(
     inventory = host_inventory(project_root)
     params = contract.get("parameters", {})
     checks: list[dict[str, Any]] = []
+    toolchain_family = (
+        _conversion_toolchain_family(str(params.get("targetChip", "")))
+        if task == "model-conversion"
+        else None
+    )
+    toolchain_label = _conversion_toolchain_label(toolchain_family)
 
     architecture = inventory["host"]["architecture"].lower()
     host_os = str(inventory["host"]["os"])
@@ -1271,7 +1389,7 @@ def task_environment_report(
             _check(
                 "C0",
                 "FAIL",
-                f"The current host is {host_os}; the admitted Sophon conversion path executes on Linux x86_64.",
+                f"The current host is {host_os}; the admitted {toolchain_label} conversion path executes on Linux x86_64.",
                 remediation=(
                     "Keep this machine as the orchestration client and run assessment/doctor in an "
                     "isolated Linux x86_64 development environment. Windows support elsewhere in "
@@ -1407,7 +1525,7 @@ def task_environment_report(
                 _check(
                     "C5",
                     "SKIP",
-                    "TPU-MLIR capability admission is deferred to the selected Linux execution environment.",
+                    f"{toolchain_label} capability admission is deferred to the selected Linux execution environment.",
                 )
             )
         elif not toolchain_spec:
@@ -1443,7 +1561,7 @@ def task_environment_report(
                             "C5",
                             "PASS",
                             (
-                                f"Complete TPU-MLIR toolchain is frozen as {inspected['id']} "
+                                f"Complete {toolchain_label} toolchain is frozen as {inspected['id']} "
                                 f"({inspected['package']['name']} "
                                 f"{inspected['package']['version']})."
                             ),
@@ -1454,7 +1572,7 @@ def task_environment_report(
                         _check(
                             "C5",
                             "FAIL",
-                            f"TPU-MLIR package exists but its compiler commands are unusable: {tools_error}.",
+                            f"{toolchain_label} package exists but its conversion interface is unusable: {tools_error}.",
                             remediation=(
                                 "Repair or replace the isolated compiler environment; do not treat "
                                 "package files alone as READY."
@@ -1465,6 +1583,8 @@ def task_environment_report(
                     )
             else:
                 official_base_only = (
+                    toolchain_family == "sophon"
+                    and
                     toolchain_spec["kind"] == "container-image"
                     and str(toolchain_spec.get("image", "")).startswith("sophgo/tpuc_dev:")
                 )
@@ -1476,7 +1596,7 @@ def task_environment_report(
                             "The declared image is a base development environment, not a complete "
                             f"TPU-MLIR compiler: {toolchain_error}."
                             if official_base_only
-                            else f"The declared TPU-MLIR toolchain is unavailable: {toolchain_error}."
+                            else f"The declared {toolchain_label} toolchain is unavailable: {toolchain_error}."
                         ),
                         remediation=(
                             "Add and freeze the TPU-MLIR package in that environment or select an "
@@ -1752,8 +1872,14 @@ def create_task_run(
             material_paths.append(destination.relative_to(run_dir).as_posix())
 
     parameters: dict[str, Any] = {}
-    if task == "model-conversion" and len(material_paths) == 1:
-        parameters["sourceModel"] = material_paths[0]
+    if task == "model-conversion":
+        model_material_paths = [
+            path
+            for path in material_paths
+            if Path(path).suffix.lower() in {".onnx", ".pt", ".pth", ".mlir", ".bmodel", ".nn"}
+        ]
+        if len(model_material_paths) == 1:
+            parameters["sourceModel"] = model_material_paths[0]
     if target_chip:
         parameters["targetChip"] = target_chip.strip().lower()
     if remote_linux:

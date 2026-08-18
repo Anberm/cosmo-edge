@@ -4,8 +4,10 @@
   "model_type": "classify",
   "source_repository_path": "data/resource/aiboxresource_x86/models/prod_X86_7982161_helmet_V1.0.0/model.onnx",
   "source_sha256": "a0ea37d99416371c6ef073d5ac87b486b77bb822b1f8aa29f2f30a8a06c97cdd",
+  "packaging": {
+    "algorithm_code": "7982161"
+  },
   "conversion": {
-    "target_platform": "rk3576",
     "maximum_onnx_opset": 19,
     "optimization_level": 3,
     "preprocessing_owner": "host"
@@ -30,6 +32,7 @@
   ],
   "calibration": {
     "source": "person crops detected in data/test-video/Safety Helmet.mp4",
+    "person_detector_model": "yolov8",
     "minimum_samples": 32,
     "labeled": false
   },

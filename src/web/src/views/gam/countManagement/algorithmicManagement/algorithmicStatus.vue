@@ -24,30 +24,17 @@
               <span v-for="item in scope.row.envStatus.common" class="span-normal" :key="item.modelCode">{{ item.modelName }}</span>
             </template>
           </el-table-column>
-          <!-- "resData": ["nvidiaT4","nvidiaA100","ascend310"] -->
-          <el-table-column v-if="engineTypeList.includes('nvidiaT4')" :label="'nvidiaT4 ' + t('glossary.modelStatus')">
+          <el-table-column
+            v-for="engineType in engineTypeList"
+            :key="engineType"
+            :label="engineType + ' ' + t('glossary.modelStatus')"
+          >
             <template #default="scope">
-              <span v-for="item in scope.row.envStatus.nvidiaT4" :class="returnSpanStyle(item)" :key="item.modelCode">{{ item.modelName }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column v-if="engineTypeList.includes('ascend310')" :label="'ascend310 ' + t('glossary.modelStatus')">
-            <template #default="scope">
-              <span v-for="item in scope.row.envStatus.ascend310" :class="returnSpanStyle(item)" :key="item.modelCode">{{ item.modelName }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column v-if="engineTypeList.includes('nvidiaA100')" :label="'nvidiaA100 ' + t('glossary.modelStatus')">
-            <template #default="scope">
-              <span v-for="item in scope.row.envStatus.nvidiaA100" :class="returnSpanStyle(item)" :key="item.modelCode">{{ item.modelName }}</span>
-            </template>
-          </el-table-column>
-           <el-table-column v-if="engineTypeList.includes('BM1688')" :label="'BM1688 ' + t('glossary.modelStatus')">
-            <template #default="scope">
-              <span v-for="item in scope.row.envStatus.BM1688" :class="returnSpanStyle(item)" :key="item.modelCode">{{ item.modelName }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column v-if="engineTypeList.includes('RK3576')" :label="'RK3576 ' + t('glossary.modelStatus')">
-            <template #default="scope">
-              <span v-for="item in scope.row.envStatus.RK3576" :class="returnSpanStyle(item)" :key="item.modelCode">{{ item.modelName }}</span>
+              <span
+                v-for="item in (scope.row.envStatus?.[engineType] || [])"
+                :key="item.modelCode"
+                :class="returnSpanStyle(item)"
+              >{{ item.modelName }}</span>
             </template>
           </el-table-column>
         </template>

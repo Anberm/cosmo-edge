@@ -117,6 +117,53 @@ if(NOT _cosmo_nn_backend_count EQUAL 1)
     message(FATAL_ERROR "Exactly one NN backend must be enabled: Sophon, CPU, or RKNN")
 endif()
 
+# The selected inference backend is a build-wide compile contract. Business,
+# API, and utility OBJECT libraries include the same backend-aware headers as
+# the inference layer, so every project target must observe one consistent set
+# of feature macros. Chip identity remains separate build data below.
+if(COSMO_NN_USE_SOPHON_BACKEND)
+    add_compile_definitions(COSMO_NN_USE_SOPHON_BACKEND)
+elseif(COSMO_NN_USE_CPU_BACKEND)
+    add_compile_definitions(
+        COSMO_NN_USE_CPU_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_ONNX_BACKEND)
+elseif(COSMO_NN_USE_RKNN_BACKEND)
+    add_compile_definitions(
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+endif()
+
+# A target package is always chip-specific even when several chips share one
+# inference/media implementation. Keep the chip identity as build data instead
+# of spreading per-chip preprocessor branches through the RKNN backend.
+set(COSMO_TARGET_CHIP "" CACHE STRING "Target accelerator chip recorded in release packages")
+if(COSMO_TARGET_CHIP)
+    string(TOLOWER "${COSMO_TARGET_CHIP}" COSMO_TARGET_CHIP_NORMALIZED)
+    if(NOT COSMO_TARGET_CHIP_NORMALIZED MATCHES "^(bm1688|cv186x|rk3576|rv1126b|unspecified)$")
+        message(FATAL_ERROR "Unsupported COSMO_TARGET_CHIP: ${COSMO_TARGET_CHIP}")
+    endif()
+endif()
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    if(NOT COSMO_TARGET_CHIP_NORMALIZED MATCHES "^(rk3576|rv1126b)$")
+        message(FATAL_ERROR
+            "RKNN builds require COSMO_TARGET_CHIP=rk3576 or rv1126b")
+    endif()
+    string(TOUPPER "${COSMO_TARGET_CHIP_NORMALIZED}" COSMO_TARGET_CHIP_LABEL)
+    set(COSMO_PLATFORM_PROFILE
+        "${CMAKE_SOURCE_DIR}/config/rknn/platforms/${COSMO_TARGET_CHIP_NORMALIZED}.json")
+    if(NOT EXISTS "${COSMO_PLATFORM_PROFILE}")
+        message(FATAL_ERROR "RKNN platform profile not found: ${COSMO_PLATFORM_PROFILE}")
+    endif()
+    add_compile_definitions(
+        COSMO_RKNN_TARGET_CHIP="${COSMO_TARGET_CHIP_NORMALIZED}"
+        COSMO_RKNN_TARGET_CHIP_LABEL="${COSMO_TARGET_CHIP_LABEL}")
+    message(STATUS
+        "RKNN platform profile: ${COSMO_TARGET_CHIP_NORMALIZED} (${COSMO_PLATFORM_PROFILE})")
+endif()
+
 # Media acceleration is selected independently from inference. Defaults keep
 # existing builds unchanged while allowing a software media pipeline to be
 # paired with another inference backend.
@@ -136,7 +183,7 @@ option(COSMO_MEDIA_USE_SOPHON_BACKEND "Enable Sophon hardware media backend"
        ${_cosmo_media_sophon_default})
 option(COSMO_MEDIA_USE_CPU_BACKEND "Enable FFmpeg software media backend"
        ${_cosmo_media_cpu_default})
-option(COSMO_MEDIA_USE_ROCKCHIP_BACKEND "Enable Rockchip MPP/RGA Copy-first media backend"
+option(COSMO_MEDIA_USE_ROCKCHIP_BACKEND "Enable Rockchip MPP/RGA hardware media backend"
        ${_cosmo_media_rockchip_default})
 
 set(_cosmo_media_backend_count 0)
@@ -778,6 +825,24 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/netplan/
 ##########################################################
 # Packaging
 ##########################################################
+if(COSMO_NN_USE_RKNN_BACKEND AND COSMO_PACKAGE_MODELS STREQUAL "include")
+    if(NOT DEFINED RESOURCE_OVERLAY_DIR OR NOT RESOURCE_OVERLAY_DIR)
+        message(FATAL_ERROR
+            "RKNN packages that include models require RESOURCE_OVERLAY_DIR")
+    endif()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_custom_target(verify_rknn_packaging_resources ALL
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/rknn/stage_platform_resources.py"
+            --platform-profile "${COSMO_PLATFORM_PROFILE}"
+            --output-dir "${RESOURCE_OVERLAY_DIR}"
+            --verify
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Verifying target-specific RKNN resource identity and freshness"
+        VERBATIM
+    )
+endif()
+
 set(PACKAGE_PREFIX  "cosmo")
 set(PACKAGE_VERSION "V${VER_MAJOR}.${VER_MINOR}.${VER_PATCH}")
 set(PACKAGE_NAME    "${PACKAGE_PREFIX}-${PACKAGE_VERSION}")
@@ -786,18 +851,20 @@ set(PACKAGE_NAME    "${PACKAGE_PREFIX}-${PACKAGE_VERSION}")
 # convenient for automation, but it can be separated from the package during a
 # manual copy. This marker keeps such mistakes observable and prevents packages
 # for different chips from being byte-identical.
-set(COSMO_TARGET_CHIP "" CACHE STRING "Target accelerator chip recorded in release packages")
 if(COSMO_TARGET_CHIP)
-    string(TOLOWER "${COSMO_TARGET_CHIP}" COSMO_TARGET_CHIP_NORMALIZED)
-    if(NOT COSMO_TARGET_CHIP_NORMALIZED MATCHES "^(bm1688|cv186x|rk3576|unspecified)$")
-        message(FATAL_ERROR "Unsupported COSMO_TARGET_CHIP: ${COSMO_TARGET_CHIP}")
-    endif()
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/target-chip.txt"
         "${COSMO_TARGET_CHIP_NORMALIZED}\n")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/target-chip.txt"
         DESTINATION share/cosmo
         PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
     message(STATUS "Package target chip: ${COSMO_TARGET_CHIP_NORMALIZED}")
+endif()
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    install(FILES "${COSMO_PLATFORM_PROFILE}"
+        DESTINATION share/cosmo
+        RENAME platform-profile.json
+        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
 endif()
 
 # Generate and install version.txt
@@ -868,6 +935,9 @@ set(CPACK_OUTPUT_FILE_PREFIX        "${CMAKE_BINARY_DIR}/packages")
 include(CPack)
 
 set(COSMO_PACKAGE_TARGETS ${EXECUTABLE_NAME} web_frontend)
+if(TARGET verify_rknn_packaging_resources)
+    list(APPEND COSMO_PACKAGE_TARGETS verify_rknn_packaging_resources)
+endif()
 add_custom_target(package_all
     # CPack names are content-addressed only after generation. Clear artifacts
     # from an earlier profile before creating and exporting this build's output.

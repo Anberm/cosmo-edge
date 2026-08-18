@@ -300,12 +300,9 @@ int AlgDataQueueDistributor::DistributorPreparedFrame(
 
     int message_count = 0;
     for (const auto& queue : plan.queues) {
-        // Native inference buffers are released by each detector immediately
-        // after its synchronous Forward. Give parallel detector queues their
-        // own AlgData wrapper so one consumer cannot clear another consumer's
-        // borrowed DMA-BUF descriptor. VideoFrame and the native owner remain
-        // shared; the ordinary single-queue path keeps its existing allocation
-        // behavior.
+        // Give parallel detector queues their own AlgData wrapper. The native
+        // owner is shared and remains valid through downstream classifier
+        // preprocessing, while per-branch task state stays isolated.
         auto queued = converted;
         if (plan.queues.size() > 1 && converted->chanDataDec.native_buffer) {
             queued = AlgDataCopy(converted);

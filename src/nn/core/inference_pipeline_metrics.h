@@ -60,9 +60,16 @@ struct InferencePipelineMetricsSnapshot {
     uint64_t rknn_rga_fill_nanoseconds{0};
     uint64_t rknn_rga_resize_color_calls{0};
     uint64_t rknn_rga_resize_color_nanoseconds{0};
+    uint64_t rknn_rga_crop_resize_calls{0};
+    uint64_t rknn_rga_crop_resize_nanoseconds{0};
+    uint64_t rknn_rga_crop_resize_failures{0};
+    uint64_t rknn_rga_crop_dmabuf_frames{0};
+    uint64_t rknn_rga_crop_host_fallbacks{0};
     uint64_t rknn_rga_failures{0};
     uint64_t rknn_cpu_resize_fallback_calls{0};
     uint64_t rknn_cpu_resize_fallback_nanoseconds{0};
+    uint64_t rknn_cpu_crop_resize_fallback_calls{0};
+    uint64_t rknn_cpu_crop_resize_fallback_nanoseconds{0};
     uint64_t rknn_cpu_normalize_fallback_calls{0};
     uint64_t rknn_cpu_normalize_fallback_nanoseconds{0};
     uint64_t rknn_native_input_map_calls{0};
@@ -139,8 +146,11 @@ public:
     void RecordRknnPreprocessFastHit();
     void RecordRknnRgaFill(uint64_t nanoseconds);
     void RecordRknnRgaResizeColor(uint64_t nanoseconds);
+    void RecordRknnRgaCropResize(uint64_t nanoseconds, bool success);
+    void RecordRknnRgaCropSource(bool dmabuf);
     void RecordRknnRgaFailure();
     void RecordRknnCpuResizeFallback(uint64_t nanoseconds);
+    void RecordRknnCpuCropResizeFallback(uint64_t nanoseconds);
     void RecordRknnCpuNormalizeFallback(uint64_t nanoseconds);
     void RecordRknnNativeInputMap(uint64_t nanoseconds);
     void RecordRknnInputFormat(bool native_int8, bool compatibility_fallback = false,
@@ -220,9 +230,16 @@ private:
     std::atomic<uint64_t> rknn_rga_fill_nanoseconds_{0};
     std::atomic<uint64_t> rknn_rga_resize_color_calls_{0};
     std::atomic<uint64_t> rknn_rga_resize_color_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_crop_resize_calls_{0};
+    std::atomic<uint64_t> rknn_rga_crop_resize_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_rga_crop_resize_failures_{0};
+    std::atomic<uint64_t> rknn_rga_crop_dmabuf_frames_{0};
+    std::atomic<uint64_t> rknn_rga_crop_host_fallbacks_{0};
     std::atomic<uint64_t> rknn_rga_failures_{0};
     std::atomic<uint64_t> rknn_cpu_resize_fallback_calls_{0};
     std::atomic<uint64_t> rknn_cpu_resize_fallback_nanoseconds_{0};
+    std::atomic<uint64_t> rknn_cpu_crop_resize_fallback_calls_{0};
+    std::atomic<uint64_t> rknn_cpu_crop_resize_fallback_nanoseconds_{0};
     std::atomic<uint64_t> rknn_cpu_normalize_fallback_calls_{0};
     std::atomic<uint64_t> rknn_cpu_normalize_fallback_nanoseconds_{0};
     std::atomic<uint64_t> rknn_native_input_map_calls_{0};

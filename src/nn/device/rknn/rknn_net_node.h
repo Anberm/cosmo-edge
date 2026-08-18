@@ -23,8 +23,6 @@ bool IsRknnBoundInt8InputCompatible(const rknn_tensor_attr& attr, const BlobDesc
                                     std::string* reason = nullptr);
 bool IsRknnRgaBoundInputCompatible(const rknn_tensor_attr& attr, int height, int width,
                                    std::string* reason = nullptr);
-bool ConfigureRknnRgaUint8InputAttr(const rknn_tensor_attr& native_attr, int height, int width,
-                                    rknn_tensor_attr& bound_attr, std::string* reason = nullptr);
 bool CopyRknnPackedInt8Input(const int8_t* source, size_t source_bytes, int8_t* destination,
                              size_t destination_bytes, int height, int width, int channels, int width_stride,
                              std::string* reason = nullptr);
@@ -35,6 +33,7 @@ bool ConvertRknnNormalizedFloatToUint8(const float* source, size_t source_count,
                                        size_t destination_count, std::string* reason = nullptr);
 bool RequantizeRknnPackedUint8ToInt8InPlace(uint8_t* data, size_t data_bytes, int height, int width,
                                             int channels, int width_stride, std::string* reason = nullptr);
+const char* RknnRgaBoundRequantizeImplementation();
 bool RknnFastOutputEnabled();
 bool RknnDirectCandidatesEnabled();
 bool RknnBoundInputEnabled();
@@ -50,6 +49,7 @@ enum class RknnCoreMode : uint8_t {
 
 RknnCoreMode ParseRknnCoreMode(const std::string& value, bool* valid = nullptr);
 rknn_core_mask ResolveRknnCoreMask(RknnCoreMode mode, uint64_t context_sequence);
+bool ShouldConfigureRknnCoreMask(RknnCoreMode mode);
 const char* RknnCoreModeName(RknnCoreMode mode);
 
 class RknnNetNode final : public NetNode, public RknnBoundInputProvider {
@@ -71,7 +71,6 @@ private:
     enum class BoundInputMode : uint8_t {
         None = 0,
         NativeInt8,
-        RgaUint8,
         RgaNativeInt8,
     };
 

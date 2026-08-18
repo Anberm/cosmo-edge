@@ -31,7 +31,7 @@ public:
     Status Forward(std::vector<std::shared_ptr<Blob>>& bottom_blobs,
                    std::vector<std::shared_ptr<Blob>>& top_blobs) override;
 
-private:
+protected:
     Status PrepareRect(std::shared_ptr<Blob> host_rect, int image_w, int image_h);
 
     static void BilinearResize(const uint8_t* src, int src_w, int src_h, int channels, uint8_t* dst,

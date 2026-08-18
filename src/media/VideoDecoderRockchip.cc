@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <deque>
@@ -17,6 +18,7 @@
 #include <rockchip/rk_vdec_cfg.h>
 
 #include "media/PreviewPipelineMetrics.h"
+#include "media/RockchipRgaBuffer.h"
 #include "media/VideoDecoderCpu.h"
 #include "util/Log.h"
 
@@ -66,6 +68,46 @@ namespace {
         return base == MPP_FMT_YUV420P || base == MPP_FMT_YUV420SP || base == MPP_FMT_YUV420SP_VU;
     }
 
+    int ToRga420Format(MppFrameFormat format) {
+        const auto base = static_cast<RK_U32>(format) & MPP_FRAME_FMT_MASK;
+        if (base == MPP_FMT_YUV420SP) {
+            return RK_FORMAT_YCbCr_420_SP;
+        }
+        if (base == MPP_FMT_YUV420SP_VU) {
+            return RK_FORMAT_YCrCb_420_SP;
+        }
+        if (base == MPP_FMT_YUV420P) {
+            return RK_FORMAT_YCbCr_420_P;
+        }
+        return RK_FORMAT_UNKNOWN;
+    }
+
+    NativeVideoColorSpace ToNativeColorSpace(MppFrameColorSpace color_space) {
+        switch (color_space) {
+            case MPP_FRAME_SPC_BT709:
+                return NativeVideoColorSpace::Bt709;
+            case MPP_FRAME_SPC_BT470BG:
+            case MPP_FRAME_SPC_SMPTE170M:
+            case MPP_FRAME_SPC_SMPTE240M:
+                return NativeVideoColorSpace::Bt601;
+            case MPP_FRAME_SPC_BT2020_NCL:
+            case MPP_FRAME_SPC_BT2020_CL:
+                return NativeVideoColorSpace::Bt2020;
+            default:
+                return NativeVideoColorSpace::Unspecified;
+        }
+    }
+
+    NativeVideoColorRange ToNativeColorRange(MppFrameColorRange color_range) {
+        if (color_range == MPP_FRAME_RANGE_MPEG) {
+            return NativeVideoColorRange::Limited;
+        }
+        if (color_range == MPP_FRAME_RANGE_JPEG) {
+            return NativeVideoColorRange::Full;
+        }
+        return NativeVideoColorRange::Unspecified;
+    }
+
     NativeVideoBufferPtr ExportMppBuffer(const std::string& decoder_name, MppFrame frame) {
         if (!frame) {
             return nullptr;
@@ -109,6 +151,8 @@ namespace {
         result->width_stride  = static_cast<int>(horizontal_stride);
         result->height_stride = static_cast<int>(vertical_stride);
         result->format        = native_format;
+        result->color_space   = ToNativeColorSpace(mpp_frame_get_colorspace(frame));
+        result->color_range   = ToNativeColorRange(mpp_frame_get_color_range(frame));
         result->owner         = std::shared_ptr<void>(buffer, [](void* value) {
             if (value) {
                 mpp_buffer_put(static_cast<MppBuffer>(value));
@@ -117,7 +161,7 @@ namespace {
         return result;
     }
 
-    VideoFramePtr CopyMppFrame(const std::string& decoder_name, MppFrame frame) {
+    VideoFramePtr CopyMppFrameCpu(const std::string& decoder_name, MppFrame frame) {
         if (!frame) {
             return nullptr;
         }
@@ -204,6 +248,78 @@ namespace {
         return output;
     }
 
+    VideoFramePtr MaterializeMppFrame(const std::string& decoder_name, MppFrame frame) {
+        if (!frame) {
+            return nullptr;
+        }
+
+        const size_t width             = mpp_frame_get_width(frame);
+        const size_t height            = mpp_frame_get_height(frame);
+        const size_t horizontal_stride = mpp_frame_get_hor_stride(frame);
+        const size_t vertical_stride   = mpp_frame_get_ver_stride(frame);
+        const auto format              = mpp_frame_get_fmt(frame);
+        auto buffer                    = mpp_frame_get_buffer(frame);
+        const int source_format        = ToRga420Format(format);
+        if (width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 ||
+            width > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            height > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            horizontal_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            vertical_stride > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            horizontal_stride < width || vertical_stride < height || !IsCompact420Format(format) || !buffer ||
+            source_format == RK_FORMAT_UNKNOWN) {
+            GetPreviewPipelineMetrics().RecordMppRgaCopyOut(false);
+            GetPreviewPipelineMetrics().RecordMppCpuCopyOutFallback();
+            return CopyMppFrameCpu(decoder_name, frame);
+        }
+
+        auto output = std::make_shared<VideoFrame>(static_cast<int>(width), static_cast<int>(height),
+                                                   PixelFormat::PIXEL_I420);
+        if (!output || !output->Active() || !output->GetData()) {
+            GetPreviewPipelineMetrics().RecordMppRgaCopyOut(false);
+            return nullptr;
+        }
+
+        const auto rga_started = std::chrono::steady_clock::now();
+        ScopedRgaBufferHandle source_handle;
+        ScopedRgaBufferHandle target_handle(output->GetData(), output->GetSize());
+        const int source_fd = mpp_buffer_get_fd(buffer);
+        source_handle.ImportFd(source_fd, mpp_buffer_get_size(buffer));
+        IM_STATUS status = IM_STATUS_OUT_OF_MEMORY;
+        if (source_handle && target_handle) {
+            auto source = wrapbuffer_handle_t(source_handle.Get(), static_cast<int>(width),
+                                              static_cast<int>(height), static_cast<int>(horizontal_stride),
+                                              static_cast<int>(vertical_stride), source_format);
+            auto target =
+                wrapbuffer_handle_t(target_handle.Get(), static_cast<int>(width), static_cast<int>(height),
+                                    static_cast<int>(width), static_cast<int>(height), RK_FORMAT_YCbCr_420_P);
+            if (source_format == RK_FORMAT_YCbCr_420_P) {
+                const im_rect source_rect{0, 0, static_cast<int>(width), static_cast<int>(height)};
+                const im_rect target_rect = source_rect;
+                const im_rect empty_rect{};
+                const rga_buffer_t empty_buffer{};
+                status =
+                    improcess(source, target, empty_buffer, source_rect, target_rect, empty_rect, IM_SYNC);
+            } else {
+                status = imcvtcolor_t(source, target, source_format, RK_FORMAT_YCbCr_420_P,
+                                      IM_COLOR_SPACE_DEFAULT, 1);
+            }
+        }
+        const bool rga_success = RockchipRgaSucceeded(status);
+        GetPreviewPipelineMetrics().RecordRgaOperation(rga_success, ElapsedNanoseconds(rga_started));
+        GetPreviewPipelineMetrics().RecordMppRgaCopyOut(rga_success);
+        if (rga_success) {
+            return output;
+        }
+
+        static std::atomic_flag fallback_logged = ATOMIC_FLAG_INIT;
+        if (!fallback_logged.test_and_set(std::memory_order_relaxed)) {
+            LOG_WARN("{} RGA DMA-BUF materialization failed with status {} ({}); using CPU copy-out",
+                     decoder_name, status, imStrError_t(status));
+        }
+        GetPreviewPipelineMetrics().RecordMppCpuCopyOutFallback();
+        return CopyMppFrameCpu(decoder_name, frame);
+    }
+
 }  // namespace
 
 struct PendingDecodeTiming {
@@ -231,7 +347,7 @@ VideoDecoderRockchip::~VideoDecoderRockchip() {
 
 VideoDecoderCapability VideoDecoderRockchip::Probe(VideoCodecType type) {
     VideoDecoderCapability capability;
-    capability.backend        = "rockchip-copy-out";
+    capability.backend        = "rockchip-mpp-rga";
     capability.implementation = "rockchip-mpp-vpu";
 
     const auto coding = ToMppCoding(type);
@@ -250,7 +366,9 @@ VideoDecoderCapability VideoDecoderRockchip::Probe(VideoCodecType type) {
     const bool format_supported  = mpp_check_support_format(MPP_CTX_DEC, coding) == MPP_OK;
     if (device_accessible && format_supported) {
         capability.available = true;
-        capability.detail    = "MPP VPU decoder is available; decoded frames are copied out as compact I420";
+        capability.detail =
+            "MPP VPU decode and DMA-BUF export are available; selected host frames are materialized "
+            "through RGA with an observable CPU fallback";
         return capability;
     }
 
@@ -346,7 +464,7 @@ bool VideoDecoderRockchip::OpenMpp() {
         return false;
     }
 
-    // NV12 is the native RK3576 decoder output. It is deinterleaved during the
+    // NV12 is the native Rockchip decoder output. It is deinterleaved during the
     // explicit Copy-out boundary, so downstream code still receives I420.
     MppFrameFormat output_format = MPP_FMT_YUV420SP;
     ret = state_->api->control(state_->context, MPP_DEC_SET_OUTPUT_FORMAT, &output_format);
@@ -365,7 +483,8 @@ bool VideoDecoderRockchip::OpenMpp() {
     }
 
     state_->opened = true;
-    LOG_INFO("{} MPP VPU decoder opened: codec={} copy-out=I420", idx_name_, static_cast<int>(codec_type_));
+    LOG_INFO("{} MPP VPU decoder opened: codec={} materialize=RGA-I420", idx_name_,
+             static_cast<int>(codec_type_));
     return true;
 }
 
@@ -589,7 +708,7 @@ DecodedVideoFrame VideoDecoderRockchip::ReceiveMppFrame(bool& made_progress) {
         PixelFormat::PIXEL_I420,
         [holder, decoder_name, resolved_pts]() {
             const auto copy_started = std::chrono::steady_clock::now();
-            auto output             = CopyMppFrame(decoder_name, holder->frame);
+            auto output             = MaterializeMppFrame(decoder_name, holder->frame);
             if (output) {
                 output->SetFrameIndex(static_cast<uint64_t>(std::max<int64_t>(0, resolved_pts)));
             }

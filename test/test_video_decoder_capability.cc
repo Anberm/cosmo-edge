@@ -15,9 +15,9 @@ TEST_CASE("Video decoder capability uses a deterministic backend", "[media][deco
     CHECK_FALSE(h265.detail.empty());
 
 #ifdef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
-    CHECK(h264.backend == "rockchip-copy-out");
+    CHECK(h264.backend == "rockchip-mpp-rga");
     CHECK(h264.implementation == "rockchip-mpp-vpu");
-    CHECK(h265.backend == "rockchip-copy-out");
+    CHECK(h265.backend == "rockchip-mpp-rga");
     CHECK(h265.implementation == "rockchip-mpp-vpu");
 #elif defined(COSMO_MEDIA_USE_SOPHON_BACKEND)
     CHECK(h264.backend == "sophon-vpu");

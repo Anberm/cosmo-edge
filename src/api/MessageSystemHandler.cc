@@ -23,6 +23,7 @@
 #include "util/FileUtil.h"
 #include "util/FormatString.h"
 #include "util/Log.h"
+#include "util/NnBackendConstants.h"
 #include "util/UuidUtil.h"
 
 namespace cosmo {
@@ -90,6 +91,9 @@ System::MsgQueryDeviceInfoSend MessageSystemHandler::Handle(System::MsgQueryDevi
     System::MsgQueryDeviceInfoSend retData{};
     auto info = device_info_.GetDeviceInfo();
     retData.resData.devInfoList.push_back({"deviceType", "设备型号", info.devModel});
+    retData.resData.devInfoList.push_back({"acceleratorBackend", "推理后端", cosmo::util::kBackendType});
+    retData.resData.devInfoList.push_back(
+        {"rkllmAvailable", "RKLLM能力", cosmo::util::kSupportsRkllm ? "true" : "false"});
     retData.resData.devInfoList.push_back({"hardwareVersion", "固件版本", info.devVersion});
     retData.resData.devInfoList.push_back({"softwareVersion", "软件版本", info.softwareVersion});
     retData.resData.devInfoList.push_back({"deviceSn", "设备SN", info.devSn});
@@ -155,6 +159,12 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.mppCopyOutFrames                = preview.mpp_copy_out_frames;
     accelerator.mppCopyOutMs                    = preview.mpp_copy_out_nanoseconds / 1000000.0;
     accelerator.mppCopyOutFailures              = preview.mpp_copy_out_failures;
+    accelerator.mppRgaCopyOutFrames             = preview.mpp_rga_copy_out_frames;
+    accelerator.mppRgaCopyOutFailures           = preview.mpp_rga_copy_out_failures;
+    accelerator.mppCpuCopyOutFallbacks          = preview.mpp_cpu_copy_out_fallbacks;
+    accelerator.mppRgaCopyInFrames              = preview.mpp_rga_copy_in_frames;
+    accelerator.mppRgaCopyInFailures            = preview.mpp_rga_copy_in_failures;
+    accelerator.mppCpuCopyInFallbacks           = preview.mpp_cpu_copy_in_fallbacks;
     accelerator.mppEarlyDroppedFrames           = preview.mpp_early_dropped_frames;
     const auto inference                        = nn::GetInferencePipelineMetrics().Snapshot();
     accelerator.colorConvertFrames              = inference.color_convert_frames;
@@ -201,16 +211,23 @@ System::MsgQueryHardwareResourceSend MessageSystemHandler::Handle(
     accelerator.rknnDetectorOutputTransformCalls = inference.rknn_detector_output_transform_calls;
     accelerator.rknnDetectorOutputTransformMs =
         inference.rknn_detector_output_transform_nanoseconds / 1000000.0;
-    accelerator.rknnDetectorMutexWaitCalls    = inference.rknn_detector_mutex_wait_calls;
-    accelerator.rknnDetectorMutexWaitMs       = inference.rknn_detector_mutex_wait_nanoseconds / 1000000.0;
-    accelerator.rknnPreprocessFastHits        = inference.rknn_preprocess_fast_hits;
-    accelerator.rknnRgaFillCalls              = inference.rknn_rga_fill_calls;
-    accelerator.rknnRgaFillMs                 = inference.rknn_rga_fill_nanoseconds / 1000000.0;
-    accelerator.rknnRgaResizeColorCalls       = inference.rknn_rga_resize_color_calls;
-    accelerator.rknnRgaResizeColorMs          = inference.rknn_rga_resize_color_nanoseconds / 1000000.0;
-    accelerator.rknnRgaFailures               = inference.rknn_rga_failures;
-    accelerator.rknnCpuResizeFallbackCalls    = inference.rknn_cpu_resize_fallback_calls;
-    accelerator.rknnCpuResizeFallbackMs       = inference.rknn_cpu_resize_fallback_nanoseconds / 1000000.0;
+    accelerator.rknnDetectorMutexWaitCalls     = inference.rknn_detector_mutex_wait_calls;
+    accelerator.rknnDetectorMutexWaitMs        = inference.rknn_detector_mutex_wait_nanoseconds / 1000000.0;
+    accelerator.rknnPreprocessFastHits         = inference.rknn_preprocess_fast_hits;
+    accelerator.rknnRgaFillCalls               = inference.rknn_rga_fill_calls;
+    accelerator.rknnRgaFillMs                  = inference.rknn_rga_fill_nanoseconds / 1000000.0;
+    accelerator.rknnRgaResizeColorCalls        = inference.rknn_rga_resize_color_calls;
+    accelerator.rknnRgaResizeColorMs           = inference.rknn_rga_resize_color_nanoseconds / 1000000.0;
+    accelerator.rknnRgaCropResizeCalls         = inference.rknn_rga_crop_resize_calls;
+    accelerator.rknnRgaCropResizeMs            = inference.rknn_rga_crop_resize_nanoseconds / 1000000.0;
+    accelerator.rknnRgaCropResizeFailures      = inference.rknn_rga_crop_resize_failures;
+    accelerator.rknnRgaCropDmaBufFrames        = inference.rknn_rga_crop_dmabuf_frames;
+    accelerator.rknnRgaCropHostFallbacks       = inference.rknn_rga_crop_host_fallbacks;
+    accelerator.rknnRgaFailures                = inference.rknn_rga_failures;
+    accelerator.rknnCpuResizeFallbackCalls     = inference.rknn_cpu_resize_fallback_calls;
+    accelerator.rknnCpuResizeFallbackMs        = inference.rknn_cpu_resize_fallback_nanoseconds / 1000000.0;
+    accelerator.rknnCpuCropResizeFallbackCalls = inference.rknn_cpu_crop_resize_fallback_calls;
+    accelerator.rknnCpuCropResizeFallbackMs = inference.rknn_cpu_crop_resize_fallback_nanoseconds / 1000000.0;
     accelerator.rknnCpuNormalizeFallbackCalls = inference.rknn_cpu_normalize_fallback_calls;
     accelerator.rknnCpuNormalizeFallbackMs    = inference.rknn_cpu_normalize_fallback_nanoseconds / 1000000.0;
     accelerator.rknnNativeInputMapCalls       = inference.rknn_native_input_map_calls;

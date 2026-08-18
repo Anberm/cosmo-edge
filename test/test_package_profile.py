@@ -9,6 +9,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tarfile
@@ -406,6 +407,9 @@ class PackageProfileTests(unittest.TestCase):
         )
         build = (REPOSITORY / "scripts/build_rknn.sh").read_text(encoding="utf-8")
         cmake = (REPOSITORY / "cmake/rkllm.cmake").read_text(encoding="utf-8")
+        media_cmake = (REPOSITORY / "cmake/rockchip_media.cmake").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn(
             "image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:"
@@ -419,9 +423,84 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
         self.assertIn("install_rkllm_sdk.py", dockerfile)
         self.assertIn('lib/librkllmrt.so LICENSE', build)
-        self.assertIn("-DCOSMO_TARGET_CHIP=rk3576", build)
+        self.assertIn('-DCOSMO_TARGET_CHIP="${TARGET_CHIP}"', build)
+        self.assertIn('[-c rk3576|rv1126b]', build)
         self.assertIn('-DCOSMO_RKLLM_REQUIRED="${RKLLM_REQUIRED}"', build)
         self.assertIn('set(RKLLM_RUNTIME_LICENSE "${COSMO_RKLLM_ROOT}/LICENSE")', cmake)
+        self.assertIn("media_sysroot_lock.py", build)
+        self.assertIn("rockchip-media-manifest.json", media_cmake)
+
+    def test_rknn_platform_profiles_share_backend_and_separate_artifacts(self) -> None:
+        rk3576 = json.loads(
+            (REPOSITORY / "config/rknn/platforms/rk3576.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        rv1126b = json.loads(
+            (REPOSITORY / "config/rknn/platforms/rv1126b.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        toolchain_lock = json.loads(
+            (REPOSITORY / "config/rknn/toolchain-lock.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for profile, chip in ((rk3576, "rk3576"), (rv1126b, "rv1126b")):
+            self.assertEqual(profile["backend"], "rknn")
+            self.assertEqual(profile["chip"], chip)
+            self.assertEqual(profile["conversion"]["target_platform"], chip)
+            self.assertTrue(profile["media"]["cpu_fallback"])
+            self.assertEqual(profile["media"]["default_backend"], "rockchip")
+            self.assertEqual(
+                profile["media"]["runtime_lock"],
+                "../../rockchip-media/runtime-lock.json",
+            )
+            self.assertTrue(profile["qualification"]["requires_target_bound_evidence"])
+            self.assertEqual(
+                profile["qualification"]["status"],
+                toolchain_lock["qualification"][chip]["status"],
+            )
+        self.assertNotEqual(
+            rk3576["media"]["runtime_profile"],
+            rv1126b["media"]["runtime_profile"],
+        )
+        self.assertNotEqual(
+            rk3576["packaging"]["legacy_models_directory"],
+            rv1126b["packaging"]["legacy_models_directory"],
+        )
+
+    def test_shared_rknn_and_rockchip_sources_do_not_fork_by_chip(self) -> None:
+        source_roots = (
+            REPOSITORY / "src/nn/device/rknn",
+            REPOSITORY / "src/media",
+        )
+        chip_pattern = re.compile(r"\b(?:rk3576|rv1126b)\b", re.IGNORECASE)
+        source_files = sorted(
+            path
+            for root in source_roots
+            for path in root.rglob("*")
+            if path.suffix in {".cc", ".cpp", ".h", ".hpp"}
+        )
+
+        self.assertTrue(source_files)
+        for path in source_files:
+            relative = path.relative_to(REPOSITORY)
+            self.assertIsNone(
+                chip_pattern.search(path.name),
+                f"chip-specific backend source file is not allowed: {relative}",
+            )
+            source = path.read_text(encoding="utf-8")
+            code_without_comments = re.sub(
+                r"//.*?$|/\*.*?\*/",
+                "",
+                source,
+                flags=re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNone(
+                chip_pattern.search(code_without_comments),
+                f"chip-specific backend branching must move to platform data: {relative}",
+            )
 
 
 if __name__ == "__main__":

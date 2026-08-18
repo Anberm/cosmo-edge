@@ -107,7 +107,9 @@ python tools/rknn/prepare_validation_data.py \
   --output-dir yolov8-calibration --samples 32
 
 python tools/rknn/convert_model.py \
-  --spec config/rknn/models/yolov8.json --model yolov8-heads.onnx \
+  --spec config/rknn/models/yolov8.json \
+  --platform-profile config/rknn/platforms/rk3576.json \
+  --model yolov8-heads.onnx \
   --output yolov8-heads-int8.rknn --quantize \
   --dataset yolov8-calibration/dataset.txt
 ```

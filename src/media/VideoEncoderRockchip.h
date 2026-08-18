@@ -9,11 +9,11 @@ namespace cosmo::media {
 class VideoEncoderCpu;
 struct RockchipEncoderState;
 
-/// Rockchip MPP encoder with a bounded host-to-MPP copy boundary.
+/// Shared Rockchip MPP encoder with an RGA-backed host-to-DMA boundary.
 ///
 /// The caller still owns compact I420 host memory. Each frame is copied into a
-/// reusable, stride-aligned MPP buffer before hardware encoding. DMA-BUF
-/// zero-copy ownership is intentionally outside this phase.
+/// reusable, stride-aligned MPP DMA-BUF through RGA before hardware encoding.
+/// A measured CPU fallback remains available for unsupported RGA layouts.
 class VideoEncoderRockchip final : public VideoEncoder {
 public:
     VideoEncoderRockchip();

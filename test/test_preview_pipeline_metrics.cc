@@ -18,6 +18,12 @@ TEST_CASE("Preview pipeline metrics expose lifecycle and stage timings", "[media
     metrics.RecordMppDecodeFallback();
     metrics.RecordMppCopyOut(true, 11'000'000);
     metrics.RecordMppCopyOut(false, 12'000'000);
+    metrics.RecordMppRgaCopyOut(true);
+    metrics.RecordMppRgaCopyOut(false);
+    metrics.RecordMppCpuCopyOutFallback();
+    metrics.RecordMppRgaCopyIn(true);
+    metrics.RecordMppRgaCopyIn(false);
+    metrics.RecordMppCpuCopyInFallback();
     metrics.RecordMppEarlyDrop();
     metrics.PreviewFailed();
 
@@ -48,6 +54,12 @@ TEST_CASE("Preview pipeline metrics expose lifecycle and stage timings", "[media
     CHECK(during.mpp_copy_out_frames == 1);
     CHECK(during.mpp_copy_out_nanoseconds == 11'000'000);
     CHECK(during.mpp_copy_out_failures == 1);
+    CHECK(during.mpp_rga_copy_out_frames == 1);
+    CHECK(during.mpp_rga_copy_out_failures == 1);
+    CHECK(during.mpp_cpu_copy_out_fallbacks == 1);
+    CHECK(during.mpp_rga_copy_in_frames == 1);
+    CHECK(during.mpp_rga_copy_in_failures == 1);
+    CHECK(during.mpp_cpu_copy_in_fallbacks == 1);
     CHECK(during.mpp_early_dropped_frames == 1);
 
     metrics.PreviewStopped(false);

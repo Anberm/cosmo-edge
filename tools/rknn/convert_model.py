@@ -30,6 +30,11 @@ def require_success(code: int, action: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--spec", required=True, type=Path)
+    parser.add_argument(
+        "--platform-profile",
+        type=Path,
+        help="RKNN platform profile; supplies the chip-specific target_platform",
+    )
     parser.add_argument("--model", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--dataset", type=Path, help="RKNN calibration dataset list")
@@ -40,11 +45,14 @@ def main() -> int:
     args = parser.parse_args()
 
     spec_path = args.spec.resolve()
+    platform_profile_path = args.platform_profile.resolve() if args.platform_profile else None
     model_path = args.model.resolve()
     output_path = args.output.resolve()
     report_path = (args.report or output_path.with_suffix(output_path.suffix + ".build.json")).resolve()
     if not spec_path.is_file() or not model_path.is_file():
         parser.error("--spec and --model must be existing files")
+    if platform_profile_path is not None and not platform_profile_path.is_file():
+        parser.error("--platform-profile must be an existing file")
     if args.quantize and (args.dataset is None or not args.dataset.is_file()):
         parser.error("--quantize requires an existing --dataset list")
     if not args.quantize and args.dataset is not None:
@@ -54,6 +62,25 @@ def main() -> int:
             parser.error(f"refusing to overwrite {candidate}; pass --force")
 
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    conversion = spec["conversion"]
+    profile = None
+    if platform_profile_path is not None:
+        profile = json.loads(platform_profile_path.read_text(encoding="utf-8"))
+        if profile.get("backend") != "rknn":
+            raise RuntimeError("platform profile backend must be rknn")
+        target_platform = profile.get("conversion", {}).get("target_platform")
+        if not isinstance(target_platform, str) or not target_platform:
+            raise RuntimeError("platform profile must define conversion.target_platform")
+        legacy_target = conversion.get("target_platform")
+        if legacy_target and legacy_target != target_platform:
+            raise RuntimeError(
+                f"model spec target_platform={legacy_target} conflicts with platform profile "
+                f"target_platform={target_platform}"
+            )
+    else:
+        target_platform = conversion.get("target_platform")
+        if not isinstance(target_platform, str) or not target_platform:
+            parser.error("--platform-profile is required when the model spec is target-independent")
     expected_hash = spec["conversion"].get("input_sha256", spec.get("source_sha256"))
     actual_hash = sha256(model_path)
     if expected_hash and actual_hash != expected_hash:
@@ -83,7 +110,6 @@ def main() -> int:
     if spec["conversion"].get("preprocessing_owner") != "host":
         raise RuntimeError("P0-P4 contract requires preprocessing_owner=host")
 
-    conversion = spec["conversion"]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rknn = RKNN(verbose=args.verbose)
     try:
@@ -91,7 +117,7 @@ def main() -> int:
         # NCHW float tensors and must remain the single preprocessing owner.
         require_success(
             rknn.config(
-                target_platform=conversion["target_platform"],
+                target_platform=target_platform,
                 optimization_level=int(conversion["optimization_level"]),
             ),
             "rknn.config",
@@ -111,6 +137,15 @@ def main() -> int:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "rknn_toolkit2_version": importlib.metadata.version("rknn-toolkit2"),
         "spec": {"path": str(spec_path), "sha256": sha256(spec_path)},
+        "platform_profile": (
+            {
+                "path": str(platform_profile_path),
+                "sha256": sha256(platform_profile_path),
+                "chip": profile.get("chip"),
+            }
+            if platform_profile_path is not None and profile is not None
+            else None
+        ),
         "source": {
             "path": str(model_path),
             "sha256": actual_hash,
@@ -119,7 +154,7 @@ def main() -> int:
             "outputs": [item.name for item in model.graph.output],
         },
         "build": {
-            "target_platform": conversion["target_platform"],
+            "target_platform": target_platform,
             "optimization_level": conversion["optimization_level"],
             "quantized": args.quantize,
             "dataset": str(args.dataset.resolve()) if args.dataset else None,

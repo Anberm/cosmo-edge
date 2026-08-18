@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,9 +69,9 @@ void Check(int result, const std::string& action) {
     }
 }
 
-rknn_core_mask ParseCoreMask(const std::string& value) {
+std::optional<rknn_core_mask> ParseCoreMask(const std::string& value) {
     if (value == "auto")
-        return RKNN_NPU_CORE_AUTO;
+        return std::nullopt;
     if (value == "0")
         return RKNN_NPU_CORE_0;
     if (value == "1")
@@ -182,7 +183,9 @@ int main(int argc, char** argv) {
         Check(rknn_init(context.Out(), const_cast<std::uint8_t*>(model.data()),
                         static_cast<std::uint32_t>(model.size()), 0, nullptr),
               "rknn_init");
-        Check(rknn_set_core_mask(context.Get(), core_mask), "rknn_set_core_mask");
+        if (core_mask) {
+            Check(rknn_set_core_mask(context.Get(), *core_mask), "rknn_set_core_mask");
+        }
 
         rknn_sdk_version version{};
         Check(rknn_query(context.Get(), RKNN_QUERY_SDK_VERSION, &version, sizeof(version)),

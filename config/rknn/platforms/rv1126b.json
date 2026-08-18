@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "chip": "rv1126b",
+  "display_name": "RV1126B",
+  "backend": "rknn",
+  "toolchain_lock": "../toolchain-lock.json",
+  "conversion": {
+    "target_platform": "rv1126b"
+  },
+  "runtime": {
+    "architecture": "aarch64",
+    "default_core_mode": "auto"
+  },
+  "media": {
+    "default_backend": "rockchip",
+    "cpu_fallback": true,
+    "runtime_lock": "../../rockchip-media/runtime-lock.json",
+    "runtime_profile": "mpp-1.1.0-rga-1.10.6",
+    "require_sealed_sysroot": true
+  },
+  "packaging": {
+    "directory_token": "RV1126B",
+    "resource_template_directory": "data/resource/aiboxresource_rknn",
+    "resource_overlay_directory": "output/platform-artifacts/rv1126b/resource-overlay",
+    "resource_manifest_required": true,
+    "legacy_models_directory": "output/platform-artifacts/rv1126b/resource-overlay/models"
+  },
+  "device": {
+    "compatible_tokens": ["rv1126b"]
+  },
+  "qualification": {
+    "status": "candidate-validated",
+    "requires_target_bound_evidence": true
+  }
+}

@@ -125,6 +125,18 @@ util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
             handle.native_image.height        = native.height;
             handle.native_image.width_stride  = native.width_stride;
             handle.native_image.height_stride = native.height_stride;
+            if (native.color_space == media::NativeVideoColorSpace::Bt601) {
+                handle.native_image.color_space = cosmo::nn::NativeImageColorSpace::Bt601;
+            } else if (native.color_space == media::NativeVideoColorSpace::Bt709) {
+                handle.native_image.color_space = cosmo::nn::NativeImageColorSpace::Bt709;
+            } else if (native.color_space == media::NativeVideoColorSpace::Bt2020) {
+                handle.native_image.color_space = cosmo::nn::NativeImageColorSpace::Bt2020;
+            }
+            if (native.color_range == media::NativeVideoColorRange::Limited) {
+                handle.native_image.color_range = cosmo::nn::NativeImageColorRange::Limited;
+            } else if (native.color_range == media::NativeVideoColorRange::Full) {
+                handle.native_image.color_range = cosmo::nn::NativeImageColorRange::Full;
+            }
             if (native.format == media::NativeVideoBufferFormat::NV12) {
                 handle.native_image.format = cosmo::nn::IMAGE_NV12;
             } else if (native.format == media::NativeVideoBufferFormat::I420) {

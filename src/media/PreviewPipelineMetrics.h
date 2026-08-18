@@ -33,6 +33,12 @@ struct PreviewPipelineMetricsSnapshot {
     uint64_t mpp_copy_out_frames{0};
     uint64_t mpp_copy_out_nanoseconds{0};
     uint64_t mpp_copy_out_failures{0};
+    uint64_t mpp_rga_copy_out_frames{0};
+    uint64_t mpp_rga_copy_out_failures{0};
+    uint64_t mpp_cpu_copy_out_fallbacks{0};
+    uint64_t mpp_rga_copy_in_frames{0};
+    uint64_t mpp_rga_copy_in_failures{0};
+    uint64_t mpp_cpu_copy_in_fallbacks{0};
     uint64_t mpp_early_dropped_frames{0};
 };
 
@@ -50,6 +56,10 @@ public:
     void RecordMppDecode(bool success, uint64_t nanoseconds);
     void RecordMppDecodeFallback();
     void RecordMppCopyOut(bool success, uint64_t nanoseconds);
+    void RecordMppRgaCopyOut(bool success);
+    void RecordMppCpuCopyOutFallback();
+    void RecordMppRgaCopyIn(bool success);
+    void RecordMppCpuCopyInFallback();
     void RecordMppEarlyDrop();
 
     [[nodiscard]] PreviewPipelineMetricsSnapshot Snapshot() const;
@@ -82,6 +92,12 @@ private:
     std::atomic<uint64_t> mpp_copy_out_frames_{0};
     std::atomic<uint64_t> mpp_copy_out_nanoseconds_{0};
     std::atomic<uint64_t> mpp_copy_out_failures_{0};
+    std::atomic<uint64_t> mpp_rga_copy_out_frames_{0};
+    std::atomic<uint64_t> mpp_rga_copy_out_failures_{0};
+    std::atomic<uint64_t> mpp_cpu_copy_out_fallbacks_{0};
+    std::atomic<uint64_t> mpp_rga_copy_in_frames_{0};
+    std::atomic<uint64_t> mpp_rga_copy_in_failures_{0};
+    std::atomic<uint64_t> mpp_cpu_copy_in_fallbacks_{0};
     std::atomic<uint64_t> mpp_early_dropped_frames_{0};
 };
 
