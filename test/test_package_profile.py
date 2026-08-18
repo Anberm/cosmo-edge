@@ -192,6 +192,16 @@ class PackageProfileTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("build_npm_dependencies.sh", web_cmake)
+        self.assertIn("set(WEB_ENTRY", web_cmake)
+        self.assertIn("OUTPUT  ${WEB_ENTRY}", web_cmake)
+        self.assertIn(
+            "add_custom_target(web_frontend ALL DEPENDS ${WEB_ENTRY})", web_cmake
+        )
+        self.assertIn(
+            "add_dependencies(web_frontend ${EXECUTABLE_NAME})", web_cmake
+        )
+        self.assertNotIn("WEB_STAMP", web_cmake)
+        self.assertNotIn("web_unified.stamp", web_cmake)
 
         for compose_name in ("docker-compose.sophon.yml", "docker-compose.rk3576.yml"):
             compose = (REPOSITORY / compose_name).read_text(encoding="utf-8")

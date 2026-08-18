@@ -6,7 +6,7 @@ find_program(BASH_EXECUTABLE bash REQUIRED)
 set(WEB_BUILD_DIR ${CMAKE_BINARY_DIR}/web)
 set(WEB_SRC_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/src/web)
 set(WEB_STAGE_DIR ${WEB_BUILD_DIR}/web_unified)
-set(WEB_STAMP     ${WEB_BUILD_DIR}/web_unified.stamp)
+set(WEB_ENTRY     ${WEB_STAGE_DIR}/dist/index.html)
 if(DEFINED RESOURCE_DIR AND NOT "${RESOURCE_DIR}" STREQUAL "")
     set(WEB_RESOURCE_DIR ${RESOURCE_DIR})
 else()
@@ -35,7 +35,7 @@ list(APPEND WEB_SRC_FILES
 file(MAKE_DIRECTORY ${WEB_BUILD_DIR})
 
 add_custom_command(
-    OUTPUT  ${WEB_STAMP}
+    OUTPUT  ${WEB_ENTRY}
     DEPENDS ${WEB_SRC_FILES}
     COMMAND ${CMAKE_COMMAND} -E remove_directory "${WEB_STAGE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${WEB_STAGE_DIR}"
@@ -56,9 +56,10 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E chdir "${WEB_STAGE_DIR}"
             ${CMAKE_COMMAND} -E env "COSMO_REPO_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
             ${NPM_EXECUTABLE} run build
-    COMMAND ${CMAKE_COMMAND} -E touch "${WEB_STAMP}"
     COMMENT "Building unified web frontend (Vue 3 + Vite)..."
     VERBATIM
 )
-add_custom_target(web_frontend ALL DEPENDS ${WEB_STAMP})
+add_custom_target(web_frontend ALL DEPENDS ${WEB_ENTRY})
+# Serialize the frontend after the engine so compiler and npm/Vite output do
+# not interleave in canonical package-build logs.
 add_dependencies(web_frontend ${EXECUTABLE_NAME})
