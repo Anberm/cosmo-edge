@@ -2,8 +2,8 @@
 title: API Fields
 description: Field-level references for common responses, events, system integration parameters, and route fields verified from the current source.
 prev:
-  text: API Overview
-  link: /en/reference/api
+  text: Image Detection API Integration
+  link: /en/reference/image-detection-api
 next:
   text: MQTT Reference
   link: /en/reference/mqtt

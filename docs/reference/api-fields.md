@@ -2,8 +2,8 @@
 title: 字段级 API 参考
 description: 当前源码中可确认的通用字段、事件字段、系统集成参数和接口路由字段说明。
 prev:
-  text: API 概览
-  link: /reference/api
+  text: 图片检测 API 接入指南
+  link: /reference/image-detection-api
 next:
   text: MQTT 接入参考
   link: /reference/mqtt

@@ -5,13 +5,13 @@ prev:
   text: Architecture Overview
   link: /en/guide/architecture
 next:
-  text: API Fields
-  link: /en/reference/api-fields
+  text: Image Detection API Integration
+  link: /en/reference/image-detection-api
 ---
 
 # API Overview
 
-This page only documents the API categories and entry points that can be verified from the current source tree. For field-level interface details, continue with [API Fields](api-fields.md), [MQTT Reference](mqtt.md), and [HTTP Webhook Reference](webhook.md).
+This page only documents the API categories and entry points that can be verified from the current source tree. For the complete upload and synchronous inference flow, continue with [Image Detection API Integration](image-detection-api.md). For other field-level details, see [API Fields](api-fields.md), [MQTT Reference](mqtt.md), and [HTTP Webhook Reference](webhook.md).
 
 ## Route Entry Points
 

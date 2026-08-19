@@ -14,6 +14,7 @@ const guideZh = [
 
 const referenceZh = [
   { text: 'API 概览', link: '/reference/api' },
+  { text: '图片检测 API 接入', link: '/reference/image-detection-api' },
   { text: '字段级 API 参考', link: '/reference/api-fields' },
   { text: 'MQTT 接入参考', link: '/reference/mqtt' },
   { text: 'HTTP Webhook 参考', link: '/reference/webhook' },
@@ -83,6 +84,7 @@ const guideEn = [
 
 const referenceEn = [
   { text: 'API Overview', link: '/en/reference/api' },
+  { text: 'Image Detection API', link: '/en/reference/image-detection-api' },
   { text: 'API Fields', link: '/en/reference/api-fields' },
   { text: 'MQTT Reference', link: '/en/reference/mqtt' },
   { text: 'HTTP Webhook Reference', link: '/en/reference/webhook' },
