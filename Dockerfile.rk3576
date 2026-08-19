@@ -3,7 +3,7 @@
 # Deprecated compatibility shim. Build and publish the shared image from
 # Dockerfile.rockchip; this file intentionally contains no chip-specific SDK
 # installation logic.
-ARG ROCKCHIP_BUILDER_IMAGE=cosmo-edge-build-env-rockchip:local
+ARG ROCKCHIP_BUILDER_IMAGE=ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rockchip@sha256:0810c23042cbe86d3a1c91f848b9849a34d94222f3ad7b7418913a26da19e71b
 FROM ${ROCKCHIP_BUILDER_IMAGE}
 
 LABEL io.cosmo.compatibility.entry="Dockerfile.rk3576" \

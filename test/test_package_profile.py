@@ -558,6 +558,9 @@ class PackageProfileTests(unittest.TestCase):
         compatibility_compose = (
             REPOSITORY / "docker-compose.rk3576.yml"
         ).read_text(encoding="utf-8")
+        compatibility_dockerfile = (REPOSITORY / "Dockerfile.rk3576").read_text(
+            encoding="utf-8"
+        )
         dockerfile = (REPOSITORY / "Dockerfile.rockchip").read_text(
             encoding="utf-8"
         )
@@ -582,9 +585,14 @@ class PackageProfileTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn(
-            "cosmo-edge-build-env-rockchip:local",
-            compose,
+        pinned_builder = (
+            "ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rockchip@sha256:"
+            "0810c23042cbe86d3a1c91f848b9849a34d94222f3ad7b7418913a26da19e71b"
+        )
+        self.assertIn(pinned_builder, compose)
+        self.assertIn(pinned_builder, compatibility_dockerfile)
+        self.assertFalse(
+            (REPOSITORY / ".github/workflows/ci-build-rk3576.yml").exists()
         )
         self.assertIn("scripts/build_rockchip_package.sh", compose)
         self.assertIn("COSMO_TARGET_CHIP", compose)
