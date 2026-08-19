@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the pinned Rockchip RKLLM runtime used by the RK3576 builder."""
+"""Install the pinned RKLLM runtime used by the shared Rockchip builder."""
 
 from __future__ import annotations
 
@@ -35,7 +35,9 @@ FILES = {
 
 
 def download(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "cosmo-edge-rk3576-builder"})
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "cosmo-edge-rockchip-builder"}
+    )
     last_error: Exception | None = None
     for attempt in range(1, 4):
         try:

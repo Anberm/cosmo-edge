@@ -23,6 +23,19 @@ class MediaSysrootError(RuntimeError):
     """Raised when a Rockchip media sysroot violates its selected lock."""
 
 
+def manifest_created_at() -> str:
+    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if source_date_epoch is None:
+        return datetime.now(timezone.utc).isoformat()
+    try:
+        timestamp = int(source_date_epoch)
+    except ValueError as error:
+        raise MediaSysrootError("SOURCE_DATE_EPOCH must be an integer") from error
+    if timestamp < 0:
+        raise MediaSysrootError("SOURCE_DATE_EPOCH must not be negative")
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -218,7 +231,7 @@ def seal_sysroot(
     manifest = {
         "schema_version": 1,
         "runtime_profile": runtime_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": manifest_created_at(),
         "sources": runtime["sources"],
         **inspected,
     }

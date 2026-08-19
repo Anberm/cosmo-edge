@@ -135,19 +135,20 @@ labeled precision/recall/F1 acceptance set.
 
 ## Build and Deployment
 
-The public build uses a digest-pinned final image with RKLLM Runtime v1.3.0
-from a pinned official Rockchip commit. The environment contains the
-aarch64 toolchain, RKNN Runtime, RKLLM Runtime, MPP, and RGA development files.
+The public build uses the digest-pinned shared Rockchip image. It maintains one
+aarch64 toolchain and RKNN Runtime, then selects the isolated RK3576 MPP/RGA
+profile. RKLLM Runtime v1.3.0 comes from a pinned official Rockchip commit.
 The base resource directory supplies common actions, layouts, and fonts; the
 RKNN resource directory supplies the RK3576 algorithms and models.
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rockchip.yml pull cosmo-rockchip-package
+COSMO_TARGET_CHIP=rk3576 ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
 
-The base image and pinned official RKLLM files are public and require no
+The shared image and pinned official RKLLM files are public and require no
 `docker login`; the helper selects Compose V2/V1. This command builds a
 Release package with the Rockchip media backend and leaves the aarch64 test
 binary at `build_rknn/cosmo-tests`; it does not enable `COSMO_DEV_MODE`.
@@ -160,7 +161,7 @@ The package distributes RKLLM Runtime, but the Open package does not distribute
 Qwen3.5 model files. The deployer must provide a licensed conversion artifact
 that matches RK3576 and Runtime 1.3.0 and import it as the four-file set above.
 
-The formal entry removes the previous `build_rknn` directory before building so
+The shared entry removes the previous `build_rknn` directory before building so
 a partial cross-compilation cache cannot be reused as release evidence. It uses
 host networking for build-time dependency resolution; the one-shot build
 service does not publish or listen on application ports.

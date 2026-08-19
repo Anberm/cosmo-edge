@@ -1,0 +1,15 @@
+**
+!Dockerfile.rockchip
+!config/
+!config/rknn/
+!config/rknn/platforms/
+!config/rknn/platforms/**
+!config/rockchip-build/
+!config/rockchip-build/**
+!config/rockchip-media/
+!config/rockchip-media/**
+!scripts/
+!scripts/install_rkllm_sdk.py
+!tools/
+!tools/rknn/
+!tools/rknn/media_sysroot_lock.py

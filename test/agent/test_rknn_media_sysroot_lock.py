@@ -170,6 +170,24 @@ class RknnMediaSysrootLockTest(unittest.TestCase):
             result = media_lock.verify_sysroot(profile, sysroot)
             self.assertIsNone(result["manifest"])
 
+    def test_source_date_epoch_makes_manifest_timestamp_reproducible(self) -> None:
+        with mock.patch.dict("os.environ", {"SOURCE_DATE_EPOCH": "0"}):
+            self.assertEqual(
+                media_lock.manifest_created_at(), "1970-01-01T00:00:00+00:00"
+            )
+
+        with mock.patch.dict("os.environ", {"SOURCE_DATE_EPOCH": "invalid"}):
+            with self.assertRaisesRegex(
+                media_lock.MediaSysrootError, "must be an integer"
+            ):
+                media_lock.manifest_created_at()
+
+        with mock.patch.dict("os.environ", {"SOURCE_DATE_EPOCH": "-1"}):
+            with self.assertRaisesRegex(
+                media_lock.MediaSysrootError, "must not be negative"
+            ):
+                media_lock.manifest_created_at()
+
 
 if __name__ == "__main__":
     unittest.main()

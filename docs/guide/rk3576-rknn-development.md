@@ -118,18 +118,18 @@ python tools/rknn/convert_model.py \
 
 ## 构建与部署
 
-公开构建使用 digest 固定的最终镜像，其中 RKLLM Runtime v1.3.0 来自 Rockchip 官方仓库
-的固定 commit；最终环境包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
-MPP 和 RGA 开发文件。基础资源目录提供通用动作、布局和字体；RKNN 资源目录提供
-RK3576 算法与模型。
+公开构建使用 digest 固定的共享 Rockchip 镜像，其中编译器与 RKNN Runtime 只维护一份，
+RK3576 使用独立的 MPP/RGA profile。RKLLM Runtime v1.3.0 来自 Rockchip 官方仓库的
+固定 commit。基础资源目录提供通用动作、布局和字体；RKNN 资源目录提供 RK3576 算法与模型。
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rockchip.yml pull cosmo-rockchip-package
+COSMO_TARGET_CHIP=rk3576 ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
 ```
 
-基础镜像和 RKLLM 官方文件均可公开获取，无需 `docker login`。辅助脚本会自动选择
+共享镜像和 RKLLM 官方文件均可公开获取，无需 `docker login`。辅助脚本会自动选择
 Docker Compose V2/V1。该命令使用 Rockchip 媒体后端构建 Release 包，并在
 `build_rknn/cosmo-tests` 保留 aarch64 测试程序；不会启用 `COSMO_DEV_MODE`。
 
@@ -139,7 +139,7 @@ RKLLM 是正式 RK3576 包的强制依赖：头文件、`librkllmrt.so` 或许�
 RKLLM Runtime 会随安装包发布，但 Qwen3.5 模型文件不随 Open 包分发。部署人员必须使用
 有权使用、与 RK3576 和 Runtime 1.3.0 匹配的转换产物，并按上一节的四文件合同导入。
 
-正式入口在构建前删除旧的 `build_rknn`，避免将部分交叉编译缓存误作发布证据。
+共享入口在构建前删除旧的 `build_rknn`，避免将部分交叉编译缓存误作发布证据。
 构建时依赖解析使用宿主机网络；一次性构建服务不发布或监听应用端口。
 
 RK3576 的板端网络由系统 NetworkManager 管理，不由 CosmoEdge 的 Sophon netplan 路径

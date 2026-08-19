@@ -7,7 +7,7 @@
 Build and operate video analytics, VLM, and event workflows through a consistent orchestration experience. Each platform uses its own runtime, build, and model artifacts.
 
 [![Nightly Sophon Build and Test](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/nightly-build-test-sophon.yml/badge.svg?branch=main)](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/nightly-build-test-sophon.yml)
-[![Nightly RK3576 Cross Build](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rk3576.yml/badge.svg?branch=main)](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rk3576.yml)
+[![Rockchip Cross Build](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rockchip.yml/badge.svg?branch=main)](https://github.com/cosmo-wander-ai/cosmo-edge/actions/workflows/ci-build-rockchip.yml)
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
 [![Runtime](https://img.shields.io/badge/runtime-C%2B%2B17-orange?style=flat-square)](#core-capabilities)
@@ -113,18 +113,29 @@ authorization. Verify the chip marker and checksum before deployment. The
 build reference; follow the [Deployment Guide](https://www.cosmowander.ai/docs/guide/deployment)
 for SSH installation, web upgrade, recovery, and post-reboot acceptance.
 
-### Build for RK3576
+### Build for Rockchip
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rockchip.yml pull cosmo-rockchip-package
+
+# RK3576 (uses the tracked RK3576 model resources)
+COSMO_TARGET_CHIP=rk3576 ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
 ls -lh build_output/rk3576/
+
+# RV1126B (requires a prepared target model overlay)
+COSMO_TARGET_CHIP=rv1126b ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
+ls -lh build_output/rv1126b/
 ```
 
-The public digest-pinned builder contains the checksum-pinned official RKLLM
-v1.3.0 runtime and the RKNN, MPP, and RGA build dependencies. See
-the [RK3576 integration guide](docs/en/guide/rk3576-rknn-development.md)
-for the target runtime and device-validation boundary.
+One digest-pinned Rockchip builder shares the compiler and RKNN SDK while
+selecting an isolated MPP/RGA profile for each chip. RKLLM v1.3.0 is required
+and packaged only for RK3576. Target markers, media-profile identities, and
+checksums are exported under `build_output/<chip>/`. See the
+[Build Guide](docs/en/guide/build.md#rockchip-artifacts) and
+[RK3576 integration guide](docs/en/guide/rk3576-rknn-development.md) for model
+and device-validation boundaries.
 
 For CV186X, follow the [CV186X Quick Start](docs/en/guide/cv186x-quick-start.md) for package installation, model import, first-event verification, upgrade, and recovery boundaries.
 
