@@ -167,6 +167,17 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn("    defaults:\n      run:\n        shell: bash\n", build_job)
         self.assertIn("set -euo pipefail", build_job)
 
+    def test_nightly_sophon_build_retries_cargo_downloads(self) -> None:
+        workflow = (
+            REPOSITORY / ".github/workflows/nightly-build-test-sophon.yml"
+        ).read_text(encoding="utf-8")
+        build_job = workflow.split("  build-sophon:", 1)[1].split(
+            "\n  test-sophon:", 1
+        )[0]
+
+        self.assertIn('CARGO_HTTP_TIMEOUT: "120"', build_job)
+        self.assertIn('CARGO_NET_RETRY: "5"', build_job)
+
     def test_container_builds_bound_and_cache_npm_connections(self) -> None:
         npmrc = (REPOSITORY / "src/web/.npmrc").read_text(encoding="utf-8")
         self.assertIn("registry=https://registry.npmmirror.com/", npmrc)

@@ -22,6 +22,10 @@ jobs:
       candidate_tests_sha256: ${{ steps.candidate_test_binary.outputs.sha256 }}
     env:
       COSMO_MODEL_GUARD_BUILD_PROFILE: public-runtime
+      # Cargo defaults each HTTP request to 30 seconds and only three retries.
+      # The public rsproxy sparse index can exceed that from GitHub runners.
+      CARGO_HTTP_TIMEOUT: "120"
+      CARGO_NET_RETRY: "5"
 
     # Specify the public container image for the build environment
     container:
