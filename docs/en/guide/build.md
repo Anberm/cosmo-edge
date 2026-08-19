@@ -1,6 +1,6 @@
 ---
 title: Build Guide
-description: Confirmed build paths for x86 Docker, Sophon, RK3576, CPU tests, and docs.
+description: Confirmed build paths for x86 Docker, Sophon, Rockchip, CPU tests, and docs.
 prev:
   text: Documentation Home
   link: /en/
@@ -25,7 +25,7 @@ This page documents build paths that are confirmed and available in the reposito
 | x86 Docker runtime | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | Starts the containerized development/runtime environment. |
 | macOS Docker Preview | `scripts/macos-docker-preview.sh` | Runs the one-video x86 workflow under amd64 emulation on Apple Silicon. |
 | Sophon SOURCE package | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Cross-compiles the installable source-build package. |
-| RK3576 release package | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | Cross-compiles the RKNN/MPP/RGA package and aarch64 validation programs. |
+| Rockchip package | `docker compose -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package` | Cross-compiles RK3576 or RV1126B with one locked RKNN builder. |
 | CPU test build | `scripts/build_cpu_test.sh` | Builds `cosmo-tests` for x86 CPU validation. |
 | Documentation site | `npm ci` and `npm run docs:build` | Builds this VitePress site. |
 
@@ -190,32 +190,48 @@ Confirmed behavior:
   under `build_output/<profile>/<chip>/`, with package names in the existing
   `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` format.
 
-## RK3576 Artifacts
+## Rockchip Artifacts
 
-The public RK3576 entry uses a digest-pinned final GHCR builder with RKLLM
-Runtime v1.3.0 from a pinned official Rockchip commit. The environment
-contains the aarch64 toolchain, RKNN Runtime, RKLLM Runtime, MPP, and RGA files:
+The Rockchip entry uses one digest-pinned GHCR image. It keeps one aarch64
+toolchain and RKNN Runtime while selecting isolated MPP/RGA roots for RK3576
+and RV1126B. RKLLM Runtime v1.3.0 is pinned to an official commit, but it is
+required and packaged only for RK3576:
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rockchip.yml pull cosmo-rockchip-package
+
+COSMO_TARGET_CHIP=rk3576 ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
+
+COSMO_TARGET_CHIP=rv1126b ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
+sha256sum build_output/rv1126b/cosmo-*.tar.gz
 ```
 
 Confirmed behavior:
 
 - Runs the aarch64 cross-build in a `linux/amd64` build container.
-- Removes `build_rknn/` before calling `scripts/build_rknn.sh -T`, preventing a
-  partial cache from being reused.
-- Fails when the RKLLM header, runtime, or license is missing; a package without
-  Qwen3.5 support is not a valid release candidate.
-- Packages both `lib/librkllmrt.so` and `share/licenses/rkllm/LICENSE`.
-- Exports the single release package to `build_output/rk3576/` without starting
-  application services.
+- Removes `build_rknn/` before routing both chips through
+  `scripts/build_rknn.sh -c <chip> -T`.
+- Rejects a builder whose embedded lock does not exactly match the checkout.
+- Seals the RV1126B MPP/RGA sysroot to its source revisions, ELF properties,
+  and hashes. Reproducible path mapping keeps temporary workspaces out of MPP.
+- Carries the MPP Apache-2.0/MIT and RGA `COPYING` texts from the pinned
+  upstream commits in RV1126B packages and enforces them through target policy.
+- Requires RKLLM and its license in RK3576 packages and forbids them in
+  RV1126B packages.
+- Exports the package, `TARGET_CHIP`, `MEDIA_RUNTIME_PROFILE`, and `SHA256SUMS`
+  under `build_output/<chip>/` without starting application services.
 - Also builds the aarch64 `build_rknn/cosmo-tests`,
   `cosmo-rknn-backend-smoke`, and `cosmo-rknn-fastpath-qualify` programs.
 - Uses host networking to resolve build dependencies but publishes no
   application ports.
+
+A deployable RV1126B build needs the model overlay named by its platform
+profile. CI may set `COSMO_PACKAGE_MODELS=preserve` to validate code, toolchain,
+and package structure without private models; that is not device acceptance.
+`docker-compose.rk3576.yml` remains only as a thin compatibility entry.
 
 See [RK3576 / RKNN Integration](./rk3576-rknn-development.md) for the supported
 release profile, runtime selection, model contract, and device-evidence boundary.

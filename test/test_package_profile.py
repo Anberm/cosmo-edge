@@ -26,6 +26,11 @@ verifier = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verifier)
 
 
+def write_text_lf(path: pathlib.Path, value: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(value)
+
+
 class PackageProfileTests(unittest.TestCase):
     @staticmethod
     def find_bash() -> tuple[str | None, dict[str, str]]:
@@ -45,6 +50,26 @@ class PackageProfileTests(unittest.TestCase):
                             environment.get("PATH", ""),
                         ]
                     )
+        elif bash:
+            candidates = (
+                bash,
+                "/opt/homebrew/bin/bash",
+                "/usr/local/bin/bash",
+            )
+            bash = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if pathlib.Path(candidate).is_file()
+                    and subprocess.run(
+                        [candidate, "-c", "((BASH_VERSINFO[0] >= 4))"],
+                        check=False,
+                        capture_output=True,
+                    ).returncode
+                    == 0
+                ),
+                None,
+            )
         return bash, environment
 
     def make_package(
@@ -52,6 +77,9 @@ class PackageProfileTests(unittest.TestCase):
         profile: str,
         model: bytes = b"plain-model",
         model_type: str = "yolov8_det",
+        target_chip: str | None = None,
+        platform_chip: str | None = None,
+        platform_runtime: str | None = None,
     ) -> pathlib.Path:
         root = "cosmo-V1.5.0"
         directory = pathlib.Path(tempfile.mkdtemp())
@@ -87,6 +115,28 @@ class PackageProfileTests(unittest.TestCase):
             info.size = len(config)
             info.mode = 0o644
             archive.addfile(info, io.BytesIO(config))
+            if target_chip is not None:
+                marker = f"{target_chip}\n".encode()
+                info = tarfile.TarInfo(f"{root}/share/cosmo/target-chip.txt")
+                info.size = len(marker)
+                info.mode = 0o644
+                archive.addfile(info, io.BytesIO(marker))
+            if platform_chip is not None:
+                platform_value: dict[str, object] = {
+                    "chip": platform_chip,
+                    "backend": "rknn",
+                }
+                if platform_runtime is not None:
+                    platform_value["media"] = {
+                        "runtime_profile": platform_runtime
+                    }
+                platform = json.dumps(platform_value).encode()
+                info = tarfile.TarInfo(
+                    f"{root}/share/cosmo/platform-profile.json"
+                )
+                info.size = len(platform)
+                info.mode = 0o644
+                archive.addfile(info, io.BytesIO(platform))
         digest = hashlib.md5(initial.read_bytes(), usedforsecurity=False).hexdigest()
         final = directory / f"{root}-{digest}.tar.gz"
         initial.rename(final)
@@ -119,6 +169,81 @@ class PackageProfileTests(unittest.TestCase):
             verifier.verify_package(
                 self.make_package("production-release", b"plain"), "production-release"
             )
+
+    def test_target_chip_and_rockchip_profile_are_bound_to_archive(self) -> None:
+        with self.assertRaisesRegex(verifier.PackageAuditError, "marker is missing"):
+            verifier.verify_package(
+                self.make_package("public-runtime"), "public-runtime", "rv1126b"
+            )
+
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "platform profile is missing"
+        ):
+            verifier.verify_package(
+                self.make_package("public-runtime", target_chip="rv1126b"),
+                "public-runtime",
+                "rv1126b",
+            )
+
+        package = self.make_package(
+            "public-runtime", target_chip="rv1126b", platform_chip="rv1126b"
+        )
+        verifier.verify_package(package, "public-runtime", "rv1126b")
+        verifier.verify_package(
+            package,
+            "public-runtime",
+            "rv1126b",
+            {
+                "required_package_paths": ["share/cosmo/platform-profile.json"],
+                "forbidden_package_paths": ["lib/librkllmrt.so"],
+            },
+        )
+
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "required target package path is missing"
+        ):
+            verifier.verify_package(
+                package,
+                "public-runtime",
+                "rv1126b",
+                {"required_package_paths": ["share/licenses/missing"]},
+            )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "forbidden target package path is present"
+        ):
+            verifier.verify_package(
+                package,
+                "public-runtime",
+                "rv1126b",
+                {"forbidden_package_paths": ["share/cosmo/target-chip.txt"]},
+            )
+
+        runtime_package = self.make_package(
+            "public-runtime",
+            target_chip="rv1126b",
+            platform_chip="rv1126b",
+            platform_runtime="runtime-a",
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "media runtime profile does not match"
+        ):
+            verifier.verify_package(
+                runtime_package,
+                "public-runtime",
+                "rv1126b",
+                {"media_runtime_profile": "runtime-b"},
+            )
+
+        with self.assertRaisesRegex(verifier.PackageAuditError, "target chip mismatch"):
+            verifier.verify_package(package, "public-runtime", "rk3576")
+
+        wrong_platform = self.make_package(
+            "public-runtime", target_chip="rv1126b", platform_chip="rk3576"
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "platform profile does not match"
+        ):
+            verifier.verify_package(wrong_platform, "public-runtime", "rv1126b")
 
     def test_build_has_no_signed_release_switches(self) -> None:
         build_inputs = (
@@ -235,7 +360,7 @@ class PackageProfileTests(unittest.TestCase):
         self.assertNotIn("WEB_STAMP", web_cmake)
         self.assertNotIn("web_unified.stamp", web_cmake)
 
-        for compose_name in ("docker-compose.sophon.yml", "docker-compose.rk3576.yml"):
+        for compose_name in ("docker-compose.sophon.yml", "docker-compose.rockchip.yml"):
             compose = (REPOSITORY / compose_name).read_text(encoding="utf-8")
             self.assertIn('NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-1}"', compose)
             self.assertIn("cosmo-npm-cache:/root/.npm", compose)
@@ -281,16 +406,15 @@ class PackageProfileTests(unittest.TestCase):
             scripts.mkdir()
             (workspace / "build/packages").mkdir(parents=True)
             entrypoint = scripts / "build_sophon_package.sh"
-            entrypoint.write_text(source, encoding="utf-8", newline="\n")
+            write_text_lf(entrypoint, source)
             build_stub = scripts / "build.sh"
-            build_stub.write_text(
+            write_text_lf(
+                build_stub,
                 "#!/bin/bash\n"
                 "set -euo pipefail\n"
                 'printf "%s\\n" "$*" > build-invocation.txt\n'
                 "printf package > "
                 "build/packages/cosmo-V1.1.0-deadbeef.tar.gz\n",
-                encoding="utf-8",
-                newline="\n",
             )
             entrypoint.chmod(0o755)
             build_stub.chmod(0o755)
@@ -380,7 +504,8 @@ class PackageProfileTests(unittest.TestCase):
             scripts = project_root / "scripts"
             scripts.mkdir()
             build_script = scripts / "build.sh"
-            build_script.write_text(
+            write_text_lf(
+                build_script,
                 (REPOSITORY / "scripts/build.sh")
                 .read_text(encoding="utf-8")
                 .replace(
@@ -388,8 +513,6 @@ class PackageProfileTests(unittest.TestCase):
                     'PROJECT_ROOT_PATH="$(cd "$(dirname "$0")/.." && pwd -P)"\n'
                     'if [ -z "${PROJECT_ROOT_PATH:-}" ]; then',
                 ),
-                encoding="utf-8",
-                newline="\n",
             )
             build_script.chmod(0o755)
             for chip in ("bm1688", "cv186x"):
@@ -428,13 +551,30 @@ class PackageProfileTests(unittest.TestCase):
             self.assertNotEqual(conflict_result.returncode, 0)
             self.assertIn("-c and -m cannot be used together", conflict_result.stderr)
 
-    def test_rk3576_release_builder_requires_pinned_rkllm(self) -> None:
-        compose = (REPOSITORY / "docker-compose.rk3576.yml").read_text(
+    def test_shared_rockchip_builder_has_isolated_target_profiles(self) -> None:
+        compose = (REPOSITORY / "docker-compose.rockchip.yml").read_text(
             encoding="utf-8"
         )
-        dockerfile = (REPOSITORY / "Dockerfile.rk3576").read_text(encoding="utf-8")
-        workflow = (REPOSITORY / ".github/workflows/ci-build-rk3576.yml").read_text(
+        compatibility_compose = (
+            REPOSITORY / "docker-compose.rk3576.yml"
+        ).read_text(encoding="utf-8")
+        dockerfile = (REPOSITORY / "Dockerfile.rockchip").read_text(
             encoding="utf-8"
+        )
+        workflow = (REPOSITORY / ".github/workflows/ci-build-rockchip.yml").read_text(
+            encoding="utf-8"
+        )
+        entrypoint = (REPOSITORY / "scripts/build_rockchip_package.sh").read_text(
+            encoding="utf-8"
+        )
+        dockerignore = (REPOSITORY / ".dockerignore").read_text(encoding="utf-8")
+        builder_dockerignore = (
+            REPOSITORY / "Dockerfile.rockchip.dockerignore"
+        ).read_text(encoding="utf-8")
+        builder_lock = json.loads(
+            (REPOSITORY / "config/rockchip-build/builder-lock.json").read_text(
+                encoding="utf-8"
+            )
         )
         build = (REPOSITORY / "scripts/build_rknn.sh").read_text(encoding="utf-8")
         cmake = (REPOSITORY / "cmake/rkllm.cmake").read_text(encoding="utf-8")
@@ -443,16 +583,46 @@ class PackageProfileTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:"
-            "135d25d0baf14e7918726f7efb040a0627926aedd5825f52fab6c1cd208da348",
+            "cosmo-edge-build-env-rockchip:local",
             compose,
         )
-        self.assertNotIn("\n    build:", compose)
-        self.assertIn("RKLLM_ROOT: /opt/rkllm", compose)
-        self.assertIn('COSMO_RKLLM_REQUIRED: "ON"', compose)
-        self.assertIn("docker compose -f docker-compose.rk3576.yml pull", workflow)
+        self.assertIn("scripts/build_rockchip_package.sh", compose)
+        self.assertIn("COSMO_TARGET_CHIP", compose)
+        self.assertIn("file: docker-compose.rockchip.yml", compatibility_compose)
+        self.assertIn('command: ["--chip", "rk3576"', compatibility_compose)
+        self.assertIn("rk3576", workflow)
+        self.assertIn("rv1126b", workflow)
+        self.assertIn("cosmo_edge-build-env_rockchip", workflow)
+        self.assertIn("packages: write", workflow)
         self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
         self.assertIn("install_rkllm_sdk.py", dockerfile)
+        self.assertIn("/opt/rockchip-media/rk3576", dockerfile)
+        self.assertIn("/opt/rockchip-media/rv1126b", dockerfile)
+        self.assertIn("-ffile-prefix-map=", dockerfile)
+        self.assertIn("--chip <rk3576|rv1126b>", entrypoint)
+        self.assertIn("--target-chip", entrypoint)
+        self.assertIn("/build_rknn", dockerignore.splitlines())
+        self.assertIn("/3rd/srs-*/trunk/objs", dockerignore.splitlines())
+        self.assertEqual(builder_dockerignore.splitlines()[0], "**")
+        self.assertIn("!config/rockchip-build/**", builder_dockerignore.splitlines())
+        self.assertIn("!scripts/install_rkllm_sdk.py", builder_dockerignore.splitlines())
+        self.assertTrue(builder_lock["targets"]["rk3576"]["rkllm_required"])
+        self.assertFalse(builder_lock["targets"]["rv1126b"]["rkllm_required"])
+        self.assertEqual(builder_lock["common"]["rkllm"]["version"], "1.3.0")
+        self.assertIn(builder_lock["common"]["rkllm"]["revision"], dockerfile)
+        self.assertIn(
+            "share/licenses/rockchip-media/librga/COPYING",
+            builder_lock["targets"]["rv1126b"]["required_package_paths"],
+        )
+        self.assertIn(
+            "lib/librkllmrt.so",
+            builder_lock["targets"]["rv1126b"]["forbidden_package_paths"],
+        )
+        self.assertIn("--target-policy-lock", entrypoint)
+        self.assertNotEqual(
+            builder_lock["targets"]["rk3576"]["media_root"],
+            builder_lock["targets"]["rv1126b"]["media_root"],
+        )
         self.assertIn('lib/librkllmrt.so LICENSE', build)
         self.assertIn('-DCOSMO_TARGET_CHIP="${TARGET_CHIP}"', build)
         self.assertIn('[-c rk3576|rv1126b]', build)
@@ -474,6 +644,16 @@ class PackageProfileTests(unittest.TestCase):
         )
         toolchain_lock = json.loads(
             (REPOSITORY / "config/rknn/toolchain-lock.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        builder_lock = json.loads(
+            (REPOSITORY / "config/rockchip-build/builder-lock.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        runtime_lock = json.loads(
+            (REPOSITORY / "config/rockchip-media/runtime-lock.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -499,6 +679,20 @@ class PackageProfileTests(unittest.TestCase):
         self.assertNotEqual(
             rk3576["packaging"]["legacy_models_directory"],
             rv1126b["packaging"]["legacy_models_directory"],
+        )
+        for profile in (rk3576, rv1126b):
+            chip = profile["chip"]
+            self.assertEqual(
+                builder_lock["targets"][chip]["media_runtime_profile"],
+                profile["media"]["runtime_profile"],
+            )
+            self.assertIn(
+                profile["media"]["runtime_profile"], runtime_lock["runtimes"]
+            )
+        rv_runtime = runtime_lock["runtimes"][rv1126b["media"]["runtime_profile"]]
+        self.assertEqual(
+            rv_runtime["artifacts"]["lib/librockchip_mpp.so.0"]["sha256"],
+            "b3f15d57a7516bab1e6167b8244afaff8f27b0b7d34813328db8420a7019820b",
         )
 
     def test_shared_rknn_and_rockchip_sources_do_not_fork_by_chip(self) -> None:

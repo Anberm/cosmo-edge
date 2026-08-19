@@ -1,6 +1,6 @@
 ---
 title: 构建指南
-description: x86 Docker、Sophon、RK3576 和 CPU 测试构建路径。
+description: x86 Docker、Sophon、Rockchip 和 CPU 测试构建路径。
 prev:
   text: 文档首页
   link: /
@@ -26,7 +26,7 @@ next:
 | x86 Docker 开发运行环境 | 首次体验、开发评估、生成 x86 发布包 | 是 | `build_output/` |
 | macOS Docker Preview | Apple Silicon 上体验单路 x86 工作流 | 是 | `build_output/macos-x86/` |
 | Sophon SOURCE 构建 | 交叉编译可安装的源码构建包 | 否 | `build_output/public-runtime/<chip>/` |
-| RK3576 稳定版构建 | 使用 RKNN、MPP 和 RGA 交叉编译发布包与测试程序 | 否 | `build_output/rk3576/` |
+| Rockchip 构建 | 使用共享 RKNN 构建镜像为 RK3576 或 RV1126B 交叉编译 | 否 | `build_output/<chip>/` |
 | CPU 测试构建 | 构建 `cosmo-tests` | 否 | `build_cpu/cosmo-tests` |
 
 ## x86 Docker 开发运行环境
@@ -176,28 +176,44 @@ Guard 设备证书和模型加密秘密仍属于受控输入，不得写入公�
   `build_output/<profile>/<chip>/`，包名仍为 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`，
   旁边的 `TARGET_CHIP` 与 `SHA256SUMS` 用于阻止同名产物混用。
 
-## RK3576 构建产物
+## Rockchip 构建产物
 
-RK3576 公开构建入口使用固定 digest 的 GHCR 最终构建镜像，其中 RKLLM Runtime v1.3.0
-固定到官方 commit。该镜像包含 aarch64 工具链、RKNN Runtime、RKLLM Runtime、
-MPP 和 RGA 开发文件：
+Rockchip 构建入口使用一个固定 digest 的 GHCR 镜像。aarch64 工具链与 RKNN Runtime
+只维护一份；RK3576 和 RV1126B 分别选择隔离的 MPP/RGA 根目录。RKLLM Runtime v1.3.0
+固定到官方 commit，但只对 RK3576 构建强制启用并进入发布包：
 
 ```bash
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-./scripts/docker-compose.sh -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+./scripts/docker-compose.sh -f docker-compose.rockchip.yml pull cosmo-rockchip-package
+
+COSMO_TARGET_CHIP=rk3576 ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
 sha256sum build_output/rk3576/cosmo-*.tar.gz
+
+COSMO_TARGET_CHIP=rv1126b ./scripts/docker-compose.sh \
+  -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
+sha256sum build_output/rv1126b/cosmo-*.tar.gz
 ```
 
 该入口已确认：
 
 - 在 `linux/amd64` 构建容器中执行 aarch64 交叉编译。
-- 构建前清理 `build_rknn/`，再调用 `scripts/build_rknn.sh -T`，避免复用部分缓存。
-- RKLLM 头文件、运行库或许可证缺少时立即失败，不再静默生成缺少 Qwen3.5 的包。
-- 发布包必须包含 `lib/librkllmrt.so` 和 `share/licenses/rkllm/LICENSE`。
-- 将唯一发布包导出到 `build_output/rk3576/`，不启动应用服务。
+- 构建前清理 `build_rknn/`，再通过同一入口调用 `scripts/build_rknn.sh -c <chip> -T`。
+- 镜像内的 builder lock 必须与源码 checkout 完全一致，目标平台 profile 的媒体运行时
+  也必须命中该 lock，否则拒绝构建。
+- RV1126B 的 MPP/RGA sysroot 使用源码版本、ELF 属性与文件哈希封印；构建路径已映射，
+  可重复构建不会把一次性工作目录写进二进制。
+- RV1126B 包同时携带固定上游 commit 中的 MPP Apache-2.0/MIT 与 RGA `COPYING`
+  许可证文本，并通过目标打包策略校验。
+- RK3576 包必须包含 `lib/librkllmrt.so` 与许可证；RV1126B 包则必须不包含 RKLLM。
+- 唯一发布包、`TARGET_CHIP`、`MEDIA_RUNTIME_PROFILE` 和 `SHA256SUMS` 输出到
+  `build_output/<chip>/`，不启动应用服务。
 - 同时生成 `build_rknn/cosmo-tests`、`cosmo-rknn-backend-smoke` 和
   `cosmo-rknn-fastpath-qualify` 三个 aarch64 验证程序。
 - 使用宿主机网络解析构建依赖，但不发布应用端口。
+
+RV1126B 的可部署包需要先把该芯片模型放入平台 profile 指定的 ignored overlay。
+CI 可使用 `COSMO_PACKAGE_MODELS=preserve` 只验证代码、工具链和打包结构，但该模式不替代
+带模型的设备验收。旧 `docker-compose.rk3576.yml` 仅作为薄兼容入口保留。
 
 稳定版支持范围、运行时选择、模型约定和板端证据边界见
 [RK3576 / RKNN 集成指南](./rk3576-rknn-development.md)。

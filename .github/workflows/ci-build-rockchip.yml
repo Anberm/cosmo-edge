@@ -1,0 +1,204 @@
+name: Rockchip Cross Build
+
+on:
+  pull_request:
+    paths:
+      - '.dockerignore'
+      - '.github/workflows/ci-build-rockchip.yml'
+      - 'Dockerfile.rockchip'
+      - 'Dockerfile.rockchip.dockerignore'
+      - 'Dockerfile.rk3576'
+      - 'docker-compose.rockchip.yml'
+      - 'docker-compose.rk3576.yml'
+      - 'config/rknn/**'
+      - 'config/rockchip-build/**'
+      - 'config/rockchip-media/**'
+      - 'cmake/**'
+      - 'data/resource/aiboxresource_rknn/**'
+      - 'scripts/**'
+      - 'src/**'
+      - 'test/**'
+      - 'tools/rknn/**'
+      - 'CMakeLists.txt'
+  push:
+    branches: [main]
+    paths:
+      - '.dockerignore'
+      - '.github/workflows/ci-build-rockchip.yml'
+      - 'Dockerfile.rockchip'
+      - 'Dockerfile.rockchip.dockerignore'
+      - 'Dockerfile.rk3576'
+      - 'docker-compose.rockchip.yml'
+      - 'docker-compose.rk3576.yml'
+      - 'config/rknn/platforms/**'
+      - 'config/rockchip-build/**'
+      - 'config/rockchip-media/**'
+      - 'scripts/install_rkllm_sdk.py'
+      - 'tools/rknn/media_sysroot_lock.py'
+  schedule:
+    # Run daily at 02:12 Beijing Time (18:12 UTC on the previous day).
+    - cron: '12 18 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: rockchip-package (${{ matrix.chip }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: rk3576
+            models: include
+          - chip: rv1126b
+            models: preserve
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Validate Rockchip package policy tooling
+        run: |
+          bash -n scripts/build_rknn.sh scripts/build_rockchip_package.sh
+          python3 -m unittest discover -s test -p 'test_package_profile.py'
+          python3 -m unittest discover -s test/agent \
+            -p 'test_rknn_media_sysroot_lock.py'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build locked Rockchip builder
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.rockchip
+          target: rockchip-builder
+          platforms: linux/amd64
+          load: true
+          tags: cosmo-edge-build-env-rockchip:ci
+          provenance: false
+          cache-from: type=gha,scope=rockchip-builder-${{ matrix.chip }}
+          cache-to: type=gha,mode=max,scope=rockchip-builder-${{ matrix.chip }}
+
+      - name: Validate shared Compose entry
+        env:
+          COSMO_ROCKCHIP_BUILDER_IMAGE: cosmo-edge-build-env-rockchip:ci
+          COSMO_TARGET_CHIP: ${{ matrix.chip }}
+          COSMO_PACKAGE_MODELS: ${{ matrix.models }}
+        run: docker compose -f docker-compose.rockchip.yml config --quiet
+
+      - name: Build target package and tests
+        env:
+          COSMO_ROCKCHIP_BUILDER_IMAGE: cosmo-edge-build-env-rockchip:ci
+          COSMO_TARGET_CHIP: ${{ matrix.chip }}
+          COSMO_PACKAGE_MODELS: ${{ matrix.models }}
+        run: docker compose -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package
+
+      - name: Verify target artifacts
+        env:
+          CHIP: ${{ matrix.chip }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=("build_output/${CHIP}"/cosmo-*.tar.gz)
+          if (( ${#packages[@]} != 1 )) || [[ ! -f "${packages[0]:-}" || -L "${packages[0]:-}" ]]; then
+            echo "Expected exactly one regular ${CHIP} package artifact." >&2
+            exit 1
+          fi
+          package="${packages[0]}"
+          package_name="${package##*/}"
+          digest="$(sha256sum -- "$package")"
+          digest="${digest%% *}"
+          printf '%s  %s\n' "$digest" "$package_name" | tee "${CHIP}-package.sha256"
+          cmp -s <(printf '%s\n' "$CHIP") "build_output/${CHIP}/TARGET_CHIP"
+          sha256sum -c "build_output/${CHIP}/SHA256SUMS"
+          for binary in build_rknn/cosmo-tests build_rknn/cosmo-rknn-backend-smoke build_rknn/cosmo-rknn-fastpath-qualify; do
+            binary_info="$(file "$binary")"
+            printf '%s\n' "$binary_info"
+            grep -Fq 'ARM aarch64' <<< "$binary_info"
+          done
+          printf "## %s candidate\n\n- Package: \`%s\`\n- SHA-256: \`%s\`\n" \
+            "$CHIP" "$package_name" "$digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload target candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.chip }}-candidate-${{ github.sha }}
+          path: |
+            build_output/${{ matrix.chip }}/*.tar.gz
+            build_output/${{ matrix.chip }}/TARGET_CHIP
+            build_output/${{ matrix.chip }}/MEDIA_RUNTIME_PROFILE
+            build_output/${{ matrix.chip }}/SHA256SUMS
+            ${{ matrix.chip }}-package.sha256
+            build_rknn/cosmo-tests
+            build_rknn/cosmo-rknn-backend-smoke
+            build_rknn/cosmo-rknn-fastpath-qualify
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  publish-builder:
+    name: publish-rockchip-builder
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Define immutable and stable tags
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rockchip
+          tags: |
+            type=sha,format=long
+            type=raw,value=v1,enable={{is_default_branch}}
+
+      - name: Publish locked Rockchip builder
+        id: publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.rockchip
+          target: rockchip-builder
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          provenance: false
+          cache-from: type=gha,scope=rockchip-builder-publish
+          cache-to: type=gha,mode=max,scope=rockchip-builder-publish
+
+      - name: Record published digest
+        env:
+          PUBLISHED_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          printf "## Shared Rockchip builder\n\n- Digest: \`%s\`\n" \
+            "$PUBLISHED_DIGEST" >> "$GITHUB_STEP_SUMMARY"

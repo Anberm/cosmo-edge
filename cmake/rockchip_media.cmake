@@ -48,6 +48,13 @@ install(DIRECTORY "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib/"
         PATTERN "librockchip_mpp.so*"
         PATTERN "librga.so*")
 
+set(ROCKCHIP_MEDIA_LICENSES
+    "${COSMO_ROCKCHIP_MEDIA_ROOT}/share/licenses")
+if(IS_DIRECTORY "${ROCKCHIP_MEDIA_LICENSES}")
+    install(DIRECTORY "${ROCKCHIP_MEDIA_LICENSES}/"
+        DESTINATION share/licenses)
+endif()
+
 set(ROCKCHIP_MEDIA_MANIFEST
     "${COSMO_ROCKCHIP_MEDIA_ROOT}/.cosmo-rockchip-media.json")
 if(EXISTS "${ROCKCHIP_MEDIA_MANIFEST}")

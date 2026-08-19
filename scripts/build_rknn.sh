@@ -26,6 +26,12 @@ if [ -z "${PROJECT_ROOT_PATH:-}" ]; then
     PROJECT_ROOT_PATH=$(cd "$(dirname "$0")/.." && pwd)
 fi
 
+BUILD_JOBS="${COSMO_BUILD_JOBS:-$(nproc)}"
+if ! [[ "${BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: COSMO_BUILD_JOBS must be a positive integer" >&2
+    exit 1
+fi
+
 TARGET_CHIP=$(printf '%s' "${TARGET_CHIP}" | tr '[:upper:]' '[:lower:]')
 PLATFORM_PROFILE="${PROJECT_ROOT_PATH}/config/rknn/platforms/${TARGET_CHIP}.json"
 if [ ! -f "${PLATFORM_PROFILE}" ]; then
@@ -130,8 +136,8 @@ cmake -S "${PROJECT_ROOT_PATH}" -B "${BUILD_DIR}" \
     -DRESOURCE_MODELS_DIR="${RESOURCE_MODELS_DIR}"
 
 ln -sf "${BUILD_DIR}/compile_commands.json" "${PROJECT_ROOT_PATH}/compile_commands.json" 2>/dev/null || true
-cmake --build "${BUILD_DIR}" --target install -j"$(nproc)"
+cmake --build "${BUILD_DIR}" --target install -j"${BUILD_JOBS}"
 if [ "${BUILD_TESTS_FLAG}" = "ON" ]; then
-    cmake --build "${BUILD_DIR}" --target cosmo-tests -j"$(nproc)"
+    cmake --build "${BUILD_DIR}" --target cosmo-tests -j"${BUILD_JOBS}"
 fi
 cmake --build "${BUILD_DIR}" --target package_all

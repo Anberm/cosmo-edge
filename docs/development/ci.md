@@ -24,7 +24,7 @@ next:
 | CPU 测试构建 | `scripts/build_cpu_test.sh`、`build_cpu/cosmo-tests` | Pull request / 手动 |
 | x86 Docker | `docker compose -f docker-compose.x86.yml up -d --build` (Windows 下为 `docker-compose.x86.windows.yml`) | 手动 / release 前 |
 | Sophon 发布包 | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <型号>]`，支持 `bm1688` / `cv186x`（默认 `bm1688`） | 手动 / self-hosted |
-| RK3576 发布包 | `docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package` | 每日 02:12（北京时间）/ 手动 |
+| Rockchip 发布包 | `COSMO_TARGET_CHIP=<rk3576|rv1126b> docker compose -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package` | 相关 PR / 每日 02:12（北京时间）/ 手动 |
 
 ## 文档站检查
 
@@ -190,29 +190,33 @@ Sophon 发布包构建依赖交叉编译环境和 Sophon SDK。型号决定内�
 输出目录；`build_output/<profile>/<chip>/` 同时包含 `TARGET_CHIP`、`SHA256SUMS` 和
 `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`。
 
-## RK3576 夜间交叉编译
+## Rockchip 交叉编译矩阵
 
-`.github/workflows/ci-build-rk3576.yml` 使用正式 RK3576 Compose 入口，每日
-北京时间 02:12（UTC 前一日 18:12）在默认分支运行，同时保留手动触发。定时工作流
-只有进入 GitHub 默认分支后才会生效。
+`.github/workflows/ci-build-rockchip.yml` 使用共享 Rockchip Compose 入口，对
+RK3576 和 RV1126B 分别运行矩阵任务。它会在相关 PR、手动触发及每日北京时间 02:12
+（UTC 前一日 18:12）运行。定时工作流只有进入 GitHub 默认分支后才会生效。
 
-CI 使用公开、固定 digest 且已包含固定 RKLLM v1.3.0 的最终构建镜像，
-无需 registry 登录：
+本地使用固定 digest 的公开 GHCR 镜像，无需 registry 登录：
 
 ```bash
-docker compose -f docker-compose.rk3576.yml pull cosmo-rk3576-package
-docker compose -f docker-compose.rk3576.yml run --rm cosmo-rk3576-package
+docker compose -f docker-compose.rockchip.yml pull cosmo-rockchip-package
+COSMO_TARGET_CHIP=rk3576 docker compose -f docker-compose.rockchip.yml \
+  run --rm cosmo-rockchip-package
 ```
 
-工作流执行以下发布候选检查：
+工作流执行以下检查：
 
-1. 验证 Compose 配置，并拉取固定 digest、带 RKLLM 的最终构建镜像。
-2. 从干净的 `build_rknn/` 完成交叉编译、测试程序构建和打包。
-3. 要求 `build_output/rk3576/` 中只存在一个普通文件类型的发布包，并记录 SHA-256。
+1. 从 `Dockerfile.rockchip` 构建同一个锁定镜像，并验证共享 Compose 配置。
+2. 从干净的 `build_rknn/` 为两个芯片分别交叉编译、构建测试程序和打包。
+3. 要求 `build_output/<chip>/` 中只存在一个普通文件类型的包，并校验目标标记、
+   媒体 profile 与 SHA-256。
 4. 确认 `cosmo-tests`、`cosmo-rknn-backend-smoke` 和
    `cosmo-rknn-fastpath-qualify` 都是 ARM aarch64 程序。
-5. 确认包内包含 `librkllmrt.so` 及其许可证，再以 `public-runtime` 配置审计内容。
-6. 上传发布包、校验和及三个验证程序，保留 7 天。
+5. RK3576 包必须包含 RKLLM 运行库与许可证；RV1126B 包必须不包含它们。
+6. 上传每个芯片的包、身份文件、校验和及三个验证程序，保留 7 天。
 
-工作流只授予 `contents: read` 权限；同一分支出现重叠运行时取消旧任务。该任务完成
-交叉编译与产物检查，不在 GitHub 托管的 x86 runner 上执行 aarch64 程序。
+RV1126B 矩阵使用 `COSMO_PACKAGE_MODELS=preserve` 验证公开源码和工具链，因为目标模型
+overlay 不进入 Git；可部署候选仍必须在已授权环境中用真实模型重新构建并上板。
+普通构建任务只有 `contents: read`；仅默认分支发布或手动发布任务获得
+`packages: write`，将通过矩阵的共享镜像推送到 GHCR。同一分支的重叠运行会取消旧任务。
+GitHub 托管的 x86 runner 只交叉编译和审计，不执行 aarch64 程序。

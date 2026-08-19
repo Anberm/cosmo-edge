@@ -1,14 +1,10 @@
-FROM ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:0dbb35f5a4336777c311b5f881886cd9b284371d61ceffff55a8216c01d2b076
+# syntax=docker/dockerfile:1.7
 
-LABEL org.opencontainers.image.title="CosmoEdge RK3576 build environment"
-LABEL org.opencontainers.image.description="Pinned RKNN/MPP/RGA builder extended with Rockchip RKLLM Runtime v1.3.0"
-LABEL org.opencontainers.image.source="https://github.com/cosmo-wander-ai/cosmo-edge"
-LABEL org.opencontainers.image.rkllm.version="1.3.0"
-LABEL org.opencontainers.image.rkllm.revision="878f9361fd3afa7e167b7079918918f78d2c1c2a"
+# Deprecated compatibility shim. Build and publish the shared image from
+# Dockerfile.rockchip; this file intentionally contains no chip-specific SDK
+# installation logic.
+ARG ROCKCHIP_BUILDER_IMAGE=cosmo-edge-build-env-rockchip:local
+FROM ${ROCKCHIP_BUILDER_IMAGE}
 
-COPY scripts/install_rkllm_sdk.py /tmp/install_rkllm_sdk.py
-RUN python3 -I -B /tmp/install_rkllm_sdk.py --root /opt/rkllm \
-    && rm -f /tmp/install_rkllm_sdk.py \
-    && test -f /opt/rkllm/include/rkllm.h \
-    && test -f /opt/rkllm/lib/librkllmrt.so \
-    && test -f /opt/rkllm/LICENSE
+LABEL io.cosmo.compatibility.entry="Dockerfile.rk3576" \
+      io.cosmo.compatibility.replacement="Dockerfile.rockchip"

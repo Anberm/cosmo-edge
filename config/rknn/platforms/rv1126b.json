@@ -15,7 +15,7 @@
     "default_backend": "rockchip",
     "cpu_fallback": true,
     "runtime_lock": "../../rockchip-media/runtime-lock.json",
-    "runtime_profile": "mpp-1.1.0-rga-1.10.6",
+    "runtime_profile": "mpp-1.1.0-rga-1.10.6-repro-v1",
     "require_sealed_sysroot": true
   },
   "packaging": {
