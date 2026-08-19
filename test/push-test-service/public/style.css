@@ -39,6 +39,7 @@ header h1 {
 nav {
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
 }
 
 .nav-btn {
@@ -436,6 +437,283 @@ video {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   图片分析 API 测试页面
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.image-analysis-heading h2,
+.image-preview-card h3,
+.image-analysis-sidebar h3 {
+    margin-top: 0;
+}
+
+.image-analysis-heading p {
+    margin: 4px 0 0;
+}
+
+.connection-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.connection-badge.connected {
+    color: #166534;
+    background: #dcfce7;
+    border: 1px solid #86efac;
+}
+
+.connection-badge.disconnected {
+    color: #991b1b;
+    background: #fee2e2;
+    border: 1px solid #fca5a5;
+}
+
+.image-analysis-layout {
+    display: grid;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.image-analysis-sidebar,
+.image-analysis-main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.image-analysis-sidebar {
+    position: sticky;
+    top: 150px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.full-width {
+    width: 100%;
+}
+
+.security-note {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    border: 1px solid #fde68a;
+    border-radius: 6px;
+    color: #854d0e;
+    background: #fefce8;
+    font-size: 0.72rem;
+    line-height: 1.5;
+}
+
+.input-action-row,
+.image-action-row {
+    display: flex;
+    gap: 8px;
+}
+
+.input-action-row input {
+    min-width: 0;
+    flex: 1;
+}
+
+.input-action-row .btn {
+    flex: 0 0 auto;
+}
+
+.image-action-row .btn {
+    flex: 1;
+}
+
+.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.analysis-status {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--card-bg);
+    font-weight: 600;
+}
+
+.analysis-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #94a3b8;
+}
+
+.analysis-status.running {
+    color: #1d4ed8;
+    border-color: #93c5fd;
+    background: #eff6ff;
+}
+
+.analysis-status.running .analysis-status-dot {
+    background: #2563eb;
+    box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.12);
+    animation: status-pulse 1.2s ease-in-out infinite;
+}
+
+.analysis-status.success {
+    color: #166534;
+    border-color: #86efac;
+    background: #f0fdf4;
+}
+
+.analysis-status.success .analysis-status-dot {
+    background: #16a34a;
+}
+
+.analysis-status.error {
+    color: #991b1b;
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
+.analysis-status.error .analysis-status-dot {
+    background: #dc2626;
+}
+
+@keyframes status-pulse {
+    50% { opacity: 0.45; }
+}
+
+.image-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(110px, 1fr));
+    gap: 10px;
+}
+
+.image-summary .summary-num {
+    color: var(--primary-color);
+}
+
+.image-result-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.image-preview-card {
+    min-width: 0;
+}
+
+.image-placeholder {
+    min-height: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    box-sizing: border-box;
+    border: 1px dashed #cbd5e1;
+    border-radius: 6px;
+    color: #94a3b8;
+    background: #f8fafc;
+    text-align: center;
+}
+
+.image-placeholder.compact {
+    min-height: 80px;
+}
+
+.image-stage {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #0f172a;
+}
+
+.image-stage img,
+.result-preview {
+    display: block;
+    margin: 0 auto;
+    max-width: 100%;
+    max-height: 520px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 6px;
+    background: #0f172a;
+}
+
+.image-stage canvas {
+    position: absolute;
+    pointer-events: none;
+}
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.targets-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.targets-table th,
+.targets-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.targets-table th {
+    color: #475569;
+    background: #f8fafc;
+}
+
+.target-label-pill {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 999px;
+    color: #1d4ed8;
+    background: #dbeafe;
+    font-weight: 600;
+}
+
+.target-confidence {
+    color: #15803d;
+    font-variant-numeric: tabular-nums;
+}
+
+.raw-response-card summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.raw-response-card pre {
+    max-height: 420px;
+    margin: 14px 0 0;
+    padding: 12px;
+    overflow: auto;
+    border-radius: 6px;
+    color: #cbd5e1;
+    background: #0f172a;
+    font: 0.76rem/1.5 Consolas, "Courier New", monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    MQTT 自动化测试页面样式
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -750,6 +1028,23 @@ video {
 
 /* 响应式调整 */
 @media (max-width: 768px) {
+    .image-analysis-layout,
+    .image-result-grid {
+        grid-template-columns: 1fr;
+    }
+    .image-analysis-sidebar {
+        position: static;
+    }
+    .image-summary {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    .image-analysis-heading {
+        align-items: flex-start;
+        gap: 10px;
+    }
     .auto-test-layout {
         grid-template-columns: 1fr;
     }

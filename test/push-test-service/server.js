@@ -9,6 +9,12 @@ const net = require('net');
 const crypto = require('crypto');
 const os = require('os');
 const fs = require('fs');
+const {
+  DeviceApiError,
+  loginAndListAlgorithms,
+  runImageAnalysis,
+  cancelImageTask,
+} = require('./image-analysis-client');
 
 // ── MQTT 自动化测试模块 ──────────────────────────────────────────────────
 const testCasesModule = require('./test-cases');
@@ -174,6 +180,65 @@ app.get('/api/state', (req, res) => {
     httpEvents: state.httpEvents,
     mqttMessages: state.mqttMessages,
   });
+});
+
+// --- 图片分析测试代理 ---
+
+function sendImageAnalysisError(res, error) {
+  const deviceError = error instanceof DeviceApiError;
+  const status = deviceError && error.status >= 400 ? error.status : 502;
+  res.status(status).json({
+    success: false,
+    error: error.message || String(error),
+    deviceResponse: deviceError ? error.payload : null,
+  });
+}
+
+app.post('/api/image-analysis/login', async (req, res) => {
+  try {
+    const result = await loginAndListAlgorithms(req.body || {});
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...result });
+  } catch (error) {
+    sendImageAnalysisError(res, error);
+  }
+});
+
+app.post(
+  '/api/image-analysis/run',
+  express.raw({ type: 'application/octet-stream', limit: '50mb' }),
+  async (req, res) => {
+    try {
+      let fileName = 'image.jpg';
+      try {
+        fileName = decodeURIComponent(req.get('x-cosmo-file-name') || fileName);
+      } catch (_) {
+        throw new DeviceApiError('图片文件名编码无效');
+      }
+      const result = await runImageAnalysis({
+        baseUrl: req.get('x-cosmo-base-url'),
+        mtk: req.get('x-cosmo-mtk'),
+        algorithmCode: req.get('x-cosmo-algorithm-code'),
+        taskId: req.get('x-cosmo-task-id'),
+        fileName,
+        imageBuffer: req.body,
+      });
+      res.set('Cache-Control', 'no-store');
+      res.json({ success: true, ...result });
+    } catch (error) {
+      sendImageAnalysisError(res, error);
+    }
+  }
+);
+
+app.post('/api/image-analysis/cancel', async (req, res) => {
+  try {
+    const result = await cancelImageTask(req.body || {});
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, response: result });
+  } catch (error) {
+    sendImageAnalysisError(res, error);
+  }
 });
 
 // --- Aedes Logic ---
@@ -472,6 +537,20 @@ app.get('/api/mqtt/test/status', (req, res) => {
   res.json({
     running: testState.running,
     currentResult: testState.currentResult,
+  });
+});
+
+// Keep this final handler after every route so parser and async route errors
+// from all test pages receive the same JSON envelope.
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  const status = err.status || err.statusCode || 500;
+  console.error(`[${now()}] HTTP ${req.method} ${req.originalUrl} failed:`, err.message);
+  res.status(status).json({
+    success: false,
+    error: err.type === 'entity.too.large'
+      ? '请求体超过测试工具 50 MB 上限'
+      : (err.message || String(err)),
   });
 });
 

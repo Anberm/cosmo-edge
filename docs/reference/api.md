@@ -5,13 +5,13 @@ prev:
   text: 架构概览
   link: /guide/architecture
 next:
-  text: 字段级 API 参考
-  link: /reference/api-fields
+  text: 图片检测 API 接入指南
+  link: /reference/image-detection-api
 ---
 
 # API 概览
 
-本文只记录当前源码中可以确认的 API 类别和入口。字段级接口说明请继续阅读[字段级 API 参考](api-fields.md)、[MQTT 接入参考](mqtt.md)和[HTTP Webhook 参考](webhook.md)。
+本文只记录当前源码中可以确认的 API 类别和入口。图片上传与同步推理的完整调用流程请阅读[图片检测 API 接入指南](image-detection-api.md)；其他字段级接口说明请继续阅读[字段级 API 参考](api-fields.md)、[MQTT 接入参考](mqtt.md)和[HTTP Webhook 参考](webhook.md)。
 
 ## 路由入口
 
