@@ -14,6 +14,9 @@ jobs:
   build-sophon:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     outputs:
       candidate_guard_sha256: ${{ steps.candidate_guard_runtime.outputs.sha256 }}
       candidate_tests_sha256: ${{ steps.candidate_test_binary.outputs.sha256 }}
