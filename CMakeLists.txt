@@ -146,6 +146,12 @@ if(COSMO_TARGET_CHIP)
     endif()
 endif()
 
+include(cmake/CosmoRuntimePaths.cmake)
+cosmo_configure_runtime_paths(
+    "${COSMO_TARGET_CHIP_NORMALIZED}"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/runtime-paths")
+message(STATUS "Cosmo mutable data root: ${COSMO_DEFAULT_DATA_DIR}")
+
 if(COSMO_NN_USE_RKNN_BACKEND)
     if(NOT COSMO_TARGET_CHIP_NORMALIZED MATCHES "^(rk3576|rv1126b)$")
         message(FATAL_ERROR
@@ -539,7 +545,8 @@ set(EXECUTABLE_NAME "cosmo-engine")
 
 add_executable(${EXECUTABLE_NAME} ${APP_SRC} ${ALL_OBJECTS})
 target_include_directories(${EXECUTABLE_NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/src)
+    ${CMAKE_SOURCE_DIR}/src
+    ${COSMO_RUNTIME_PATHS_INCLUDE_DIR})
 # Third-party headers come from IMPORTED targets via COMMON_LIBS + header-only libs
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE nlohmann stb uWebSockets)
 if(COSMO_NN_USE_SOPHON_BACKEND)
@@ -621,7 +628,9 @@ if(BUILD_TESTS)
     add_executable(cosmo-tests ${APP_SRC_NO_MAIN} ${ALL_OBJECTS} ${TEST_SRC})
     add_dependencies(cosmo-tests third_build)
     target_include_directories(cosmo-tests PRIVATE
-        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/test)
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/test
+        ${COSMO_RUNTIME_PATHS_INCLUDE_DIR})
     target_precompile_headers(cosmo-tests PRIVATE
         ${CMAKE_SOURCE_DIR}/test/catch_amalgamated.hpp
         ${CMAKE_SOURCE_DIR}/test/catch2/trompeloeil.hpp
@@ -710,6 +719,13 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/
     PATTERN "__pycache__" EXCLUDE
     PATTERN "*.pyc" EXCLUDE
     PATTERN "*.pyo" EXCLUDE
+)
+
+# Package-specific runtime roots. Launchers treat these as defaults and retain
+# explicit COSMO_DATA_DIR/COSMO_APP_DATA_DIR overrides.
+install(FILES "${COSMO_RUNTIME_PATHS_ENV}"
+    DESTINATION share/cosmo
+    PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 # Font
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/SOURCEHANSANSCN-REGULAR.OTF

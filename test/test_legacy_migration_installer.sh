@@ -37,6 +37,7 @@ test -f "$root/data/cwaiuserdata/mqttUpgradeApp"
 service="$root/etc/systemd/system/cosmo.service"
 test -f "$service"
 grep -Fxq 'ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh' "$service"
+grep -Fxq 'EnvironmentFile=-/appfs/cosmo_wander/cwai_data/share/cosmo/runtime-paths.env' "$service"
 grep -Fxq 'Restart=on-failure' "$service"
 grep -Fxq 'RestartSec=10' "$service"
 test -L "$root/etc/systemd/system/multi-user.target.wants/cosmo.service"
@@ -74,6 +75,35 @@ COSMO_MIGRATION_TEST_ROOT="$root" CLEAN_RESOURCE=1 \
     sh "$payload/scripts/install.sh" "$root/install-clean.log"
 test ! -e "$active/resource/stale.conf"
 grep -Fxq packaged-model "$active/resource/models/model.nn"
+
+# Rockchip packages place mutable state below /userdata while retaining the
+# shared /appfs application root.
+rk_root="${root}/rk-case"
+rk_payload="${rk_root}/payload"
+rk_active="${rk_root}/appfs/cosmo_wander/cwai_data"
+mkdir -p "$rk_payload/scripts" "$rk_payload/bin" "$rk_payload/files/Interface" \
+    "$rk_payload/web" "$rk_payload/share/cosmo"
+cp "$repo/scripts/legacy_migration_install.sh" "$rk_payload/scripts/install.sh"
+printf 'new\n' >"$rk_payload/bin/cosmo-engine"
+printf '#!/bin/sh\n' >"$rk_payload/scripts/stop.sh"
+printf '#!/bin/sh\n' >"$rk_payload/scripts/start.sh"
+printf '#!/bin/sh\n' >"$rk_payload/scripts/inte_run_start.sh"
+chmod +x "$rk_payload/scripts/"*.sh
+printf 'http\n' >"$rk_payload/files/Interface/ai-box-interface_v1.0.html"
+printf 'mqtt\n' >"$rk_payload/files/Interface/mqtt_v1.0.html"
+printf '%s\n' \
+    'COSMO_PACKAGE_DATA_DIR=/userdata/cwaiuserdata' \
+    'COSMO_PACKAGE_APP_DATA_DIR=/appfs/cosmo_wander/cwai_data' \
+    >"$rk_payload/share/cosmo/runtime-paths.env"
+
+COSMO_MIGRATION_TEST_ROOT="$rk_root" \
+    sh "$rk_payload/scripts/install.sh" "$rk_root/install.log"
+
+test -f "$rk_root/userdata/cwaiuserdata/mqttUpgradeApp"
+test ! -e "$rk_root/data/cwaiuserdata/mqttUpgradeApp"
+test -f "$rk_active/share/cosmo/runtime-paths.env"
+grep -Fxq 'EnvironmentFile=-/appfs/cosmo_wander/cwai_data/share/cosmo/runtime-paths.env' \
+    "$rk_root/etc/systemd/system/cosmo.service"
 
 # Preserved resources must be copied into staging before the package overlays
 # them. Keeping the packaged resource tree in staging while copying the active

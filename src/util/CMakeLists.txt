@@ -65,6 +65,7 @@ add_library(cosmo_util OBJECT
 # Project headers
 target_include_directories(cosmo_util PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${COSMO_RUNTIME_PATHS_INCLUDE_DIR}
 )
 
 target_link_libraries(cosmo_util PRIVATE cosmo_common cryptopp uuid)
