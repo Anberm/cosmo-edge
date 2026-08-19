@@ -23,7 +23,7 @@ src/web/
 └── src/
     ├── main.js               # 应用入口
     ├── App.vue               # 根组件
-    ├── api/                  # API 模块（7 个文件）
+    ├── api/                  # API 模块
     │   └── index.js          # 合并所有模块，注入全局 $API
     ├── assets/               # 图片、图标、音频资源
     ├── components/           # 共享组件
@@ -31,7 +31,7 @@ src/web/
     ├── micro/
     │   └── state.js          # 轻量全局状态
     ├── router/
-    │   └── index.js          # Hash 模式路由（约 25 条）
+    │   └── index.js          # Hash 模式路由
     ├── styles/
     │   └── global.scss       # 全局 SCSS
     ├── utils/                # Axios 封装、消息提示、图片预览、i18n 加载、WebRTC 播放器
@@ -102,7 +102,7 @@ npm run build
 | `npm run preview`           | 本地预览生产构建结果                                    |
 | `npm run i18n:check`        | 运行全部 5 个 i18n 校验脚本                             |
 | `npm run resource-i18n:check` | 检查资源 i18n 同步状态                               |
-| `npm run resource-i18n:sync`  | 从后端同步资源 i18n key（提交前检查 diff）           |
+| `npm run resource-i18n:sync`  | 从 aiboxResource 源同步资源 i18n key（提交前检查 diff） |
 
 i18n 校验覆盖：短词 scope 正确性、locale key 一致性、glossary 同步、弹窗操作按钮标签、未使用 key 检测。
 
@@ -110,7 +110,7 @@ i18n 校验覆盖：短词 scope 正确性、locale key 一致性、glossary 同
 
 ### 第一步：创建视图组件
 
-在 `src/web/views/` 下的对应子目录中创建新的 `.vue` 文件（设备相关放 `box/`，AI 管理相关放 `gam/`）。
+在 `src/web/src/views/` 下的对应子目录中创建新的 `.vue` 文件（设备相关放 `box/`，AI 管理相关放 `gam/`）。
 
 ### 第二步：注册路由
 
@@ -153,7 +153,8 @@ i18n 校验覆盖：短词 scope 正确性、locale key 一致性、glossary 同
 
 ### 模式
 
-API 模块位于 `src/web/src/api/`。每个模块导出封装了 `axios` 调用的函数。`api/index.js` 通过对象展开将所有模块合并为一个对象，`main.js` 将其注入为全局 `$API`。
+API 模块位于 `src/web/src/api/`。每个模块默认导出一个由请求函数组成的对象；`api/index.js`
+通过对象展开把所有模块合并为扁平对象，`main.js` 再将它注入为全局 `$API`。
 
 组件中使用方式：`this.$API.dologin(params)` 或 `proxy.$API.dologin(params)`（Composition API）。
 
@@ -167,18 +168,41 @@ API 模块位于 `src/web/src/api/`。每个模块导出封装了 `axios` 调用
 | 算法管理   | `countManage.js` | 算法增删改查、许可证、硬件信息     |
 | 底库       | `basePic.js`     | 人脸库、人体库、物品库、文件导入   |
 | 实时流     | `screen.js`      | 摄像头列表、拉流生命周期、WebSocket |
+| 首次引导   | `onboarding.js`  | 引导状态查询、完成和重置             |
 
 ### 新增端点
 
-在对应模块文件中添加函数（或新建文件），通过 `api/index.js` 导出：
+在对应模块对象中添加函数；如果新建模块文件，再把默认导出对象展开到 `api/index.js`：
 
 ```js
 // api/myModule.js
-export const queryMyData = (params) => request.post('/gtw/cwai/MyModule/Query', params);
+import { request } from '@/utils/request'
+
+export default {
+  queryMyData: data => request({
+    url: '/gtw/cwai/MyModule/Query',
+    method: 'post',
+    data
+  })
+}
 
 // api/index.js
-export * as myModule from './myModule.js';
+import myModule from './myModule'
+
+export default {
+  ...login,
+  ...box,
+  ...screen,
+  ...basePic,
+  ...gam,
+  ...countManage,
+  ...onboarding,
+  ...myModule
+}
 ```
+
+展开后组件通过 `proxy.$API.queryMyData(data)` 调用；当前 API 层不是
+`proxy.$API.myModule.queryMyData(data)` 这种命名空间结构。
 
 所有 API 调用共用 `utils/request.js` 中的 Axios 实例，会自动附加 `mtk`、`token`、`fileMode`、`lang` 等请求头，并处理认证失败的跳转。
 
@@ -194,8 +218,8 @@ export * as myModule from './myModule.js';
 
 | 层级               | 来源                                          | 用途                               |
 | ------------------ | --------------------------------------------- | ---------------------------------- |
-| 静态 locale 文件   | `i18n/locales/{zh-CN,en-US}.js`（各约 1420 行） | 所有内置 UI 文案、导航、校验、状态等 |
-| 短词 glossary      | `i18n/glossary.js`（76 条）                     | 紧凑布局场景下的缩写               |
+| 静态 locale 文件   | `i18n/locales/{zh-CN,en-US}.js`                  | 所有内置 UI 文案、导航、校验、状态等 |
+| 短词 glossary      | `i18n/glossary.js`                               | 紧凑布局场景下的缩写               |
 | 动态资源 i18n      | `public/resource-i18n/resource.{locale}.json`    | 算法名称、参数、选项等后端配置项   |
 
 ### 翻译 API

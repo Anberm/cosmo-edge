@@ -168,8 +168,8 @@ Common causes:
   it defaults to `bm1688`.
 - Selecting `production-release` outside the controlled release environment —
   missing production SDK, provisioning, release-public-key, or bootstrap inputs is
-  rejected by design. Use SOURCE for ordinary source-code builds; do not bypass
-  the formal release checks.
+  rejected by design. Use the default Open profile (internal name `public-runtime`)
+  for ordinary source-code builds; do not bypass the formal release checks.
 
 ## Protected Presets Do Not Load
 
@@ -188,7 +188,7 @@ sudo journalctl -u cosmo.service -b --no-pager -n 200
 
 If the controlled provisioner is still present in its temporary device
 directory, run `sudo /temporary-directory/cosmo-model-provision status` to
-validate the certificate against the live device. The SOURCE package does not
+validate the certificate against the live device. The Open package does not
 provide that tool.
 
 - `-2001` (`CMG_V2_CERTIFICATE_UNAVAILABLE`) means the certificate is missing
@@ -200,7 +200,7 @@ Do not create per-model licenses or copy another device's certificate. Create
 a fresh request on this device, issue its certificate in the controlled
 offline environment, and run
 `cosmo-model-provision install --certificate <absolute-certificate-path>`.
-The SOURCE installer does not create, delete, or repair this certificate.
+The Open installer does not create, delete, or repair this certificate.
 
 ## nginx / SRS / cosmo-engine Not Started
 

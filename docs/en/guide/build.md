@@ -24,10 +24,9 @@ This page documents build paths that are confirmed and available in the reposito
 | --- | --- | --- |
 | x86 Docker runtime | `docker-compose.x86.yml` / `docker-compose.x86.windows.yml` | Starts the containerized development/runtime environment. |
 | macOS Docker Preview | `scripts/macos-docker-preview.sh` | Runs the one-video x86 workflow under amd64 emulation on Apple Silicon. |
-| Sophon SOURCE package | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Cross-compiles the installable source-build package. |
+| Sophon Open package | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Cross-compiles the installable public source-build package. |
 | Rockchip package | `docker compose -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package` | Cross-compiles RK3576 or RV1126B with one locked RKNN builder. |
 | CPU test build | `scripts/build_cpu_test.sh` | Builds `cosmo-tests` for x86 CPU validation. |
-| Documentation site | `npm ci` and `npm run docs:build` | Builds this VitePress site. |
 
 ## x86 Docker Development Runtime
 
@@ -249,12 +248,3 @@ build_cpu/cosmo-tests
 ```
 
 Useful for smoke testing C++ compilation and packaging logic without a target edge device.
-
-## Documentation Build
-
-```bash
-npm ci
-npm run docs:build
-```
-
-The build output is generated under `docs/.vitepress/dist` and should not be committed.

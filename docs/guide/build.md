@@ -25,7 +25,7 @@ next:
 | --- | --- | --- | --- |
 | x86 Docker 开发运行环境 | 首次体验、开发评估、生成 x86 发布包 | 是 | `build_output/` |
 | macOS Docker Preview | Apple Silicon 上体验单路 x86 工作流 | 是 | `build_output/macos-x86/` |
-| Sophon SOURCE 构建 | 交叉编译可安装的源码构建包 | 否 | `build_output/public-runtime/<chip>/` |
+| Sophon Open 构建 | 交叉编译可安装的公开源码构建包 | 否 | `build_output/public-runtime/<chip>/` |
 | Rockchip 构建 | 使用共享 RKNN 构建镜像为 RK3576 或 RV1126B 交叉编译 | 否 | `build_output/<chip>/` |
 | CPU 测试构建 | 构建 `cosmo-tests` | 否 | `build_cpu/cosmo-tests` |
 
@@ -224,14 +224,8 @@ CI 可使用 `COSMO_PACKAGE_MODELS=preserve` 只验证代码、工具链和打�
 bash scripts/build_cpu_test.sh
 ```
 
-该脚本会使用 CPU 后端配置 CMake，并开启：
+该脚本使用 CPU 后端和 `BUILD_TESTS=ON` 配置 CMake，生成：
 
-```text
-BUILD_TESTS=ON
-```
-
-目标产物：
-
-```text
+```sh
 build_cpu/cosmo-tests
 ```
