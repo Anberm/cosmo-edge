@@ -1,41 +1,15 @@
-# CosmoEdge 1.1 benchmark release checklist
+# CosmoEdge 1.1 benchmark repository checklist
 
-Status: **PUBLICATION-READY PERFORMANCE REPORT — PREPARED, NOT YET PUBLISHED**
+Status: **prepared for repository review; not yet published**
 
-## Completed for the public benchmark
+- [x] Source commit and tree frozen.
+- [x] ScenarioBench source hashes frozen, including detector/classifier FPS override.
+- [x] Controlled video metadata and SHA-256 frozen.
+- [x] BM1688, CV186X, RK3576, and RV1126B model hashes recorded.
+- [x] 49 small-model cases generated as independent sanitized attachments.
+- [x] Platform summaries, single-task matrices, and concurrent-task results regenerated.
+- [x] Existing three-platform VLM attachments preserved unchanged.
+- [x] HTML links, JSON files, public-data scrub, and checksums validated.
+- [x] `SHA256SUMS` regenerated after the final file set.
 
-- [x] CosmoEdge 1.1 source baseline commit and tree frozen in `release-manifest.json`.
-- [x] BM1688 and CV186X evidence bound to the exact Open package SHA-256 and running engine SHA-256.
-- [x] Known environment facts captured; unknown runtime fields remain explicit.
-- [x] Public environment material applies the commercial disclosure policy; non-public environment fields remain only in the private archive.
-- [x] Available model and dataset identities and SHA-256 values recorded.
-- [x] Sanitized single-detector, dual-detector, and VLM attachments generated.
-- [x] VLM target fixed at 0.1 FPS per channel and RK3576 shared-counter correction documented.
-- [x] Bilingual HTML includes scope, method, reproduction, comparability, and limitations.
-- [x] Capacity heatmap, throughput/latency curves, and resource-peak chart regenerated.
-- [x] Public package and generator checked for device addresses, credentials, local paths, serial numbers, and internal IDs.
-- [x] The two approved Open Sophon models are present in both platform-scoped resource sets; the benchmark directory contains no model bytes or video sample.
-- [x] `SHA256SUMS` regenerated after all output files.
-
-## Product-release evidence outside this benchmark
-
-- [ ] Record the final Protected package SHA-256 and private build provenance.
-- [ ] Recover the final RK3576 package SHA-256 and source provenance.
-- [ ] Record the final RK3576 VLM artifact SHA-256.
-- [ ] Complete repeat, soak, customer-journey, and accuracy qualification for any recommended-profile claim.
-
-The unchecked items do not block publication of this scoped performance report because it does not distribute package, non-approved model, or video binaries and does not claim an official recommended profile. They remain required for complete product-package qualification and any stronger capacity commitment.
-
-Do not copy `private-evidence/` into a release artifact.
-
-## Website publication handoff
-
-- [x] Local documentation build contains bilingual main reports, six bilingual platform-index pages, and eighteen bilingual standalone workload pages.
-- [x] Local smoke test resolves every main-report attachment link to a generated file.
-- [x] Platform indexes and all standalone workload attachments provide Chinese and English rendered pages with return navigation.
-- [x] Desktop and 390 px mobile layouts keep wide tables inside local horizontal-scroll regions without page-level overflow.
-- [ ] Deploy the documentation build containing `benchmarks/scenario-bench/v1.1/`.
-- [ ] Confirm the Chinese and English primary report URLs return HTTP 200.
-- [ ] Confirm all eighteen bilingual standalone workload report URLs return HTTP 200 and render as HTML rather than GitHub source.
-
-The last three checks remain intentionally open while this PR is prepared but not published.
+Do not copy `private-evidence/` into the repository or a release asset.

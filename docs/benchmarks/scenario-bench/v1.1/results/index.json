@@ -3,29 +3,44 @@
   "benchmark": "CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark",
   "publicationStatus": "release-evidence",
   "manifest": "../release-manifest.json",
-  "generatedAt": "2026-08-13T11:57:35+08:00",
-  "primaryClaim": "short-run concurrent dual-detector workload; not a recommended profile",
+  "generatedAt": "2026-08-19T19:24:17+08:00",
+  "primaryClaim": "observed short-run concurrent dual-detector workload",
   "platforms": [
     {
       "platform": "BM1688",
+      "scope": "release-platform",
       "overview": "bm1688/summary.json",
       "dualDetector": "bm1688/dual-detector/summary.json",
       "singleDetector": "bm1688/single-detector/summary.json",
-      "vlmObservation": "bm1688/vlm-observation/summary.json"
+      "vlmObservation": "bm1688/vlm-observation/summary.json",
+      "cases": "bm1688/cases/index.json"
     },
     {
       "platform": "CV186X",
+      "scope": "release-platform",
       "overview": "cv186x/summary.json",
       "dualDetector": "cv186x/dual-detector/summary.json",
       "singleDetector": "cv186x/single-detector/summary.json",
-      "vlmObservation": "cv186x/vlm-observation/summary.json"
+      "vlmObservation": "cv186x/vlm-observation/summary.json",
+      "cases": "cv186x/cases/index.json"
     },
     {
       "platform": "RK3576",
+      "scope": "release-platform",
       "overview": "rk3576/summary.json",
       "dualDetector": "rk3576/dual-detector/summary.json",
       "singleDetector": "rk3576/single-detector/summary.json",
-      "vlmObservation": "rk3576/vlm-observation/summary.json"
+      "vlmObservation": "rk3576/vlm-observation/summary.json",
+      "cases": "rk3576/cases/index.json"
+    },
+    {
+      "platform": "RV1126B",
+      "scope": "additional-experimental-platform",
+      "overview": "rv1126b/summary.json",
+      "dualDetector": "rv1126b/dual-detector/summary.json",
+      "singleDetector": "rv1126b/single-detector/summary.json",
+      "vlmObservation": null,
+      "cases": "rv1126b/cases/index.json"
     }
   ]
 }

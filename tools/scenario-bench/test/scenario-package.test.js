@@ -194,6 +194,10 @@ loadProfile:
         actionId: 'AA_00001',
         configObject: JSON.stringify({ params: [{ key: 'fps', value: '7' }] }),
       },
+      {
+        actionId: 'AA_00002',
+        configObject: { params: [{ key: 'fps', value: '7' }] },
+      },
     ]),
   }), 'utf8');
 
@@ -207,7 +211,7 @@ loadProfile:
   });
 
   assert.equal(pkg.targetFps, 5);
-  assert.deepEqual(fpsValues, ['5', '5']);
+  assert.deepEqual(fpsValues, ['5', '5', '5']);
 });
 
 test('merges explicit per-task config params for soak-safe workloads', (t) => {

@@ -1,7 +1,8 @@
-# Scenario package status
+# Public scenario descriptors
 
-`dual-detector/scenario.public.yml` is the sanitized semantic workload definition.
+- `single-detector/person-detector.public.yml`: person-detection FPS gradient.
+- `single-detector/safety-helmet-detector.public.yml`: two-stage no-safety-helmet FPS gradient.
+- `dual-detector/scenario.public.yml`: both CV tasks at 5 FPS per channel.
+- `vlm-observation/scenario.public.yml`: existing three-platform VLM observation.
 
-It intentionally omits internal algorithm IDs, schedule IDs, action IDs, device endpoints, and orchestration templates. A directly executable per-platform scenario cannot be published until the public model identities, import process, legal sample video, and release package are frozen. The final release process must generate device-resolved scenario bundles from the public model card and release manifest.
-
-Do not insert internal identifiers merely to make this draft executable.
+Resolve `<platform>` and `<platform-maximum>` locally before execution. Device addresses, credentials, and device-local identifiers stay outside the public descriptor.

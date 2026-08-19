@@ -1,6 +1,6 @@
 version: 2
-name: dual-detector-5fps-staircase
-displayName: Dual-detector 5 FPS per channel staircase
+name: dual-cv-5fps-staircase
+displayName: Person detection and no-safety-helmet analysis at 5 FPS
 sampleIntervalSec: 3
 
 channels:
@@ -8,7 +8,7 @@ channels:
   repeatCount: 0
   sources:
     - name: public-1080p24-sample
-      file: "../../dataset/Safety Helmet.mp4"
+      file: "../../dataset/controlled-1080p24-sample.mp4"
 
 tasks:
   - id: person-detector
@@ -16,8 +16,8 @@ tasks:
     type: cv
     modelRef: "../../models/<platform>.json#person-detector"
     targetFps: 5
-  - id: safety-helmet-detector
-    displayName: Safety-helmet detector
+  - id: no-safety-helmet-analysis
+    displayName: No-safety-helmet analysis
     type: cv
     modelRef: "../../models/<platform>.json#safety-helmet-classifier"
     targetFps: 5
@@ -25,7 +25,7 @@ tasks:
 bindings:
   - task: person-detector
     channels: all
-  - task: safety-helmet-detector
+  - task: no-safety-helmet-analysis
     channels: all
 
 thresholds:
@@ -37,9 +37,5 @@ thresholds:
       maxMissingRate: 0
 
 loadProfile:
-  # Use the platform-specific step duration recorded in results/*/summary.json.
   - channels: "1..<platform-maximum>"
-    holdSec: "<platform-hold-seconds>"
-
-# This public descriptor is deliberately device-resolved at execution time.
-# Internal algorithm and schedule identifiers are not part of the public identity.
+    holdSec: 30

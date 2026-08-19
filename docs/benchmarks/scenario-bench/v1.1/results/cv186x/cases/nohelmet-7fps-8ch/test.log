@@ -1,0 +1,16 @@
+benchmark=cosmoedge-1.1-multistream
+platform=CV186X
+case=nohelmet-7fps-8ch
+workload=safety-helmet-detector
+target_fps=7
+configured_channels=8
+outcome=completed
+boundary=lower-bound
+channels=1 hold=30s result=PASS min_fps=7.31 avg_discard=0
+channels=2 hold=30s result=PASS min_fps=7.14 avg_discard=0
+channels=3 hold=30s result=PASS min_fps=7.05 avg_discard=0
+channels=4 hold=30s result=PASS min_fps=7.1 avg_discard=0
+channels=5 hold=30s result=PASS min_fps=7.07 avg_discard=0
+channels=6 hold=30s result=PASS min_fps=7 avg_discard=0
+channels=7 hold=30s result=PASS min_fps=6.88 avg_discard=0
+channels=8 hold=30s result=PASS min_fps=6.92 avg_discard=0

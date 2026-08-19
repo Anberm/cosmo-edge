@@ -1,0 +1,431 @@
+{
+  "schemaVersion": 1,
+  "caseId": "person-10fps-16ch",
+  "platformId": "cv186x",
+  "platform": "CV186X",
+  "platformScope": "release-platform",
+  "workload": "person-detector",
+  "targetFps": 10,
+  "configuredChannels": 16,
+  "stepHoldSeconds": 30,
+  "outcome": "setup-blocked",
+  "boundaryKind": "binding-blocked",
+  "lastPassingChannels": 15,
+  "firstBlockedChannels": 16,
+  "blockedReason": "task binding failed before measurement",
+  "evidenceDate": "2026-08-19",
+  "gates": {
+    "minimumFpsRatio": 0.8,
+    "maximumMissingRate": 0,
+    "maximumAverageDiscardRate": 0.05,
+    "maximumCriticalPathLatencyMs": 200,
+    "maximumDetectorLatencyMs": 150
+  },
+  "steps": [
+    {
+      "channels": 1,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.45,
+          "minimumFpsRatio": 1.045,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 25.9,
+          "maximumCriticalPathLatencyMs": 29.4
+        }
+      ],
+      "minimumProcessingFps": 10.45,
+      "maximumDetectorLatencyMs": 25.9,
+      "maximumCriticalPathLatencyMs": 29.4,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 4,
+      "acceleratorMemoryPeakPercent": 15,
+      "cpuPeakPercent": 4,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 2,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.15,
+          "minimumFpsRatio": 1.015,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 26.7,
+          "maximumCriticalPathLatencyMs": 30.2
+        }
+      ],
+      "minimumProcessingFps": 10.15,
+      "maximumDetectorLatencyMs": 26.7,
+      "maximumCriticalPathLatencyMs": 30.2,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 14,
+      "acceleratorMemoryPeakPercent": 19,
+      "cpuPeakPercent": 7,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 3,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 9.98,
+          "minimumFpsRatio": 0.998,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 26.8,
+          "maximumCriticalPathLatencyMs": 30.3
+        }
+      ],
+      "minimumProcessingFps": 9.98,
+      "maximumDetectorLatencyMs": 26.8,
+      "maximumCriticalPathLatencyMs": 30.3,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 22,
+      "acceleratorMemoryPeakPercent": 22,
+      "cpuPeakPercent": 11,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 4,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.08,
+          "minimumFpsRatio": 1.008,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 41.7,
+          "maximumCriticalPathLatencyMs": 45.1
+        }
+      ],
+      "minimumProcessingFps": 10.08,
+      "maximumDetectorLatencyMs": 41.7,
+      "maximumCriticalPathLatencyMs": 45.1,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 20,
+      "acceleratorMemoryPeakPercent": 26,
+      "cpuPeakPercent": 15,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 5,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.08,
+          "minimumFpsRatio": 1.008,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 29.3,
+          "maximumCriticalPathLatencyMs": 32.8
+        }
+      ],
+      "minimumProcessingFps": 10.08,
+      "maximumDetectorLatencyMs": 29.3,
+      "maximumCriticalPathLatencyMs": 32.8,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 26,
+      "acceleratorMemoryPeakPercent": 29,
+      "cpuPeakPercent": 19,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 6,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.05,
+          "minimumFpsRatio": 1.005,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 29.1,
+          "maximumCriticalPathLatencyMs": 32.7
+        }
+      ],
+      "minimumProcessingFps": 10.05,
+      "maximumDetectorLatencyMs": 29.1,
+      "maximumCriticalPathLatencyMs": 32.7,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 34,
+      "acceleratorMemoryPeakPercent": 33,
+      "cpuPeakPercent": 23,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 7,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.03,
+          "minimumFpsRatio": 1.003,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 30.7,
+          "maximumCriticalPathLatencyMs": 34.2
+        }
+      ],
+      "minimumProcessingFps": 10.03,
+      "maximumDetectorLatencyMs": 30.7,
+      "maximumCriticalPathLatencyMs": 34.2,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 52,
+      "acceleratorMemoryPeakPercent": 36,
+      "cpuPeakPercent": 28,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 8,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.05,
+          "minimumFpsRatio": 1.005,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 31.3,
+          "maximumCriticalPathLatencyMs": 34.8
+        }
+      ],
+      "minimumProcessingFps": 10.05,
+      "maximumDetectorLatencyMs": 31.3,
+      "maximumCriticalPathLatencyMs": 34.8,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 48,
+      "acceleratorMemoryPeakPercent": 40,
+      "cpuPeakPercent": 32,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 9,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.02,
+          "minimumFpsRatio": 1.002,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 33.8,
+          "maximumCriticalPathLatencyMs": 37.5
+        }
+      ],
+      "minimumProcessingFps": 10.02,
+      "maximumDetectorLatencyMs": 33.8,
+      "maximumCriticalPathLatencyMs": 37.5,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 60,
+      "acceleratorMemoryPeakPercent": 43,
+      "cpuPeakPercent": 38,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 10,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.03,
+          "minimumFpsRatio": 1.003,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 33.5,
+          "maximumCriticalPathLatencyMs": 40.1
+        }
+      ],
+      "minimumProcessingFps": 10.03,
+      "maximumDetectorLatencyMs": 33.5,
+      "maximumCriticalPathLatencyMs": 40.1,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 66,
+      "acceleratorMemoryPeakPercent": 47,
+      "cpuPeakPercent": 43,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 11,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 10.02,
+          "minimumFpsRatio": 1.002,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 36.3,
+          "maximumCriticalPathLatencyMs": 40.3
+        }
+      ],
+      "minimumProcessingFps": 10.02,
+      "maximumDetectorLatencyMs": 36.3,
+      "maximumCriticalPathLatencyMs": 40.3,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 66,
+      "acceleratorMemoryPeakPercent": 50,
+      "cpuPeakPercent": 49,
+      "memoryPeakPercent": 38,
+      "failureReason": null
+    },
+    {
+      "channels": 12,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 9.97,
+          "minimumFpsRatio": 0.997,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 39.7,
+          "maximumCriticalPathLatencyMs": 44
+        }
+      ],
+      "minimumProcessingFps": 9.97,
+      "maximumDetectorLatencyMs": 39.7,
+      "maximumCriticalPathLatencyMs": 44,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 66,
+      "acceleratorMemoryPeakPercent": 54,
+      "cpuPeakPercent": 63,
+      "memoryPeakPercent": 37,
+      "failureReason": null
+    },
+    {
+      "channels": 13,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 9.92,
+          "minimumFpsRatio": 0.992,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 41.4,
+          "maximumCriticalPathLatencyMs": 45.9
+        }
+      ],
+      "minimumProcessingFps": 9.92,
+      "maximumDetectorLatencyMs": 41.4,
+      "maximumCriticalPathLatencyMs": 45.9,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 84,
+      "acceleratorMemoryPeakPercent": 57,
+      "cpuPeakPercent": 69,
+      "memoryPeakPercent": 38,
+      "failureReason": null
+    },
+    {
+      "channels": 14,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 9.95,
+          "minimumFpsRatio": 0.995,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 53.8,
+          "maximumCriticalPathLatencyMs": 58.5
+        }
+      ],
+      "minimumProcessingFps": 9.95,
+      "maximumDetectorLatencyMs": 53.8,
+      "maximumCriticalPathLatencyMs": 58.5,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": 92,
+      "acceleratorMemoryPeakPercent": 62,
+      "cpuPeakPercent": 76,
+      "memoryPeakPercent": 38,
+      "failureReason": null
+    },
+    {
+      "channels": 15,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "person-detector",
+          "targetFps": 10,
+          "minimumProcessingFps": 9.68,
+          "minimumFpsRatio": 0.968,
+          "missingRate": 0,
+          "averageDiscardRate": 0.0035,
+          "maximumDetectorLatencyMs": 56.7,
+          "maximumCriticalPathLatencyMs": 60.7
+        }
+      ],
+      "minimumProcessingFps": 9.68,
+      "maximumDetectorLatencyMs": 56.7,
+      "maximumCriticalPathLatencyMs": 60.7,
+      "averageDiscardRate": 0.0035,
+      "maximumChannelDiscardRate": 0.0152,
+      "acceleratorPeakPercent": 88,
+      "acceleratorMemoryPeakPercent": 93,
+      "cpuPeakPercent": 81,
+      "memoryPeakPercent": 38,
+      "failureReason": null
+    }
+  ]
+}

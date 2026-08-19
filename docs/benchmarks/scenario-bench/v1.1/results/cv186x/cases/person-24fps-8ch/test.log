@@ -1,0 +1,16 @@
+benchmark=cosmoedge-1.1-multistream
+platform=CV186X
+case=person-24fps-8ch
+workload=person-detector
+target_fps=24
+configured_channels=8
+outcome=completed
+boundary=lower-bound
+channels=1 hold=30s result=PASS min_fps=24 avg_discard=0
+channels=2 hold=30s result=PASS min_fps=23.79 avg_discard=0
+channels=3 hold=30s result=PASS min_fps=23.98 avg_discard=0
+channels=4 hold=30s result=PASS min_fps=23.93 avg_discard=0
+channels=5 hold=30s result=PASS min_fps=23.83 avg_discard=0
+channels=6 hold=30s result=PASS min_fps=23.74 avg_discard=0
+channels=7 hold=30s result=PASS min_fps=23.68 avg_discard=0
+channels=8 hold=30s result=PASS min_fps=20.58 avg_discard=0.0212

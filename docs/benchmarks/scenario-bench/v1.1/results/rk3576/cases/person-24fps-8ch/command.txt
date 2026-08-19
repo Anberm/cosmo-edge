@@ -1,0 +1,7 @@
+# Public reproduction descriptor
+platform=rk3576
+case=person-24fps-8ch
+workload=person-detector
+target_fps=24
+configured_channels=8
+scenario=../../../../../scenarios/single-detector/person-detector.public.yml

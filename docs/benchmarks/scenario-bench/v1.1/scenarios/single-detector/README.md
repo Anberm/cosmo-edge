@@ -1,6 +1,6 @@
-# Single-detector reproduction descriptors
+# Single-task reproduction descriptors
 
-- `person-detector.public.yml`: personnel detection at 24, 10, 7, and 5 FPS.
-- `safety-helmet-detector.public.yml`: two-stage safety-helmet workload at the same FPS gradient.
+- `person-detector.public.yml`: person detection at 24, 10, 7, and 5 FPS.
+- `safety-helmet-detector.public.yml`: two-stage no-safety-helmet analysis at the same FPS gradient.
 
-Each file is a public descriptor. Before execution, resolve the model reference and device-specific algorithm layout locally. Do not commit device addresses, credentials, schedule IDs, internal algorithm IDs, or channel IDs.
+Each step holds for 30 seconds and adds one channel. Resolve the model reference and device-local task layout before execution.

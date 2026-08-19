@@ -33,11 +33,11 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 
 ## CosmoEdge 1.1
 
-> This branch is the CosmoEdge 1.1 source line. Platform capacity varies by model and workload; use the linked evidence rather than treating a short-run maximum as a deployment recommendation.
+> This branch is the CosmoEdge 1.1 source line. The linked benchmark pack contains the current controlled single-detector, dual-detector, and VLM evidence.
 
 - **Multi-platform release:** BM1688, CV186X, and RK3576 use the same video-ingest, orchestration, event, and observability workflow with target-specific model artifacts.
 - **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single-detector, dual-detector, and Experimental VLM workloads with sanitized reproducibility attachments.
-- **Rockchip RK3576:** cross-build, board operation, RKNN inference, and MPP/RGA media paths are integrated. A 4-channel single-detector profile has 12-hour evidence; higher short-run points remain measured boundaries rather than recommended profiles.
+- **Rockchip RK3576:** cross-build, board operation, RKNN inference, and MPP/RGA media paths are integrated. The public benchmark includes the complete 24/10/7/5 FPS single-detector matrix and an 8-channel concurrent dual-detector run at 5 FPS.
 - **Sophon model handling:** chip-aware validation supports target-specific `.nn` artifacts for BM1688 and CV186X. The benchmark records an exact Open-package and running-engine binding for both reference devices.
 - **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 tensor decoding paths with explicit fallbacks.
 - **Agent-assisted development:** a repository-guided path for handing model porting, integration, and UI tasks to the coding agent you already use and receiving verifiable deliverables.
@@ -181,14 +181,14 @@ Start with [Agent-Assisted Development](docs/en/development/agent-assisted-devel
 
 ### CosmoEdge 1.1 multi-platform performance report
 
-The publication-ready v1.1 material covers BM1688, CV186X, and RK3576 with a concise public report plus linked single-detector, dual-detector, and Experimental VLM attachments. Results are short-run workload evidence unless a longer duration is explicitly stated; they are not theoretical chip limits or automatic deployment recommendations.
+The v1.1 report covers BM1688, CV186X, and RK3576, with RV1126B listed as an additional experimental platform. It includes 49 independent small-model case reports for person detection, no-safety-helmet analysis, and concurrent 5 FPS workloads. Existing VLM attachments remain available separately.
 
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
 - [中文基准报告索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
 - [English primary report (rendered documentation site)](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.html)
 - [Methodology and reproduction](docs/benchmarks/scenario-bench/v1.1/methodology.md)
 
-The release-branch preparation baseline is `feat/model-guard-v2.3` commit `209bc2b52849864a15bdad91beb61f5bc982c17f`, tree `f64a98bce05b9ee8dc64dda8e56ad50f9d15687f`. BM1688 and CV186X are byte-bound to the recorded Open package and running engine; that package does not embed a source commit and therefore is not claimed as a reproducible build of the preparation baseline. The RK3576 package digest and Protected-package provenance are not distributed in this public benchmark, so the report does not make package-qualified claims for them. See the [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json) for the exact evidence boundary.
+The controlled run uses source commit `89c73a7464a81ef378686447d7c1eeb88b988455`, tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`, one fixed 1080p24 input, 30-second steps, and the gates recorded in the [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json).
 
 The following table preserves the previously published **v1.0 baseline** for historical comparison:
 

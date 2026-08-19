@@ -1,6 +1,6 @@
 version: 2
-name: safety-helmet-detector-fps-gradient
-displayName: Safety-helmet detector 24/10/7/5 FPS staircase
+name: no-safety-helmet-analysis-fps-gradient
+displayName: No-safety-helmet analysis 24/10/7/5 FPS staircase
 sampleIntervalSec: 3
 
 channels:
@@ -8,11 +8,11 @@ channels:
   repeatCount: 0
   sources:
     - name: public-1080p24-sample
-      file: "../../dataset/Safety Helmet.mp4"
+      file: "../../dataset/controlled-1080p24-sample.mp4"
 
 tasks:
-  - id: safety-helmet-detector
-    displayName: Safety-helmet detector
+  - id: no-safety-helmet-analysis
+    displayName: No-safety-helmet analysis
     type: cv
     modelRefs:
       - "../../models/<platform>.json#person-detector"
@@ -20,12 +20,12 @@ tasks:
     targetFps: "<24|10|7|5>"
 
 bindings:
-  - task: safety-helmet-detector
+  - task: no-safety-helmet-analysis
     channels: all
 
 loadProfile:
   - channels: "1..<platform-maximum>"
-    holdSec: "<platform-hold-seconds>"
+    holdSec: 30
 
 thresholds:
   pass:

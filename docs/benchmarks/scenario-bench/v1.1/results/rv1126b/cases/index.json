@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "platformId": "rv1126b",
+  "platform": "RV1126B",
+  "scope": "additional-experimental-platform",
+  "caseCount": 9,
+  "cases": [
+    {
+      "caseId": "dual-cv-5fps-4ch",
+      "workload": "dual-detector",
+      "targetFps": 5,
+      "configuredChannels": 4,
+      "outcome": "completed",
+      "boundaryKind": "lower-bound",
+      "lastPassingChannels": 4,
+      "summary": "dual-cv-5fps-4ch/summary.json",
+      "report": "dual-cv-5fps-4ch/report.html",
+      "reportZhCn": "dual-cv-5fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "nohelmet-10fps-4ch",
+      "workload": "safety-helmet-detector",
+      "targetFps": 10,
+      "configuredChannels": 4,
+      "outcome": "completed",
+      "boundaryKind": "lower-bound",
+      "lastPassingChannels": 4,
+      "summary": "nohelmet-10fps-4ch/summary.json",
+      "report": "nohelmet-10fps-4ch/report.html",
+      "reportZhCn": "nohelmet-10fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "nohelmet-24fps-4ch",
+      "workload": "safety-helmet-detector",
+      "targetFps": 24,
+      "configuredChannels": 4,
+      "outcome": "stopped",
+      "boundaryKind": "performance-stop",
+      "lastPassingChannels": 2,
+      "summary": "nohelmet-24fps-4ch/summary.json",
+      "report": "nohelmet-24fps-4ch/report.html",
+      "reportZhCn": "nohelmet-24fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "nohelmet-5fps-4ch",
+      "workload": "safety-helmet-detector",
+      "targetFps": 5,
+      "configuredChannels": 4,
+      "outcome": "completed",
+      "boundaryKind": "lower-bound",
+      "lastPassingChannels": 4,
+      "summary": "nohelmet-5fps-4ch/summary.json",
+      "report": "nohelmet-5fps-4ch/report.html",
+      "reportZhCn": "nohelmet-5fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "nohelmet-7fps-4ch",
+      "workload": "safety-helmet-detector",
+      "targetFps": 7,
+      "configuredChannels": 4,
+      "outcome": "completed",
+      "boundaryKind": "lower-bound",
+      "lastPassingChannels": 4,
+      "summary": "nohelmet-7fps-4ch/summary.json",
+      "report": "nohelmet-7fps-4ch/report.html",
+      "reportZhCn": "nohelmet-7fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "person-10fps-4ch",
+      "workload": "person-detector",
+      "targetFps": 10,
+      "configuredChannels": 4,
+      "outcome": "completed",
+      "boundaryKind": "lower-bound",
+      "lastPassingChannels": 4,
+      "summary": "person-10fps-4ch/summary.json",
+      "report": "person-10fps-4ch/report.html",
+      "reportZhCn": "person-10fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "person-24fps-4ch",
+      "workload": "person-detector",
+      "targetFps": 24,
+      "configuredChannels": 4,
+      "outcome": "stopped",
+      "boundaryKind": "performance-stop",
+      "lastPassingChannels": 2,
+      "summary": "person-24fps-4ch/summary.json",
+      "report": "person-24fps-4ch/report.html",
+      "reportZhCn": "person-24fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "person-5fps-4ch",
+      "workload": "person-detector",
+      "targetFps": 5,
+      "configuredChannels": 4,
+      "outcome": "completed",
+      "boundaryKind": "lower-bound",
+      "lastPassingChannels": 4,
+      "summary": "person-5fps-4ch/summary.json",
+      "report": "person-5fps-4ch/report.html",
+      "reportZhCn": "person-5fps-4ch/report.zh-CN.html"
+    },
+    {
+      "caseId": "person-7fps-4ch",
+      "workload": "person-detector",
+      "targetFps": 7,
+      "configuredChannels": 4,
+      "outcome": "completed",
+      "boundaryKind": "lower-bound",
+      "lastPassingChannels": 4,
+      "summary": "person-7fps-4ch/summary.json",
+      "report": "person-7fps-4ch/report.html",
+      "reportZhCn": "person-7fps-4ch/report.zh-CN.html"
+    }
+  ]
+}

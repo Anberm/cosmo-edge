@@ -8,7 +8,7 @@ channels:
   repeatCount: 0
   sources:
     - name: public-1080p24-sample
-      file: "../../dataset/Safety Helmet.mp4"
+      file: "../../dataset/controlled-1080p24-sample.mp4"
 
 tasks:
   - id: person-detector
@@ -23,7 +23,7 @@ bindings:
 
 loadProfile:
   - channels: "1..<platform-maximum>"
-    holdSec: "<platform-hold-seconds>"
+    holdSec: 30
 
 thresholds:
   pass:

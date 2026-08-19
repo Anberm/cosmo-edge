@@ -1,0 +1,12 @@
+benchmark=cosmoedge-1.1-multistream
+platform=RV1126B
+case=person-5fps-4ch
+workload=person-detector
+target_fps=5
+configured_channels=4
+outcome=completed
+boundary=lower-bound
+channels=1 hold=30s result=PASS min_fps=5.31 avg_discard=0
+channels=2 hold=30s result=PASS min_fps=5.19 avg_discard=0
+channels=3 hold=30s result=PASS min_fps=5.14 avg_discard=0
+channels=4 hold=30s result=PASS min_fps=5.14 avg_discard=0

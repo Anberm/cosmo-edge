@@ -1,0 +1,7 @@
+# Public reproduction descriptor
+platform=rv1126b
+case=nohelmet-24fps-4ch
+workload=safety-helmet-detector
+target_fps=24
+configured_channels=4
+scenario=../../../../../scenarios/single-detector/safety-helmet-detector.public.yml

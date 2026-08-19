@@ -33,11 +33,11 @@ CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编�
 
 ## CosmoEdge 1.1
 
-> 当前分支是 CosmoEdge 1.1 源码线。不同模型和负载的容量不同，请以关联证据为准，不把短时最高点直接当作部署推荐值。
+> 当前分支是 CosmoEdge 1.1 源码线，关联 benchmark 包包含当前受控的单算法、双算法与 VLM 证据。
 
 - **多平台发布：**BM1688、CV186X 与 RK3576 共享同一套视频接入、任务编排、事件和可观测流程，并分别使用目标平台模型产物。
 - **公开 benchmark 包：**[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单算法、双算法与 Experimental VLM，提供脱敏后的可复现附件。
-- **Rockchip RK3576：**已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径；4 路单算法已有 12 小时证据，更高短时结果只作为实测边界，不直接作为推荐配置。
+- **Rockchip RK3576：**已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径；公开 benchmark 已包含 24/10/7/5 FPS 单算法完整矩阵与 8 路 5 FPS 双算法并发结果。
 - **Sophon 模型处理：**芯片感知校验支持 BM1688 与 CV186X 的目标 `.nn` 产物；benchmark 已记录两台参考设备的 Open 安装包和运行引擎精确绑定。
 - **RKNN 数据路径：**包含 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 张量直接解码路径，并保留明确 fallback。
 - **智能体辅助二开：**提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
@@ -163,14 +163,14 @@ CV186X 请按照 [CV186X 快速开始](docs/guide/cv186x-quick-start.md)完成�
 
 ### CosmoEdge 1.1 多平台性能报告
 
-已收口的 v1.1 公开材料覆盖 BM1688、CV186X 与 RK3576，包括精简主报告及关联的单算法、双算法、Experimental VLM 附件。除非明确标注更长时长，当前结果属于短时工作负载证据，不代表芯片理论上限，也不会自动成为部署推荐配置。
+v1.1 报告覆盖 BM1688、CV186X 与 RK3576，并把 RV1126B 作为附加实验平台列出。报告包含人员检测、未佩戴安全帽分析和 5 FPS 双任务并发的 49 份独立小模型用例；既有 VLM 附件单独保留。
 
 - [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
 - [中文主报告（官网渲染版）](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
 - [方法与复现](docs/benchmarks/scenario-bench/v1.1/methodology.md)
 
-发布分支准备基线为 `feat/model-guard-v2.3` commit `209bc2b52849864a15bdad91beb61f5bc982c17f`、tree `f64a98bce05b9ee8dc64dda8e56ad50f9d15687f`。BM1688 与 CV186X 已绑定到记录的 Open 安装包和运行引擎；该安装包不嵌入 source commit，因此不宣称它可从这一准备基线复现构建。RK3576 包哈希与 Protected 包构建来源不在公开 benchmark 中，因此报告不对它们作 package-qualified 声明。精确证据边界见 [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json)。
+本轮受控测试使用源码 commit `89c73a7464a81ef378686447d7c1eeb88b988455`、tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`，统一固定 1080p24 视频、30 秒单级时长和 [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json) 中记录的门禁。
 
 下表保留此前已经公开的 **v1.0 历史基线**：
 

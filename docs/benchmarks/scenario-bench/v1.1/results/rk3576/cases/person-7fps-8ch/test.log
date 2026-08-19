@@ -1,0 +1,16 @@
+benchmark=cosmoedge-1.1-multistream
+platform=RK3576
+case=person-7fps-8ch
+workload=person-detector
+target_fps=7
+configured_channels=8
+outcome=completed
+boundary=lower-bound
+channels=1 hold=30s result=PASS min_fps=7.31 avg_discard=0
+channels=2 hold=30s result=PASS min_fps=7.15 avg_discard=0
+channels=3 hold=30s result=PASS min_fps=7.08 avg_discard=0
+channels=4 hold=30s result=PASS min_fps=7.14 avg_discard=0
+channels=5 hold=30s result=PASS min_fps=7.14 avg_discard=0
+channels=6 hold=30s result=PASS min_fps=7.1 avg_discard=0
+channels=7 hold=30s result=PASS min_fps=7.08 avg_discard=0
+channels=8 hold=30s result=PASS min_fps=7.09 avg_discard=0

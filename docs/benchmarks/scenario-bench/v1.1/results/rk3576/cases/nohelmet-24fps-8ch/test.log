@@ -1,0 +1,17 @@
+benchmark=cosmoedge-1.1-multistream
+platform=RK3576
+case=nohelmet-24fps-8ch
+workload=safety-helmet-detector
+target_fps=24
+configured_channels=8
+outcome=stopped
+boundary=performance-stop
+channels=1 hold=30s result=PASS min_fps=24.24 avg_discard=0
+channels=2 hold=30s result=PASS min_fps=24.07 avg_discard=0
+channels=3 hold=30s result=PASS min_fps=24.02 avg_discard=0
+channels=4 hold=30s result=PASS min_fps=24.02 avg_discard=0
+channels=5 hold=30s result=PASS min_fps=23 avg_discard=0
+channels=6 hold=30s result=PASS min_fps=19.7 avg_discard=0.006
+channels=7 hold=30s result=FAIL min_fps=15.97 avg_discard=0.031
+channels=8 hold=30s result=STOP min_fps=15.02 avg_discard=0.0586
+stop=processing-FPS gate failed (66.5%)

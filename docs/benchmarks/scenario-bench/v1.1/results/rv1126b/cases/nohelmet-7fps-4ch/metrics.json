@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "workload": "safety-helmet-detector",
+  "targetFps": 7,
+  "gates": {
+    "minimumFpsRatio": 0.8,
+    "maximumMissingRate": 0,
+    "maximumAverageDiscardRate": 0.05,
+    "maximumCriticalPathLatencyMs": 200,
+    "maximumDetectorLatencyMs": 150
+  },
+  "steps": [
+    {
+      "channels": 1,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "safety-helmet-detector",
+          "targetFps": 7,
+          "minimumProcessingFps": 7.17,
+          "minimumFpsRatio": 1.025,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 38.7,
+          "maximumCriticalPathLatencyMs": 49.2
+        }
+      ],
+      "minimumProcessingFps": 7.17,
+      "maximumDetectorLatencyMs": 38.7,
+      "maximumCriticalPathLatencyMs": 49.2,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": null,
+      "acceleratorMemoryPeakPercent": null,
+      "cpuPeakPercent": 13,
+      "memoryPeakPercent": 39,
+      "failureReason": null
+    },
+    {
+      "channels": 2,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "safety-helmet-detector",
+          "targetFps": 7,
+          "minimumProcessingFps": 7.07,
+          "minimumFpsRatio": 1.01,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 39.5,
+          "maximumCriticalPathLatencyMs": 50.2
+        }
+      ],
+      "minimumProcessingFps": 7.07,
+      "maximumDetectorLatencyMs": 39.5,
+      "maximumCriticalPathLatencyMs": 50.2,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": null,
+      "acceleratorMemoryPeakPercent": null,
+      "cpuPeakPercent": 25,
+      "memoryPeakPercent": 43,
+      "failureReason": null
+    },
+    {
+      "channels": 3,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "safety-helmet-detector",
+          "targetFps": 7,
+          "minimumProcessingFps": 7.08,
+          "minimumFpsRatio": 1.012,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 43.7,
+          "maximumCriticalPathLatencyMs": 56.6
+        }
+      ],
+      "minimumProcessingFps": 7.08,
+      "maximumDetectorLatencyMs": 43.7,
+      "maximumCriticalPathLatencyMs": 56.6,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": null,
+      "acceleratorMemoryPeakPercent": null,
+      "cpuPeakPercent": 37,
+      "memoryPeakPercent": 47,
+      "failureReason": null
+    },
+    {
+      "channels": 4,
+      "holdSeconds": 30,
+      "result": "PASS",
+      "tasks": [
+        {
+          "name": "safety-helmet-detector",
+          "targetFps": 7,
+          "minimumProcessingFps": 7.07,
+          "minimumFpsRatio": 1.01,
+          "missingRate": 0,
+          "averageDiscardRate": 0,
+          "maximumDetectorLatencyMs": 45.9,
+          "maximumCriticalPathLatencyMs": 62
+        }
+      ],
+      "minimumProcessingFps": 7.07,
+      "maximumDetectorLatencyMs": 45.9,
+      "maximumCriticalPathLatencyMs": 62,
+      "averageDiscardRate": 0,
+      "maximumChannelDiscardRate": 0,
+      "acceleratorPeakPercent": null,
+      "acceleratorMemoryPeakPercent": null,
+      "cpuPeakPercent": 45,
+      "memoryPeakPercent": 51,
+      "failureReason": null
+    }
+  ]
+}

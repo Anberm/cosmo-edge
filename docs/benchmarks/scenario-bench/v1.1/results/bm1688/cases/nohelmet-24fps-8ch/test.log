@@ -1,0 +1,16 @@
+benchmark=cosmoedge-1.1-multistream
+platform=BM1688
+case=nohelmet-24fps-8ch
+workload=safety-helmet-detector
+target_fps=24
+configured_channels=8
+outcome=setup-blocked
+boundary=binding-blocked
+channels=1 hold=30s result=PASS min_fps=23.94 avg_discard=0
+channels=2 hold=30s result=PASS min_fps=23.72 avg_discard=0
+channels=3 hold=30s result=PASS min_fps=23.54 avg_discard=0
+channels=4 hold=30s result=PASS min_fps=23.47 avg_discard=0
+channels=5 hold=30s result=PASS min_fps=23.54 avg_discard=0
+channels=6 hold=30s result=PASS min_fps=23.63 avg_discard=0
+channels=7 hold=30s result=PASS min_fps=21.55 avg_discard=0.0037
+stop=task binding failed before measurement
