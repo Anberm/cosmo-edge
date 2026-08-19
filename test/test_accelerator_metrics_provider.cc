@@ -67,8 +67,36 @@ TEST_CASE("RKNN accelerator metrics provider reports per-core busy-time load", "
     CHECK(metrics.gpudevusage.front().gpuusage == Catch::Approx(0.42));
 }
 
+TEST_CASE("RKNN accelerator metrics provider reports aggregate-only busy-time load",
+          "[system][metrics][rknn]") {
+    ScopedNpuLoadFixture fixture("NPU load:  37%\n");
+    auto provider = cosmo::service::detail::CreateAcceleratorMetricsProvider();
+    REQUIRE(provider != nullptr);
+
+    const auto metrics = provider->QueryUtilization();
+    CHECK(metrics.gpuusageAvailable);
+    CHECK(metrics.gpuusage == Catch::Approx(0.37));
+    CHECK(metrics.utilizationMetric == "busy-time-load");
+    REQUIRE(metrics.coreUtilizations.size() == 1);
+    CHECK(metrics.coreUtilizations.front() == Catch::Approx(0.37));
+    REQUIRE(metrics.gpudevusage.size() == 1);
+    CHECK(metrics.gpudevusage.front().gpuusage == Catch::Approx(0.37));
+}
+
 TEST_CASE("RKNN accelerator metrics provider rejects invalid load", "[system][metrics][rknn]") {
     ScopedNpuLoadFixture fixture("NPU load:  Core0: 105%, Core1: 0%,\n");
+    auto provider = cosmo::service::detail::CreateAcceleratorMetricsProvider();
+    REQUIRE(provider != nullptr);
+
+    const auto metrics = provider->QueryUtilization();
+    CHECK_FALSE(metrics.gpuusageAvailable);
+    CHECK(metrics.gpuusage == 0.0);
+    CHECK(metrics.coreUtilizations.empty());
+}
+
+TEST_CASE("RKNN accelerator metrics provider rejects invalid aggregate-only load",
+          "[system][metrics][rknn]") {
+    ScopedNpuLoadFixture fixture("NPU load: 101%\n");
     auto provider = cosmo::service::detail::CreateAcceleratorMetricsProvider();
     REQUIRE(provider != nullptr);
 

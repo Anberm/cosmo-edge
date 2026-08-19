@@ -51,16 +51,30 @@ namespace {
                 return std::nullopt;
             cores_by_id[*core_id] = static_cast<double>(*percent) / 100.0;
         }
-        if (cores_by_id.empty())
+        if (!cores_by_id.empty()) {
+            NpuLoadSnapshot result;
+            result.cores.reserve(cores_by_id.size());
+            for (const auto& [core_id, load] : cores_by_id) {
+                (void)core_id;
+                result.cores.push_back(load);
+                result.aggregate = std::max(result.aggregate, load);
+            }
+            return result;
+        }
+
+        // Single-core Rockchip parts such as RV1126B expose only an aggregate
+        // counter ("NPU load: 37%") instead of RK3576-style CoreN fields.
+        static const std::regex aggregate_pattern(R"(NPU\s+load\s*:\s*([0-9]+)\s*%)", std::regex::icase);
+        std::smatch aggregate_match;
+        if (!std::regex_search(text, aggregate_match, aggregate_pattern))
+            return std::nullopt;
+        const auto percent = ParseUnsigned(aggregate_match[1]);
+        if (!percent || *percent > 100)
             return std::nullopt;
 
         NpuLoadSnapshot result;
-        result.cores.reserve(cores_by_id.size());
-        for (const auto& [core_id, load] : cores_by_id) {
-            (void)core_id;
-            result.cores.push_back(load);
-            result.aggregate = std::max(result.aggregate, load);
-        }
+        result.aggregate = static_cast<double>(*percent) / 100.0;
+        result.cores.push_back(result.aggregate);
         return result;
     }
 
