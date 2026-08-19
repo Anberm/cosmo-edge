@@ -369,7 +369,8 @@ When position and direction are correct, click **Finish Drawing**.
 
 ### 6.3 Set the Offline-Video Running Strategy
 
-To observe the same sample repeatedly, use **Offline Video Play Count**. The current form accepts only `0–100`; the runtime treats `0` as an infinite loop and a positive value as the total play count. Some current resource help text still says “negative means infinite and zero means one,” but the form rejects negative values and that description conflicts with runtime code. Enter `0` to loop on this version.
+To observe the same sample repeatedly, use **Offline Video Play Count**. The form accepts `0–100`:
+`0` loops indefinitely, while `1–100` is the total number of plays.
 
 ![Setting offline-video play count and running strategy](images/img_24.webp)
 
