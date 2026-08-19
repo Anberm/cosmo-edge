@@ -12,6 +12,7 @@
             <h1>AI Box 可视化测试平台</h1>
             <nav>
                 <button class="nav-btn active" data-tab="http-alerts">HTTP 告警可视化</button>
+                <button class="nav-btn" data-tab="image-analysis">图片分析测试</button>
                 <button class="nav-btn" data-tab="mqtt-test">MQTT 接口测试</button>
                 <button class="nav-btn" data-tab="mqtt-auto-test">MQTT 自动化测试</button>
             </nav>
@@ -27,6 +28,115 @@
             </div>
             <div id="alerts-list" class="alerts-grid">
                 <!-- Alerts will be injected here -->
+            </div>
+        </section>
+
+        <!-- Image Analysis Test Tab -->
+        <section id="image-analysis" class="tab-content">
+            <div class="section-header image-analysis-heading">
+                <div>
+                    <h2>图片分析 API 测试</h2>
+                    <p class="text-muted">连接 CosmoEdge 设备，选择图片分析算法，上传图片并查看检测框、置信度和原始响应。</p>
+                </div>
+                <span id="image-analysis-connection" class="connection-badge disconnected">未连接</span>
+            </div>
+
+            <div class="image-analysis-layout">
+                <aside class="image-analysis-sidebar">
+                    <div class="card">
+                        <h3>1. 连接设备</h3>
+                        <div class="form-group">
+                            <label for="image-device-url">设备地址</label>
+                            <input id="image-device-url" type="url" value="http://127.0.0.1" placeholder="http://192.168.1.100">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="image-account">账号</label>
+                                <input id="image-account" type="text" value="admin" autocomplete="username">
+                            </div>
+                            <div class="form-group">
+                                <label for="image-password">密码</label>
+                                <input id="image-password" type="password" autocomplete="current-password">
+                            </div>
+                        </div>
+                        <button id="image-connect" class="btn btn-primary full-width">连接并加载算法</button>
+                        <p class="security-note">凭据只用于本次测试请求，不写入浏览器存储或测试报告。请仅在可信测试网络使用。</p>
+                    </div>
+
+                    <div class="card">
+                        <h3>2. 选择算法与图片</h3>
+                        <div class="form-group">
+                            <label for="image-algorithm">图片分析算法</label>
+                            <select id="image-algorithm" disabled>
+                                <option value="">请先连接设备</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="image-task-id">任务 ID</label>
+                            <div class="input-action-row">
+                                <input id="image-task-id" type="text" placeholder="自动生成唯一任务 ID">
+                                <button id="image-regenerate-task" class="btn btn-ghost btn-sm" type="button" title="生成新的任务 ID">换一个</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="image-file">测试图片</label>
+                            <input id="image-file" type="file" accept="image/jpeg,image/png,image/bmp">
+                            <p id="image-file-meta" class="text-muted">支持 JPEG、PNG、BMP；设备能力为最终限制。</p>
+                        </div>
+                        <div class="image-action-row">
+                            <button id="image-run" class="btn btn-primary" disabled>开始分析</button>
+                            <button id="image-release" class="btn btn-secondary" disabled>释放任务</button>
+                        </div>
+                    </div>
+                </aside>
+
+                <div class="image-analysis-main">
+                    <div id="image-analysis-status" class="analysis-status idle">
+                        <span class="analysis-status-dot"></span>
+                        <span id="image-analysis-status-text">等待连接设备</span>
+                    </div>
+
+                    <div id="image-analysis-summary" class="image-summary hidden">
+                        <div class="summary-card"><span id="image-target-count" class="summary-num">0</span><span class="summary-label">目标数</span></div>
+                        <div class="summary-card"><span id="image-face-count" class="summary-num">0</span><span class="summary-label">人脸数</span></div>
+                        <div class="summary-card"><span id="image-elapsed" class="summary-num">0 ms</span><span class="summary-label">总耗时</span></div>
+                        <div class="summary-card"><span id="image-chunks" class="summary-num">0</span><span class="summary-label">上传分片</span></div>
+                    </div>
+
+                    <div class="image-result-grid">
+                        <div class="card image-preview-card">
+                            <h3>原图与检测框</h3>
+                            <div id="image-original-empty" class="image-placeholder">选择图片后在此预览</div>
+                            <div id="image-original-stage" class="image-stage hidden">
+                                <img id="image-original-preview" alt="待分析原图">
+                                <canvas id="image-overlay-canvas"></canvas>
+                            </div>
+                        </div>
+                        <div class="card image-preview-card">
+                            <h3>设备标注结果</h3>
+                            <div id="image-result-empty" class="image-placeholder">分析完成后显示设备返回的标注图</div>
+                            <img id="image-result-preview" class="result-preview hidden" alt="设备标注结果">
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>结构化目标</h3>
+                        <div id="image-targets-empty" class="image-placeholder compact">暂无检测结果</div>
+                        <div id="image-targets-table-wrap" class="table-scroll hidden">
+                            <table class="targets-table">
+                                <thead>
+                                    <tr><th>#</th><th>区域</th><th>标签</th><th>置信度</th><th>目标框 (x, y, w, h)</th><th>关键点</th></tr>
+                                </thead>
+                                <tbody id="image-targets-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <details class="card raw-response-card">
+                        <summary>查看原始 API 响应</summary>
+                        <pre id="image-raw-response">尚未调用图片分析接口。</pre>
+                    </details>
+                </div>
             </div>
         </section>
 
