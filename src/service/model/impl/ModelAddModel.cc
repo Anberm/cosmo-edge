@@ -399,21 +399,22 @@ util::ErrorEnum ModelImportExporter::WriteNnFile(const std::string& modelType,
                 LOG_INFO("[AddModel] RKLLM: copied component to {}", destination);
             }
         }
+    }
 #endif
 #ifndef COSMO_NN_USE_RKLLM_BACKEND
-        const bool is_rkllm_qwen35 = false;
+    const bool is_rkllm_qwen35 = false;
 #endif
-        if (!is_rkllm_qwen35 && bmodel_paths.size() != 1) {
-            convert_error = "RKNN add-model requires exactly one model file";
-        } else if (!is_rkllm_qwen35) {
-            const std::string model_file_path = model_dir + "/model.rknn";
-            std::error_code ec;
-            fs::copy_file(bmodel_paths[0], model_file_path, fs::copy_options::overwrite_existing, ec);
-            if (ec)
-                convert_error = "Failed to copy RKNN model to " + model_file_path + ": " + ec.message();
-            else
-                LOG_INFO("[AddModel] RKNN: copied model file to {}", model_file_path);
-        }
+    if (!is_rkllm_qwen35 && bmodel_paths.size() != 1) {
+        convert_error = "RKNN add-model requires exactly one model file";
+    } else if (!is_rkllm_qwen35) {
+        const std::string model_file_path = model_dir + "/model.rknn";
+        std::error_code ec;
+        fs::copy_file(bmodel_paths[0], model_file_path, fs::copy_options::overwrite_existing, ec);
+        if (ec)
+            convert_error = "Failed to copy RKNN model to " + model_file_path + ": " + ec.message();
+        else
+            LOG_INFO("[AddModel] RKNN: copied model file to {}", model_file_path);
+    }
 #elif defined(COSMO_NN_USE_ONNX_BACKEND)
     // CPU/x86: copy .onnx file directly; no Sophon wrapper needed.
     std::string convert_error;
@@ -455,262 +456,264 @@ util::ErrorEnum ModelImportExporter::WriteNnFile(const std::string& modelType,
     }
 #endif
 
-        if (!convert_error.empty()) {
-            try {
-                fs::remove_all(model_dir);
-            } catch (const std::exception&) {
-            }
-            LOG_WARN("[AddModel] model file conversion/copy failed: {}", convert_error);
-            return util::ErrorEnum::SysErr;
+    if (!convert_error.empty()) {
+        try {
+            fs::remove_all(model_dir);
+        } catch (const std::exception&) {
         }
-        return util::ErrorEnum::Success;
+        LOG_WARN("[AddModel] model file conversion/copy failed: {}", convert_error);
+        return util::ErrorEnum::SysErr;
     }
+    return util::ErrorEnum::Success;
+}
 
-    // UpdateTemplateConfig moved to ModelAddModel_Json.cc
+// UpdateTemplateConfig moved to ModelAddModel_Json.cc
 
-    util::ErrorEnum ModelImportExporter::CopyAuxiliaryFiles(
-        const std::string& modelType, const std::string& vocabFilePath, const std::string& tokenizerFilePath,
-        const std::string& characterTableFilePath, const std::string& model_dir) {
-        namespace fs = std::filesystem;
+util::ErrorEnum ModelImportExporter::CopyAuxiliaryFiles(const std::string& modelType,
+                                                        const std::string& vocabFilePath,
+                                                        const std::string& tokenizerFilePath,
+                                                        const std::string& characterTableFilePath,
+                                                        const std::string& model_dir) {
+    namespace fs = std::filesystem;
 
-        if (modelType == "dino" && !vocabFilePath.empty()) {
-            if (fs::exists(vocabFilePath)) {
-                std::string dest_vocab = model_dir + "/vocab.txt";
-                try {
-                    fs::copy_file(vocabFilePath, dest_vocab, fs::copy_options::overwrite_existing);
-                    LOG_INFO("[AddModel] Copied vocab.txt to {}", dest_vocab);
-                } catch (const std::exception& e) {
-                    try {
-                        fs::remove_all(model_dir);
-                    } catch (const std::exception&) {
-                    }
-                    LOG_WARN("[AddModel] Failed to copy vocab.txt: {}", e.what());
-                    return util::ErrorEnum::SysErr;
-                }
-            } else {
-                try {
-                    fs::remove_all(model_dir);
-                } catch (const std::exception&) {
-                }
-                LOG_WARN("[AddModel] vocab.txt temp file does not exist: {}", vocabFilePath);
-                return util::ErrorEnum::FileNotExist;
-            }
-        }
-
-        if ((modelType == "qwen3vl" || modelType == "qwen3_5") && !tokenizerFilePath.empty()) {
-            if (fs::exists(tokenizerFilePath)) {
-                std::string dest_tokenizer = model_dir + "/tokenizer.json";
-                try {
-                    fs::copy_file(tokenizerFilePath, dest_tokenizer, fs::copy_options::overwrite_existing);
-                    LOG_INFO("[AddModel] Copied tokenizer.json to {}", dest_tokenizer);
-                } catch (const std::exception& e) {
-                    try {
-                        fs::remove_all(model_dir);
-                    } catch (const std::exception&) {
-                    }
-                    LOG_WARN("[AddModel] Failed to copy tokenizer.json: {}", e.what());
-                    return util::ErrorEnum::SysErr;
-                }
-            } else {
-                try {
-                    fs::remove_all(model_dir);
-                } catch (const std::exception&) {
-                }
-                LOG_WARN("[AddModel] tokenizer.json temp file does not exist: {}", tokenizerFilePath);
-                return util::ErrorEnum::FileNotExist;
-            }
-        }
-
-        if (modelType == "ocr") {
-            std::string dest_table = model_dir + "/character_table.txt";
+    if (modelType == "dino" && !vocabFilePath.empty()) {
+        if (fs::exists(vocabFilePath)) {
+            std::string dest_vocab = model_dir + "/vocab.txt";
             try {
-                fs::copy_file(characterTableFilePath, dest_table, fs::copy_options::overwrite_existing);
-                LOG_INFO("[AddModel] Copied OCR character table to {}", dest_table);
+                fs::copy_file(vocabFilePath, dest_vocab, fs::copy_options::overwrite_existing);
+                LOG_INFO("[AddModel] Copied vocab.txt to {}", dest_vocab);
             } catch (const std::exception& e) {
                 try {
                     fs::remove_all(model_dir);
                 } catch (const std::exception&) {
                 }
-                LOG_WARN("[AddModel] Failed to copy OCR character table: {}", e.what());
+                LOG_WARN("[AddModel] Failed to copy vocab.txt: {}", e.what());
                 return util::ErrorEnum::SysErr;
             }
-        }
-
-        return util::ErrorEnum::Success;
-    }
-
-    // ============================================================
-    // Slim AddAtomicModel orchestrator
-    // ============================================================
-    util::ErrorEnum ModelImportExporter::AddAtomicModel(
-        const std::string& modelCode, const std::string& modelName, const std::string& modelType,
-        const std::string& description, const std::vector<cosmo::Model::BmodelFileInfo>& bmodel_files,
-        const std::string& vocabFilePath, const std::string& tokenizerFilePath,
-        const std::string& characterTableFilePath, const std::string& normalizationMode,
-        const std::string& colorChannel) {
-        namespace fs = std::filesystem;
-
-        const std::string models_dir   = get_model_path_();
-        const std::string template_dir = get_model_template_path_();
-
-        // Collect temp files for cleanup
-        std::vector<std::string> temp_files_to_cleanup;
-        for (const auto& bmodelFile : bmodel_files) {
-            if (!bmodelFile.filePath.empty())
-                temp_files_to_cleanup.push_back(bmodelFile.filePath);
-        }
-        if (!vocabFilePath.empty())
-            temp_files_to_cleanup.push_back(vocabFilePath);
-        if (!tokenizerFilePath.empty())
-            temp_files_to_cleanup.push_back(tokenizerFilePath);
-        if (!characterTableFilePath.empty())
-            temp_files_to_cleanup.push_back(characterTableFilePath);
-
-        auto cleanup_and_return = [&](util::ErrorEnum err) -> util::ErrorEnum {
-            CleanupManagedUploadFiles(temp_files_to_cleanup);
-            return err;
-        };
-
-        // 1-2. Validate inputs
-        std::string resolved_model_code;
-        std::vector<std::string> bmodel_paths;
-        auto err = ValidateAddModelInputs(modelCode, modelName, modelType, bmodel_files, vocabFilePath,
-                                          tokenizerFilePath, characterTableFilePath, resolved_model_code,
-                                          bmodel_paths);
-        if (err != util::ErrorEnum::Success)
-            return cleanup_and_return(err);
-
-        std::string resolved_vocab_path;
-        std::string resolved_tokenizer_path;
-        std::string resolved_character_table_path;
-        if ((!vocabFilePath.empty() && !ResolveManagedUploadFile(vocabFilePath, resolved_vocab_path)) ||
-            (!tokenizerFilePath.empty() &&
-             !ResolveManagedUploadFile(tokenizerFilePath, resolved_tokenizer_path)) ||
-            (!characterTableFilePath.empty() &&
-             !ResolveManagedUploadFile(characterTableFilePath, resolved_character_table_path))) {
-            LOG_WARN("{}", "[AddModel] Auxiliary file is not a managed upload");
-            return cleanup_and_return(util::ErrorEnum::FileNotExist);
-        }
-
-        // 3. Read template file
-        std::string template_path = (fs::path(template_dir) / (modelType + ".json")).string();
-        if (!fs::exists(template_path)) {
-            LOG_WARN("[AddModel] Model type template not found: {}", template_path);
-            return cleanup_and_return(util::ErrorEnum::FileNotExist);
-        }
-
-        std::ifstream templateFile(template_path);
-        if (!templateFile.is_open()) {
-            LOG_WARN("[AddModel] Failed to open template file: {}", template_path);
-            return cleanup_and_return(util::ErrorEnum::SysErr);
-        }
-
-        std::stringstream templateBuffer;
-        templateBuffer << templateFile.rdbuf();
-        templateFile.close();
-
-        nlohmann::json templateDoc;
-        try {
-            templateDoc = nlohmann::json::parse(templateBuffer.str());
-        } catch (const std::exception& e) {
-            LOG_WARN("[AddModel] Template file JSON parse error: {} ({})", template_path, e.what());
-            return cleanup_and_return(util::ErrorEnum::InvalidParam);
-        }
-
-        // 4. Get bmodel info
-        bool use_template_defaults = false;
-        std::vector<cosmo::BmodelInfo> bmodel_infos;
-        err = CollectBmodelInfo(modelType, bmodel_paths, bmodel_infos, use_template_defaults);
-        if (err != util::ErrorEnum::Success)
-            return cleanup_and_return(err);
-
-        if (modelType == "ocr") {
-            err = ConfigureOcrCharacterTable(templateDoc, bmodel_infos, resolved_character_table_path);
-            if (err != util::ErrorEnum::Success)
-                return cleanup_and_return(err);
-        }
-
-        // 5. Calculate version number
-        std::string version_str = CalculateNextVersion(models_dir, resolved_model_code);
-
-        // 6. Create model directory
-        std::string clean_model_name = modelName;
-        std::replace(clean_model_name.begin(), clean_model_name.end(), ' ', '_');
-        std::replace(clean_model_name.begin(), clean_model_name.end(), '/', '_');
-        std::replace(clean_model_name.begin(), clean_model_name.end(), '\\', '_');
-
-        std::string folder_name = std::string(cosmo::util::kNewDirPrefix) + resolved_model_code + "_" +
-                                  clean_model_name + "_" + version_str;
-        std::string model_dir;
-        if (!cosmo::path::IsSafePathComponent(folder_name, 200) ||
-            !cosmo::path::ResolvePathWithinRoot(models_dir, (fs::path(models_dir) / folder_name).string(),
-                                                model_dir)) {
-            LOG_WARN("[AddModel] Refusing unsafe model directory component: {}", folder_name);
-            return cleanup_and_return(util::ErrorEnum::InvalidParam);
-        }
-
-        LOG_INFO("[AddModel] Creating model directory: {}", model_dir);
-        if (!util::CreateDir(model_dir)) {
-            LOG_WARN("[AddModel] Failed to create model directory: {}", model_dir);
-            return cleanup_and_return(util::ErrorEnum::SysErr);
-        }
-
-        // 7. Write model.nn
-        err = WriteNnFile(modelType, bmodel_paths, model_dir);
-        if (err != util::ErrorEnum::Success)
-            return cleanup_and_return(err);
-
-        // 8. Update template config
-        UpdateTemplateConfig(templateDoc, resolved_model_code, version_str, modelName, modelType, description,
-                             bmodel_infos, use_template_defaults, normalizationMode, colorChannel);
-
-        // 8.1 Validate model output format
-        {
-            try {
-                validate_model_output_format_(templateDoc);
-            } catch (const std::exception&) {
-                try {
-                    fs::remove_all(model_dir);
-                } catch (const std::exception&) {
-                }
-                CleanupManagedUploadFiles(temp_files_to_cleanup);
-                throw;  // re-throw to preserve original exception behavior
-            }
-        }
-
-        // 9. Save config.json
-        std::string config_path  = model_dir + "/config.json";
-        std::string json_content = templateDoc.dump(2);
-
-        if (!util::WriteFile(config_path, json_content)) {
+        } else {
             try {
                 fs::remove_all(model_dir);
             } catch (const std::exception&) {
             }
-            LOG_WARN("[AddModel] Failed to save config.json: {}", config_path);
-            return cleanup_and_return(util::ErrorEnum::SysErr);
+            LOG_WARN("[AddModel] vocab.txt temp file does not exist: {}", vocabFilePath);
+            return util::ErrorEnum::FileNotExist;
         }
-
-        // 9.1 Copy auxiliary files
-        err = CopyAuxiliaryFiles(modelType, resolved_vocab_path, resolved_tokenizer_path,
-                                 resolved_character_table_path, model_dir);
-        if (err != util::ErrorEnum::Success)
-            return cleanup_and_return(err);
-
-        // 10. Clean up temp files
-        CleanupManagedUploadFiles(temp_files_to_cleanup);
-
-        // 11. Update memory mapping so service can find it without restart
-        if (set_model_path_mapping_) {
-            set_model_path_mapping_(resolved_model_code, model_dir);
-        }
-
-        LOG_INFO("[AddModel] Successfully added model: code={}, name={}, version={}, directory={}",
-                 resolved_model_code, modelName, version_str, model_dir);
-
-        return util::ErrorEnum::Success;
     }
 
-    // ImportFlatArchive, ImportDirectoryArchive, ImportModel — moved to ModelImporter.cc
+    if ((modelType == "qwen3vl" || modelType == "qwen3_5") && !tokenizerFilePath.empty()) {
+        if (fs::exists(tokenizerFilePath)) {
+            std::string dest_tokenizer = model_dir + "/tokenizer.json";
+            try {
+                fs::copy_file(tokenizerFilePath, dest_tokenizer, fs::copy_options::overwrite_existing);
+                LOG_INFO("[AddModel] Copied tokenizer.json to {}", dest_tokenizer);
+            } catch (const std::exception& e) {
+                try {
+                    fs::remove_all(model_dir);
+                } catch (const std::exception&) {
+                }
+                LOG_WARN("[AddModel] Failed to copy tokenizer.json: {}", e.what());
+                return util::ErrorEnum::SysErr;
+            }
+        } else {
+            try {
+                fs::remove_all(model_dir);
+            } catch (const std::exception&) {
+            }
+            LOG_WARN("[AddModel] tokenizer.json temp file does not exist: {}", tokenizerFilePath);
+            return util::ErrorEnum::FileNotExist;
+        }
+    }
+
+    if (modelType == "ocr") {
+        std::string dest_table = model_dir + "/character_table.txt";
+        try {
+            fs::copy_file(characterTableFilePath, dest_table, fs::copy_options::overwrite_existing);
+            LOG_INFO("[AddModel] Copied OCR character table to {}", dest_table);
+        } catch (const std::exception& e) {
+            try {
+                fs::remove_all(model_dir);
+            } catch (const std::exception&) {
+            }
+            LOG_WARN("[AddModel] Failed to copy OCR character table: {}", e.what());
+            return util::ErrorEnum::SysErr;
+        }
+    }
+
+    return util::ErrorEnum::Success;
+}
+
+// ============================================================
+// Slim AddAtomicModel orchestrator
+// ============================================================
+util::ErrorEnum ModelImportExporter::AddAtomicModel(
+    const std::string& modelCode, const std::string& modelName, const std::string& modelType,
+    const std::string& description, const std::vector<cosmo::Model::BmodelFileInfo>& bmodel_files,
+    const std::string& vocabFilePath, const std::string& tokenizerFilePath,
+    const std::string& characterTableFilePath, const std::string& normalizationMode,
+    const std::string& colorChannel) {
+    namespace fs = std::filesystem;
+
+    const std::string models_dir   = get_model_path_();
+    const std::string template_dir = get_model_template_path_();
+
+    // Collect temp files for cleanup
+    std::vector<std::string> temp_files_to_cleanup;
+    for (const auto& bmodelFile : bmodel_files) {
+        if (!bmodelFile.filePath.empty())
+            temp_files_to_cleanup.push_back(bmodelFile.filePath);
+    }
+    if (!vocabFilePath.empty())
+        temp_files_to_cleanup.push_back(vocabFilePath);
+    if (!tokenizerFilePath.empty())
+        temp_files_to_cleanup.push_back(tokenizerFilePath);
+    if (!characterTableFilePath.empty())
+        temp_files_to_cleanup.push_back(characterTableFilePath);
+
+    auto cleanup_and_return = [&](util::ErrorEnum err) -> util::ErrorEnum {
+        CleanupManagedUploadFiles(temp_files_to_cleanup);
+        return err;
+    };
+
+    // 1-2. Validate inputs
+    std::string resolved_model_code;
+    std::vector<std::string> bmodel_paths;
+    auto err =
+        ValidateAddModelInputs(modelCode, modelName, modelType, bmodel_files, vocabFilePath,
+                               tokenizerFilePath, characterTableFilePath, resolved_model_code, bmodel_paths);
+    if (err != util::ErrorEnum::Success)
+        return cleanup_and_return(err);
+
+    std::string resolved_vocab_path;
+    std::string resolved_tokenizer_path;
+    std::string resolved_character_table_path;
+    if ((!vocabFilePath.empty() && !ResolveManagedUploadFile(vocabFilePath, resolved_vocab_path)) ||
+        (!tokenizerFilePath.empty() &&
+         !ResolveManagedUploadFile(tokenizerFilePath, resolved_tokenizer_path)) ||
+        (!characterTableFilePath.empty() &&
+         !ResolveManagedUploadFile(characterTableFilePath, resolved_character_table_path))) {
+        LOG_WARN("{}", "[AddModel] Auxiliary file is not a managed upload");
+        return cleanup_and_return(util::ErrorEnum::FileNotExist);
+    }
+
+    // 3. Read template file
+    std::string template_path = (fs::path(template_dir) / (modelType + ".json")).string();
+    if (!fs::exists(template_path)) {
+        LOG_WARN("[AddModel] Model type template not found: {}", template_path);
+        return cleanup_and_return(util::ErrorEnum::FileNotExist);
+    }
+
+    std::ifstream templateFile(template_path);
+    if (!templateFile.is_open()) {
+        LOG_WARN("[AddModel] Failed to open template file: {}", template_path);
+        return cleanup_and_return(util::ErrorEnum::SysErr);
+    }
+
+    std::stringstream templateBuffer;
+    templateBuffer << templateFile.rdbuf();
+    templateFile.close();
+
+    nlohmann::json templateDoc;
+    try {
+        templateDoc = nlohmann::json::parse(templateBuffer.str());
+    } catch (const std::exception& e) {
+        LOG_WARN("[AddModel] Template file JSON parse error: {} ({})", template_path, e.what());
+        return cleanup_and_return(util::ErrorEnum::InvalidParam);
+    }
+
+    // 4. Get bmodel info
+    bool use_template_defaults = false;
+    std::vector<cosmo::BmodelInfo> bmodel_infos;
+    err = CollectBmodelInfo(modelType, bmodel_paths, bmodel_infos, use_template_defaults);
+    if (err != util::ErrorEnum::Success)
+        return cleanup_and_return(err);
+
+    if (modelType == "ocr") {
+        err = ConfigureOcrCharacterTable(templateDoc, bmodel_infos, resolved_character_table_path);
+        if (err != util::ErrorEnum::Success)
+            return cleanup_and_return(err);
+    }
+
+    // 5. Calculate version number
+    std::string version_str = CalculateNextVersion(models_dir, resolved_model_code);
+
+    // 6. Create model directory
+    std::string clean_model_name = modelName;
+    std::replace(clean_model_name.begin(), clean_model_name.end(), ' ', '_');
+    std::replace(clean_model_name.begin(), clean_model_name.end(), '/', '_');
+    std::replace(clean_model_name.begin(), clean_model_name.end(), '\\', '_');
+
+    std::string folder_name = std::string(cosmo::util::kNewDirPrefix) + resolved_model_code + "_" +
+                              clean_model_name + "_" + version_str;
+    std::string model_dir;
+    if (!cosmo::path::IsSafePathComponent(folder_name, 200) ||
+        !cosmo::path::ResolvePathWithinRoot(models_dir, (fs::path(models_dir) / folder_name).string(),
+                                            model_dir)) {
+        LOG_WARN("[AddModel] Refusing unsafe model directory component: {}", folder_name);
+        return cleanup_and_return(util::ErrorEnum::InvalidParam);
+    }
+
+    LOG_INFO("[AddModel] Creating model directory: {}", model_dir);
+    if (!util::CreateDir(model_dir)) {
+        LOG_WARN("[AddModel] Failed to create model directory: {}", model_dir);
+        return cleanup_and_return(util::ErrorEnum::SysErr);
+    }
+
+    // 7. Write model.nn
+    err = WriteNnFile(modelType, bmodel_paths, model_dir);
+    if (err != util::ErrorEnum::Success)
+        return cleanup_and_return(err);
+
+    // 8. Update template config
+    UpdateTemplateConfig(templateDoc, resolved_model_code, version_str, modelName, modelType, description,
+                         bmodel_infos, use_template_defaults, normalizationMode, colorChannel);
+
+    // 8.1 Validate model output format
+    {
+        try {
+            validate_model_output_format_(templateDoc);
+        } catch (const std::exception&) {
+            try {
+                fs::remove_all(model_dir);
+            } catch (const std::exception&) {
+            }
+            CleanupManagedUploadFiles(temp_files_to_cleanup);
+            throw;  // re-throw to preserve original exception behavior
+        }
+    }
+
+    // 9. Save config.json
+    std::string config_path  = model_dir + "/config.json";
+    std::string json_content = templateDoc.dump(2);
+
+    if (!util::WriteFile(config_path, json_content)) {
+        try {
+            fs::remove_all(model_dir);
+        } catch (const std::exception&) {
+        }
+        LOG_WARN("[AddModel] Failed to save config.json: {}", config_path);
+        return cleanup_and_return(util::ErrorEnum::SysErr);
+    }
+
+    // 9.1 Copy auxiliary files
+    err = CopyAuxiliaryFiles(modelType, resolved_vocab_path, resolved_tokenizer_path,
+                             resolved_character_table_path, model_dir);
+    if (err != util::ErrorEnum::Success)
+        return cleanup_and_return(err);
+
+    // 10. Clean up temp files
+    CleanupManagedUploadFiles(temp_files_to_cleanup);
+
+    // 11. Update memory mapping so service can find it without restart
+    if (set_model_path_mapping_) {
+        set_model_path_mapping_(resolved_model_code, model_dir);
+    }
+
+    LOG_INFO("[AddModel] Successfully added model: code={}, name={}, version={}, directory={}",
+             resolved_model_code, modelName, version_str, model_dir);
+
+    return util::ErrorEnum::Success;
+}
+
+// ImportFlatArchive, ImportDirectoryArchive, ImportModel — moved to ModelImporter.cc
 
 }  // namespace cosmo::service
