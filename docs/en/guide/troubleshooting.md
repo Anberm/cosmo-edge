@@ -160,7 +160,7 @@ For BM1688, replace the final argument with `bm1688` or omit it.
 
 Common causes:
 
-- Network issues preventing apt/npm/cargo mirror downloads — check `SOPHON_APT_MIRROR` and related environment variables.
+- Failure to pull the prebuilt GHCR image or populate the npm cache — check Docker registry networking, proxy, DNS, and the current build log.
 - Insufficient disk space — the build requires approximately 3GB.
 - An unsupported `COSMO_MODEL_GUARD_BUILD_PROFILE` value — only
   `public-runtime` and `production-release` are accepted.

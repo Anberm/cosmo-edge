@@ -157,7 +157,7 @@ Sophon 产物不会直接写在 `build_output/` 根目录。每个
 
 常见问题：
 
-- 网络问题导致 apt/npm/cargo 镜像下载失败 — 检查 `SOPHON_APT_MIRROR` 等环境变量。
+- 无法拉取预构建 GHCR 镜像或填充 npm 缓存——检查 Docker registry 网络、代理、DNS 和当前构建日志。
 - 磁盘空间不足 — 构建过程需要约 3GB 空间。
 - `COSMO_MODEL_GUARD_BUILD_PROFILE` 取值不受支持——只接受
   `public-runtime` 和 `production-release`。

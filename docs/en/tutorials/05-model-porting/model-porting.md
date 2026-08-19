@@ -623,10 +623,8 @@ without producing an event.
 
 ![Drawing and saving the detection region](images/img_40.webp)
 
-Under **Running Strategy**, ensure the current time is in an active period. The current form accepts
-`0–100`: `0` means an infinite loop, and a positive value is the total play count. Resource help text that
-says “negative means infinite and zero means one” conflicts with form validation and runtime code. Follow
-the earlier screenshot and enter `0` to loop on this version; a negative value is rejected by the form.
+Under **Running Strategy**, ensure the current time is in an active period. Offline Video Play Count accepts
+`0–100`: `0` loops indefinitely, while `1–100` is the total number of plays.
 
 ![Configuring offline-video strategy and repeat count](images/img_41.webp)
 

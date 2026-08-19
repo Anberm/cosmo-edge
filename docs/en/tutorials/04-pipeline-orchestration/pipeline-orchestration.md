@@ -416,7 +416,8 @@ For the first test, use template values and **Detection Time = 0 seconds** to pr
 
    ![Adjusting the Region Intrusion primary area](images/img_62.webp)
 
-9. Make the current time active under **Running Strategy**. The current form accepts `0–100`: enter `0` for an infinite offline-video loop, while a positive value is the total play count. The resource text that says “negative means infinite and zero means one” conflicts with form validation and runtime code; do not enter a negative value.
+9. Make the current time active under **Running Strategy**. Offline Video Play Count accepts `0–100`:
+   `0` loops indefinitely, while `1–100` is the total number of plays.
 
    ![Setting the offline-video running strategy](images/img_63.webp)
 
