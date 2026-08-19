@@ -320,6 +320,17 @@ jobs:
           require_pos_int COSMO_CATCH2_SHARD_TIMEOUT_SECONDS "$shard_timeout_seconds"
           require_pos_int COSMO_TEST_CASE_TIMEOUT_SECONDS    "$case_timeout_seconds"
 
+          # --input-file parses each line as a Catch2 test specification. Escape
+          # grammar characters so punctuation in a literal test name (notably
+          # commas) cannot turn the generated filter into an invalid spec.
+          write_catch2_test_spec() {
+            local escaped="$1"
+            escaped="${escaped//\\/\\\\}"
+            escaped="${escaped//,/\\,}"
+            escaped="${escaped//\"/\\\"}"
+            printf '"%s"\n' "$escaped"
+          }
+
           # self-hosted runner 工作目录跨 run 复用,历史 run 的 bisect/shards 文件会累积,
           # 被 Upload step 整个目录打包上传,新旧混杂干扰诊断。每次 run 开始清空这两个目录。
           rm -rf "$shards_dir" "$bisect_dir"
@@ -403,12 +414,19 @@ jobs:
             n=${#shard_tests[@]}
             shards_run=$((shards_run + 1))
 
+            filter="$shards_dir/$idx.filter"
+            : > "$filter"
+            for name in "${shard_tests[@]}"; do
+              [ -n "$name" ] || continue
+              write_catch2_test_spec "$name" >> "$filter"
+            done
+
             echo
             echo "[$idx] shard with $n tests"
 
             start_seconds="$(date +%s)"
             timeout --kill-after=10s "${shard_timeout_seconds}s" \
-              ./cosmo-tests --input-file "$input" --reporter "$reporter" \
+              ./cosmo-tests --input-file "$filter" --reporter "$reporter" \
                             --warn UnmatchedTestSpec \
               > "$log" 2>&1
             status=$?
@@ -438,8 +456,8 @@ jobs:
           done
 
           # 4) For any shard that timed out or crashed, re-run its tests one-per-process to
-          #    pinpoint the culprit. Single-spec here, so NoTestsRunExitCode=2 already
-          #    catches a no-match; --warn UnmatchedTestSpec kept for parity.
+          #    pinpoint the culprit. Use the same literal-name escaping as the shard run;
+          #    --warn UnmatchedTestSpec still catches a no-match.
           if [ "${#bisect_targets[@]}" -gt 0 ]; then
             echo
             echo "Bisecting ${#bisect_targets[@]} shard(s) per-test (${case_timeout_seconds}s/case)."
@@ -456,7 +474,7 @@ jobs:
                 safe_name="${safe_name:-test}"
                 log_file="$bisect_dir/${idx}_$(printf '%03d' "$number")_${safe_name}.log"
                 filter_file="$bisect_dir/${idx}_$(printf '%03d' "$number")_${safe_name}.filter"
-                printf '%s\n' "$name" > "$filter_file"
+                write_catch2_test_spec "$name" > "$filter_file"
 
                 echo "[bisect #$idx $number/${#shard_tests[@]}] $name"
                 start_seconds="$(date +%s)"

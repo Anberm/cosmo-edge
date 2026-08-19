@@ -178,6 +178,15 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn('CARGO_HTTP_TIMEOUT: "120"', build_job)
         self.assertIn('CARGO_NET_RETRY: "5"', build_job)
 
+    def test_nightly_sophon_escapes_generated_catch2_filters(self) -> None:
+        workflow = (
+            REPOSITORY / ".github/workflows/nightly-build-test-sophon.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("write_catch2_test_spec()", workflow)
+        self.assertIn('escaped="${escaped//,/\\\\,}"', workflow)
+        self.assertEqual(workflow.count('write_catch2_test_spec "$name"'), 2)
+
     def test_container_builds_bound_and_cache_npm_connections(self) -> None:
         npmrc = (REPOSITORY / "src/web/.npmrc").read_text(encoding="utf-8")
         self.assertIn("registry=https://registry.npmmirror.com/", npmrc)
