@@ -594,6 +594,10 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn("rv1126b", workflow)
         self.assertIn("cosmo_edge-build-env_rockchip", workflow)
         self.assertIn("packages: write", workflow)
+        self.assertIn(
+            '(cd "build_output/${CHIP}" && sha256sum -c SHA256SUMS)',
+            workflow,
+        )
         self.assertIn("878f9361fd3afa7e167b7079918918f78d2c1c2a", dockerfile)
         self.assertIn("install_rkllm_sdk.py", dockerfile)
         self.assertIn("/opt/rockchip-media/rk3576", dockerfile)

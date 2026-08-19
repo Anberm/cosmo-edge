@@ -122,7 +122,7 @@ jobs:
           digest="${digest%% *}"
           printf '%s  %s\n' "$digest" "$package_name" | tee "${CHIP}-package.sha256"
           cmp -s <(printf '%s\n' "$CHIP") "build_output/${CHIP}/TARGET_CHIP"
-          sha256sum -c "build_output/${CHIP}/SHA256SUMS"
+          (cd "build_output/${CHIP}" && sha256sum -c SHA256SUMS)
           for binary in build_rknn/cosmo-tests build_rknn/cosmo-rknn-backend-smoke build_rknn/cosmo-rknn-fastpath-qualify; do
             binary_info="$(file "$binary")"
             printf '%s\n' "$binary_info"
