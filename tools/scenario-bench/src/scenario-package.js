@@ -14,8 +14,9 @@ import { parse as parseYaml } from 'yaml';
 import { normalizeTaskType } from './task-strategies.js';
 
 const FPS_ACTION_ID = 'AA_00001';
+const CLASSIFIER_FPS_ACTION_ID = 'AA_00002';
 const VLM_ACTION_IDS = new Set(['DA_00003', 'PDA_00003']);
-const FPS_ACTION_IDS = new Set([FPS_ACTION_ID, ...VLM_ACTION_IDS]);
+const FPS_ACTION_IDS = new Set([FPS_ACTION_ID, CLASSIFIER_FPS_ACTION_ID, ...VLM_ACTION_IDS]);
 const SUPPORTED_VIDEO_MODES = new Set(['local', 'rtsp-fidelity', 'rtsp-deterministic']);
 export const DEFAULT_HOLD_SEC = 30;
 export const DEFAULT_VLM_HOLD_SEC = 60;

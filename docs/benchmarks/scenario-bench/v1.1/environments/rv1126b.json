@@ -1,17 +1,16 @@
 {
   "schemaVersion": 2,
-  "platform": "CV186X",
-  "deviceDescription": "CV186X reference device",
+  "platform": "RV1126B",
+  "scope": "release-platform",
+  "deviceDescription": "RV1126B reference device",
   "architecture": "aarch64",
-  "os": "Ubuntu 22.04.5 LTS",
+  "os": "Linux",
   "memory": {
-    "systemBytes": 2160451584,
-    "acceleratorHeap0MiB": 1536,
-    "acceleratorHeap1MiB": 4096
+    "sharedSystemMiB": 1990
   },
   "runtime": {
-    "inference": "libsophon/BMRT 0.4.12",
-    "media": "Sophon FFmpeg 2.0.0 / Sophon GStreamer 2.0.0"
+    "inference": "RKNN",
+    "media": "Rockchip MPP / RGA"
   },
   "cosmoEdgeInstalledVersion": "V1.1.0.0",
   "releaseSourceCommit": "89c73a7464a81ef378686447d7c1eeb88b988455",

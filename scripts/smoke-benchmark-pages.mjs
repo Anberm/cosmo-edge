@@ -1,79 +1,120 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const distRoot = resolve(repositoryRoot, process.argv[2] ?? 'docs/.vitepress/dist');
-const benchmarkRoot = join(distRoot, 'benchmarks', 'scenario-bench', 'v1.1');
-const platforms = ['bm1688', 'cv186x', 'rk3576'];
-const workloads = ['single-detector', 'dual-detector', 'vlm-observation'];
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const distRoot = path.resolve(repositoryRoot, process.argv[2] ?? 'docs/.vitepress/dist');
+const benchmarkRoot = path.join(distRoot, 'benchmarks', 'scenario-bench', 'v1.1');
 const failures = [];
+
+const manifest = readJson('release-manifest.json');
+const vlm = readJson('results/vlm-observations.json');
+const vlmPlatformIds = new Set((vlm?.observations ?? []).map((item) => item.platformId));
+const platforms = (manifest?.platforms ?? []).map((definition) => ({
+  ...definition,
+  canonical: readJson(`results/${definition.id}/cases.json`),
+}));
+
 const expectedReports = ['report.html', 'report.zh-CN.html'];
-
 for (const platform of platforms) {
-  expectedReports.push(`results/${platform}/report.html`, `results/${platform}/report.zh-CN.html`);
-  for (const workload of workloads) {
+  const cases = platform.canonical?.cases ?? [];
+  for (const suffix of ['', '.zh-CN']) {
     expectedReports.push(
-      `results/${platform}/${workload}/report.html`,
-      `results/${platform}/${workload}/report.zh-CN.html`,
+      `results/${platform.id}/report${suffix}.html`,
+      `results/${platform.id}/cases/report${suffix}.html`,
+      `results/${platform.id}/single-workload/report${suffix}.html`,
+      `results/${platform.id}/concurrent-mixed/report${suffix}.html`,
     );
-  }
-}
-
-for (const relative of expectedReports) {
-  const file = join(benchmarkRoot, ...relative.split('/'));
-  if (!existsSync(file)) {
-    failures.push(`${relative}: generated report is missing`);
-    continue;
-  }
-  const html = readFileSync(file, 'utf8');
-  if (!/<html\b[^>]*>/iu.test(html) || !/<title>[^<]+<\/title>/iu.test(html)) {
-    failures.push(`${relative}: generated file is not a complete HTML report`);
-  }
-}
-
-for (const main of ['report.html', 'report.zh-CN.html']) {
-  const file = join(benchmarkRoot, main);
-  if (!existsSync(file)) continue;
-  const html = readFileSync(file, 'utf8');
-  const reportName = main === 'report.zh-CN.html' ? 'report.zh-CN.html' : 'report.html';
-  for (const platform of platforms) {
-    for (const workload of workloads) {
-      const target = `results/${platform}/${workload}/${reportName}`;
-      if (!html.includes(`href="${target}"`)) {
-        failures.push(`${main}: missing standalone-report link ${target}`);
-      } else if (!existsSync(join(benchmarkRoot, ...target.split('/')))) {
-        failures.push(`${main}: standalone-report target is missing ${target}`);
-      }
+    if (vlmPlatformIds.has(platform.id)) {
+      expectedReports.push(`results/${platform.id}/vlm-observation/report${suffix}.html`);
+    }
+    for (const benchmarkCase of cases) {
+      expectedReports.push(`results/${platform.id}/cases/${benchmarkCase.caseId}/report${suffix}.html`);
     }
   }
 }
 
-for (const platform of platforms) {
-  for (const reportName of ['report.html', 'report.zh-CN.html']) {
-    const relative = `results/${platform}/${reportName}`;
-    const html = readFileSync(join(benchmarkRoot, ...relative.split('/')), 'utf8');
-    for (const workload of workloads) {
-      const target = `${workload}/${reportName}`;
-      if (!html.includes(`href="${target}"`)) {
-        failures.push(`${relative}: missing workload-report link ${target}`);
-      }
-    }
-  }
-}
+const actualReports = fs.existsSync(benchmarkRoot)
+  ? walk(benchmarkRoot)
+    .filter((file) => /^report(?:\.zh-cn)?\.html$/i.test(path.basename(file)))
+    .map((file) => path.relative(benchmarkRoot, file).replaceAll('\\', '/'))
+    .sort()
+  : [];
+compareSets('report inventory', new Set(actualReports), new Set(expectedReports));
 
-for (const relative of expectedReports) {
-  const html = readFileSync(join(benchmarkRoot, ...relative.split('/')), 'utf8');
+for (const report of expectedReports) {
+  const file = path.join(benchmarkRoot, ...report.split('/'));
+  if (!fs.existsSync(file)) continue;
+  const html = fs.readFileSync(file, 'utf8');
+  if (!/<html\b[^>]*>/iu.test(html) || !/<title>[^<]+<\/title>/iu.test(html) || !/<\/html>\s*$/iu.test(html)) {
+    failures.push(`${report}: generated file is not a complete HTML report`);
+  }
+  const expectedLang = report.endsWith('.zh-CN.html') ? 'zh-CN' : 'en';
+  const actualLang = html.match(/<html\b[^>]*\blang=["']([^"']+)["']/iu)?.[1];
+  if (actualLang !== expectedLang) failures.push(`${report}: expected lang ${expectedLang}, found ${actualLang ?? 'missing'}`);
   const tables = html.match(/<table\b/giu)?.length ?? 0;
   const wrappers = html.match(/<div class="table"/giu)?.length ?? 0;
-  if (tables !== wrappers) failures.push(`${relative}: ${tables} table(s) but ${wrappers} responsive wrapper(s)`);
-  if (!html.includes('class="report-nav"')) failures.push(`${relative}: report navigation is missing`);
+  if (tables !== wrappers) failures.push(`${report}: ${tables} table(s) but ${wrappers} responsive wrapper(s)`);
+  if (!html.includes('class="report-nav"')) failures.push(`${report}: report navigation is missing`);
+  if (/\b(?:undefined|NaN)\b|\[object Object\]/u.test(html)) failures.push(`${report}: unresolved generated value`);
 }
 
-if (failures.length > 0) {
+for (const reportName of ['report.html', 'report.zh-CN.html']) {
+  const file = path.join(benchmarkRoot, reportName);
+  if (!fs.existsSync(file)) continue;
+  const html = fs.readFileSync(file, 'utf8');
+  for (const platform of platforms) {
+    for (const target of [
+      `results/${platform.id}/${reportName}`,
+      `results/${platform.id}/single-workload/${reportName}`,
+      `results/${platform.id}/concurrent-mixed/${reportName}`,
+      `results/${platform.id}/cases/${reportName}`,
+      ...(vlmPlatformIds.has(platform.id) ? [`results/${platform.id}/vlm-observation/${reportName}`] : []),
+    ]) {
+      if (!html.includes(`href="${target}"`)) failures.push(`${reportName}: missing report link ${target}`);
+    }
+  }
+}
+
+const expectedCaseCount = manifest?.evidence?.smallModelCaseCount;
+const actualCaseCount = platforms.reduce((count, platform) => count + (platform.canonical?.cases?.length ?? 0), 0);
+if (actualCaseCount !== expectedCaseCount) {
+  failures.push(`canonical case count ${actualCaseCount} differs from manifest count ${expectedCaseCount}`);
+}
+
+if (failures.length) {
   console.error(`Benchmark page smoke test failed with ${failures.length} issue(s):`);
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
-console.log(`Benchmark page smoke test passed: ${expectedReports.length} bilingual rendered reports, responsive tables, and cross-report navigation.`);
+console.log(
+  `Benchmark page smoke test passed: ${expectedReports.length} generated bilingual reports across ` +
+  `${platforms.length} manifest-defined platforms and ${actualCaseCount} canonical cases.`,
+);
+
+function readJson(relativePath) {
+  const file = path.join(benchmarkRoot, ...relativePath.split('/'));
+  if (!fs.existsSync(file)) {
+    failures.push(`${relativePath}: generated JSON is missing`);
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    failures.push(`${relativePath}: invalid JSON (${error.message})`);
+    return null;
+  }
+}
+
+function compareSets(label, actual, expected) {
+  for (const item of expected) if (!actual.has(item)) failures.push(`${label} is missing: ${item}`);
+  for (const item of actual) if (!expected.has(item)) failures.push(`${label} contains unexpected entry: ${item}`);
+}
+
+function walk(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(directory, entry.name);
+    return entry.isDirectory() ? walk(full) : [full];
+  });
+}
