@@ -33,8 +33,6 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 
 ## CosmoEdge 1.1
 
-> This branch is the CosmoEdge 1.1 source line. The linked benchmark pack contains the current controlled single-workload, concurrent mixed-workload, and VLM evidence.
-
 - **Multi-platform release:** BM1688, CV186X, RK3576, and RV1126B use the same video-ingest, orchestration, event, and observability workflow with target-specific model artifacts.
 - **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single workloads, concurrent mixed workloads, and conservative VLM performance display boundaries with sanitized reproducibility attachments.
 - **Rockchip release platforms:** RK3576 and RV1126B both include cross-build, board operation, RKNN inference, and MPP/RGA media paths and share the same v1.1 release tier. Their platform-specific benchmark and long-running evidence remain separately traceable without changing that release tier.

@@ -33,8 +33,6 @@ CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编�
 
 ## CosmoEdge 1.1
 
-> 当前分支是 CosmoEdge 1.1 源码线，关联 benchmark 包包含当前受控的单任务、并发混合任务与 VLM 证据。
-
 - **多平台发布：**BM1688、CV186X、RK3576 与 RV1126B 共享同一套视频接入、任务编排、事件和可观测流程，并分别使用目标平台模型产物。
 - **公开 benchmark 包：**[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单任务、并发混合任务与保守 VLM 性能展示边界，提供脱敏后的可复现附件。
 - **Rockchip 发布平台：**RK3576 与 RV1126B 均已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径，并纳入同一档 v1.1 发布范围；各自 benchmark 与长稳证据继续分开追溯，但不改变发布档位。
@@ -231,6 +229,8 @@ VLM 原始运行没有启用 FPS PASS/FAIL。统一按“全路最低 FPS 达到
 认证设备提供预配置加速、经过验证的商业模型包和专属部署支持，但不解锁另一套软件功能。中国大陆可通过[淘宝购买认证设备](https://item.taobao.com/item.htm?id=1066672051450)；其他地区或项目部署支持请联系 <hello@cosmowander.ai>。
 
 欢迎提交范围明确的 bug 报告、文档改进、场景示例和集成说明。提交 pull request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。社区支持入口为 [GitHub Discussions](https://github.com/cosmo-wander-ai/cosmo-edge/discussions)和 [Gitee Issues](https://gitee.com/cosmo-wander-ai/cosmo-edge/issues)；安全问题请按 [SECURITY.md](SECURITY.md) 私密报告。
+
+中文实时交流可加入 [CosmoEdge 微信开发者交流群](https://github.com/cosmo-wander-ai/cosmo-edge/discussions/112)；微信群用于开发者交流，群内形成的可复现问题和可复用结论请继续沉淀到 GitHub Discussions 或 Issues。
 
 ## FAQ
 
