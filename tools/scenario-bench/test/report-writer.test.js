@@ -63,6 +63,44 @@ test('capacity conclusion uses bottleneck step when an earlier step has a report
   assert.doesNotMatch(summary.conclusion, /1 路开始/);
 });
 
+test('VLM report with a disabled throughput gate never claims capacity', () => {
+  const writer = new ReportWriter('.');
+  const steps = Array.from({ length: 6 }, (_, index) => ({
+    step: { index },
+    channels: index + 1,
+    pass: true,
+    reasons: [],
+    perThreshold: [],
+    taskStats: [],
+    mediaStages: {},
+  }));
+  const runResult = {
+    status: 'completed',
+    profileMode: 'capacity',
+    tasks: [{ id: 'vlm', type: 'vlm', targetFps: 0.1 }],
+    thresholds: {
+      taskTypes: {
+        vlm: { minFpsRatio: null, maxMissingRate: 0 },
+      },
+    },
+  };
+
+  const summary = writer._buildSummary(runResult, steps);
+
+  assert.equal(summary.overallPass, true);
+  assert.equal(summary.capacityMeasured, false);
+  assert.equal(summary.capacityExclusionReason, 'vlm-throughput-gate-disabled');
+  assert.equal(summary.maxStableChannels, null);
+  assert.equal(summary.maxStableChannelsExact, false);
+  assert.equal(summary.maxVerifiedPassedChannels, 6);
+  assert.match(summary.conclusion, /不形成容量结论/);
+  assert.doesNotMatch(summary.conclusion, /容量上限/);
+
+  const html = writer._renderHtml(runResult, steps, summary);
+  assert.match(html, /VLM 吞吐门禁未启用/);
+  assert.doesNotMatch(html, /可直接给出容量上限/);
+});
+
 test('HTML rendering formats task percentage fields', () => {
   const writer = new ReportWriter('.');
   const html = writer._renderHtml({

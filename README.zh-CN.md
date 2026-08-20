@@ -36,14 +36,14 @@ CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编�
 > 当前分支是 CosmoEdge 1.1 源码线，关联 benchmark 包包含当前受控的单任务、并发混合任务与 VLM 证据。
 
 - **多平台发布：**BM1688、CV186X、RK3576 与 RV1126B 共享同一套视频接入、任务编排、事件和可观测流程，并分别使用目标平台模型产物。
-- **公开 benchmark 包：**[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单任务、并发混合任务与 Experimental VLM，提供脱敏后的可复现附件。
-- **Rockchip 发布平台：**RK3576 与 RV1126B 均已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径，并纳入同一档 v1.1 发布范围。RV1126B 已完成多轮线下验证；最终长稳证据仍在生成，因此当前短时结果不作为生产容量承诺。
+- **公开 benchmark 包：**[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单任务、并发混合任务与保守 VLM 性能展示边界，提供脱敏后的可复现附件。
+- **Rockchip 发布平台：**RK3576 与 RV1126B 均已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径，并纳入同一档 v1.1 发布范围；各自 benchmark 与长稳证据继续分开追溯，但不改变发布档位。
 - **Sophon 模型处理：**芯片感知校验支持 BM1688 与 CV186X 的目标 `.nn` 产物；benchmark 已记录两台参考设备的 Open 安装包和运行引擎精确绑定。
 - **RKNN 数据路径：**包含 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 张量直接解码路径，并保留明确 fallback。
 - **智能体辅助二开：**提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
 - **Model Guard 2.3：**为 Sophon Protected 包中的商业预置模型提供分发保护；Open 与 Protected 的应用软件能力一致，不以 SKU 解锁软件功能，区别在于模型是否加密以及是否包含设备授权工具。
 - **macOS Docker Preview：**为 Apple Silicon 提供隔离的 `linux/amd64` 单路本地视频体验路径，已完成多轮线下端到端验证。由于它不启用 Model Guard、不提供原生 macOS/NPU 路径、不覆盖多路部署，也不代表生产性能，因此仍保持 Preview 定位。
-- **验证进行中：**候选绑定的 VLM 压测和长稳验证正在执行。运行完成并冻结身份与阈值前，当前 VLM 数据仍为 Experimental，短时容量结果也不等同于长稳结论。
+- **验证边界：**VLM 原始运行仍是短时观测，公开矩阵在不改写实际门禁的前提下统一采用 80% 保守性能参考；长稳验证独立进行，不能由容量阶梯替代。
 
 ## 选择平台
 
@@ -51,9 +51,8 @@ CosmoEdge 提供统一的引擎架构与编排体验，但每次构建只选择�
 
 | 平台 | 状态 | 运行时 / 模型产物 | 当前范围与证据 |
 | --- | --- | --- | --- |
-| Sophon BM1688 | v1.1 已支持 / 主力平台 | BMRT / `.nn` | 生产部署路径，包含 [v1.1 工作负载证据](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)和已发布 [v1.0 基线](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/) |
-| Rockchip RK3576 | v1.1 已支持 | RKNN / `.rknn` | 交叉构建和板端路径已验证；参见 [RK3576 集成指南](docs/guide/rk3576-rknn-development.md)与 [v1.1 工作负载证据](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md) |
-| Rockchip RV1126B | v1.1 已支持 | RKNN / `.rknn` | 板端运行、媒体、推理与端到端流程已通过多轮线下验证；当前容量结果已公开，最终长稳证据仍在生成 |
+| Sophon BM1688 | v1.1 已支持 / 主力平台 | BMRT / `.nn` | 生产部署路径，包含 [v1.1 工作负载证据](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md) |
+| Rockchip RK3576 / RV1126B | v1.1 已支持 | RKNN / 目标平台专用 `.rknn` | 两个平台在交叉构建、板端、媒体、推理与端到端验证后保持同一档 v1.1 发布定位；平台实测结果仍在 [v1.1 报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)中分别列出 |
 | Sophon CV186X | v1.1 已支持 | BMRT / 目标芯片专用 `.nn` | 模型导入与设备工作负载证据见 [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md) |
 | x86 Linux / Windows；Apple Silicon macOS | Linux / Windows 已支持；macOS Preview | ONNX Runtime / `.onnx` | Mac 通过 amd64 仿真覆盖单路本地视频开发体验，不代表原生性能 |
 | Sophon BM1684X | 规划中 | — | 不属于当前发布范围 |
@@ -165,7 +164,7 @@ CV186X 请按照 [CV186X 快速开始](docs/guide/cv186x-quick-start.md)完成�
 
 ### CosmoEdge 1.1 多平台性能报告
 
-v1.1 报告覆盖 BM1688、CV186X、RK3576 与 RV1126B。报告包含人员检测、未佩戴安全帽分析和 5 FPS 并发混合任务的 49 份独立小模型用例；既有 VLM 附件单独保留。
+v1.1 报告覆盖 BM1688、CV186X、RK3576 与 RV1126B。报告包含人员检测、未佩戴安全帽分析和 5 FPS 并发混合任务的 49 份独立小模型用例，并增加保守 VLM 性能展示矩阵。
 
 - [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
@@ -183,7 +182,16 @@ v1.1 报告覆盖 BM1688、CV186X、RK3576 与 RV1126B。报告包含人员检�
 | RK3576 | 人员检测 + 未佩戴安全帽分析 | 3 | 5 | ≥8 | 16/16 |
 | RV1126B | 人员检测 + 未佩戴安全帽分析 | 3 | 5 | ≥4 | 8/8 |
 
-这些是 30 秒单级、禁用预览条件下的短时容量边界，不是生产推荐路数或长稳结论。完整 24/10/7/5 FPS 矩阵见 [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)；此前公开的数据继续保留在 [v1.0 历史报告归档](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/)中。
+VLM 原始运行没有启用 FPS PASS/FAIL。统一按“全路最低 FPS 达到每路 0.1 FPS 目标的 80%，且非 FPS 窗口完整”的保守发布参考回算后：
+
+| 平台 | 目标 FPS/路 | 性能展示边界 | 下一阶梯证据 |
+| --- | ---: | ---: | --- |
+| BM1688 | 0.1 | 6 路 | 7 路全路最低 0.07 FPS |
+| CV186X | 0.1 | 6 路 | 7 路启动敏感窗口不纳入判定 |
+| RK3576 | 0.1 | 4 路 | 5 路全路最低 0.07 FPS |
+| RV1126B | — | — | 本轮无 VLM 观测 |
+
+这些是当前记录条件下的短时展示边界，不是精确硬件极限、生产推荐路数或长稳结论。完整矩阵见 [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)；此前公开的数据只保留一个 [v1.0 历史归档](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/)入口。
 
 ## 架构
 
@@ -250,7 +258,7 @@ v1.1 报告覆盖 BM1688、CV186X、RK3576 与 RV1126B。报告包含人员检�
 <details>
 <summary><b>CosmoEdge 的生产就绪程度如何？</b></summary>
 
-`v1.1.0` 是 BM1688、CV186X、RK3576、RV1126B 与 x86 的多平台发布线，并包含已完成多轮验证、范围受限的 macOS Docker Preview。关联报告记录了实测工作负载边界和明确的证据缺口；VLM 压测与长稳结果将在验证完成后补充。生产容量仍需结合自有模型、视频流、精度要求和部署条件完成验证。
+`v1.1.0` 是 BM1688、CV186X、RK3576、RV1126B 与 x86 的多平台发布线，并包含已完成多轮验证、范围受限的 macOS Docker Preview。关联报告记录了实测工作负载边界、保守 VLM 性能展示和明确的证据缺口；长稳资格仍独立判断。生产容量仍需结合自有模型、视频流、精度要求和部署条件完成验证。
 
 </details>
 

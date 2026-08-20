@@ -4,15 +4,15 @@ This directory points to the newest reviewed benchmark refresh generated after t
 
 ## Summary
 
-| Platform | Target FPS/ch | Gate result in this run | English | Chinese |
+| Platform | Target FPS/ch | Conservative 80% display boundary | English | Chinese |
 | --- | ---: | --- | --- | --- |
-| BM1688 | 0.1 | 8 channels passed | <a href="../v1.1/results/bm1688/vlm-observation/report.html">open</a> | <a href="../v1.1/results/bm1688/vlm-observation/report.zh-CN.html">zh-CN</a> |
-| CV186X | 0.1 | 6 channels passed | <a href="../v1.1/results/cv186x/vlm-observation/report.html">open</a> | <a href="../v1.1/results/cv186x/vlm-observation/report.zh-CN.html">zh-CN</a> |
-| RK3576 | 0.1 | 6 channels passed | <a href="../v1.1/results/rk3576/vlm-observation/report.html">open</a> | <a href="../v1.1/results/rk3576/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| BM1688 | 0.1 | 6 channels | <a href="../v1.1/results/bm1688/vlm-observation/report.html">open</a> | <a href="../v1.1/results/bm1688/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| CV186X | 0.1 | 6 channels | <a href="../v1.1/results/cv186x/vlm-observation/report.html">open</a> | <a href="../v1.1/results/cv186x/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| RK3576 | 0.1 | 4 channels | <a href="../v1.1/results/rk3576/vlm-observation/report.html">open</a> | <a href="../v1.1/results/rk3576/vlm-observation/report.zh-CN.html">zh-CN</a> |
 
 ## Notes
 
 - The 2026-08-20 refresh uses one controlled 1080p24 local-loop input, 60-second steps, and task-local completion counters.
-- VLM FPS is recorded but not gated. These are short-run runtime observations, not supported-channel or long-running qualification claims.
-- Results are recorded against the gates enabled for this run; see the v1.1 methodology and canonical data for the complete evaluation contract.
-- The [previous single-device report](vlm-77175-npu/report.html) remains available for old links and is superseded by the versioned three-platform refresh above.
+- VLM FPS was recorded but not gated in the raw runs. The table applies the v1.1 conservative post-evaluation and is not an exact capacity or long-running claim.
+- Startup-sensitive windows do not count as performance failures and do not increase the displayed boundary; see the v1.1 methodology and canonical data for the complete contract.
+- The [previous single-device report](vlm-77175-npu/report.html) remains available only as a superseded historical observation.

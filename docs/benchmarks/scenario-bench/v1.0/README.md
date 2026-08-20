@@ -20,4 +20,4 @@ This directory contains the sanitized ScenarioBench benchmark data referenced by
 
 Raw `metrics.json` files are intentionally kept out of the repository. Publish them with the v1.0 release assets when full sampling traces are required.
 
-For the latest VLM benchmark methodology and refreshed local report, see [current/vlm-77175-npu](../current/vlm-77175-npu/report.html).
+For the current VLM methodology and conservative multi-platform performance display, see the [v1.1 benchmark](../v1.1/README.md). The former single-device page remains a superseded historical observation only.

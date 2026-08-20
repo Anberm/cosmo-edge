@@ -20,4 +20,4 @@
 
 完整 `metrics.json` 不提交到仓库，继续随 v1.0 release asset 发布。
 
-最新 VLM benchmark 口径和本地刷新报告见 [current/vlm-77175-npu](../current/vlm-77175-npu/report.zh-CN.html)。
+当前 VLM 口径和多平台保守性能展示见 [v1.1 benchmark](../v1.1/README.zh-CN.md)；此前的单设备页面只保留为已被取代的历史观测。

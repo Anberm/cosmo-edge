@@ -58,7 +58,11 @@ export function generateBenchmarkPages({ sourceRoot = defaultSourceRoot, outputR
 
       const observation = vlmByPlatform.get(platform.id);
       if (observation) {
-        writeReport(outputRoot, `results/${platform.id}/vlm-observation/report${suffix}`, renderVlmReport(locale, platform, observation));
+        writeReport(
+          outputRoot,
+          `results/${platform.id}/vlm-observation/report${suffix}`,
+          renderVlmReport(locale, platform, observation, vlm.publicationEvaluation),
+        );
         reportCount += 1;
       }
 
@@ -165,7 +169,7 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
     interpretation: {
       singleWorkload: 'last passing short-run channel count under enabled CV gates',
       concurrentMixed: 'highest configured short-run point passed; observed lower bound only',
-      vlm: 'Experimental runtime observation; analysis FPS is not a gate',
+      vlm: 'raw FPS remained observational; publication display boundaries are conservative post-evaluations of contiguous complete steps',
       bindingBlocked: 'the next configured channel was blocked during task binding before measurement',
       storageBlocked: 'the expansion run was blocked before measurement by its storage precondition',
     },
@@ -177,6 +181,16 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
       concurrentMixed: platform.cases.filter((item) => item.workload === 'concurrent-mixed').map(matrixEntry),
     })),
     vlmEvidenceStatus: vlm.evidenceStatus,
+    vlmPublicationEvaluation: {
+      policy: vlm.publicationEvaluation,
+      platforms: platforms.map((platform) => {
+        const observation = vlm.observations.find((item) => item.platformId === platform.id);
+        return {
+          platformId: platform.id,
+          publicationBoundary: observation?.publicationBoundary ?? null,
+        };
+      }),
+    },
   });
 }
 
@@ -200,18 +214,19 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
     workloadLabel(workload, locale),
     ...targetFpsValues.map((fps) => displayBoundary(findCase(platform, workload, fps))),
   ]));
-  const vlmRows = platforms.flatMap((platform) => {
+  const publicationPolicy = manifest.evidence?.vlmPublicationEvaluation;
+  const vlmRows = platforms.map((platform) => {
     const item = vlmByPlatform.get(platform.id);
-    if (!item) return [];
-    const lastPassingStep = item.steps.find(
-      (step) => step.channels === item.observedBoundary.highestNonFpsPassingChannels,
-    );
-    return [[
+    if (!item) {
+      return [platform.name, '—', '—', '—', zh ? '本轮无 VLM 观测' : 'No VLM observation in this refresh'];
+    }
+    return [
       platform.name,
-      '0.1',
-      value(item.observedBoundary.highestNonFpsPassingChannels),
-      value(lastPassingStep?.currentRouteFps),
-    ]];
+      value(publicationPolicy?.targetFpsPerChannel),
+      percent(publicationPolicy?.minimumActiveRouteFpsRatio),
+      value(item.publicationBoundary?.displayChannels),
+      publicationBoundaryReason(item, locale),
+    ];
   });
   const environmentRows = platforms.map((platform) => [
     platform.name,
@@ -252,11 +267,11 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
   ];
 
   body.push(
-    `<h2>${zh ? 'VLM 实验运行观测' : 'Experimental VLM runtime observations'}</h2>`,
+    `<h2>${zh ? 'VLM 性能展示边界' : 'VLM performance display boundaries'}</h2>`,
     notice(zh
-      ? 'VLM 已使用 2026-08-20 受控输入刷新，各平台按本轮记录的门禁汇总；FPS 只记录、不参与 PASS/FAIL，因此不能作为正式支持路数或长稳结论。'
-      : 'VLM was refreshed with the 2026-08-20 controlled input and summarized against the gates recorded for each run. FPS is recorded but excluded from PASS/FAIL, so the results are not supported-channel or long-running claims.', 'experimental'),
-    table(zh ? ['平台', '目标 FPS/路', '本轮通过路数', '该级新增路 FPS'] : ['Platform', 'Target FPS/ch', 'Channels passed in this run', 'New-route FPS at that step'], vlmRows),
+      ? '原始运行未启用 FPS PASS/FAIL。本表按全路最低 FPS 达到目标值 80% 且非 FPS 窗口完整的连续阶梯进行保守回算；启动敏感步骤不作为性能失败，也不增加展示路数。这不是精确硬件极限或长稳结论。'
+      : 'The raw runs did not enable FPS PASS/FAIL. This table conservatively post-evaluates the contiguous steps where every active route reached 80% of target and the non-FPS window was complete. Startup-sensitive steps are not performance failures and do not increase the displayed boundary. This is not an exact hardware limit or long-running claim.', 'experimental'),
+    table(zh ? ['平台', '目标 FPS/路', '发布参考', '性能展示边界', '边界依据'] : ['Platform', 'Target FPS/ch', 'Publication reference', 'Performance display boundary', 'Boundary basis'], vlmRows),
     `<h2>${zh ? '证据入口' : 'Evidence entry points'}</h2>`,
     table(zh ? ['平台', '平台报告', '用例', '单任务', '混合任务', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Mixed workload', 'VLM'], linksRows),
     `<h2>${zh ? '测试环境' : 'Test environment'}</h2>`,
@@ -305,7 +320,7 @@ function renderPlatformReport(locale, manifest, platform, observation) {
     `<ul><li>${anchor(`cases/report${zh ? '.zh-CN' : ''}.html`, `${platform.cases.length} ${zh ? '个用例' : 'cases'}`)}</li>` +
       `<li>${anchor(`single-workload/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务汇总' : 'Single-task summary')}</li>` +
       `<li>${anchor(`concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务汇总' : 'Mixed-workload summary')}</li>` +
-      (observation ? `<li>${anchor(`vlm-observation/report${zh ? '.zh-CN' : ''}.html`, zh ? 'VLM 实验观测' : 'Experimental VLM observation')}</li>` : '') +
+      (observation ? `<li>${anchor(`vlm-observation/report${zh ? '.zh-CN' : ''}.html`, zh ? 'VLM 性能观测' : 'VLM performance observation')}</li>` : '') +
       `</ul>`,
     `<p>${zh ? '小模型测试源码' : 'Small-model test source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></p>`,
   ];
@@ -368,7 +383,7 @@ function renderCaseReport(locale, platform, item) {
   return page(locale, `${platform.name} ${caseLabel(item, locale)}`, individualCaseNav(locale), body);
 }
 
-function renderVlmReport(locale, platform, observation) {
+function renderVlmReport(locale, platform, observation, publicationPolicy) {
   const zh = locale === 'zh-CN';
   const rows = observation.steps.map((step) => [
     step.channels,
@@ -380,19 +395,34 @@ function renderVlmReport(locale, platform, observation) {
     percentWhole(step.acceleratorPeakPercent),
     percentWhole(step.cpuPeakPercent),
     percentWhole(step.memoryPeakPercent),
+    publicationStepStatus(step, observation, publicationPolicy, locale),
     status(step.nonFpsGateResult),
     value(step.stopReason),
   ]);
-  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? 'VLM 实验运行观测' : 'Experimental VLM runtime observation'}</h1>` +
+  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? 'VLM 性能观测' : 'VLM performance observation'}</h1>` +
     notice(zh
-      ? '这是 2026-08-20 受控输入短时观测。新增路 FPS 来自任务本地完成计数；FPS 门禁未启用，因此不支持正式容量或长稳结论。'
-      : 'This is the 2026-08-20 controlled short-run observation. New-route FPS comes from task-local completion counts; the FPS gate was disabled, so it does not support a capacity or long-running claim.', 'experimental') +
-    table(zh ? ['路数', '时长', '目标 FPS/路', '当前新增路 FPS', '全路最低 FPS / 目标比例', '平均丢弃', '加速器', 'CPU', '内存', '非 FPS 门禁', '停止原因'] : ['Channels', 'Hold', 'Target FPS/ch', 'Current new-route FPS', 'Minimum active-route FPS / target ratio', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Non-FPS gate', 'Stop reason'], rows) +
+      ? `原始运行未启用 FPS PASS/FAIL。按全路最低 FPS 达到目标值的 ${percent(publicationPolicy?.minimumActiveRouteFpsRatio)} 且非 FPS 窗口完整的连续阶梯保守回算，本发布材料展示 ${observation.publicationBoundary?.displayChannels ?? '—'} 路；启动敏感步骤不作为性能失败。这不是精确容量或长稳结论。`
+      : `The raw run did not enable FPS PASS/FAIL. Conservatively post-evaluating the contiguous steps with every active route at ≥ ${percent(publicationPolicy?.minimumActiveRouteFpsRatio)} of target and a complete non-FPS window gives a ${observation.publicationBoundary?.displayChannels ?? '—'}-channel publication display boundary. Startup-sensitive steps are not performance failures. This is not an exact capacity or long-running claim.`, 'experimental') +
+    table(zh ? ['路数', '时长', '目标 FPS/路', '当前新增路 FPS', '全路最低 FPS / 目标比例', '平均丢弃', '加速器', 'CPU', '内存', '80% 发布参考', '原始非 FPS 门禁', '停止原因'] : ['Channels', 'Hold', 'Target FPS/ch', 'Current new-route FPS', 'Minimum active-route FPS / target ratio', 'Avg discard', 'Accelerator', 'CPU', 'Memory', '80% publication reference', 'Raw non-FPS gate', 'Stop reason'], rows) +
     `<p>${zh ? '测试源码' : 'Test source'}: <code>${escapeHtml(observation.source?.commit ?? '—')}</code> · ` +
     `${zh ? '工具补丁' : 'tool patch'}: <code>${escapeHtml(observation.source?.toolPatchSha256 ?? '—')}</code> · ` +
     `${anchor('../../vlm-observations.json', zh ? 'canonical 数据' : 'canonical data')} · ` +
     `${anchor('../../../methodology.md', zh ? '方法说明' : 'methodology')}</p>`;
   return page(locale, `${platform.name} VLM`, workloadNav(locale), body);
+}
+
+function publicationStepStatus(step, observation, publicationPolicy, locale) {
+  const zh = locale === 'zh-CN';
+  const ratio = step?.minimumActiveRouteFpsRatioObserved;
+  if (ratio == null || ratio < publicationPolicy?.minimumActiveRouteFpsRatio) {
+    return zh ? '低于参考线' : 'BELOW';
+  }
+  if (step?.nonFpsGateResult !== 'PASS') {
+    return observation?.source?.protocolClass === 'pre-readiness-startup-sensitive'
+      ? (zh ? '启动数据排除' : 'STARTUP EXCLUDED')
+      : (zh ? '窗口不完整' : 'INCOMPLETE');
+  }
+  return zh ? '达到参考线' : 'MEETS';
 }
 
 function renderStepTable(locale, item) {
@@ -539,6 +569,23 @@ function workloadLabel(workload, locale) {
   if (workload === 'no-safety-helmet-analysis') return zh ? '未佩戴安全帽分析' : 'No-safety-helmet analysis';
   if (workload === 'concurrent-mixed') return zh ? '并发混合任务' : 'Concurrent mixed workload';
   return workload;
+}
+
+function publicationBoundaryReason(observation, locale) {
+  const zh = locale === 'zh-CN';
+  const boundary = observation?.publicationBoundary;
+  const step = observation?.steps?.find((item) => item.channels === boundary?.firstExcludedChannels);
+  if (boundary?.firstExcludedReason === 'below-fps-reference') {
+    return zh
+      ? `${step?.channels ?? '下一'} 路全路最低 ${value(step?.minimumActiveRouteFps)} FPS（${percent(step?.minimumActiveRouteFpsRatioObserved)}）`
+      : `${step?.channels ?? 'Next'} channels: ${value(step?.minimumActiveRouteFps)} FPS minimum across active routes (${percent(step?.minimumActiveRouteFpsRatioObserved)})`;
+  }
+  if (boundary?.firstExcludedReason === 'startup-sensitive-incomplete') {
+    return zh
+      ? `${step?.channels ?? '下一'} 路启动敏感窗口不纳入性能判定`
+      : `${step?.channels ?? 'Next'}-channel startup-sensitive window excluded from performance judgment`;
+  }
+  return zh ? '没有可解释的下一阶梯' : 'No interpretable next step';
 }
 
 function caseLabel(item, locale) {

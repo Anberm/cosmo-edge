@@ -36,14 +36,14 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 > This branch is the CosmoEdge 1.1 source line. The linked benchmark pack contains the current controlled single-workload, concurrent mixed-workload, and VLM evidence.
 
 - **Multi-platform release:** BM1688, CV186X, RK3576, and RV1126B use the same video-ingest, orchestration, event, and observability workflow with target-specific model artifacts.
-- **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single workloads, concurrent mixed workloads, and Experimental VLM observations with sanitized reproducibility attachments.
-- **Rockchip release platforms:** RK3576 and RV1126B both include cross-build, board operation, RKNN inference, and MPP/RGA media paths and share the same v1.1 release tier. RV1126B has completed multiple lab validation rounds; final long-running evidence is still being produced, so the current short-run results are not production-sizing claims.
+- **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single workloads, concurrent mixed workloads, and conservative VLM performance display boundaries with sanitized reproducibility attachments.
+- **Rockchip release platforms:** RK3576 and RV1126B both include cross-build, board operation, RKNN inference, and MPP/RGA media paths and share the same v1.1 release tier. Their platform-specific benchmark and long-running evidence remain separately traceable without changing that release tier.
 - **Sophon model handling:** chip-aware validation supports target-specific `.nn` artifacts for BM1688 and CV186X. The benchmark records an exact Open-package and running-engine binding for both reference devices.
 - **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 tensor decoding paths with explicit fallbacks.
 - **Agent-assisted development:** a repository-guided path for handing model porting, integration, and UI tasks to the coding agent you already use and receiving verifiable deliverables.
 - **Model Guard 2.3:** protects commercial preset-model distribution in Sophon Protected packages. Open and Protected expose the same application features, with no SKU-gated software functionality; they differ in model encryption and device-provisioning tooling.
 - **macOS Docker Preview:** an isolated `linux/amd64` path for one local-video workflow on Apple Silicon, validated through multiple end-to-end lab rounds. It remains Preview because it does not enable Model Guard, provide a native macOS/NPU path, cover multi-channel deployment, or represent production performance.
-- **Qualification in progress:** candidate-bound VLM stress and long-running validation are underway. Until those runs finish and their identities and thresholds are frozen, current VLM data remains Experimental and short-run capacity results remain distinct from soak conclusions.
+- **Qualification boundary:** VLM raw runs remain short-run observations, while the public matrix applies one conservative 80% performance reference without rewriting the executed gates. Long-running validation continues independently and is not substituted by a capacity staircase.
 
 ## Choose a Platform
 
@@ -51,9 +51,8 @@ CosmoEdge provides one engine architecture and orchestration experience, but eac
 
 | Platform | Status | Runtime / model artifact | Current scope and evidence |
 | --- | --- | --- | --- |
-| Sophon BM1688 | v1.1 supported / primary | BMRT / `.nn` | Production deployment path with [v1.1 workload evidence](docs/benchmarks/scenario-bench/v1.1/README.md) and published [v1.0 baselines](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/) |
-| Rockchip RK3576 | v1.1 supported | RKNN / `.rknn` | Cross-build and board paths validated; see the [integration guide](docs/en/guide/rk3576-rknn-development.md) and [v1.1 workload evidence](docs/benchmarks/scenario-bench/v1.1/README.md) |
-| Rockchip RV1126B | v1.1 supported | RKNN / `.rknn` | Multiple lab rounds passed for board, media, inference, and end-to-end workflows; current capacity results are published, while final long-running evidence is still in progress |
+| Sophon BM1688 | v1.1 supported / primary | BMRT / `.nn` | Production deployment path with [v1.1 workload evidence](docs/benchmarks/scenario-bench/v1.1/README.md) |
+| Rockchip RK3576 / RV1126B | v1.1 supported | RKNN / target-specific `.rknn` | Both platforms share the same v1.1 release tier after cross-build, board, media, inference, and end-to-end validation; platform-specific measured results remain separate in the [v1.1 report](docs/benchmarks/scenario-bench/v1.1/README.md) |
 | Sophon CV186X | v1.1 supported | BMRT / target-specific `.nn` | Model import and device workload evidence included in the [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.md) |
 | x86 Linux / Windows; Apple Silicon macOS | Linux / Windows supported; macOS Preview | ONNX Runtime / `.onnx` | Mac uses amd64 emulation for one local-video developer workflow, not native performance evidence |
 | Sophon BM1684X | Planned | — | Not part of the current release scope |
@@ -183,7 +182,7 @@ Start with [Agent-Assisted Development](docs/en/development/agent-assisted-devel
 
 ### CosmoEdge 1.1 multi-platform performance report
 
-The v1.1 report covers BM1688, CV186X, RK3576, and RV1126B. It includes 49 independent small-model case reports for person detection, no-safety-helmet analysis, and a concurrent mixed workload at 5 FPS per business task. Existing VLM attachments remain available separately.
+The v1.1 report covers BM1688, CV186X, RK3576, and RV1126B. It includes 49 independent small-model case reports for person detection, no-safety-helmet analysis, and a concurrent mixed workload at 5 FPS per business task, plus a conservative VLM performance display matrix.
 
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
 - [中文基准报告索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
@@ -201,7 +200,16 @@ Each channel concurrently runs two business tasks across three model stages: per
 | RK3576 | Person detection + no-safety-helmet analysis | 3 | 5 | ≥8 | 16/16 |
 | RV1126B | Person detection + no-safety-helmet analysis | 3 | 5 | ≥4 | 8/8 |
 
-These are short-run boundaries under 30-second, preview-disabled steps—not production recommendations or long-duration conclusions. See the [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.md) for the complete 24/10/7/5 FPS matrix. Previously published data remains available in the [v1.0 historical report archive](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/).
+The VLM raw runs did not enable FPS PASS/FAIL. Applying the same conservative publication reference—every active route at or above 80% of the 0.1 FPS target, with a complete non-FPS window—produces:
+
+| Platform | Target FPS/ch | Performance display boundary | Next-step evidence |
+| --- | ---: | ---: | --- |
+| BM1688 | 0.1 | 6 channels | 7-channel minimum was 0.07 FPS |
+| CV186X | 0.1 | 6 channels | 7-channel startup-sensitive window excluded |
+| RK3576 | 0.1 | 4 channels | 5-channel minimum was 0.07 FPS |
+| RV1126B | — | — | No VLM observation in this refresh |
+
+These are short-run display boundaries under the recorded conditions—not exact hardware limits, production recommendations, or long-duration conclusions. See the [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.md) for the complete matrices. Previously published data remains available through one [v1.0 historical archive](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/) link.
 
 ## Architecture
 
@@ -268,7 +276,7 @@ Yes. Use the model-porting path to validate the tensor, preprocessing, post-proc
 <details>
 <summary><b>How production-ready is CosmoEdge?</b></summary>
 
-`v1.1.0` is the multi-platform release line for BM1688, CV186X, RK3576, RV1126B, and x86, with a validated, scoped macOS Docker Preview. The linked report records measured workload boundaries and explicit evidence gaps; final VLM stress and long-running results will be added after qualification completes. Production sizing still requires validation with your own models, streams, accuracy requirements, and deployment conditions.
+`v1.1.0` is the multi-platform release line for BM1688, CV186X, RK3576, RV1126B, and x86, with a validated, scoped macOS Docker Preview. The linked report records measured workload boundaries, conservative VLM performance displays, and explicit evidence gaps; long-running qualification remains separate. Production sizing still requires validation with your own models, streams, accuracy requirements, and deployment conditions.
 
 </details>
 

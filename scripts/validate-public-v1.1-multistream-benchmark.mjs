@@ -360,6 +360,30 @@ function validateVlmEvidence(manifestValue, definitions) {
       || value.crossPlatformComparable !== false) {
     fail('mixed VLM readiness protocols must not be marked cross-platform comparable');
   }
+  const publicationPolicy = value.publicationEvaluation;
+  const manifestPublicationPolicy = manifestValue?.evidence?.vlmPublicationEvaluation;
+  expectObjectKeys(publicationPolicy, [
+    'classification',
+    'targetFpsPerChannel',
+    'minimumActiveRouteFpsRatio',
+    'requiresNonFpsGatePass',
+    'usesContiguousCompletedPrefix',
+    'startupSensitiveStopsArePerformanceFailures',
+    'capacityClaimAllowed',
+  ], 'canonical VLM publication evaluation');
+  if (!deepEqual(publicationPolicy, manifestPublicationPolicy)) {
+    fail('canonical VLM publication evaluation differs from the release manifest');
+  }
+  if (publicationPolicy?.classification !== 'conservative-post-evaluation'
+      || publicationPolicy?.targetFpsPerChannel !== manifestValue?.controls?.vlmTargetFpsPerChannel
+      || publicationPolicy?.minimumActiveRouteFpsRatio !== 0.8
+      || publicationPolicy?.requiresNonFpsGatePass !== true
+      || publicationPolicy?.usesContiguousCompletedPrefix !== true
+      || publicationPolicy?.startupSensitiveStopsArePerformanceFailures !== false
+      || publicationPolicy?.capacityClaimAllowed !== false
+      || manifestValue?.controls?.vlmFpsGateEnabled !== false) {
+    fail('VLM publication evaluation policy is inconsistent');
+  }
   if (typeof refresh?.projectionPolicy !== 'string' || !refresh.projectionPolicy.includes('first non-FPS gate')) {
     fail('manifest VLM projection policy is missing');
   }
@@ -426,6 +450,52 @@ function validateVlmEvidence(manifestValue, definitions) {
     const firstStop = stopped.length ? Math.min(...stopped) : null;
     if (observation?.observedBoundary?.highestNonFpsPassingChannels !== highestPass) fail(`${label} highest non-FPS passing boundary is inconsistent`);
     if (observation?.observedBoundary?.firstNonFpsStopChannels !== firstStop) fail(`${label} first non-FPS stop boundary is inconsistent`);
+
+    const publicationBoundary = observation?.publicationBoundary;
+    expectObjectKeys(publicationBoundary, [
+      'displayChannels',
+      'firstExcludedChannels',
+      'firstExcludedReason',
+      'claimClass',
+      'capacityClaimAllowed',
+      'reason',
+    ], `${label} publication boundary`);
+    let expectedDisplayChannels = null;
+    let expectedFirstExcludedChannels = null;
+    let expectedFirstExcludedReason = null;
+    for (const step of steps) {
+      if (expectedFirstExcludedChannels != null) break;
+      const meetsFpsReference = step?.minimumActiveRouteFpsRatioObserved != null
+        && step.minimumActiveRouteFpsRatioObserved >= publicationPolicy?.minimumActiveRouteFpsRatio;
+      const hasCompleteNonFpsWindow = step?.nonFpsGateResult === 'PASS';
+      if (meetsFpsReference && hasCompleteNonFpsWindow) {
+        expectedDisplayChannels = step.channels;
+        continue;
+      }
+      expectedFirstExcludedChannels = step?.channels ?? null;
+      expectedFirstExcludedReason = !meetsFpsReference
+        ? 'below-fps-reference'
+        : observation?.source?.protocolClass === 'pre-readiness-startup-sensitive'
+          ? 'startup-sensitive-incomplete'
+          : 'non-fps-gate-stop';
+    }
+    if (publicationBoundary?.displayChannels !== expectedDisplayChannels) {
+      fail(`${label} conservative display boundary is inconsistent with the contiguous 80% FPS prefix`);
+    }
+    if (publicationBoundary?.firstExcludedChannels !== expectedFirstExcludedChannels
+        || publicationBoundary?.firstExcludedReason !== expectedFirstExcludedReason) {
+      fail(`${label} first publication-excluded step is inconsistent`);
+    }
+    if (publicationBoundary?.claimClass !== 'conservative-performance-display'
+        || publicationBoundary?.capacityClaimAllowed !== false
+        || typeof publicationBoundary?.reason !== 'string'
+        || publicationBoundary.reason.length < 20) {
+      fail(`${label} publication boundary claim class is invalid`);
+    }
+    if (publicationBoundary?.firstExcludedReason === 'startup-sensitive-incomplete'
+        && observation?.source?.protocolClass !== 'pre-readiness-startup-sensitive') {
+      fail(`${label} cannot exclude a step as startup-sensitive under the final readiness protocol`);
+    }
   }
   if (manifestValue?.evidence?.vlmObservations !== 'results/vlm-observations.json') fail('manifest VLM reference changed');
   return value;
@@ -581,6 +651,9 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
     if (!html.includes(rootReport.endsWith('.zh-CN.html') ? '并发混合任务矩阵' : 'Concurrent mixed-workload matrix')) {
       fail(`${rootReport} is missing the concurrent mixed-workload matrix`);
     }
+    if (!html.includes(rootReport.endsWith('.zh-CN.html') ? 'VLM 性能展示边界' : 'VLM performance display boundaries')) {
+      fail(`${rootReport} is missing the VLM performance display matrix`);
+    }
   }
 
   const index = readJsonIfPresent(outputRoot, 'results/index.json');
@@ -589,6 +662,16 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
   if (index?.caseCount !== caseCount || casesIndex?.caseCount !== caseCount) fail('generated indexes do not contain the canonical case total');
   if (index?.publicationStatus !== manifestValue?.release?.publicationState || matrix?.publicationStatus !== manifestValue?.release?.publicationState) {
     fail('generated index publication status differs from the manifest');
+  }
+  if (!deepEqual(matrix?.vlmPublicationEvaluation?.policy, vlmValue?.publicationEvaluation)) {
+    fail('generated VLM publication policy differs from the canonical evidence');
+  }
+  const expectedPublicationBoundaries = platforms.map((platform) => ({
+    platformId: platform.platformId,
+    publicationBoundary: vlmValue?.observations?.find((item) => item.platformId === platform.platformId)?.publicationBoundary ?? null,
+  }));
+  if (!deepEqual(matrix?.vlmPublicationEvaluation?.platforms, expectedPublicationBoundaries)) {
+    fail('generated VLM publication boundaries differ from the canonical evidence');
   }
 }
 

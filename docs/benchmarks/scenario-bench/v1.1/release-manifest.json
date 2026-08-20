@@ -5,7 +5,7 @@
     "version": "1.1.0",
     "tag": "v1.1.0",
     "publicationState": "prepared-not-published",
-    "frozenAt": "2026-08-20T18:27:53+08:00"
+    "frozenAt": "2026-08-20T19:54:01+08:00"
   },
   "sourceBaseline": {
     "repository": "https://github.com/cosmo-wander-ai/cosmo-edge",
@@ -27,7 +27,7 @@
     "cliSha256": "b93c3beebb3a453340038e307e296832da26263175cb34915a17b1d916a35eda",
     "evaluatorSha256": "5b483c0b1217c383fc7ff9179357161d53a1d4ac7c943e5789ddecb171160799",
     "metricsSamplerSha256": "db1f753ff2810aec938f60f872cbc3fba92cc3403b0c38044ed6f79e7adc0e8d",
-    "reportWriterSha256": "5542ef6330e049031da7322470610192b088c5268427d1b4009a18cbbe383553",
+    "reportWriterSha256": "a3fe4e94b15cfc830426de7e96f20f589cb27ff44dbb875e9f8f722cba2fdb31",
     "vlmReadinessSha256": "c265df2b10217af6ab15332d1441358b723a518be993853fcb03e83a5a664755",
     "scenarioPackageSha256": "1779e426eeb82d230185166070192fea589a5b15bc64e74c574ef59ecf92da67",
     "taskRunnerSha256": "3ed5a5aa8eac42d53fad6bb4a04ad2ac53026aefb7d1120afb246f3caf3e3161",
@@ -122,8 +122,17 @@
       "results/rk3576/cases.json",
       "results/rv1126b/cases.json"
     ],
-    "vlm": "2026-08-20 controlled current-route refresh; mixed readiness protocols are not cross-platform comparable",
+    "vlm": "2026-08-20 controlled raw observations with conservative 80% publication boundaries; mixed readiness protocols are not cross-platform comparable",
     "vlmObservations": "results/vlm-observations.json",
+    "vlmPublicationEvaluation": {
+      "classification": "conservative-post-evaluation",
+      "targetFpsPerChannel": 0.1,
+      "minimumActiveRouteFpsRatio": 0.8,
+      "requiresNonFpsGatePass": true,
+      "usesContiguousCompletedPrefix": true,
+      "startupSensitiveStopsArePerformanceFailures": false,
+      "capacityClaimAllowed": false
+    },
     "vlmRefresh": {
       "sourceCommit": "f0a26546c60c57e70166f18d556f712a273a866d",
       "sourceTree": "a9ebe3921771d8aaa0d29244074e7bfe3d098cf3",

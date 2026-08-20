@@ -53,9 +53,18 @@ BM1688 与 CV186X 使用字节一致的检测和分类模型；RK3576、RV1126B 
 | RK3576 | [JSON](results/rk3576/cases.json) | <a href="./results/rk3576/report.zh-CN.html">打开</a> | <a href="./results/rk3576/cases/report.zh-CN.html">打开</a> | <a href="./results/rk3576/single-workload/report.zh-CN.html">单任务</a> · <a href="./results/rk3576/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="./results/rk3576/vlm-observation/report.zh-CN.html">打开</a> |
 | RV1126B | [JSON](results/rv1126b/cases.json) | <a href="./results/rv1126b/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/cases/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/single-workload/report.zh-CN.html">单任务</a> · <a href="./results/rv1126b/concurrent-mixed/report.zh-CN.html">混合任务</a> | — |
 
-VLM 观测已于 2026-08-20 使用相同的 1080p24 受控输入刷新，每级保持 60 秒。BM1688 本轮 8 路通过，CV186X 与 RK3576 本轮均 6 路通过。Canonical 数据统一收录在[一份文件](results/vlm-observations.json)中。
+## VLM 性能展示边界
 
-VLM FPS 仍然只作观测、不参与 PASS/FAIL，因此这些结果记录的是本轮已启用门禁下的短时观测，不是长稳资格结论。完整测试口径与停止条件见[方法说明](methodology.md)和 canonical 数据；后续运行会使用本次提交的逐路就绪探测。
+VLM 观测已于 2026-08-20 使用相同的 1080p24 受控输入刷新，每级保持 60 秒。原始运行未启用 FPS PASS/FAIL；发布材料统一按“全路最低 FPS 达到每路 0.1 FPS 目标的 80%，且非 FPS 窗口完整”的连续阶梯进行保守回算。
+
+| 平台 | 目标 FPS/路 | 发布参考 | 性能展示边界 | 下一阶梯 |
+| --- | ---: | ---: | ---: | --- |
+| BM1688 | 0.1 | ≥80% | 6 路 | 7 路全路最低 0.07 FPS（70%） |
+| CV186X | 0.1 | ≥80% | 6 路 | 7 路为启动敏感窗口，不纳入性能判定 |
+| RK3576 | 0.1 | ≥80% | 4 路 | 5 路全路最低 0.07 FPS（70%） |
+| RV1126B | — | — | — | 本轮无 VLM 观测 |
+
+逐路就绪探测属于正式采样前置条件，其探测样本不进入 FPS 统计。CV186X 与 RK3576 的历史运行早于最终逐路就绪协议，因此启动敏感停止既不作为性能失败，也不增加展示路数。上述数值是本次发布的保守性能展示边界，不是精确硬件极限、正式容量或长稳资格结论。Canonical 原始测量统一收录在[一份文件](results/vlm-observations.json)中。
 
 VLM 执行源码为 `f0a26546c60c57e70166f18d556f712a273a866d`，tree 为 `a9ebe3921771d8aaa0d29244074e7bfe3d098cf3`；每个平台观测都记录了源 summary、源 metrics 和工具补丁哈希。
 

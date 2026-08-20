@@ -53,9 +53,18 @@ The 49 small-model cases are stored once in four platform-level canonical JSON f
 | RK3576 | [JSON](results/rk3576/cases.json) | <a href="./results/rk3576/report.html">open</a> | <a href="./results/rk3576/cases/report.html">open</a> | <a href="./results/rk3576/single-workload/report.html">single</a> · <a href="./results/rk3576/concurrent-mixed/report.html">mixed</a> | <a href="./results/rk3576/vlm-observation/report.html">open</a> |
 | RV1126B | [JSON](results/rv1126b/cases.json) | <a href="./results/rv1126b/report.html">open</a> | <a href="./results/rv1126b/cases/report.html">open</a> | <a href="./results/rv1126b/single-workload/report.html">single</a> · <a href="./results/rv1126b/concurrent-mixed/report.html">mixed</a> | — |
 
-The VLM observations were refreshed on 2026-08-20 with the same controlled 1080p24 input and a 60-second hold per step. BM1688 passed 8 channels in this run; CV186X and RK3576 each passed 6 channels. The canonical measurements are consolidated in [one canonical file](results/vlm-observations.json).
+## VLM performance display boundaries
 
-VLM FPS remains observational and is not an enabled PASS/FAIL gate, so these results record the short-run outcome against the gates enabled for this run rather than long-running qualification. See the [methodology](methodology.md) and canonical data for the full evaluation and stop contract; future runs use the per-route readiness probe committed here.
+The VLM observations were refreshed on 2026-08-20 with the same controlled 1080p24 input and a 60-second hold per step. The raw runs did not enable FPS PASS/FAIL. For publication, the recorded steps are conservatively post-evaluated as a contiguous prefix where every active route reaches 80% of the 0.1 FPS-per-channel target and the non-FPS window is complete.
+
+| Platform | Target FPS/ch | Publication reference | Performance display boundary | Next step |
+| --- | ---: | ---: | ---: | --- |
+| BM1688 | 0.1 | ≥80% | 6 channels | 7-channel minimum across active routes: 0.07 FPS (70%) |
+| CV186X | 0.1 | ≥80% | 6 channels | 7-channel startup-sensitive window excluded from performance judgment |
+| RK3576 | 0.1 | ≥80% | 4 channels | 5-channel minimum across active routes: 0.07 FPS (70%) |
+| RV1126B | — | — | — | No VLM observation in this refresh |
+
+Per-route readiness is a precondition outside formal hold sampling, and its probes do not enter FPS statistics. The CV186X and RK3576 runs predate the final per-route readiness protocol, so their startup-sensitive stops neither count as performance failures nor increase the displayed boundary. These values are conservative publication display boundaries, not exact hardware limits, formal capacity, or long-running qualification. The canonical raw measurements are consolidated in [one canonical file](results/vlm-observations.json).
 
 The VLM execution source is `f0a26546c60c57e70166f18d556f712a273a866d`, tree `a9ebe3921771d8aaa0d29244074e7bfe3d098cf3`; each platform observation records its source-summary, source-metrics, and tool-patch hashes.
 

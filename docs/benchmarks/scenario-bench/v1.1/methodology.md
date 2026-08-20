@@ -47,13 +47,18 @@ Each selected run is stored once in `results/<platform>/cases.json`. The entry c
 
 ## VLM
 
-The 2026-08-20 VLM refresh uses the same fixed local-loop 1080p24 input, adds one channel per step, holds each step for 60 seconds, and samples approximately every 3 seconds. Throughput is derived from each task's local completion queue instead of the shared Qwen worker-batch counter. ScenarioBench reports the newest route's completion FPS separately from the minimum across active routes; the compact public projection retains the newest-route value used in its summary table.
+The 2026-08-20 VLM refresh uses the same fixed local-loop 1080p24 input, adds one channel per step, holds each step for 60 seconds, and samples approximately every 3 seconds. Throughput is derived from each task's local completion queue instead of the shared Qwen worker-batch counter. ScenarioBench reports the newest route's completion FPS separately from the minimum across all active routes; publication evaluation uses the latter because every active route must satisfy the workload target.
 
-BM1688 was rerun with the final readiness protocol: every newly added route had to advance its task-local completion counter and expose direct Qwen latency before formal sampling began. CV186X and RK3576 were measured with the immediately preceding protocol, which applied a 30-second warmup to the first route but did not probe readiness for every later route. Their first 7-channel failure remains a measured zero-tolerance missing-telemetry gate failure, but it occurred in early hold samples before the new route had completed startup. It is therefore recorded as a startup-sensitive pre-readiness observation, not as a demonstrated 6-channel capacity limit. The committed tool makes future route admission explicit.
+BM1688 was rerun with the final readiness protocol: every newly added route had to advance its task-local completion counter and expose direct Qwen latency before formal sampling began. These readiness probes occur before the formal hold window and never enter FPS, discard, or telemetry-rate statistics. CV186X and RK3576 were measured with the immediately preceding protocol, which applied a 30-second warmup to the first route but did not probe readiness for every later route. Their first 7-channel failure remains a measured zero-tolerance missing-telemetry gate failure, but it occurred in early hold samples before the new route had completed startup. It is therefore retained as a startup-sensitive raw observation, not classified as a performance failure or a demonstrated capacity limit.
 
 BM1688's public source hashes identify its native completed run. The CV186X and RK3576 public `sourceSummarySha256` and `sourceMetricsSha256` identify sanitized first-failure projections cut at the first non-FPS gate stop. Their device runs continued beyond that cutoff, but later steps are intentionally excluded from the public staircase; the canonical source block separately freezes the original-run summary and metrics hashes.
 
-VLM FPS gating remains disabled. `PASS` means only that the enabled missing-telemetry and discard gates passed; the data is an experimental short-run runtime observation, not an official supported-channel or long-running qualification claim. RV1126B has no VLM observation in this pack.
+VLM FPS gating remained disabled in the executed runs. `PASS` in the raw data means only that the enabled missing-telemetry and discard gates passed. The release pages do not rewrite that history. Instead, they apply a separate conservative publication evaluation to the contiguous prefix of steps where:
+
+1. the minimum FPS across every active route is at least 80% of the 0.1 FPS-per-channel target; and
+2. the recorded non-FPS window is complete.
+
+The resulting performance display boundaries are BM1688 6 channels, CV186X 6 channels, and RK3576 4 channels. BM1688 first falls below the reference at 7 channels; RK3576 first falls below it at 5 channels. CV186X's 7-channel startup-sensitive window is excluded from performance judgment, so 6 remains the last complete interpretable step. This is a conservative publication display, not an official capacity, exact hardware limit, or long-running qualification claim. RV1126B has no VLM observation in this pack.
 
 ## Reproduction
 
