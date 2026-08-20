@@ -34,7 +34,7 @@ const manifest = readJsonIfPresent(root, 'release-manifest.json');
 const platformDefinitions = validateManifest(manifest);
 const canonicalPlatforms = validateCanonicalCases(manifest, platformDefinitions);
 const vlm = validateVlmEvidence(manifest, platformDefinitions);
-if (archivePath) validateArchivedEvidence(archivePath, manifest, canonicalPlatforms, vlm);
+if (archivePath) validateArchivedEvidence(archivePath, manifest, canonicalPlatforms);
 validateCanonicalSourceLayout(platformDefinitions);
 validateSchemaDocument();
 
@@ -79,7 +79,7 @@ if (errors.length) {
 const totalCases = canonicalPlatforms.reduce((count, item) => count + item.cases.length, 0);
 console.log(
   `Validation passed: ${platformDefinitions.length} manifest-defined platforms, ${totalCases} canonical cases, ` +
-  `${generation.reportCount} generated bilingual reports, retained VLM observations, relative links, public scrub, and source/generated checksums verified.`,
+  `${generation.reportCount} generated bilingual reports, refreshed VLM observations, relative links, public scrub, and source/generated checksums verified.`,
 );
 
 function validateManifest(value) {
@@ -103,6 +103,34 @@ function validateManifest(value) {
   if (!positiveInteger(value.evidence?.smallModelCaseCount)) fail('manifest evidence.smallModelCaseCount must be a positive integer');
   if (value.evidence?.caseSchema !== 'results/cases.schema.json') fail('manifest evidence.caseSchema must point to the canonical schema');
   if (value.evidence?.vlmObservations !== 'results/vlm-observations.json') fail('manifest evidence.vlmObservations must point to the canonical VLM file');
+  if (typeof value.benchmarkTool?.role !== 'string' || !value.benchmarkTool.role.includes('current publication')) {
+    fail('manifest benchmarkTool.role must distinguish the current publication tool from execution provenance');
+  }
+
+  const benchmarkToolFiles = {
+    cliSha256: 'tools/scenario-bench/src/cli.js',
+    evaluatorSha256: 'tools/scenario-bench/src/step-evaluator.js',
+    metricsSamplerSha256: 'tools/scenario-bench/src/metrics-sampler.js',
+    reportWriterSha256: 'tools/scenario-bench/src/report-writer.js',
+    vlmReadinessSha256: 'tools/scenario-bench/src/vlm-readiness.js',
+    scenarioPackageSha256: 'tools/scenario-bench/src/scenario-package.js',
+    taskRunnerSha256: 'tools/scenario-bench/src/task-runner.js',
+    lockfileSha256: 'tools/scenario-bench/package-lock.json',
+  };
+  for (const [field, relative] of Object.entries(benchmarkToolFiles)) {
+    const expected = value.benchmarkTool?.[field];
+    if (!sha256(expected)) {
+      fail(`manifest benchmarkTool.${field} must be a 64-character SHA-256`);
+      continue;
+    }
+    const file = path.join(workspace, ...relative.split('/'));
+    if (!fs.existsSync(file)) {
+      fail(`manifest benchmark tool file is missing: ${relative}`);
+      continue;
+    }
+    const actual = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    if (actual !== expected) fail(`manifest benchmarkTool.${field} differs from ${relative}`);
+  }
 
   const archive = value.evidence?.fullEvidenceArchive;
   if (!archive || typeof archive !== 'object') {
@@ -110,6 +138,7 @@ function validateManifest(value) {
   } else {
     if (!sha256(archive.sha256)) fail('full evidence archive SHA-256 is invalid');
     if (!sha1(archive.sourceCommit) || !sha1(archive.sourceTree)) fail('full evidence archive source commit/tree is invalid');
+    if (archive.scope !== '49 canonical small-model cases only') fail('full evidence archive scope must remain limited to the 49 small-model cases');
     if (archive.publicationState !== 'prepared-not-published') fail('full evidence archive must remain prepared-not-published');
     if (archive.includedInRepository !== false) fail('full evidence archive must not be included in the repository');
   }
@@ -322,8 +351,41 @@ function validateStep(caseLabel, benchmarkCase, gates, step, index) {
 function validateVlmEvidence(manifestValue, definitions) {
   const value = readJsonIfPresent(root, 'results/vlm-observations.json');
   if (!value) return { observations: [] };
-  if (value.schemaVersion !== 2 || value.evidenceStatus !== 'preserved-preceding-evidence' || value.refreshedWithSmallModelCases !== false) {
+  if (value.schemaVersion !== 3 || value.evidenceStatus !== 'refreshed-controlled-vlm-evidence'
+      || value.refreshedWithControlledInput !== true || value.refreshDate !== '2026-08-20') {
     fail('canonical VLM evidence status is inconsistent');
+  }
+  const refresh = manifestValue?.evidence?.vlmRefresh;
+  if (!refresh || value.crossPlatformComparable !== refresh.crossPlatformComparable
+      || value.crossPlatformComparable !== false) {
+    fail('mixed VLM readiness protocols must not be marked cross-platform comparable');
+  }
+  const publicationPolicy = value.publicationEvaluation;
+  const manifestPublicationPolicy = manifestValue?.evidence?.vlmPublicationEvaluation;
+  expectObjectKeys(publicationPolicy, [
+    'classification',
+    'targetFpsPerChannel',
+    'minimumActiveRouteFpsRatio',
+    'requiresNonFpsGatePass',
+    'usesContiguousCompletedPrefix',
+    'startupSensitiveStopsArePerformanceFailures',
+    'capacityClaimAllowed',
+  ], 'canonical VLM publication evaluation');
+  if (!deepEqual(publicationPolicy, manifestPublicationPolicy)) {
+    fail('canonical VLM publication evaluation differs from the release manifest');
+  }
+  if (publicationPolicy?.classification !== 'conservative-post-evaluation'
+      || publicationPolicy?.targetFpsPerChannel !== manifestValue?.controls?.vlmTargetFpsPerChannel
+      || publicationPolicy?.minimumActiveRouteFpsRatio !== 0.8
+      || publicationPolicy?.requiresNonFpsGatePass !== true
+      || publicationPolicy?.usesContiguousCompletedPrefix !== true
+      || publicationPolicy?.startupSensitiveStopsArePerformanceFailures !== false
+      || publicationPolicy?.capacityClaimAllowed !== false
+      || manifestValue?.controls?.vlmFpsGateEnabled !== false) {
+    fail('VLM publication evaluation policy is inconsistent');
+  }
+  if (typeof refresh?.projectionPolicy !== 'string' || !refresh.projectionPolicy.includes('first non-FPS gate')) {
+    fail('manifest VLM projection policy is missing');
   }
   const releaseIds = new Set(definitions.filter((item) => item.scope === 'release-platform').map((item) => item.id));
   const observations = Array.isArray(value.observations) ? value.observations : [];
@@ -333,7 +395,36 @@ function validateVlmEvidence(manifestValue, definitions) {
     const label = `${observation?.platformId ?? '<missing>'} VLM observation`;
     if (!releaseIds.has(observation?.platformId)) fail(`${label} is not attached to a release platform`);
     if (!sha256(observation?.sourceSummarySha256)) fail(`${label} sourceSummarySha256 is invalid`);
+    if (!sha256(observation?.sourceMetricsSha256)) fail(`${label} sourceMetricsSha256 is invalid`);
+    if (!sha1(observation?.source?.commit) || !sha1(observation?.source?.tree)) fail(`${label} source commit/tree is invalid`);
+    if (!sha256(observation?.source?.toolPatchSha256)) fail(`${label} source tool-patch hash is invalid`);
+    if (!['final-per-route-readiness', 'pre-readiness-startup-sensitive'].includes(observation?.source?.protocolClass)) {
+      fail(`${label} readiness protocol class is invalid`);
+    }
+    if (observation?.source?.commit !== refresh?.sourceCommit || observation?.source?.tree !== refresh?.sourceTree) {
+      fail(`${label} source provenance differs from the release manifest`);
+    }
+    const expectedToolPatch = observation?.source?.protocolClass === 'final-per-route-readiness'
+      ? refresh?.finalToolPatchSha256
+      : refresh?.preReadinessToolPatchSha256;
+    if (observation?.source?.toolPatchSha256 !== expectedToolPatch) {
+      fail(`${label} tool-patch provenance differs from the release manifest`);
+    }
+    if (observation?.source?.protocolClass === 'final-per-route-readiness') {
+      if (observation?.source?.artifactForm !== 'native-completed-run'
+          || observation?.source?.projectionCutoff !== null
+          || observation?.source?.executionContinuedBeyondProjection !== false) {
+        fail(`${label} must identify its native completed-run artifact`);
+      }
+    } else if (observation?.source?.artifactForm !== 'first-failure-public-projection'
+        || observation?.source?.projectionCutoff !== 'first non-FPS gate stop'
+        || observation?.source?.executionContinuedBeyondProjection !== true
+        || !sha256(observation?.source?.originalRunSummarySha256)
+        || !sha256(observation?.source?.originalRunMetricsSha256)) {
+      fail(`${label} must identify its first-failure projection and original-run hashes`);
+    }
     if (observation?.workload?.targetFpsPerChannel !== 0.1) fail(`${label} target FPS must remain 0.1 per channel`);
+    if (observation?.workload?.counterSemantics !== 'task-local-completion-counter') fail(`${label} must use task-local completion counters`);
     if (observation?.observedBoundary?.capacityClaimAllowed !== false) fail(`${label} must not claim capacity`);
     const steps = Array.isArray(observation?.steps) ? observation.steps : [];
     let previousChannel = 0;
@@ -342,8 +433,16 @@ function validateVlmEvidence(manifestValue, definitions) {
       previousChannel = step?.channels ?? previousChannel;
       if (step?.targetFpsPerChannel !== observation.workload.targetFpsPerChannel) fail(`${label} step ${index + 1} target FPS changed`);
       if (step?.fpsGateEnabled !== false) fail(`${label} step ${index + 1} FPS gate must remain disabled`);
-      if (!nullableNonNegativeNumber(step?.observedEquivalentPerChannelFps)) fail(`${label} step ${index + 1} equivalent FPS is invalid`);
+      if (!nullableNonNegativeNumber(step?.currentRouteFps)) fail(`${label} step ${index + 1} current-route FPS is invalid`);
       if (!nullableNonNegativeNumber(step?.fpsAchievementRatioObserved)) fail(`${label} step ${index + 1} FPS ratio is invalid`);
+      if (!nullableNonNegativeNumber(step?.minimumActiveRouteFps)) fail(`${label} step ${index + 1} active-route minimum FPS is invalid`);
+      if (!nullableNonNegativeNumber(step?.minimumActiveRouteFpsRatioObserved)) fail(`${label} step ${index + 1} active-route minimum FPS ratio is invalid`);
+      if (step?.minimumActiveRouteFps != null && step?.minimumActiveRouteFpsRatioObserved != null) {
+        const expectedRatio = step.minimumActiveRouteFps / step.targetFpsPerChannel;
+        if (Math.abs(step.minimumActiveRouteFpsRatioObserved - expectedRatio) > 0.001) {
+          fail(`${label} step ${index + 1} active-route minimum FPS ratio is inconsistent`);
+        }
+      }
     }
     const passing = steps.filter((step) => step?.nonFpsGateResult === 'PASS').map((step) => step.channels);
     const stopped = steps.filter((step) => step?.nonFpsGateResult !== 'PASS').map((step) => step.channels);
@@ -351,12 +450,58 @@ function validateVlmEvidence(manifestValue, definitions) {
     const firstStop = stopped.length ? Math.min(...stopped) : null;
     if (observation?.observedBoundary?.highestNonFpsPassingChannels !== highestPass) fail(`${label} highest non-FPS passing boundary is inconsistent`);
     if (observation?.observedBoundary?.firstNonFpsStopChannels !== firstStop) fail(`${label} first non-FPS stop boundary is inconsistent`);
+
+    const publicationBoundary = observation?.publicationBoundary;
+    expectObjectKeys(publicationBoundary, [
+      'displayChannels',
+      'firstExcludedChannels',
+      'firstExcludedReason',
+      'claimClass',
+      'capacityClaimAllowed',
+      'reason',
+    ], `${label} publication boundary`);
+    let expectedDisplayChannels = null;
+    let expectedFirstExcludedChannels = null;
+    let expectedFirstExcludedReason = null;
+    for (const step of steps) {
+      if (expectedFirstExcludedChannels != null) break;
+      const meetsFpsReference = step?.minimumActiveRouteFpsRatioObserved != null
+        && step.minimumActiveRouteFpsRatioObserved >= publicationPolicy?.minimumActiveRouteFpsRatio;
+      const hasCompleteNonFpsWindow = step?.nonFpsGateResult === 'PASS';
+      if (meetsFpsReference && hasCompleteNonFpsWindow) {
+        expectedDisplayChannels = step.channels;
+        continue;
+      }
+      expectedFirstExcludedChannels = step?.channels ?? null;
+      expectedFirstExcludedReason = !meetsFpsReference
+        ? 'below-fps-reference'
+        : observation?.source?.protocolClass === 'pre-readiness-startup-sensitive'
+          ? 'startup-sensitive-incomplete'
+          : 'non-fps-gate-stop';
+    }
+    if (publicationBoundary?.displayChannels !== expectedDisplayChannels) {
+      fail(`${label} conservative display boundary is inconsistent with the contiguous 80% FPS prefix`);
+    }
+    if (publicationBoundary?.firstExcludedChannels !== expectedFirstExcludedChannels
+        || publicationBoundary?.firstExcludedReason !== expectedFirstExcludedReason) {
+      fail(`${label} first publication-excluded step is inconsistent`);
+    }
+    if (publicationBoundary?.claimClass !== 'conservative-performance-display'
+        || publicationBoundary?.capacityClaimAllowed !== false
+        || typeof publicationBoundary?.reason !== 'string'
+        || publicationBoundary.reason.length < 20) {
+      fail(`${label} publication boundary claim class is invalid`);
+    }
+    if (publicationBoundary?.firstExcludedReason === 'startup-sensitive-incomplete'
+        && observation?.source?.protocolClass !== 'pre-readiness-startup-sensitive') {
+      fail(`${label} cannot exclude a step as startup-sensitive under the final readiness protocol`);
+    }
   }
   if (manifestValue?.evidence?.vlmObservations !== 'results/vlm-observations.json') fail('manifest VLM reference changed');
   return value;
 }
 
-function validateArchivedEvidence(file, manifestValue, platforms, vlmValue) {
+function validateArchivedEvidence(file, manifestValue, platforms) {
   const resolved = path.resolve(file);
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
     fail(`full evidence archive is missing: ${resolved}`);
@@ -410,22 +555,6 @@ function validateArchivedEvidence(file, manifestValue, platforms, vlmValue) {
     }
   }
 
-  for (const observation of vlmValue?.observations ?? []) {
-    const entry = `${archiveRoot}/${observation.platformId}/vlm-observation/summary.json`;
-    const bytes = readArchiveEntry(resolved, entry);
-    if (!bytes) continue;
-    const digest = crypto.createHash('sha256').update(bytes).digest('hex');
-    if (digest !== observation.sourceSummarySha256) fail(`archive VLM summary hash differs for ${observation.platformId}`);
-    let raw;
-    try {
-      raw = JSON.parse(bytes.toString('utf8'));
-    } catch (error) {
-      fail(`archive VLM summary is invalid JSON for ${observation.platformId}: ${error.message}`);
-      continue;
-    }
-    const { platformId: unusedPlatform, sourceSummarySha256: unusedHash, ...canonicalPayload } = observation;
-    if (!deepEqual(canonicalPayload, raw)) fail(`canonical VLM observation differs from archived summary for ${observation.platformId}`);
-  }
 }
 
 function readArchiveEntry(archive, entry) {
@@ -522,6 +651,9 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
     if (!html.includes(rootReport.endsWith('.zh-CN.html') ? '并发混合任务矩阵' : 'Concurrent mixed-workload matrix')) {
       fail(`${rootReport} is missing the concurrent mixed-workload matrix`);
     }
+    if (!html.includes(rootReport.endsWith('.zh-CN.html') ? 'VLM 性能展示边界' : 'VLM performance display boundaries')) {
+      fail(`${rootReport} is missing the VLM performance display matrix`);
+    }
   }
 
   const index = readJsonIfPresent(outputRoot, 'results/index.json');
@@ -530,6 +662,16 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
   if (index?.caseCount !== caseCount || casesIndex?.caseCount !== caseCount) fail('generated indexes do not contain the canonical case total');
   if (index?.publicationStatus !== manifestValue?.release?.publicationState || matrix?.publicationStatus !== manifestValue?.release?.publicationState) {
     fail('generated index publication status differs from the manifest');
+  }
+  if (!deepEqual(matrix?.vlmPublicationEvaluation?.policy, vlmValue?.publicationEvaluation)) {
+    fail('generated VLM publication policy differs from the canonical evidence');
+  }
+  const expectedPublicationBoundaries = platforms.map((platform) => ({
+    platformId: platform.platformId,
+    publicationBoundary: vlmValue?.observations?.find((item) => item.platformId === platform.platformId)?.publicationBoundary ?? null,
+  }));
+  if (!deepEqual(matrix?.vlmPublicationEvaluation?.platforms, expectedPublicationBoundaries)) {
+    fail('generated VLM publication boundaries differ from the canonical evidence');
   }
 }
 

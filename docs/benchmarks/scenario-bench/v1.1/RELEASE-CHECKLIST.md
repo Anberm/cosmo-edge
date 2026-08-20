@@ -9,10 +9,16 @@ Status: **prepared for repository review; not yet published**
 - [x] 49 small-model cases preserved once in four schema-bound canonical files.
 - [x] Every canonical case retains the original frozen summary SHA-256.
 - [x] Platform summaries, case pages, workload matrices, and indexes generated deterministically at build time.
-- [x] Existing three-platform VLM observations consolidated without enabling an FPS gate or capacity claim.
+- [x] 2026-08-20 three-platform VLM observations preserved without retroactively enabling an FPS gate or capacity claim.
+- [x] Conservative VLM publication evaluation deterministically resolves BM1688 6, CV186X 6, and RK3576 4 from the contiguous 80%-FPS, complete-window prefix.
+- [x] Per-run readiness protocol and stop semantics retained in canonical evidence and methodology.
+- [x] VLM task-local completion-counter and per-route readiness tool changes covered by tests.
+- [x] ScenarioBench suppresses capacity wording whenever a VLM throughput gate is disabled.
 - [x] Canonical JSON semantics, generated HTML links/languages, public-data scrub, and source/generated checksums validated.
-- [x] Full pre-simplification evidence archive frozen separately by commit, tree, and SHA-256.
+- [x] The 49-case small-model pre-simplification archive is frozen separately by commit, tree, and SHA-256.
+- [x] Refreshed VLM projections retain their projected-artifact and private original-run source hashes.
+- [ ] CV186X and RK3576 VLM re-measurement with the unified readiness probe — deferred until the long-duration qualification releases the devices.
 
 This checklist qualifies the benchmark publication candidate only. It does not claim product-release qualification, soak stability, RTSP resilience, accuracy acceptance, or customer-journey acceptance.
 
-Do not copy `private-evidence/` or the full evidence archive into the repository. Publishing the separately recorded archive as a release asset requires an explicit release action and final provenance review.
+Do not copy `private-evidence/` or the small-model full evidence archive into the repository. Publishing the separately recorded archive as a release asset requires an explicit release action and final provenance review.

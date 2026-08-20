@@ -26,10 +26,12 @@ the behavior of the CPU, CUDA, or Sophon backends:
   OSD paths.
 - Full DMA-BUF zero-copy is outside the supported release boundary.
 
-The recommended deployment starting point is the single-detector profile that completed a
+The recommended deployment starting point is the person-detection profile that completed a
 12-hour run at four channels and 5 FPS per channel. The latest short staircases reached 16
-channels at 5 FPS for a single detector and 8 channels at 5 FPS per task for two detectors.
-These are measured boundaries for the stated models and gates, not replacements for a recommended
+channels at 5 FPS for the single person-detection workload and 8 channels at 5 FPS per task
+for a concurrent mixed workload. Each mixed-workload channel runs person detection alongside
+no-safety-helmet analysis, whose pipeline contains detection followed by classification. These
+are measured boundaries for the stated models and gates, not replacements for a recommended
 profile. See [ScenarioBench v1.1](/benchmarks/scenario-bench/v1.1/report.html).
 
 ## Repository and Evidence Boundary
@@ -233,9 +235,10 @@ device's actual IP address.
   task restart recovery passed on the tested build.
 - Delayed Copy-out discarded frames before host copies and is the selected
   optimization for this release.
-- The v1.1 public report records a 16-channel, 5 FPS single-detector staircase and an 8-channel,
-  5 FPS-per-task dual-detector staircase. Both are short-run measured boundaries and have not been
-  promoted to official recommended profiles.
+- The v1.1 public report records a 16-channel, 5 FPS person-detection staircase and an 8-channel,
+  5 FPS-per-task concurrent mixed-workload staircase. Each mixed-workload channel combines person
+  detection with two-stage no-safety-helmet analysis. Both are short-run measured boundaries and
+  have not been promoted to official recommended profiles.
 - RK3576 NPU telemetry uses the vendor busy-time counter from
   `/sys/kernel/debug/rknpu/load`, reports the busiest core on the health card,
   and retains every core in the accelerator payload. The startup script exposes

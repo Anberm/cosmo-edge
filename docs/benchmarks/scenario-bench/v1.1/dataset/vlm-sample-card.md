@@ -1,14 +1,14 @@
-# Dataset card: existing VLM evidence sample
+# Dataset card: controlled VLM refresh sample
 
 | Field | Value |
 | --- | --- |
-| Public ID | `cosmoedge-vlm-sample-v1` |
-| File | `vlm-sample.mp4` |
-| SHA-256 | `ec77182a264f3059a091b68c4973942dba3b80e93f20feaf4d7e146885caf9d2` |
-| Size | 20,049,063 bytes |
-| Duration | 15.018667 seconds |
+| Public ID | `cosmoedge-controlled-1080p24-v1` |
+| File | `controlled-1080p24-sample.mp4` |
+| SHA-256 | `3e1c5b97cd5bcc081e47ec631f84c36e72f075c8b9da6a19de3d9705fb887f92` |
+| Size | 1,300,407 bytes |
+| Duration | 15 seconds |
 | Video | H.264, 1920×1080, yuv420p, 24 FPS |
-| Audio | AAC |
-| Scope | Existing three-platform VLM observation; not part of the 2026-08-19 small-model refresh |
+| Audio | None |
+| Scope | 2026-08-20 BM1688, CV186X, and RK3576 VLM runtime observation refresh |
 
 The media binary is not included.

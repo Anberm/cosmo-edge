@@ -47,17 +47,28 @@ Each selected run is stored once in `results/<platform>/cases.json`. The entry c
 
 ## VLM
 
-This refresh does not change the existing BM1688, CV186X, or RK3576 VLM evidence. Those observations are consolidated in `results/vlm-observations.json`; RV1126B has no VLM observation in this pack. Because VLM FPS gating was disabled, the data remains an experimental runtime observation and not a capacity claim.
+The 2026-08-20 VLM refresh uses the same fixed local-loop 1080p24 input, adds one channel per step, holds each step for 60 seconds, and samples approximately every 3 seconds. Throughput is derived from each task's local completion queue instead of the shared Qwen worker-batch counter. ScenarioBench reports the newest route's completion FPS separately from the minimum across all active routes; publication evaluation uses the latter because every active route must satisfy the workload target.
+
+BM1688 was rerun with the final readiness protocol: every newly added route had to advance its task-local completion counter and expose direct Qwen latency before formal sampling began. These readiness probes occur before the formal hold window and never enter FPS, discard, or telemetry-rate statistics. CV186X and RK3576 were measured with the immediately preceding protocol, which applied a 30-second warmup to the first route but did not probe readiness for every later route. Their first 7-channel failure remains a measured zero-tolerance missing-telemetry gate failure, but it occurred in early hold samples before the new route had completed startup. It is therefore retained as a startup-sensitive raw observation, not classified as a performance failure or a demonstrated capacity limit.
+
+BM1688's public source hashes identify its native completed run. The CV186X and RK3576 public `sourceSummarySha256` and `sourceMetricsSha256` identify sanitized first-failure projections cut at the first non-FPS gate stop. Their device runs continued beyond that cutoff, but per the evaluation stop contract, steps after the first gate failure are not comparable and are excluded from the public staircase; the canonical source block separately freezes the original-run summary and metrics hashes.
+
+VLM FPS gating remained disabled in the executed runs. `PASS` in the raw data means only that the enabled missing-telemetry and discard gates passed. The release pages do not rewrite that history. Instead, they apply a separate conservative publication evaluation to the contiguous prefix of steps where:
+
+1. the minimum FPS across every active route is at least 80% of the 0.1 FPS-per-channel target; and
+2. the recorded non-FPS window is complete.
+
+The resulting performance display boundaries are BM1688 6 channels, CV186X 6 channels, and RK3576 4 channels. BM1688 first falls below the reference at 7 channels; RK3576 first falls below it at 5 channels. CV186X's 7-channel startup-sensitive window is excluded from performance judgment, so 6 remains the last complete interpretable step. This is a conservative publication display, not an official capacity, exact hardware limit, or long-running qualification claim. RV1126B has no VLM observation in this pack.
 
 ## Reproduction
 
 1. Verify the source, ScenarioBench, model, and sample hashes.
 2. Resolve the public scenario descriptors to the device-local model and task configuration.
 3. Run each case with its recorded target FPS and maximum channel count.
-4. Keep raw summaries, commands, and sanitized logs in the full evidence archive; project the complete measured steps into the platform canonical case file.
+4. Keep raw summaries, commands, and sanitized logs in private evidence; project the public measurements and their source hashes into the canonical files.
 5. Run `npm run benchmarks:v1.1:validate` to check case semantics, public scrub, links, deterministic report generation, and checksums.
 6. Run the documentation build to generate bilingual HTML, aggregate indexes, matrices, and a checksum inventory for the built output.
 
-When the separately held full evidence archive is available, pass it to the validator with `--archive <path>`. That optional check verifies the archive hash and compares all 49 canonical cases and three retained VLM observations with their original frozen summaries.
+When the separately held small-model evidence archive is available, pass it to the validator with `--archive <path>`. That optional check verifies the archive hash and compares all 49 canonical small-model cases with their original frozen summaries. The refreshed VLM canonical file carries separate source-summary, source-metrics, source-tree, and tool-patch hashes.
 
-The Git repository contains only canonical measurements and compact public metadata. The separately hashed full evidence archive is prepared but not published. Neither form may contain a device address, credential, device serial, internal model/task identifier, channel identifier, or local absolute path.
+The Git repository contains only canonical measurements and compact public metadata. The separately hashed full archive covers the small-model cases and is prepared but not published; refreshed VLM raw runs remain separate private evidence referenced by their source hashes. No public form may contain a device address, credential, device serial, internal model/task identifier, channel identifier, or local absolute path.

@@ -17,11 +17,12 @@
 </style></head><body>
 <h1>压测报告</h1>
 <p><a href="report.html">English report</a> · <a href="summary.json">机器可读摘要</a></p>
-<p>总体结果: <span class="badge pass">PASS</span></p>
-<div class="summary"><strong>结论</strong><br>全部测试路数通过；容量上限至少为 8 路</div>
-<div class="summary"><strong>口径说明</strong><br>本报告使用更新后的 ScenarioBench VLM 口径：local 模式按目标 FPS 注入取帧率，阶梯保持 60s，并以稳定窗口累计完成数计算 VLM 吞吐。</div>
+<div class="banner warn"><strong>已被取代的历史观测</strong><br>本页没有记录实际启用的 FPS 门禁，因此不形成容量结论。当前保守发布评估见 <a href="../../v1.1/report.zh-CN.html">v1.1 多平台报告</a>。</div>
+<p>总体结果: <span class="badge warn">OBSERVATION</span></p>
+<div class="summary"><strong>结论</strong><br>历史非容量 VLM 观测；撤回此前“至少 8 路”的容量表述。</div>
+<div class="summary"><strong>口径说明</strong><br>当时 local 模式按目标 FPS 取帧、每级保持 60s；本页只为兼容旧链接保留。</div>
 <h2>判定口径</h2>
-<table class="note-table"><tr><th>容量结论</th><td>当前按连续路数扫描，可直接给出容量上限。容量上限是最后一个完整执行且通过报告阈值的路数。</td></tr><tr><th>路数 PASS/FAIL</th><td>每个任务按 task type 选择判定策略。CV 默认使用关键链路、检测节点和丢弃率；VLM 默认使用分析 FPS 达标率和采样缺失率，并可配置端到端延时。全局平均丢弃率阈值为 0.02。</td></tr><tr><th>瓶颈停止</th><td>运行期保护熔断，用于避免设备继续加压。CV 使用稳定窗口 FPS 相对基线折半作为保护；VLM 使用目标 FPS 达标率，避免低帧率任务被短窗口误判。丢弃率、CPU、内存等保护仍然通用。</td></tr><tr><th>采样窗口</th><td>约每 3s 采样一次；阶梯汇总使用该阶梯后半段采样点作为稳定窗口。</td></tr><tr><th>失败原因</th><td>表格中的失败原因来自未通过的阈值项；若同时存在瓶颈停止，顶部横幅展示触发提前停止的运行期原因。</td></tr></table>
+<table class="note-table"><tr><th>容量结论</th><td>不可用；无法从这份历史产物核验 VLM 吞吐门禁。</td></tr><tr><th>路数 PASS/FAIL</th><td>下方阶梯状态按原记录保留，不得解释为正式支持路数。</td></tr><tr><th>采样窗口</th><td>约每 3s 采样一次；阶梯汇总使用后半段采样点作为稳定窗口。</td></tr><tr><th>当前评估</th><td>带版本号的 v1.1 报告在不改写实际门禁的前提下，对当前 canonical 观测采用 80% 保守发布参考。</td></tr></table>
 <h2>基础信息</h2>
 <table><tr><th>场景</th><td>VLM 算法压测 (77175)</td></tr><tr><th>任务</th><td>vlm-77175: 77175 (VLM 算法 77175)</td></tr><tr><th>任务策略</th><td>vlm-77175=vlm</td></tr><tr><th>编排设定 FPS（参考）</th><td>vlm-77175=0.1</td></tr><tr><th>视频模式</th><td>local</td></tr><tr><th>设备</th><td>YY-16T01-Preview / NPU-Device-B</td></tr><tr><th>软件版本</th><td>V1.0.0.0</td></tr><tr><th>开始时间</th><td>2026-07-07T07:38:48.140Z</td></tr><tr><th>结束时间</th><td>2026-07-07T07:47:37.636Z</td></tr><tr><th>总采样点</th><td>168</td></tr><tr><th>基线 FPS（参考）</th><td>0.13 (step 1, 1ch)</td></tr></table>
 <h2>路数结果</h2>
