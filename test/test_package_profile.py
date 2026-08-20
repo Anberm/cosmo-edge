@@ -80,6 +80,8 @@ class PackageProfileTests(unittest.TestCase):
         target_chip: str | None = None,
         platform_chip: str | None = None,
         platform_runtime: str | None = None,
+        runtime_data_dir: str | None = None,
+        runtime_app_data_dir: str = "/appfs/cosmo_wander/cwai_data",
     ) -> pathlib.Path:
         root = "cosmo-V1.5.0"
         directory = pathlib.Path(tempfile.mkdtemp())
@@ -100,7 +102,22 @@ class PackageProfileTests(unittest.TestCase):
             if profile == "production-release":
                 files.add("bin/cosmo-model-provision")
             for name in sorted(files):
-                data = b"#!/bin/sh\n" if name in executable_files or name.endswith("provision") else b"V1.5.0\n"
+                if name == "share/cosmo/runtime-paths.env":
+                    selected_data_dir = runtime_data_dir or (
+                        "/userdata/cwaiuserdata"
+                        if target_chip in ("rk3576", "rv1126b")
+                        else "/data/cwaiuserdata"
+                    )
+                    data = (
+                        f"COSMO_PACKAGE_DATA_DIR={selected_data_dir}\n"
+                        f"COSMO_PACKAGE_APP_DATA_DIR={runtime_app_data_dir}\n"
+                    ).encode()
+                else:
+                    data = (
+                        b"#!/bin/sh\n"
+                        if name in executable_files or name.endswith("provision")
+                        else b"V1.5.0\n"
+                    )
                 info = tarfile.TarInfo(f"{root}/{name}")
                 info.size = len(data)
                 info.mode = 0o755 if name in executable_files or name.endswith("provision") else 0o644
@@ -244,6 +261,39 @@ class PackageProfileTests(unittest.TestCase):
             verifier.PackageAuditError, "platform profile does not match"
         ):
             verifier.verify_package(wrong_platform, "public-runtime", "rv1126b")
+
+    def test_runtime_paths_match_target_chip(self) -> None:
+        for target_chip in ("rk3576", "rv1126b"):
+            package = self.make_package(
+                "public-runtime",
+                target_chip=target_chip,
+                platform_chip=target_chip,
+            )
+            verifier.verify_package(package, "public-runtime", target_chip)
+
+        sophon = self.make_package("public-runtime", target_chip="bm1688")
+        verifier.verify_package(sophon, "public-runtime", "bm1688")
+
+        wrong_data_root = self.make_package(
+            "public-runtime",
+            target_chip="rv1126b",
+            platform_chip="rv1126b",
+            runtime_data_dir="/data/cwaiuserdata",
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "runtime data directory does not match"
+        ):
+            verifier.verify_package(wrong_data_root, "public-runtime", "rv1126b")
+
+        wrong_app_root = self.make_package(
+            "public-runtime",
+            target_chip="bm1688",
+            runtime_app_data_dir="/userdata/cwai_data",
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "application directory is incompatible"
+        ):
+            verifier.verify_package(wrong_app_root, "public-runtime", "bm1688")
 
     def test_build_has_no_signed_release_switches(self) -> None:
         build_inputs = (

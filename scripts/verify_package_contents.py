@@ -27,7 +27,13 @@ REQUIRED_EXECUTABLES = {
     "scripts/start.sh",
     "scripts/stop.sh",
 }
-REQUIRED_FILES = {"bin/version.txt", "scripts/common.sh"}
+RUNTIME_PATHS_FILE = "share/cosmo/runtime-paths.env"
+REQUIRED_FILES = {"bin/version.txt", "scripts/common.sh", RUNTIME_PATHS_FILE}
+RUNTIME_DATA_DIRS = {
+    "default": "/data/cwaiuserdata",
+    "rockchip": "/userdata/cwaiuserdata",
+}
+RUNTIME_APP_DATA_DIR = "/appfs/cosmo_wander/cwai_data"
 PRIVATE_MARKERS = (
     b"-----BEGIN PRIVATE KEY-----",
     b"-----BEGIN ENCRYPTED PRIVATE KEY-----",
@@ -58,6 +64,45 @@ def verify_archive_name(path: pathlib.Path) -> None:
     )
     if match is None or match.group(1).lower() != archive_md5(path):
         raise PackageAuditError("archive name must contain its exact MD5 digest")
+
+
+def parse_runtime_paths(data: bytes) -> dict[str, str]:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise PackageAuditError("runtime path declaration is not UTF-8") from error
+
+    expected_keys = {
+        "COSMO_PACKAGE_DATA_DIR",
+        "COSMO_PACKAGE_APP_DATA_DIR",
+    }
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line:
+            continue
+        if "=" not in line:
+            raise PackageAuditError("runtime path declaration contains an invalid line")
+        key, value = line.split("=", 1)
+        if key not in expected_keys:
+            raise PackageAuditError(
+                f"runtime path declaration contains an unsupported key: {key}"
+            )
+        if key in values:
+            raise PackageAuditError(
+                f"runtime path declaration contains a duplicate key: {key}"
+            )
+        if not value.startswith("/") or any(character.isspace() for character in value):
+            raise PackageAuditError(
+                f"runtime path declaration contains an invalid path: {key}"
+            )
+        values[key] = value
+
+    missing = expected_keys.difference(values)
+    if missing:
+        raise PackageAuditError(
+            f"runtime path declaration is missing: {', '.join(sorted(missing))}"
+        )
+    return values
 
 
 def verify_package(
@@ -106,6 +151,12 @@ def verify_package(
         if entry is None or not entry.isreg() or not (entry.mode & stat.S_IXUSR):
             raise PackageAuditError(f"required executable is missing: {filename}")
 
+    runtime_paths = parse_runtime_paths(contents[RUNTIME_PATHS_FILE])
+    if runtime_paths["COSMO_PACKAGE_APP_DATA_DIR"] != RUNTIME_APP_DATA_DIR:
+        raise PackageAuditError(
+            "runtime application directory is incompatible with the installation layout"
+        )
+
     for filename in entries:
         if pathlib.PurePosixPath(filename).name.lower() in FORBIDDEN_BASENAMES:
             raise PackageAuditError(f"controlled secret is forbidden: {filename}")
@@ -130,20 +181,43 @@ def verify_package(
                     f"forbidden target package path is present: {forbidden}"
                 )
 
-    if target_chip is not None:
-        marker_name = "share/cosmo/target-chip.txt"
+    marker_name = "share/cosmo/target-chip.txt"
+    actual_chip: str | None = None
+    if marker_name in entries:
         marker = entries.get(marker_name)
         if marker is None or not marker.isreg():
-            raise PackageAuditError(f"target chip marker is missing: {marker_name}")
+            raise PackageAuditError(f"target chip marker is invalid: {marker_name}")
         try:
             actual_chip = contents[marker_name].decode("utf-8").strip().lower()
         except UnicodeDecodeError as error:
             raise PackageAuditError("target chip marker is not UTF-8") from error
+        if actual_chip not in TARGET_CHIPS:
+            raise PackageAuditError(f"unsupported target chip marker: {actual_chip}")
+
+    if target_chip is not None:
+        if actual_chip is None:
+            raise PackageAuditError(f"target chip marker is missing: {marker_name}")
         if actual_chip != target_chip:
             raise PackageAuditError(
                 f"target chip mismatch: expected {target_chip}, package contains {actual_chip}"
             )
 
+    effective_chip = target_chip or actual_chip
+    if effective_chip is not None:
+        expected_data_dir = (
+            RUNTIME_DATA_DIRS["rockchip"]
+            if effective_chip in ("rk3576", "rv1126b")
+            else RUNTIME_DATA_DIRS["default"]
+        )
+        if runtime_paths["COSMO_PACKAGE_DATA_DIR"] != expected_data_dir:
+            raise PackageAuditError(
+                "runtime data directory does not match target chip: "
+                f"expected {expected_data_dir} for {effective_chip}"
+            )
+    elif runtime_paths["COSMO_PACKAGE_DATA_DIR"] not in RUNTIME_DATA_DIRS.values():
+        raise PackageAuditError("runtime data directory is unsupported")
+
+    if target_chip is not None:
         if target_chip in ("rk3576", "rv1126b"):
             platform_name = "share/cosmo/platform-profile.json"
             platform_entry = entries.get(platform_name)

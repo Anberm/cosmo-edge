@@ -167,14 +167,14 @@ host networking for build-time dependency resolution; the one-shot build
 service does not publish or listen on application ports.
 
 Board networking on RK3576 is managed by system NetworkManager, not by the
-Sophon netplan path in CosmoEdge. Clearing `/data/cwaiuserdata` recreates the
+Sophon netplan path in CosmoEdge. Clearing `/userdata/cwaiuserdata` recreates the
 default JSON but does not change an existing NetworkManager connection to
 `192.168.100.1`; use `ip -4 addr`/`nmcli` as the deployment source of truth.
 
 Keep mutable and packaged roots separate at runtime:
 
 ```bash
-export COSMO_DATA_DIR=/data/cwaiuserdata
+export COSMO_DATA_DIR=/userdata/cwaiuserdata
 export COSMO_APP_DATA_DIR=/appfs/cosmo_wander/cwai_data
 export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
@@ -209,7 +209,7 @@ the RKLLM language path and does not replace this gate. Use the CosmoEdge
 with the same aarch64 toolchain as the build image and run it on the device:
 
 ```bash
-MODEL_DIR=/data/cwaiuserdata/resource/models/<qwen3.5-model-directory>
+MODEL_DIR=/userdata/cwaiuserdata/resource/models/<qwen3.5-model-directory>
 export LD_LIBRARY_PATH=./lib
 ./demo smoke.jpg "$MODEL_DIR/vision.rknn" "$MODEL_DIR/model.rkllm" \
   64 4096 2 rk3576 \
