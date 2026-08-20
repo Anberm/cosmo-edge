@@ -1,4 +1,0 @@
-benchmark=cosmoedge-1.1-multistream
-platform=RV1126B
-device=RV1126B reference device
-publication=release-evidence

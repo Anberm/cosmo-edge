@@ -1,7 +1,0 @@
-# Public reproduction descriptor
-platform=rk3576
-case=nohelmet-10fps-16ch
-workload=safety-helmet-detector
-target_fps=10
-configured_channels=16
-scenario=../../../../../scenarios/single-detector/safety-helmet-detector.public.yml

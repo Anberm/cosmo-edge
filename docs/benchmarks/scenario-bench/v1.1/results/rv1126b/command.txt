@@ -1,1 +1,0 @@
-See cases/, dual-detector/, and single-detector/ for workload-specific reproduction descriptors.

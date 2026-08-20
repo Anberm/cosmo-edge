@@ -1,7 +1,0 @@
-# Public reproduction descriptor
-platform=rv1126b
-case=dual-cv-5fps-4ch
-workload=dual-detector
-target_fps=5
-configured_channels=4
-scenario=../../../../../scenarios/dual-detector/scenario.public.yml

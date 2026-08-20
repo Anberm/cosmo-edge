@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "manifestStatus": "frozen-publication-candidate",
   "release": {
     "version": "1.1.0",
@@ -70,28 +70,28 @@
       "scope": "release-platform",
       "environment": "environments/bm1688.json",
       "models": "models/bm1688.json",
-      "results": "results/bm1688/"
+      "results": "results/bm1688/cases.json"
     },
     {
       "id": "cv186x",
       "scope": "release-platform",
       "environment": "environments/cv186x.json",
       "models": "models/cv186x.json",
-      "results": "results/cv186x/"
+      "results": "results/cv186x/cases.json"
     },
     {
       "id": "rk3576",
       "scope": "release-platform",
       "environment": "environments/rk3576.json",
       "models": "models/rk3576.json",
-      "results": "results/rk3576/"
+      "results": "results/rk3576/cases.json"
     },
     {
       "id": "rv1126b",
       "scope": "additional-experimental-platform",
       "environment": "environments/rv1126b.json",
       "models": "models/rv1126b.json",
-      "results": "results/rv1126b/"
+      "results": "results/rv1126b/cases.json"
     }
   ],
   "workloads": {
@@ -103,11 +103,29 @@
   "evidence": {
     "smallModelCaseCount": 49,
     "smallModelRefresh": "2026-08-19 controlled run",
-    "vlm": "preserved from the preceding v1.1 evidence set"
+    "caseSchema": "results/cases.schema.json",
+    "canonicalSmallModelCases": [
+      "results/bm1688/cases.json",
+      "results/cv186x/cases.json",
+      "results/rk3576/cases.json",
+      "results/rv1126b/cases.json"
+    ],
+    "vlm": "preserved from the preceding v1.1 evidence set",
+    "vlmObservations": "results/vlm-observations.json",
+    "fullEvidenceArchive": {
+      "artifactName": "original-v1.1-5ec280a9.tar.gz",
+      "sha256": "99535bd47cc0ed6193dbdca61cef37f5b6db47c04c1ad6ab5ec607131de75f50",
+      "sourceCommit": "5ec280a93071d66027a8f3ae10715dab5dae1424",
+      "sourceTree": "1d92976871185b16833f2efc9f8ac4f8eedce740",
+      "publicationState": "prepared-not-published",
+      "includedInRepository": false
+    }
   },
   "qualification": {
-    "benchmarkPackComplete": true,
+    "canonicalBenchmarkDatasetComplete": true,
+    "generatedReportContractVerified": true,
     "publicAssetRedistributionSafe": true,
-    "readyForRepositoryReview": true
+    "readyForRepositoryReview": true,
+    "productReleaseQualified": false
   }
 }

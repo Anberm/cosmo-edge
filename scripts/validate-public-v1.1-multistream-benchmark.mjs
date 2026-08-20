@@ -1,108 +1,74 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generateBenchmarkPages } from './generate-v1.1-benchmark-pages.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const workspace = path.resolve(here, '..');
 const root = path.join(workspace, 'docs', 'benchmarks', 'scenario-bench', 'v1.1');
-
 const errors = [];
-const officialPlatforms = ['bm1688', 'cv186x', 'rk3576'];
-const experimentalPlatforms = ['rv1126b'];
-const platforms = [...officialPlatforms, ...experimentalPlatforms];
-const attachmentFiles = ['summary.json', 'metrics.json', 'command.txt', 'test.log', 'report.html', 'report.zh-CN.html'];
+const archivePath = parseArchiveArgument(process.argv.slice(2));
 
-const expectedCases = {
-  bm1688: [
-    'person-24fps-8ch', 'person-10fps-16ch', 'person-7fps-16ch', 'person-5fps-16ch',
-    'nohelmet-24fps-8ch', 'nohelmet-10fps-16ch', 'nohelmet-7fps-16ch', 'nohelmet-5fps-16ch',
-    'dual-cv-5fps-16ch',
-  ],
-  cv186x: [
-    'person-24fps-8ch', 'person-24fps-16ch', 'person-10fps-8ch', 'person-10fps-16ch',
-    'person-7fps-8ch', 'person-7fps-16ch', 'person-5fps-8ch', 'person-5fps-16ch',
-    'nohelmet-24fps-8ch', 'nohelmet-10fps-8ch', 'nohelmet-10fps-16ch',
-    'nohelmet-7fps-8ch', 'nohelmet-7fps-16ch', 'nohelmet-5fps-8ch', 'nohelmet-5fps-16ch',
-    'dual-cv-5fps-8ch',
-  ],
-  rk3576: [
-    'person-24fps-8ch', 'person-10fps-8ch', 'person-10fps-16ch',
-    'person-7fps-8ch', 'person-7fps-16ch', 'person-5fps-8ch', 'person-5fps-16ch',
-    'nohelmet-24fps-8ch', 'nohelmet-10fps-8ch', 'nohelmet-10fps-16ch',
-    'nohelmet-7fps-8ch', 'nohelmet-7fps-16ch', 'nohelmet-5fps-8ch', 'nohelmet-5fps-16ch',
-    'dual-cv-5fps-8ch',
-  ],
-  rv1126b: [
-    'person-24fps-4ch', 'person-10fps-4ch', 'person-7fps-4ch', 'person-5fps-4ch',
-    'nohelmet-24fps-4ch', 'nohelmet-10fps-4ch', 'nohelmet-7fps-4ch', 'nohelmet-5fps-4ch',
-    'dual-cv-5fps-4ch',
-  ],
-};
-
-const expectedCaseCount = Object.values(expectedCases).reduce((count, cases) => count + cases.length, 0);
-if (expectedCaseCount !== 49) errors.push(`validator case contract is invalid: expected 49, defined ${expectedCaseCount}`);
-
-const required = [
-  'README.md', 'README.zh-CN.md', 'RELEASE-CHECKLIST.md', 'release-manifest.json',
-  'methodology.md', 'LICENSES.md', 'SHA256SUMS', 'report.html', 'report.zh-CN.html',
-  'assets/capacity-overview.svg', 'assets/throughput-curves.svg', 'assets/resource-peaks.svg',
-  'assets/capacity-overview.zh-CN.svg', 'assets/throughput-curves.zh-CN.svg', 'assets/resource-peaks.zh-CN.svg',
-  'dataset/dataset-card.md', 'dataset/download-samples.sh',
-  'models/model-card.md', 'models/io-contract.json', 'models/download-model.sh',
-  'scenarios/README.md', 'scenarios/single-detector/README.md',
-  'scenarios/single-detector/person-detector.public.yml',
-  'scenarios/single-detector/safety-helmet-detector.public.yml',
-  'scenarios/dual-detector/scenario.public.yml', 'scenarios/vlm-observation/scenario.public.yml',
-  'results/index.json', 'results/cases.json', 'results/workload-matrix.json',
+const requiredSourceFiles = [
+  'README.md',
+  'README.zh-CN.md',
+  'RELEASE-CHECKLIST.md',
+  'LICENSES.md',
+  'methodology.md',
+  'release-manifest.json',
+  'SHA256SUMS',
+  'results/cases.schema.json',
+  'results/vlm-observations.json',
 ];
 
-for (const platform of platforms) {
-  required.push(
-    `environments/${platform}.json`,
-    `models/${platform}.json`,
-    `results/${platform}/environment.json`,
-    `results/${platform}/cases/index.json`,
-  );
-  for (const file of attachmentFiles) required.push(`results/${platform}/${file}`);
-  for (const workload of ['single-detector', 'dual-detector']) {
-    for (const file of attachmentFiles) required.push(`results/${platform}/${workload}/${file}`);
-  }
-  if (officialPlatforms.includes(platform)) {
-    for (const file of attachmentFiles) required.push(`results/${platform}/vlm-observation/${file}`);
-  }
-  for (const caseId of expectedCases[platform]) {
-    for (const file of attachmentFiles) required.push(`results/${platform}/cases/${caseId}/${file}`);
-  }
-}
-
 if (!fs.existsSync(root)) {
-  errors.push(`benchmark pack root is missing: ${root}`);
+  fail(`benchmark source root is missing: ${root}`);
 } else {
-  for (const relativePath of required) requireFile(relativePath);
+  for (const relativePath of requiredSourceFiles) requireFile(root, relativePath);
 }
 
-const allFiles = fs.existsSync(root) ? walk(root) : [];
-const manifest = readJsonIfPresent('release-manifest.json');
-if (manifest) validateManifest(manifest);
+const manifest = readJsonIfPresent(root, 'release-manifest.json');
+const platformDefinitions = validateManifest(manifest);
+const canonicalPlatforms = validateCanonicalCases(manifest, platformDefinitions);
+const vlm = validateVlmEvidence(manifest, platformDefinitions);
+if (archivePath) validateArchivedEvidence(archivePath, manifest, canonicalPlatforms, vlm);
+validateCanonicalSourceLayout(platformDefinitions);
+validateSchemaDocument();
 
-for (const file of allFiles.filter((entry) => entry.toLowerCase().endsWith('.json'))) {
-  let value;
-  try {
-    value = readJson(file);
-  } catch (error) {
-    errors.push(`invalid JSON: ${relative(file)} (${error.message})`);
-    continue;
+const sourceFiles = fs.existsSync(root) ? walk(root) : [];
+for (const file of sourceFiles.filter((entry) => entry.toLowerCase().endsWith('.json'))) {
+  const value = readJsonWithError(file);
+  if (value !== null) validateJsonReferences(root, file, value, null);
+}
+
+let generatedRoot = null;
+let generation = null;
+try {
+  generatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cosmoedge-v1.1-validate-'));
+  generation = generateBenchmarkPages({ sourceRoot: root, outputRoot: generatedRoot });
+  validateGeneratedPack(generatedRoot, manifest, canonicalPlatforms, vlm, generation);
+} catch (error) {
+  fail(`deterministic report generation failed: ${error.message}`);
+}
+
+validatePublicScrub(sourceFiles, root, 'source');
+validateChecksums(root, 'source SHA256SUMS');
+validateLinksAndLanguages(root, sourceFiles, generatedRoot);
+
+if (generatedRoot && fs.existsSync(generatedRoot)) {
+  const generatedFiles = walk(generatedRoot);
+  for (const file of generatedFiles.filter((entry) => entry.toLowerCase().endsWith('.json'))) {
+    const value = readJsonWithError(file);
+    if (value !== null) validateJsonReferences(generatedRoot, file, value, null);
   }
-  validateJsonReferences(file, value);
+  validatePublicScrub(generatedFiles, generatedRoot, 'generated pack');
+  validateChecksums(generatedRoot, 'generated SHA256SUMS');
+  validateLinksAndLanguages(generatedRoot, generatedFiles, null);
+  fs.rmSync(generatedRoot, { recursive: true, force: true });
 }
-
-validateCaseIndexes();
-validateCaseArtifacts();
-validateVlmEvidence();
-validatePublicScrub(allFiles);
-validateChecksums(allFiles);
-validateLinksAndLanguages(allFiles);
 
 if (errors.length) {
   console.error(`Validation failed (${errors.length}):`);
@@ -110,147 +76,437 @@ if (errors.length) {
   process.exit(1);
 }
 
+const totalCases = canonicalPlatforms.reduce((count, item) => count + item.cases.length, 0);
 console.log(
-  `Validation passed: ${allFiles.length} files, ${platforms.length} platforms, ` +
-  `${expectedCaseCount} small-model cases, retained VLM evidence, relative links, public scrub, and complete checksums verified.`,
+  `Validation passed: ${platformDefinitions.length} manifest-defined platforms, ${totalCases} canonical cases, ` +
+  `${generation.reportCount} generated bilingual reports, retained VLM observations, relative links, public scrub, and source/generated checksums verified.`,
 );
 
 function validateManifest(value) {
+  if (!value) return [];
+  if (value.schemaVersion !== 3) fail('manifest schemaVersion must be 3');
+  if (value.release?.version !== '1.1.0' || value.release?.tag !== 'v1.1.0') {
+    fail('manifest release identity must be version 1.1.0 and tag v1.1.0');
+  }
   if (value.release?.publicationState !== 'prepared-not-published') {
-    errors.push('manifest release.publicationState must be prepared-not-published');
+    fail('manifest release.publicationState must be prepared-not-published');
   }
-  if (!/^[0-9a-f]{40}$/.test(value.sourceBaseline?.commit ?? '')) {
-    errors.push('manifest sourceBaseline.commit must be a frozen 40-character Git commit');
+  if (!sha1(value.sourceBaseline?.commit)) fail('manifest sourceBaseline.commit must be a frozen 40-character Git commit');
+  if (!sha1(value.sourceBaseline?.tree)) fail('manifest sourceBaseline.tree must be a frozen 40-character Git tree');
+  if (!sha256(value.dataset?.sha256)) fail('manifest dataset.sha256 must be a 64-character SHA-256');
+  const targetFpsValues = value.controls?.smallModelTargetFps;
+  if (!Array.isArray(targetFpsValues) || !targetFpsValues.length || targetFpsValues.some((fps) => !positiveNumber(fps))) {
+    fail('manifest controls.smallModelTargetFps must be a non-empty array of positive numbers');
+  } else if (new Set(targetFpsValues).size !== targetFpsValues.length) {
+    fail('manifest controls.smallModelTargetFps must not contain duplicates');
   }
-  if (!/^[0-9a-f]{40}$/.test(value.sourceBaseline?.tree ?? '')) {
-    errors.push('manifest sourceBaseline.tree must be a frozen 40-character Git tree');
-  }
-  if (value.qualification?.benchmarkPackComplete !== true) {
-    errors.push('manifest qualification.benchmarkPackComplete must be true');
-  }
-  if (!/^[0-9a-f]{64}$/.test(value.dataset?.sha256 ?? '')) {
-    errors.push('manifest dataset.sha256 must be a 64-character SHA-256');
+  if (!positiveInteger(value.evidence?.smallModelCaseCount)) fail('manifest evidence.smallModelCaseCount must be a positive integer');
+  if (value.evidence?.caseSchema !== 'results/cases.schema.json') fail('manifest evidence.caseSchema must point to the canonical schema');
+  if (value.evidence?.vlmObservations !== 'results/vlm-observations.json') fail('manifest evidence.vlmObservations must point to the canonical VLM file');
+
+  const archive = value.evidence?.fullEvidenceArchive;
+  if (!archive || typeof archive !== 'object') {
+    fail('manifest evidence.fullEvidenceArchive is required');
+  } else {
+    if (!sha256(archive.sha256)) fail('full evidence archive SHA-256 is invalid');
+    if (!sha1(archive.sourceCommit) || !sha1(archive.sourceTree)) fail('full evidence archive source commit/tree is invalid');
+    if (archive.publicationState !== 'prepared-not-published') fail('full evidence archive must remain prepared-not-published');
+    if (archive.includedInRepository !== false) fail('full evidence archive must not be included in the repository');
   }
 
-  const manifestPlatforms = Array.isArray(value.platforms) ? value.platforms : [];
-  const actualIds = manifestPlatforms.map((item) => item?.id).filter(Boolean).sort();
-  const expectedIds = [...platforms].sort();
-  if (!sameArray(actualIds, expectedIds)) {
-    errors.push(`manifest platform inventory must be exactly: ${expectedIds.join(', ')}`);
+  if (value.qualification?.canonicalBenchmarkDatasetComplete !== true) {
+    fail('manifest qualification.canonicalBenchmarkDatasetComplete must be true');
+  }
+  if (value.qualification?.generatedReportContractVerified !== true) {
+    fail('manifest qualification.generatedReportContractVerified must be true');
+  }
+  if (value.qualification?.productReleaseQualified !== false) {
+    fail('benchmark evidence must not claim product release qualification');
+  }
+
+  const definitions = Array.isArray(value.platforms) ? value.platforms : [];
+  if (!definitions.length) fail('manifest must declare at least one platform');
+  const ids = definitions.map((item) => item?.id);
+  if (ids.some((id) => typeof id !== 'string' || !/^[a-z0-9-]+$/.test(id))) fail('manifest contains an invalid platform id');
+  if (new Set(ids).size !== ids.length) fail('manifest contains duplicate platform ids');
+  if (!definitions.some((item) => item?.scope === 'release-platform')) fail('manifest must declare at least one release platform');
+
+  const allowedScopes = new Set(['release-platform', 'additional-experimental-platform']);
+  for (const definition of definitions) {
+    const label = `manifest platform ${definition?.id ?? '<missing>'}`;
+    if (!allowedScopes.has(definition?.scope)) fail(`${label} has an unsupported scope`);
+    if (definition?.environment !== `environments/${definition.id}.json`) fail(`${label} environment reference is not canonical`);
+    if (definition?.models !== `models/${definition.id}.json`) fail(`${label} model reference is not canonical`);
+    if (definition?.results !== `results/${definition.id}/cases.json`) fail(`${label} results reference must point to its canonical case file`);
+  }
+
+  const expectedCaseFiles = definitions.map((item) => `results/${item.id}/cases.json`).sort();
+  const declaredCaseFiles = Array.isArray(value.evidence?.canonicalSmallModelCases)
+    ? [...value.evidence.canonicalSmallModelCases].sort()
+    : [];
+  if (!sameArray(expectedCaseFiles, declaredCaseFiles)) {
+    fail('manifest evidence.canonicalSmallModelCases must exactly match the manifest platform inventory');
+  }
+  return definitions;
+}
+
+function validateCanonicalCases(manifestValue, definitions) {
+  const result = [];
+  const globalCaseKeys = new Set();
+  const sourceSummaryHashes = new Set();
+  for (const definition of definitions) {
+    const relativePath = `results/${definition.id}/cases.json`;
+    requireFile(root, relativePath);
+    const value = readJsonIfPresent(root, relativePath);
+    if (!value) continue;
+    result.push(value);
+    const label = `${definition.id} canonical cases`;
+    expectObjectKeys(value, [
+      '$schema', 'schemaVersion', 'benchmark', 'platformId', 'platform', 'scope', 'evidenceDate', 'caseCount', 'gates', 'cases',
+    ], label);
+    if (value.$schema !== '../cases.schema.json') fail(`${label} has an incorrect schema reference`);
+    if (value.schemaVersion !== 2) fail(`${label} schemaVersion must be 2`);
+    if (value.platformId !== definition.id) fail(`${label} platformId does not match the manifest`);
+    if (value.scope !== definition.scope) fail(`${label} scope does not match the manifest`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value.evidenceDate ?? '')) fail(`${label} evidenceDate is invalid`);
+    if (!deepEqual(value.gates, manifestValue?.controls?.cvGates)) fail(`${label} gates differ from the manifest controls`);
+
+    const cases = Array.isArray(value.cases) ? value.cases : [];
+    if (!Array.isArray(value.cases)) fail(`${label} cases must be an array`);
+    if (value.caseCount !== cases.length) fail(`${label} caseCount does not match its case array`);
+    const localIds = new Set();
+    for (const benchmarkCase of cases) {
+      validateCase(definition, value.gates ?? {}, benchmarkCase);
+      const caseKey = `${definition.id}/${benchmarkCase?.caseId}`;
+      if (localIds.has(benchmarkCase?.caseId)) fail(`${label} contains duplicate case id ${benchmarkCase?.caseId}`);
+      if (globalCaseKeys.has(caseKey)) fail(`duplicate global case key ${caseKey}`);
+      localIds.add(benchmarkCase?.caseId);
+      globalCaseKeys.add(caseKey);
+      if (sha256(benchmarkCase?.sourceSummarySha256)) {
+        if (sourceSummaryHashes.has(benchmarkCase.sourceSummarySha256)) fail(`duplicate source summary hash in ${caseKey}`);
+        sourceSummaryHashes.add(benchmarkCase.sourceSummarySha256);
+      }
+    }
+    for (const workload of ['person-detector', 'safety-helmet-detector']) {
+      for (const fps of manifestValue?.controls?.smallModelTargetFps ?? []) {
+        if (!cases.some((item) => item.workload === workload && item.targetFps === fps)) {
+          fail(`${label} is missing ${workload} at ${fps} FPS`);
+        }
+      }
+    }
+    if (!cases.some((item) => item.workload === 'dual-detector')) fail(`${label} is missing a dual-detector case`);
+  }
+
+  const actualCount = result.reduce((count, item) => count + (item.cases?.length ?? 0), 0);
+  if (manifestValue && actualCount !== manifestValue.evidence?.smallModelCaseCount) {
+    fail(`canonical case total ${actualCount} does not match manifest evidence.smallModelCaseCount ${manifestValue.evidence?.smallModelCaseCount}`);
+  }
+  return result;
+}
+
+function validateCase(definition, gates, value) {
+  const label = `${definition.id}/${value?.caseId ?? '<missing-case-id>'}`;
+  expectObjectKeys(value, [
+    'caseId', 'workload', 'targetFps', 'configuredChannels', 'outcome', 'boundaryKind', 'lastPassingChannels',
+    'firstBlockedChannels', 'blockedReason', 'sourceSummarySha256', 'steps',
+  ], label);
+  const identity = parseCaseId(value?.caseId);
+  if (!identity) fail(`${label} caseId does not encode workload, target FPS, and configured channels`);
+  if (identity && value.workload !== identity.workload) fail(`${label} workload differs from its caseId`);
+  if (identity && value.targetFps !== identity.targetFps) fail(`${label} targetFps differs from its caseId`);
+  if (identity && value.configuredChannels !== identity.configuredChannels) fail(`${label} configuredChannels differs from its caseId`);
+  if (!sha256(value?.sourceSummarySha256)) fail(`${label} sourceSummarySha256 is invalid`);
+  if (!positiveInteger(value?.configuredChannels) || !positiveInteger(value?.lastPassingChannels)) fail(`${label} channel boundaries must be positive integers`);
+  if (value?.lastPassingChannels > value?.configuredChannels) fail(`${label} lastPassingChannels exceeds configuredChannels`);
+
+  const allowedOutcomes = new Set(['completed', 'stopped', 'setup-blocked']);
+  const allowedBoundaries = new Set(['lower-bound', 'performance-stop', 'binding-blocked', 'storage-blocked']);
+  if (!allowedOutcomes.has(value?.outcome)) fail(`${label} outcome is invalid`);
+  if (!allowedBoundaries.has(value?.boundaryKind)) fail(`${label} boundaryKind is invalid`);
+
+  const steps = Array.isArray(value?.steps) ? value.steps : [];
+  if (!steps.length) fail(`${label} must contain at least one measured step`);
+  let previousChannel = 0;
+  for (const [index, step] of steps.entries()) {
+    validateStep(label, value, gates, step, index);
+    if (positiveInteger(step?.channels) && step.channels <= previousChannel) fail(`${label} step channels must be strictly increasing`);
+    previousChannel = step?.channels ?? previousChannel;
+  }
+
+  const passingChannels = steps.filter((step) => step?.result === 'PASS').map((step) => step.channels);
+  const nonPassingChannels = steps.filter((step) => step?.result !== 'PASS').map((step) => step.channels);
+  const measuredLastPass = passingChannels.length ? Math.max(...passingChannels) : null;
+  if (measuredLastPass !== value?.lastPassingChannels) fail(`${label} lastPassingChannels does not match measured PASS steps`);
+
+  if (value?.boundaryKind === 'lower-bound') {
+    if (value.outcome !== 'completed' || value.firstBlockedChannels !== null || value.blockedReason !== null) {
+      fail(`${label} lower-bound metadata is inconsistent`);
+    }
+    if (value.lastPassingChannels !== value.configuredChannels || nonPassingChannels.length) {
+      fail(`${label} lower-bound must pass every configured step`);
+    }
+  } else if (value?.boundaryKind === 'performance-stop') {
+    const firstNonPass = nonPassingChannels.length ? Math.min(...nonPassingChannels) : null;
+    if (value.outcome !== 'stopped' || value.firstBlockedChannels !== firstNonPass || typeof value.blockedReason !== 'string') {
+      fail(`${label} performance-stop metadata is inconsistent`);
+    }
+  } else if (value) {
+    if (value.outcome !== 'setup-blocked' || value.firstBlockedChannels !== value.lastPassingChannels + 1) {
+      fail(`${label} setup-blocked boundary metadata is inconsistent`);
+    }
+    if (nonPassingChannels.length || typeof value.blockedReason !== 'string') {
+      fail(`${label} setup-blocked case must contain only completed PASS steps and a reason`);
+    }
   }
 }
 
-function validateCaseIndexes() {
-  const globalIndex = readJsonIfPresent('results/cases.json');
-  const expectedKeys = new Set(platforms.flatMap((platform) => expectedCases[platform].map((caseId) => `${platform}/${caseId}`)));
-  if (globalIndex) {
-    if (globalIndex.caseCount !== expectedCaseCount) errors.push(`results/cases.json caseCount must be ${expectedCaseCount}`);
-    const cases = Array.isArray(globalIndex.cases) ? globalIndex.cases : [];
-    const actualKeys = cases.map((item) => `${item?.platformId}/${item?.caseId}`);
-    compareSets('results/cases.json case inventory', new Set(actualKeys), expectedKeys);
-    if (actualKeys.length !== new Set(actualKeys).size) errors.push('results/cases.json contains duplicate cases');
-    for (const item of cases) {
-      if (!item || !expectedKeys.has(`${item.platformId}/${item.caseId}`)) continue;
-      const prefix = `${item.platformId}/cases/${item.caseId}`;
-      if (item.summary !== `${prefix}/summary.json`) errors.push(`incorrect summary link for ${item.platformId}/${item.caseId}`);
-      if (item.report !== `${prefix}/report.html`) errors.push(`incorrect English report link for ${item.platformId}/${item.caseId}`);
-      if (item.reportZhCn !== `${prefix}/report.zh-CN.html`) errors.push(`incorrect Chinese report link for ${item.platformId}/${item.caseId}`);
+function validateStep(caseLabel, benchmarkCase, gates, step, index) {
+  const label = `${caseLabel} step ${index + 1}`;
+  expectObjectKeys(step, [
+    'channels', 'holdSeconds', 'result', 'tasks', 'minimumProcessingFps', 'maximumDetectorLatencyMs',
+    'maximumCriticalPathLatencyMs', 'averageDiscardRate', 'maximumChannelDiscardRate', 'acceleratorPeakPercent',
+    'acceleratorMemoryPeakPercent', 'cpuPeakPercent', 'memoryPeakPercent', 'failureReason',
+  ], label);
+  if (!positiveInteger(step?.channels) || step.channels > benchmarkCase.configuredChannels) fail(`${label} channels are invalid`);
+  if (!positiveNumber(step?.holdSeconds)) fail(`${label} holdSeconds must be positive`);
+  if (!new Set(['PASS', 'FAIL', 'STOP']).has(step?.result)) fail(`${label} result is invalid`);
+  if (step?.result === 'PASS' && step.failureReason !== null) fail(`${label} PASS must not contain a failure reason`);
+  if (step?.result !== 'PASS' && typeof step?.failureReason !== 'string') fail(`${label} non-PASS result must contain a failure reason`);
+
+  const tasks = Array.isArray(step?.tasks) ? step.tasks : [];
+  const expectedTaskNames = benchmarkCase.workload === 'dual-detector'
+    ? ['person-detector', 'safety-helmet-detector']
+    : [benchmarkCase.workload];
+  if (!sameArray(tasks.map((task) => task?.name).sort(), [...expectedTaskNames].sort())) fail(`${label} task inventory differs from its workload`);
+  for (const task of tasks) {
+    expectObjectKeys(task, [
+      'name', 'targetFps', 'minimumProcessingFps', 'minimumFpsRatio', 'missingRate', 'averageDiscardRate',
+      'maximumDetectorLatencyMs', 'maximumCriticalPathLatencyMs',
+    ], `${label} task ${task?.name ?? '<missing>'}`);
+    if (task?.targetFps !== benchmarkCase.targetFps) fail(`${label} task ${task?.name} targetFps differs from its case`);
+    for (const key of ['minimumProcessingFps', 'minimumFpsRatio', 'missingRate', 'averageDiscardRate', 'maximumDetectorLatencyMs', 'maximumCriticalPathLatencyMs']) {
+      if (!nullableNonNegativeNumber(task?.[key])) fail(`${label} task ${task?.name} ${key} must be a non-negative number or null`);
     }
   }
-
-  const resultsIndex = readJsonIfPresent('results/index.json');
-  if (resultsIndex) {
-    const actual = new Map((Array.isArray(resultsIndex.platforms) ? resultsIndex.platforms : [])
-      .map((item) => [platformIdFromOverview(item?.overview), item]));
-    if (actual.size !== platforms.length || platforms.some((platform) => !actual.has(platform))) {
-      errors.push(`results/index.json must contain exactly ${platforms.length} platforms`);
-    }
-    for (const platform of platforms) {
-      const item = actual.get(platform);
-      if (!item) continue;
-      const expectedScope = officialPlatforms.includes(platform) ? 'release-platform' : 'additional-experimental-platform';
-      if (item.scope !== expectedScope) errors.push(`results/index.json scope is incorrect for ${platform}`);
-      if (item.cases !== `${platform}/cases/index.json`) errors.push(`results/index.json cases link is incorrect for ${platform}`);
-      if (officialPlatforms.includes(platform) && item.vlmObservation !== `${platform}/vlm-observation/summary.json`) {
-        errors.push(`results/index.json VLM link is incorrect for ${platform}`);
-      }
-      if (platform === 'rv1126b' && item.vlmObservation !== null) errors.push('RV1126B must not expose a VLM observation link');
-    }
+  for (const key of [
+    'minimumProcessingFps', 'maximumDetectorLatencyMs', 'maximumCriticalPathLatencyMs', 'averageDiscardRate',
+    'maximumChannelDiscardRate', 'acceleratorPeakPercent', 'acceleratorMemoryPeakPercent', 'cpuPeakPercent', 'memoryPeakPercent',
+  ]) {
+    if (!nullableNonNegativeNumber(step?.[key])) fail(`${label} ${key} must be a non-negative number or null`);
   }
 
+  if (step?.result === 'PASS') {
+    for (const task of tasks) {
+      if (!(task.minimumFpsRatio >= gates.minFpsRatio)) fail(`${label} PASS violates the task FPS-ratio gate`);
+      if (!(task.missingRate <= gates.maxMissingRate)) fail(`${label} PASS violates the task missing-rate gate`);
+      if (!(task.averageDiscardRate <= gates.maxAverageDiscardRate)) fail(`${label} PASS violates the task discard-rate gate`);
+      if (!(task.maximumDetectorLatencyMs <= gates.maxDetectorLatencyMs)) fail(`${label} PASS violates the detector-latency gate`);
+      if (!(task.maximumCriticalPathLatencyMs <= gates.maxCriticalPathLatencyMs)) fail(`${label} PASS violates the critical-path gate`);
+    }
+    if (!(step.averageDiscardRate <= gates.maxAverageDiscardRate)) fail(`${label} PASS violates the aggregate discard-rate gate`);
+    if (!(step.maximumDetectorLatencyMs <= gates.maxDetectorLatencyMs)) fail(`${label} PASS violates the aggregate detector-latency gate`);
+    if (!(step.maximumCriticalPathLatencyMs <= gates.maxCriticalPathLatencyMs)) fail(`${label} PASS violates the aggregate critical-path gate`);
+  }
+}
+
+function validateVlmEvidence(manifestValue, definitions) {
+  const value = readJsonIfPresent(root, 'results/vlm-observations.json');
+  if (!value) return { observations: [] };
+  if (value.schemaVersion !== 2 || value.evidenceStatus !== 'preserved-preceding-evidence' || value.refreshedWithSmallModelCases !== false) {
+    fail('canonical VLM evidence status is inconsistent');
+  }
+  const releaseIds = new Set(definitions.filter((item) => item.scope === 'release-platform').map((item) => item.id));
+  const observations = Array.isArray(value.observations) ? value.observations : [];
+  const ids = observations.map((item) => item?.platformId);
+  if (new Set(ids).size !== ids.length) fail('canonical VLM file contains duplicate platforms');
+  for (const observation of observations) {
+    const label = `${observation?.platformId ?? '<missing>'} VLM observation`;
+    if (!releaseIds.has(observation?.platformId)) fail(`${label} is not attached to a release platform`);
+    if (!sha256(observation?.sourceSummarySha256)) fail(`${label} sourceSummarySha256 is invalid`);
+    if (observation?.workload?.targetFpsPerChannel !== 0.1) fail(`${label} target FPS must remain 0.1 per channel`);
+    if (observation?.observedBoundary?.capacityClaimAllowed !== false) fail(`${label} must not claim capacity`);
+    const steps = Array.isArray(observation?.steps) ? observation.steps : [];
+    let previousChannel = 0;
+    for (const [index, step] of steps.entries()) {
+      if (!positiveInteger(step?.channels) || step.channels <= previousChannel) fail(`${label} channels must be strictly increasing`);
+      previousChannel = step?.channels ?? previousChannel;
+      if (step?.targetFpsPerChannel !== observation.workload.targetFpsPerChannel) fail(`${label} step ${index + 1} target FPS changed`);
+      if (step?.fpsGateEnabled !== false) fail(`${label} step ${index + 1} FPS gate must remain disabled`);
+      if (!nullableNonNegativeNumber(step?.observedEquivalentPerChannelFps)) fail(`${label} step ${index + 1} equivalent FPS is invalid`);
+      if (!nullableNonNegativeNumber(step?.fpsAchievementRatioObserved)) fail(`${label} step ${index + 1} FPS ratio is invalid`);
+    }
+    const passing = steps.filter((step) => step?.nonFpsGateResult === 'PASS').map((step) => step.channels);
+    const stopped = steps.filter((step) => step?.nonFpsGateResult !== 'PASS').map((step) => step.channels);
+    const highestPass = passing.length ? Math.max(...passing) : null;
+    const firstStop = stopped.length ? Math.min(...stopped) : null;
+    if (observation?.observedBoundary?.highestNonFpsPassingChannels !== highestPass) fail(`${label} highest non-FPS passing boundary is inconsistent`);
+    if (observation?.observedBoundary?.firstNonFpsStopChannels !== firstStop) fail(`${label} first non-FPS stop boundary is inconsistent`);
+  }
+  if (manifestValue?.evidence?.vlmObservations !== 'results/vlm-observations.json') fail('manifest VLM reference changed');
+  return value;
+}
+
+function validateArchivedEvidence(file, manifestValue, platforms, vlmValue) {
+  const resolved = path.resolve(file);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    fail(`full evidence archive is missing: ${resolved}`);
+    return;
+  }
+  const archiveBytes = fs.readFileSync(resolved);
+  const archiveDigest = crypto.createHash('sha256').update(archiveBytes).digest('hex');
+  if (archiveDigest !== manifestValue?.evidence?.fullEvidenceArchive?.sha256) {
+    fail('full evidence archive SHA-256 differs from the manifest');
+    return;
+  }
+
+  const archiveRoot = 'docs/benchmarks/scenario-bench/v1.1/results';
   for (const platform of platforms) {
-    const index = readJsonIfPresent(`results/${platform}/cases/index.json`);
-    if (!index) continue;
-    if (index.platformId !== platform) errors.push(`case index platformId is incorrect for ${platform}`);
-    if (index.caseCount !== expectedCases[platform].length) errors.push(`${platform} case index count must be ${expectedCases[platform].length}`);
-    const cases = Array.isArray(index.cases) ? index.cases : [];
-    const ids = cases.map((item) => typeof item === 'string' ? item : item?.caseId);
-    compareSets(`${platform} case index`, new Set(ids), new Set(expectedCases[platform]));
-    if (ids.length !== new Set(ids).size) errors.push(`${platform} case index contains duplicate cases`);
+    for (const benchmarkCase of platform.cases) {
+      const entry = `${archiveRoot}/${platform.platformId}/cases/${benchmarkCase.caseId}/summary.json`;
+      const bytes = readArchiveEntry(resolved, entry);
+      if (!bytes) continue;
+      const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+      if (digest !== benchmarkCase.sourceSummarySha256) fail(`archive summary hash differs for ${platform.platformId}/${benchmarkCase.caseId}`);
+      let raw;
+      try {
+        raw = JSON.parse(bytes.toString('utf8'));
+      } catch (error) {
+        fail(`archive summary is invalid JSON for ${platform.platformId}/${benchmarkCase.caseId}: ${error.message}`);
+        continue;
+      }
+      for (const key of [
+        'caseId', 'workload', 'targetFps', 'configuredChannels', 'outcome', 'boundaryKind',
+        'lastPassingChannels', 'firstBlockedChannels', 'blockedReason', 'steps',
+      ]) {
+        if (!deepEqual(raw[key], benchmarkCase[key])) fail(`canonical ${key} differs from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
+      }
+      if (raw.platformId !== platform.platformId || raw.platform !== platform.platform || raw.platformScope !== platform.scope) {
+        fail(`canonical platform identity differs from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
+      }
+      if (raw.evidenceDate !== platform.evidenceDate) fail(`canonical evidenceDate differs from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
+      const normalizedGates = {
+        minFpsRatio: raw.gates?.minimumFpsRatio,
+        maxMissingRate: raw.gates?.maximumMissingRate,
+        maxAverageDiscardRate: raw.gates?.maximumAverageDiscardRate,
+        maxCriticalPathLatencyMs: raw.gates?.maximumCriticalPathLatencyMs,
+        maxDetectorLatencyMs: raw.gates?.maximumDetectorLatencyMs,
+      };
+      if (!deepEqual(normalizedGates, platform.gates)) fail(`canonical gates differ from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
+    }
+  }
+
+  for (const observation of vlmValue?.observations ?? []) {
+    const entry = `${archiveRoot}/${observation.platformId}/vlm-observation/summary.json`;
+    const bytes = readArchiveEntry(resolved, entry);
+    if (!bytes) continue;
+    const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+    if (digest !== observation.sourceSummarySha256) fail(`archive VLM summary hash differs for ${observation.platformId}`);
+    let raw;
+    try {
+      raw = JSON.parse(bytes.toString('utf8'));
+    } catch (error) {
+      fail(`archive VLM summary is invalid JSON for ${observation.platformId}: ${error.message}`);
+      continue;
+    }
+    const { platformId: unusedPlatform, sourceSummarySha256: unusedHash, ...canonicalPayload } = observation;
+    if (!deepEqual(canonicalPayload, raw)) fail(`canonical VLM observation differs from archived summary for ${observation.platformId}`);
   }
 }
 
-function validateCaseArtifacts() {
+function readArchiveEntry(archive, entry) {
+  const result = spawnSync('tar', ['-xOf', archive, entry], { encoding: null, maxBuffer: 16 * 1024 * 1024 });
+  if (result.status !== 0) {
+    fail(`full evidence archive is missing ${entry}`);
+    return null;
+  }
+  return result.stdout;
+}
+
+function validateCanonicalSourceLayout(definitions) {
+  for (const relativePath of ['report.html', 'report.zh-CN.html']) {
+    if (fs.existsSync(path.join(root, relativePath))) fail(`generated report must not be tracked in canonical source: ${relativePath}`);
+  }
+  const resultsRoot = path.join(root, 'results');
+  if (!fs.existsSync(resultsRoot)) return;
+  const allowedRootEntries = new Set(['cases.schema.json', 'vlm-observations.json', ...definitions.map((item) => item.id)]);
+  for (const entry of fs.readdirSync(resultsRoot, { withFileTypes: true })) {
+    if (!allowedRootEntries.has(entry.name)) fail(`derived or undeclared result is tracked in canonical source: results/${entry.name}`);
+  }
+  for (const definition of definitions) {
+    const platformRoot = path.join(resultsRoot, definition.id);
+    if (!fs.existsSync(platformRoot)) continue;
+    for (const entry of fs.readdirSync(platformRoot, { withFileTypes: true })) {
+      if (entry.name !== 'cases.json' || !entry.isFile()) {
+        fail(`derived platform artifact is tracked in canonical source: results/${definition.id}/${entry.name}`);
+      }
+    }
+  }
+}
+
+function validateSchemaDocument() {
+  const schema = readJsonIfPresent(root, 'results/cases.schema.json');
+  if (!schema) return;
+  if (schema.$schema !== 'https://json-schema.org/draft/2020-12/schema') fail('case schema must use JSON Schema draft 2020-12');
+  if (schema.type !== 'object' || schema.additionalProperties !== false) fail('case schema root must be a closed object');
+  for (const definition of ['gates', 'case', 'step', 'task']) {
+    if (!schema.$defs?.[definition]) fail(`case schema is missing $defs.${definition}`);
+  }
+}
+
+function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, generationResult) {
+  const caseCount = platforms.reduce((count, item) => count + item.cases.length, 0);
+  const vlmIds = new Set((vlmValue?.observations ?? []).map((item) => item.platformId));
+  const expectedReports = ['report.html', 'report.zh-CN.html'];
   for (const platform of platforms) {
-    const casesRoot = path.join(root, 'results', platform, 'cases');
-    if (fs.existsSync(casesRoot)) {
-      const actualDirectories = fs.readdirSync(casesRoot, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => entry.name);
-      compareSets(`${platform} case directories`, new Set(actualDirectories), new Set(expectedCases[platform]));
-    }
-
-    const enPlatformReport = readTextIfPresent(`results/${platform}/report.html`);
-    const zhPlatformReport = readTextIfPresent(`results/${platform}/report.zh-CN.html`);
-    for (const caseId of expectedCases[platform]) {
-      const summaryPath = `results/${platform}/cases/${caseId}/summary.json`;
-      const summary = readJsonIfPresent(summaryPath);
-      const identity = parseCaseId(caseId);
-      if (summary) {
-        if (summary.platformId !== platform) errors.push(`${summaryPath} platformId is incorrect`);
-        if (summary.caseId !== caseId) errors.push(`${summaryPath} caseId is incorrect`);
-        if (summary.workload !== identity.workload) errors.push(`${summaryPath} workload is incorrect`);
-        if (summary.targetFps !== identity.targetFps) errors.push(`${summaryPath} targetFps is incorrect`);
-        if (summary.configuredChannels !== identity.configuredChannels) errors.push(`${summaryPath} configuredChannels is incorrect`);
+    for (const localeSuffix of ['', '.zh-CN']) {
+      expectedReports.push(
+        `results/${platform.platformId}/report${localeSuffix}.html`,
+        `results/${platform.platformId}/cases/report${localeSuffix}.html`,
+        `results/${platform.platformId}/single-detector/report${localeSuffix}.html`,
+        `results/${platform.platformId}/dual-detector/report${localeSuffix}.html`,
+      );
+      if (vlmIds.has(platform.platformId)) {
+        expectedReports.push(`results/${platform.platformId}/vlm-observation/report${localeSuffix}.html`);
       }
-      for (const file of attachmentFiles) {
-        const relativePath = `results/${platform}/cases/${caseId}/${file}`;
-        const absolutePath = path.join(root, ...relativePath.split('/'));
-        if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).size === 0) errors.push(`empty case attachment: ${relativePath}`);
-      }
-      if (enPlatformReport && !enPlatformReport.includes(`cases/${caseId}/report.html`)) {
-        errors.push(`English ${platform} overview does not link case report: ${caseId}`);
-      }
-      if (zhPlatformReport && !zhPlatformReport.includes(`cases/${caseId}/report.zh-CN.html`)) {
-        errors.push(`Chinese ${platform} overview does not link case report: ${caseId}`);
+      for (const benchmarkCase of platform.cases) {
+        expectedReports.push(`results/${platform.platformId}/cases/${benchmarkCase.caseId}/report${localeSuffix}.html`);
       }
     }
   }
-}
+  const actualReports = walk(outputRoot)
+    .filter((file) => file.toLowerCase().endsWith('.html'))
+    .map((file) => path.relative(outputRoot, file).replaceAll('\\', '/'))
+    .sort();
+  const sortedExpected = [...expectedReports].sort();
+  if (!sameArray(actualReports, sortedExpected)) compareSets('generated report inventory', new Set(actualReports), new Set(sortedExpected));
+  if (generationResult.reportCount !== expectedReports.length) fail('generator reportCount does not match the manifest-derived inventory');
+  if (generationResult.platformCount !== platforms.length || generationResult.caseCount !== caseCount) fail('generator platform/case counts are inconsistent');
 
-function validateVlmEvidence() {
-  const expectedSeries = {
-    bm1688: [0.100, 0.100, 0.100, 0.100, 0.060, 0.100, 0.080, 0.040],
-    cv186x: [0.120, 0.100, 0.100, 0.100, 0.060, 0.060, 0.060, 0.080],
-    rk3576: [0.100, 0.120, 0.116, 0.115, 0.091, 0.076, 0.063, 0.057],
-  };
-  for (const platform of officialPlatforms) {
-    const summary = readJsonIfPresent(`results/${platform}/vlm-observation/summary.json`);
-    if (!summary) continue;
-    const steps = Array.isArray(summary.steps) ? summary.steps : [];
-    const series = steps.map((step) => step.observedEquivalentPerChannelFps);
-    if (!sameArray(series, expectedSeries[platform])) errors.push(`${platform} retained VLM FPS series changed`);
-    if (!sameArray(steps.map((step) => step.channels), [1, 2, 3, 4, 5, 6, 7, 8])) errors.push(`${platform} retained VLM channel staircase changed`);
-    if (summary.workload?.targetFpsPerChannel !== 0.1 || steps.some((step) => step.targetFpsPerChannel !== 0.1)) {
-      errors.push(`${platform} retained VLM target FPS must remain 0.1 per channel`);
-    }
-    if (steps.some((step) => step.fpsGateEnabled !== false)) errors.push(`${platform} retained VLM FPS gate semantics changed`);
+  for (const report of expectedReports) {
+    const file = path.join(outputRoot, ...report.split('/'));
+    if (!fs.existsSync(file)) continue;
+    const html = fs.readFileSync(file, 'utf8');
+    const expectedLang = report.endsWith('.zh-CN.html') ? 'zh-CN' : 'en';
+    const actualLang = html.match(/<html\b[^>]*\blang=["']([^"']+)["']/i)?.[1];
+    if (actualLang !== expectedLang) fail(`generated report has incorrect lang: ${report}`);
+    if (!/<\/html>\s*$/i.test(html)) fail(`generated report is incomplete: ${report}`);
+    if (!html.includes('class="report-nav"')) fail(`generated report navigation is missing: ${report}`);
+    const tables = html.match(/<table\b/gi)?.length ?? 0;
+    const wrappers = html.match(/<div class="table"/gi)?.length ?? 0;
+    if (tables !== wrappers) fail(`generated report lacks responsive table wrappers: ${report}`);
+    if (/\b(?:undefined|NaN)\b|\[object Object\]/.test(html)) fail(`generated report contains an unresolved value: ${report}`);
   }
-  const rvVlm = path.join(root, 'results', 'rv1126b', 'vlm-observation');
-  if (fs.existsSync(rvVlm)) errors.push('RV1126B must not contain a VLM observation directory');
+
+  const index = readJsonIfPresent(outputRoot, 'results/index.json');
+  const casesIndex = readJsonIfPresent(outputRoot, 'results/cases.json');
+  const matrix = readJsonIfPresent(outputRoot, 'results/workload-matrix.json');
+  if (index?.caseCount !== caseCount || casesIndex?.caseCount !== caseCount) fail('generated indexes do not contain the canonical case total');
+  if (index?.publicationStatus !== manifestValue?.release?.publicationState || matrix?.publicationStatus !== manifestValue?.release?.publicationState) {
+    fail('generated index publication status differs from the manifest');
+  }
 }
 
-function validatePublicScrub(files) {
+function validatePublicScrub(files, packRoot, label) {
   const forbidden = [
     [/\bhost\d+\b/gi, 'internal host alias'],
     [/\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b/g, 'private IP address'],
@@ -270,133 +526,126 @@ function validatePublicScrub(files) {
     [/"kernel(?:Build)?"\s*:/gi, 'public kernel field'],
     [/<th>Kernel<\/th>|OS\s*\/\s*Kernel/gi, 'public kernel column'],
   ];
-
   for (const file of files) {
     if (path.basename(file) === 'SHA256SUMS' || !textFile(file)) continue;
     const text = fs.readFileSync(file, 'utf8');
-    for (const [pattern, label] of forbidden) {
+    for (const [pattern, description] of forbidden) {
       pattern.lastIndex = 0;
-      if (pattern.test(text)) errors.push(`${label} found in ${relative(file)}`);
+      if (pattern.test(text)) fail(`${description} found in ${label} ${relativeTo(packRoot, file)}`);
     }
   }
 }
 
-function validateChecksums(files) {
-  const checksumPath = path.join(root, 'SHA256SUMS');
-  if (!fs.existsSync(checksumPath)) return;
-
+function validateChecksums(packRoot, label) {
+  const checksumPath = path.join(packRoot, 'SHA256SUMS');
+  if (!fs.existsSync(checksumPath)) {
+    fail(`${label} is missing`);
+    return;
+  }
+  const files = walk(packRoot);
   const expected = new Set(files
     .filter((file) => path.resolve(file) !== path.resolve(checksumPath))
-    .map((file) => path.relative(root, file).replaceAll('\\', '/')));
+    .map((file) => relativeTo(packRoot, file)));
   const declared = new Map();
-  const lines = fs.readFileSync(checksumPath, 'utf8').split(/\r?\n/).filter((line) => line.length > 0);
-  for (const line of lines) {
+  for (const line of fs.readFileSync(checksumPath, 'utf8').split(/\r?\n/).filter(Boolean)) {
     const match = line.match(/^([0-9a-f]{64})  (.+)$/);
     if (!match) {
-      errors.push(`invalid SHA256SUMS line: ${line}`);
+      fail(`${label} contains an invalid line: ${line}`);
       continue;
     }
     const [, digest, target] = match;
     const normalized = path.posix.normalize(target);
     if (target !== normalized || path.posix.isAbsolute(target) || normalized === '..' || normalized.startsWith('../') || target.includes('\\')) {
-      errors.push(`unsafe or non-canonical SHA256SUMS target: ${target}`);
+      fail(`${label} contains an unsafe or non-canonical target: ${target}`);
       continue;
     }
-    if (target === 'SHA256SUMS') errors.push('SHA256SUMS must not hash itself');
-    if (declared.has(target)) errors.push(`duplicate SHA256SUMS target: ${target}`);
+    if (target === 'SHA256SUMS') fail(`${label} must not hash itself`);
+    if (declared.has(target)) fail(`${label} contains a duplicate target: ${target}`);
     declared.set(target, digest);
   }
-
-  compareSets('SHA256SUMS file inventory', new Set(declared.keys()), expected);
+  compareSets(`${label} inventory`, new Set(declared.keys()), expected);
   for (const [target, digest] of declared) {
-    const file = path.join(root, ...target.split('/'));
+    const file = path.join(packRoot, ...target.split('/'));
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
     const actual = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-    if (actual !== digest) errors.push(`checksum mismatch: ${target}`);
+    if (actual !== digest) fail(`${label} mismatch: ${target}`);
   }
 }
 
-function validateLinksAndLanguages(files) {
+function validateLinksAndLanguages(packRoot, files, generatedFallbackRoot) {
   for (const file of files.filter((entry) => entry.toLowerCase().endsWith('.html'))) {
     const text = fs.readFileSync(file, 'utf8');
-    const lang = text.match(/<html\b[^>]*\blang\s*=\s*["']([^"']+)["']/i)?.[1];
-    const expectedLang = file.toLowerCase().endsWith('.zh-cn.html') ? 'zh-CN' : 'en';
-    if (lang !== expectedLang) errors.push(`incorrect HTML lang in ${relative(file)}: expected ${expectedLang}, found ${lang ?? 'missing'}`);
-    if (!/<\/html>\s*$/i.test(text)) errors.push(`incomplete HTML document: ${relative(file)}`);
     for (const match of text.matchAll(/(?:href|src)\s*=\s*["']([^"']+)["']/gi)) {
-      validateRelativeLink(file, decodeHtmlEntities(match[1]), 'HTML');
+      validateRelativeLink(packRoot, file, decodeHtmlEntities(match[1]), 'HTML', generatedFallbackRoot);
     }
   }
-
   for (const file of files.filter((entry) => entry.toLowerCase().endsWith('.md'))) {
     const text = fs.readFileSync(file, 'utf8');
     for (const match of text.matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^)]*)?\)/g)) {
-      validateRelativeLink(file, match[1].replace(/^<|>$/g, ''), 'Markdown');
+      validateRelativeLink(packRoot, file, match[1].replace(/^<|>$/g, ''), 'Markdown', generatedFallbackRoot);
+    }
+    for (const match of text.matchAll(/<(?:a|img)\b[^>]*(?:href|src)=["']([^"']+)["']/gi)) {
+      validateRelativeLink(packRoot, file, decodeHtmlEntities(match[1]), 'Markdown HTML', generatedFallbackRoot);
     }
   }
 }
 
-function validateJsonReferences(file, value) {
+function validateJsonReferences(packRoot, file, value, generatedFallbackRoot) {
   const referenceKeys = new Set([
-    'manifest', 'releaseManifest', 'environment', 'models', 'dataset', 'overview',
-    'dualDetector', 'singleDetector', 'vlmObservation', 'cases', 'summary',
-    'report', 'reportZhCn', 'metrics', 'command', 'testLog', 'results',
+    '$schema', 'manifest', 'releaseManifest', 'environment', 'models', 'dataset', 'card', 'overview',
+    'dualDetector', 'singleDetector', 'vlmObservation', 'vlmObservations', 'caseSchema', 'canonicalSmallModelCases',
+    'cases', 'canonical', 'summary', 'report', 'reportZhCn', 'metrics', 'command', 'testLog', 'results',
   ]);
   visit(value, null);
-
   function visit(node, key) {
     if (typeof node === 'string' && referenceKeys.has(key) && looksLikeArtifactReference(node)) {
-      validateRelativeLink(file, node, 'JSON');
+      validateRelativeLink(packRoot, file, node, 'JSON', generatedFallbackRoot);
       return;
     }
     if (Array.isArray(node)) {
       for (const item of node) visit(item, key);
-      return;
-    }
-    if (node && typeof node === 'object') {
+    } else if (node && typeof node === 'object') {
       for (const [childKey, child] of Object.entries(node)) visit(child, childKey);
     }
   }
 }
 
-function looksLikeArtifactReference(value) {
-  return value.includes('/') && (
-    value.endsWith('/') ||
-    /\.(?:html?|json|md|txt|log|yml|yaml|svg|csv)$/i.test(value.split('#')[0].split('?')[0])
-  );
-}
-
-function validateRelativeLink(sourceFile, rawTarget, kind) {
-  if (!rawTarget || rawTarget.startsWith('#')) return;
-  if (/^(?:https?:|data:|mailto:|tel:)/i.test(rawTarget)) return;
+function validateRelativeLink(packRoot, sourceFile, rawTarget, kind, generatedFallbackRoot) {
+  if (!rawTarget || rawTarget.startsWith('#') || /^(?:https?:|data:|mailto:|tel:)/i.test(rawTarget)) return;
   if (/^(?:javascript:|file:|\\\\|\/\/)/i.test(rawTarget)) {
-    errors.push(`${kind} link is not an allowed relative link in ${relative(sourceFile)}: ${rawTarget}`);
+    fail(`${kind} link is not an allowed relative link in ${relativeTo(packRoot, sourceFile)}: ${rawTarget}`);
     return;
   }
   const withoutFragment = rawTarget.split('#')[0].split('?')[0];
   if (!withoutFragment) return;
   if (withoutFragment.includes('\\') || path.posix.isAbsolute(withoutFragment)) {
-    errors.push(`${kind} link is not relative/POSIX in ${relative(sourceFile)}: ${rawTarget}`);
+    fail(`${kind} link is not relative/POSIX in ${relativeTo(packRoot, sourceFile)}: ${rawTarget}`);
     return;
   }
   let decoded;
   try {
     decoded = decodeURIComponent(withoutFragment);
   } catch {
-    errors.push(`${kind} link has invalid URL encoding in ${relative(sourceFile)}: ${rawTarget}`);
+    fail(`${kind} link has invalid URL encoding in ${relativeTo(packRoot, sourceFile)}: ${rawTarget}`);
     return;
   }
   const resolved = path.resolve(path.dirname(sourceFile), ...decoded.split('/'));
-  if (!insideRoot(resolved)) {
-    errors.push(`${kind} link escapes the benchmark pack in ${relative(sourceFile)}: ${rawTarget}`);
+  if (!inside(packRoot, resolved)) {
+    fail(`${kind} link escapes the benchmark pack in ${relativeTo(packRoot, sourceFile)}: ${rawTarget}`);
     return;
   }
-  if (!fs.existsSync(resolved)) errors.push(`broken ${kind} link in ${relative(sourceFile)}: ${rawTarget}`);
+  if (fs.existsSync(resolved)) return;
+  if (generatedFallbackRoot) {
+    const sourceDirectoryRelative = path.relative(packRoot, path.dirname(sourceFile));
+    const generatedTarget = path.resolve(generatedFallbackRoot, sourceDirectoryRelative, ...decoded.split('/'));
+    if (inside(generatedFallbackRoot, generatedTarget) && fs.existsSync(generatedTarget)) return;
+  }
+  fail(`broken ${kind} link in ${relativeTo(packRoot, sourceFile)}: ${rawTarget}`);
 }
 
 function parseCaseId(caseId) {
-  const match = /^(person|nohelmet|dual-cv)-(\d+)fps-(\d+)ch$/.exec(caseId);
-  if (!match) return { workload: null, targetFps: null, configuredChannels: null };
+  const match = /^(person|nohelmet|dual-cv)-(\d+(?:\.\d+)?)fps-(\d+)ch$/.exec(caseId ?? '');
+  if (!match) return null;
   return {
     workload: match[1] === 'person' ? 'person-detector' : match[1] === 'nohelmet' ? 'safety-helmet-detector' : 'dual-detector',
     targetFps: Number(match[2]),
@@ -404,64 +653,106 @@ function parseCaseId(caseId) {
   };
 }
 
-function platformIdFromOverview(value) {
-  const match = /^(bm1688|cv186x|rk3576|rv1126b)\/summary\.json$/.exec(value ?? '');
-  return match?.[1] ?? null;
+function parseArchiveArgument(args) {
+  if (!args.length) return null;
+  if (args.length !== 2 || args[0] !== '--archive' || !args[1]) {
+    throw new Error('usage: validate-public-v1.1-multistream-benchmark.mjs [--archive <path>]');
+  }
+  return args[1];
 }
 
-function readJsonIfPresent(relativePath) {
-  const file = path.join(root, ...relativePath.split('/'));
+function expectObjectKeys(value, requiredKeys, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`${label} must be an object`);
+    return;
+  }
+  const allowed = new Set(requiredKeys);
+  for (const key of requiredKeys) if (!(key in value)) fail(`${label} is missing ${key}`);
+  for (const key of Object.keys(value)) if (!allowed.has(key)) fail(`${label} contains unexpected property ${key}`);
+}
+
+function requireFile(packRoot, relativePath) {
+  const file = path.join(packRoot, ...relativePath.split('/'));
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) fail(`missing required file: ${relativePath}`);
+}
+
+function readJsonIfPresent(packRoot, relativePath) {
+  const file = path.join(packRoot, ...relativePath.split('/'));
   if (!fs.existsSync(file)) return null;
+  return readJsonWithError(file);
+}
+
+function readJsonWithError(file) {
   try {
-    return readJson(file);
-  } catch {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    fail(`invalid JSON: ${relativeTo(root, file)} (${error.message})`);
     return null;
   }
 }
 
-function readTextIfPresent(relativePath) {
-  const file = path.join(root, ...relativePath.split('/'));
-  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
-}
-
-function requireFile(relativePath) {
-  const file = path.join(root, ...relativePath.split('/'));
-  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) errors.push(`missing required file: ${relativePath}`);
-}
-
 function compareSets(label, actual, expected) {
-  for (const item of expected) if (!actual.has(item)) errors.push(`${label} is missing: ${item}`);
-  for (const item of actual) if (!expected.has(item)) errors.push(`${label} contains unexpected entry: ${item}`);
+  for (const item of expected) if (!actual.has(item)) fail(`${label} is missing: ${item}`);
+  for (const item of actual) if (!expected.has(item)) fail(`${label} contains unexpected entry: ${item}`);
 }
 
 function sameArray(actual, expected) {
   return actual.length === expected.length && actual.every((value, index) => Object.is(value, expected[index]));
 }
 
-function insideRoot(file) {
-  const relativePath = path.relative(root, file);
-  return relativePath === '' || (!relativePath.startsWith('..' + path.sep) && relativePath !== '..' && !path.isAbsolute(relativePath));
+function deepEqual(actual, expected) {
+  return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
-function walk(dir) {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
+function positiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function positiveNumber(value) {
+  return Number.isFinite(value) && value > 0;
+}
+
+function nullableNonNegativeNumber(value) {
+  return value === null || (Number.isFinite(value) && value >= 0);
+}
+
+function sha1(value) {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
+}
+
+function sha256(value) {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
+function inside(directory, file) {
+  const relativePath = path.relative(directory, file);
+  return relativePath === '' || (!relativePath.startsWith(`..${path.sep}`) && relativePath !== '..' && !path.isAbsolute(relativePath));
+}
+
+function relativeTo(packRoot, file) {
+  return path.relative(packRoot, file).replaceAll('\\', '/');
+}
+
+function walk(directory) {
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(directory, entry.name);
     return entry.isDirectory() ? walk(full) : [full];
   });
-}
-
-function readJson(file) {
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
-}
-
-function relative(file) {
-  return path.relative(workspace, file).replaceAll('\\', '/');
 }
 
 function textFile(file) {
   return /\.(?:md|html|json|txt|log|csv|tsv|xml|css|js|cjs|mjs|yml|yaml|toml|ini|cfg|svg|sh)$/i.test(file);
 }
 
+function looksLikeArtifactReference(value) {
+  return value.endsWith('/') || /\.(?:html?|json|md|txt|log|yml|yaml|svg|csv)$/i.test(value.split('#')[0].split('?')[0]);
+}
+
 function decodeHtmlEntities(value) {
   return value.replaceAll('&amp;', '&').replaceAll('&#38;', '&');
+}
+
+function fail(message) {
+  errors.push(message);
 }

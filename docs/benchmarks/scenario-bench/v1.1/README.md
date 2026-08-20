@@ -2,7 +2,9 @@
 
 > Person detection, no-safety-helmet analysis, and concurrent-task results on BM1688, CV186X, and RK3576. RV1126B is included as an additional experimental platform.
 
-Entry points: [English report](report.html) · [中文报告](report.zh-CN.html) · [methodology](methodology.md) · [machine-readable index](results/index.json)
+Entry points: [English report](report.html) · [中文报告](report.zh-CN.html) · [methodology](methodology.md) · [canonical case schema](results/cases.schema.json)
+
+The HTML reports and aggregate indexes linked from this page are generated during the documentation build. The repository keeps the canonical measurements, not duplicate report payloads.
 
 ## Concurrent-task results
 
@@ -45,22 +47,24 @@ Values are the last passing channel count. `≥` means the highest configured co
 
 BM1688 and CV186X use byte-identical detector/classifier artifacts. RK3576 and RV1126B use platform-specific RKNN artifacts with the same public I/O contracts. Full hashes are in the [model card](models/model-card.md).
 
-## Independent reports
+## Canonical data and generated reports
 
-The refresh contains 49 small-model case attachments. Every case includes bilingual HTML, `summary.json`, `metrics.json`, `command.txt`, and a sanitized `test.log`.
+The 49 small-model cases are stored once in four platform-level canonical JSON files. Each entry retains the complete measured staircase and the SHA-256 of its original frozen `summary.json`. Bilingual case pages, platform/workload summaries, indexes, and matrices are generated from these files; they are not additional evidence copies.
 
-| Platform | Platform summary | All cases | Single-task summary | Concurrent-task summary | Existing VLM |
+| Platform | Canonical cases | Generated overview | Generated case pages | Generated workload reports | Existing VLM |
 | --- | --- | --- | --- | --- | --- |
-| BM1688 | <a href="./results/bm1688/report.html">open</a> | <a href="./results/bm1688/cases/report.html">open</a> | <a href="./results/bm1688/single-detector/report.html">open</a> | <a href="./results/bm1688/dual-detector/report.html">open</a> | <a href="./results/bm1688/vlm-observation/report.html">open</a> |
-| CV186X | <a href="./results/cv186x/report.html">open</a> | <a href="./results/cv186x/cases/report.html">open</a> | <a href="./results/cv186x/single-detector/report.html">open</a> | <a href="./results/cv186x/dual-detector/report.html">open</a> | <a href="./results/cv186x/vlm-observation/report.html">open</a> |
-| RK3576 | <a href="./results/rk3576/report.html">open</a> | <a href="./results/rk3576/cases/report.html">open</a> | <a href="./results/rk3576/single-detector/report.html">open</a> | <a href="./results/rk3576/dual-detector/report.html">open</a> | <a href="./results/rk3576/vlm-observation/report.html">open</a> |
-| RV1126B | <a href="./results/rv1126b/report.html">open</a> | <a href="./results/rv1126b/cases/report.html">open</a> | <a href="./results/rv1126b/single-detector/report.html">open</a> | <a href="./results/rv1126b/dual-detector/report.html">open</a> | — |
+| BM1688 | [JSON](results/bm1688/cases.json) | <a href="./results/bm1688/report.html">open</a> | <a href="./results/bm1688/cases/report.html">open</a> | <a href="./results/bm1688/single-detector/report.html">single</a> · <a href="./results/bm1688/dual-detector/report.html">concurrent</a> | <a href="./results/bm1688/vlm-observation/report.html">open</a> |
+| CV186X | [JSON](results/cv186x/cases.json) | <a href="./results/cv186x/report.html">open</a> | <a href="./results/cv186x/cases/report.html">open</a> | <a href="./results/cv186x/single-detector/report.html">single</a> · <a href="./results/cv186x/dual-detector/report.html">concurrent</a> | <a href="./results/cv186x/vlm-observation/report.html">open</a> |
+| RK3576 | [JSON](results/rk3576/cases.json) | <a href="./results/rk3576/report.html">open</a> | <a href="./results/rk3576/cases/report.html">open</a> | <a href="./results/rk3576/single-detector/report.html">single</a> · <a href="./results/rk3576/dual-detector/report.html">concurrent</a> | <a href="./results/rk3576/vlm-observation/report.html">open</a> |
+| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="./results/rv1126b/report.html">open</a> | <a href="./results/rv1126b/cases/report.html">open</a> | <a href="./results/rv1126b/single-detector/report.html">single</a> · <a href="./results/rv1126b/dual-detector/report.html">concurrent</a> | — |
 
-This refresh updates small-model results only; the existing VLM attachments for the three release platforms remain unchanged.
+This refresh updates small-model results only. The preceding VLM observations are consolidated in [one canonical file](results/vlm-observations.json) and remain experimental because FPS was not an enabled gate.
+
+The full pre-simplification evidence tree, including per-case commands, sanitized logs, summaries, metrics, and HTML, is recorded in the manifest as a separate archive. Its hash is frozen, but the archive is **prepared, not published**, and is not tracked in this repository.
 
 ## Reproduction files
 
 - [release-manifest.json](release-manifest.json): source, tool, input, and platform identities.
 - [methodology.md](methodology.md): procedure and result interpretation.
 - [scenarios](scenarios/README.md): sanitized public workload descriptors.
-- <a href="./SHA256SUMS">SHA256SUMS</a>: hashes for the public pack.
+- <a href="./SHA256SUMS">SHA256SUMS</a>: hashes for the canonical repository source; the generated public output receives its own complete checksum inventory at build time.

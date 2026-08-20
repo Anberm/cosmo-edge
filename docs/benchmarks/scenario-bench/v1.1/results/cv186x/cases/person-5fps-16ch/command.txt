@@ -1,7 +1,0 @@
-# Public reproduction descriptor
-platform=cv186x
-case=person-5fps-16ch
-workload=person-detector
-target_fps=5
-configured_channels=16
-scenario=../../../../../scenarios/single-detector/person-detector.public.yml

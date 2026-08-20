@@ -2,7 +2,9 @@
 
 > BM1688、CV186X 与 RK3576 的人员检测、未佩戴安全帽分析和双任务并发结果；RV1126B 作为附加实验平台列出。
 
-入口：[中文主报告](report.zh-CN.html) · [English report](report.html) · [测试方法](methodology.md) · [机器可读索引](results/index.json)
+入口：[中文主报告](report.zh-CN.html) · [English report](report.html) · [测试方法](methodology.md) · [canonical 用例 Schema](results/cases.schema.json)
+
+本页链接的 HTML 报告和聚合索引均在文档构建时生成。仓库只保留 canonical 测量数据，不重复提交报告载荷。
 
 ## 双任务结果
 
@@ -45,22 +47,24 @@
 
 BM1688 与 CV186X 使用字节一致的检测和分类模型；RK3576、RV1126B 使用相同公开输入输出合同的平台专用 RKNN 产物。模型完整哈希见 [models](models/model-card.md)。
 
-## 独立报告
+## Canonical 数据与构建生成报告
 
-本轮共生成 49 个小模型用例附件。每个用例均包含中英文 HTML、`summary.json`、`metrics.json`、`command.txt` 和脱敏 `test.log`。
+49 个小模型用例只在 4 份平台级 canonical JSON 中保存一次。每条记录保留完整实测阶梯，以及冻结分支中原始 `summary.json` 的 SHA-256。双语用例页、平台/工作负载汇总、索引与矩阵都从这些文件生成，不再作为额外证据副本提交。
 
-| 平台 | 平台汇总 | 全部独立用例 | 单任务汇总 | 双任务汇总 | 既有 VLM |
+| 平台 | Canonical 用例 | 构建生成概览 | 构建生成用例页 | 构建生成工作负载报告 | 既有 VLM |
 | --- | --- | --- | --- | --- | --- |
-| BM1688 | <a href="./results/bm1688/report.zh-CN.html">打开</a> | <a href="./results/bm1688/cases/report.zh-CN.html">打开</a> | <a href="./results/bm1688/single-detector/report.zh-CN.html">打开</a> | <a href="./results/bm1688/dual-detector/report.zh-CN.html">打开</a> | <a href="./results/bm1688/vlm-observation/report.zh-CN.html">打开</a> |
-| CV186X | <a href="./results/cv186x/report.zh-CN.html">打开</a> | <a href="./results/cv186x/cases/report.zh-CN.html">打开</a> | <a href="./results/cv186x/single-detector/report.zh-CN.html">打开</a> | <a href="./results/cv186x/dual-detector/report.zh-CN.html">打开</a> | <a href="./results/cv186x/vlm-observation/report.zh-CN.html">打开</a> |
-| RK3576 | <a href="./results/rk3576/report.zh-CN.html">打开</a> | <a href="./results/rk3576/cases/report.zh-CN.html">打开</a> | <a href="./results/rk3576/single-detector/report.zh-CN.html">打开</a> | <a href="./results/rk3576/dual-detector/report.zh-CN.html">打开</a> | <a href="./results/rk3576/vlm-observation/report.zh-CN.html">打开</a> |
-| RV1126B | <a href="./results/rv1126b/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/cases/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/single-detector/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/dual-detector/report.zh-CN.html">打开</a> | — |
+| BM1688 | [JSON](results/bm1688/cases.json) | <a href="./results/bm1688/report.zh-CN.html">打开</a> | <a href="./results/bm1688/cases/report.zh-CN.html">打开</a> | <a href="./results/bm1688/single-detector/report.zh-CN.html">单任务</a> · <a href="./results/bm1688/dual-detector/report.zh-CN.html">并发</a> | <a href="./results/bm1688/vlm-observation/report.zh-CN.html">打开</a> |
+| CV186X | [JSON](results/cv186x/cases.json) | <a href="./results/cv186x/report.zh-CN.html">打开</a> | <a href="./results/cv186x/cases/report.zh-CN.html">打开</a> | <a href="./results/cv186x/single-detector/report.zh-CN.html">单任务</a> · <a href="./results/cv186x/dual-detector/report.zh-CN.html">并发</a> | <a href="./results/cv186x/vlm-observation/report.zh-CN.html">打开</a> |
+| RK3576 | [JSON](results/rk3576/cases.json) | <a href="./results/rk3576/report.zh-CN.html">打开</a> | <a href="./results/rk3576/cases/report.zh-CN.html">打开</a> | <a href="./results/rk3576/single-detector/report.zh-CN.html">单任务</a> · <a href="./results/rk3576/dual-detector/report.zh-CN.html">并发</a> | <a href="./results/rk3576/vlm-observation/report.zh-CN.html">打开</a> |
+| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="./results/rv1126b/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/cases/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/single-detector/report.zh-CN.html">单任务</a> · <a href="./results/rv1126b/dual-detector/report.zh-CN.html">并发</a> | — |
 
-本次刷新只更新小模型结果；三款发布平台原有 VLM 附件保持不变。
+本次刷新只更新小模型结果。此前的 VLM 观测合并到[一份 canonical 文件](results/vlm-observations.json)中；由于 FPS 未启用门禁，它们仍然只能作为实验观测。
+
+精简前的完整证据树（含逐用例命令、脱敏日志、summary、metrics 与 HTML）作为独立归档记录在 manifest 中。其哈希已经冻结，但归档状态是**已准备、未发布**，也不进入 Git 仓库。
 
 ## 复现文件
 
 - [release-manifest.json](release-manifest.json)：源码、工具、视频和平台身份。
 - [methodology.md](methodology.md)：测试步骤与结果判定。
 - [scenarios](scenarios/README.md)：脱敏后的公开场景描述。
-- <a href="./SHA256SUMS">SHA256SUMS</a>：公开包文件哈希。
+- <a href="./SHA256SUMS">SHA256SUMS</a>：canonical 仓库源文件哈希；构建生成的公开输出会另行生成完整校验清单。
