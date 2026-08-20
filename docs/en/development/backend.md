@@ -109,15 +109,22 @@ API routes are defined in `src/api/ApiRouter.cc` and `src/api/ApiRouterRoutes.cc
 Routes use a macro pattern (defined in `ApiRouterInternal.h`):
 
 ```cpp
-ROUTE("/gtw/cwai/System/QueryDeviceInfo", Mtk, system_handler_, System, QueryDeviceInfo)
+ROUTE("/gtw/cwai/System/", kAuth, system_handler_, System, QueryDeviceInfo);
 ```
 
+The macro concatenates the path prefix with its final `X` argument. The example therefore registers
+`/gtw/cwai/System/QueryDeviceInfo`. Do not pass the complete endpoint as the first argument, or
+`QueryDeviceInfo` will be appended a second time.
+
 This expands to a dispatch that:
-1. Matches the URL (case-insensitive via `util::ToLower`).
-2. Validates the `mtk` token if the route is marked `Mtk` (vs `None` for public routes).
+1. Registers and matches the complete URL case-insensitively through `util::ToLower`.
+2. Validates the HTTP `mtk` for `kAuth`; `kNoAuth` permits anonymous access.
 3. Deserializes the request JSON into `NS::MsgQueryDeviceInfoSend`.
 4. Calls the handler.
 5. Serializes the response (`NS::MsgQueryDeviceInfoRecv`) back to JSON.
+
+Use `ROUTE_CONTEXT` when the handler needs request context such as the upload-session body or authenticated
+principal. Core DTOs use `ROUTE_CORE` or `ROUTE_CORE_CONTEXT`. These macros also take a path prefix, not a full endpoint.
 
 ### Standard Response Envelope
 
@@ -127,9 +134,11 @@ Most management responses inherit from `MsgSendHead`:
 | ------------ | -------- | -------------------------------- |
 | `resCode`    | number   | `1` = success, `0` = failure     |
 | `resMsg`     | object[] | Error / info message list        |
-| `resData`    | object   | Business payload (varies by API) |
 | `resultCode` | string   | Compatibility response code      |
 | `resultMsg`  | string   | Compatibility response text      |
+
+`MsgSendHead` itself does not declare `resData`; concrete response DTOs define their business payload outside
+the common response head.
 
 ### Adding a New Route Group
 
@@ -142,9 +151,9 @@ Most management responses inherit from `MsgSendHead`:
 
 | Registration Function       | URL Prefix                            | Domain              |
 | --------------------------- | ------------------------------------- | ------------------- |
-| `RegisterCoreRoutes()`      | (login, interface list)               | Core / auth         |
-| `RegisterNetworkRoutes()`   | `/gtw/cwai/Network/`                  | Network, DNS, NTP   |
-| `RegisterAlgorithmRoutes()` | `/gtw/cwai/Algorithm/`                | Algorithms          |
+| `RegisterCoreRoutes()`      | `/v1/cwai/aihost/`, `/gtw/cwai/aihost/`, `/gtw/cwai/login/` | Core, compatibility, login |
+| `RegisterNetworkRoutes()`   | `/gtw/cwai/network/`                  | Network, DNS, NTP   |
+| `RegisterAlgorithmRoutes()` | `/gtw/cwai/Algorithm/`, `/gtw/cwai/algorithm/layout/` | Algorithms, orchestration |
 | `RegisterModelRoutes()`     | `/gtw/cwai/atomic/Model/`             | Model repository    |
 | `RegisterScheduleRoutes()`  | `/gtw/cwai/schedule/`                 | Time templates      |
 | `RegisterEventRoutes()`     | `/gtw/cwai/Event/`                    | Events, alarms      |
@@ -156,12 +165,13 @@ Most management responses inherit from `MsgSendHead`:
 | `RegisterAudioRoutes()`     | `/gtw/cwai/Audio/`                    | Audio files, devices |
 | `RegisterLinkageRoutes()`   | `/gtw/cwai/AlarmStrage/`              | Alarm linkage       |
 | `RegisterLiveStreamRoutes()`| `/gtw/cwai/LiveStream/`               | Live stream lifecycle |
+| `RegisterOnboardingRoutes()`| `/gtw/cwai/Onboarding/`               | First-use guide     |
 
 ## Testing
 
 ### Framework
 
-Tests use [Catch2](https://github.com/catchorg/Catch2) with [Trompeloeil](https://github.com/rollbear/trompeloeil) for mocking. The test files live under `test/` and map one-to-one to service or component implementations.
+Tests use [Catch2](https://github.com/catchorg/Catch2) with [Trompeloeil](https://github.com/rollbear/trompeloeil) for mocking. Test files live under `test/`; reusable service mocks live under `test/mock/`.
 
 ### Build and Run
 
@@ -172,7 +182,18 @@ bash scripts/build_cpu_test.sh
 
 ### Mocking
 
-The `ServiceRegistry::Set<T>(ptr)` non-owning injection is the primary mechanism for replacing real services with mocks in tests. A central mock header (`test/test_mock_services.h`) provides reusable mock implementations for common interfaces.
+The `ServiceRegistry::Set<T>(ptr)` non-owning injection is the primary mechanism for replacing real services
+with mocks in tests. Common interfaces have focused `test/mock/Mock*Service.h` files, while
+`test/mock/MockServiceRegistry.h` and `.cc` register the commonly shared mocks in the test `ServiceRegistry`.
+
+```cpp
+#include "mock/MockServiceRegistry.h"
+
+cosmo::test::MockServiceRegistry mocks;
+```
+
+When adding a service, add a narrow mock for its interface. Add it to the `MockServiceRegistry` aggregate only
+when multiple tests need the same dependency assembly.
 
 ### Test File Naming
 
@@ -181,7 +202,7 @@ Test files follow the pattern `test_<component>.cc`, e.g.:
 - `test_video_frame_service_impl.cc` → tests `VideoFrameServiceImpl`
 - `test_api_router.cc` → tests `ApiRouter`
 
-When adding a new service, add a corresponding test file with a Trompeloeil mock for each dependency.
+When adding a service, add focused behavior tests and Trompeloeil mocks for dependencies that need isolation.
 
 ## Code Style
 

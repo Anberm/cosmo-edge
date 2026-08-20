@@ -43,12 +43,6 @@ the three groups below.
 Do not skip the final acceptance of the preceding guide. An uploaded model, a saved task, or a visible box
 is only an intermediate state; every path includes result and failure-path validation.
 
-## Additional Deployment Example
-
-[Deploy Ultralytics YOLO with CosmoEdge](06-ultralytics-yolo-edge/ultralytics-yolo-edge.md) remains available
-as a separate community-style deployment record. It is not one of the five core guides above, and its own
-status and evidence determine whether it is ready for a specific release.
-
 ## Related Documentation
 
 - [Deployment Guide](../guide/deployment.md)

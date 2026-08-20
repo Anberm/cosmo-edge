@@ -157,14 +157,14 @@ Sophon 产物不会直接写在 `build_output/` 根目录。每个
 
 常见问题：
 
-- 网络问题导致 apt/npm/cargo 镜像下载失败 — 检查 `SOPHON_APT_MIRROR` 等环境变量。
+- 无法拉取预构建 GHCR 镜像或填充 npm 缓存——检查 Docker registry 网络、代理、DNS 和当前构建日志。
 - 磁盘空间不足 — 构建过程需要约 3GB 空间。
 - `COSMO_MODEL_GUARD_BUILD_PROFILE` 取值不受支持——只接受
   `public-runtime` 和 `production-release`。
 - 芯片型号不受支持——只接受 `bm1688` 和 `cv186x`；省略时默认 `bm1688`。
 - 在非受控发布环境选择 `production-release`——缺少正式 SDK、设备初始化、
   信任身份、签发者或发布引导输入时按设计拒绝构建。普通源码修改应使用
-  SOURCE，不要绕过正式发布检查。
+  默认 Open（内部配置 `public-runtime`），不要绕过正式发布检查。
 
 ## 受保护 preset 无法加载
 
@@ -182,7 +182,7 @@ sudo journalctl -u cosmo.service -b --no-pager -n 200
 ```
 
 如果受控 provisioner 仍在设备的临时目录，还可以运行
-`sudo /临时目录/cosmo-model-provision status` 直接校验证书和本机绑定；SOURCE
+`sudo /临时目录/cosmo-model-provision status` 直接校验证书和本机绑定；Open
 包本身不提供该工具。
 
 - `-2001`（`CMG_V2_CERTIFICATE_UNAVAILABLE`）：证书文件不存在或无法读取。
@@ -191,7 +191,7 @@ sudo journalctl -u cosmo.service -b --no-pager -n 200
 
 不要生成逐模型 license，也不要复制另一台设备的证书。使用本机生成的新请求在
 受控离线环境重新签发证书，再执行
-`cosmo-model-provision install --certificate <证书绝对路径>`。SOURCE 安装器
+`cosmo-model-provision install --certificate <证书绝对路径>`。Open 安装器
 不会创建、删除或修复该证书。
 
 ## nginx / SRS / cosmo-engine 未启动
