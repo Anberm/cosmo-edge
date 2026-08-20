@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "platform": "RV1126B",
-  "scope": "additional-experimental-platform",
+  "scope": "release-platform",
   "deviceDescription": "RV1126B reference device",
   "architecture": "aarch64",
   "os": "Linux",

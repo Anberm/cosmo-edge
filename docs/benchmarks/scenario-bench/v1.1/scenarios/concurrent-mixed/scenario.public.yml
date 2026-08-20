@@ -1,6 +1,6 @@
 version: 2
-name: dual-cv-5fps-staircase
-displayName: Person detection and no-safety-helmet analysis at 5 FPS
+name: concurrent-mixed-5fps-staircase
+displayName: Concurrent mixed workload with person detection and no-safety-helmet analysis at 5 FPS per business task
 sampleIntervalSec: 3
 
 channels:

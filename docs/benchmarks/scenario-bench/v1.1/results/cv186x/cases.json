@@ -1,6 +1,6 @@
 {
   "$schema": "../cases.schema.json",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "benchmark": "CosmoEdge 1.1 small-model capacity benchmark",
   "platformId": "cv186x",
   "platform": "CV186X",
@@ -16,8 +16,9 @@
   },
   "cases": [
     {
-      "caseId": "dual-cv-5fps-8ch",
-      "workload": "dual-detector",
+      "caseId": "mixed-cv-5fps-8ch",
+      "sourceCaseId": "dual-cv-5fps-8ch",
+      "workload": "concurrent-mixed",
       "targetFps": 5,
       "configuredChannels": 8,
       "outcome": "completed",
@@ -43,7 +44,7 @@
               "maximumCriticalPathLatencyMs": 29.6
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.14,
               "minimumFpsRatio": 1.029,
@@ -80,7 +81,7 @@
               "maximumCriticalPathLatencyMs": 29.8
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -117,7 +118,7 @@
               "maximumCriticalPathLatencyMs": 30.9
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -154,7 +155,7 @@
               "maximumCriticalPathLatencyMs": 32.1
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -191,7 +192,7 @@
               "maximumCriticalPathLatencyMs": 31.8
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -228,7 +229,7 @@
               "maximumCriticalPathLatencyMs": 32.6
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.02,
               "minimumFpsRatio": 1.003,
@@ -265,7 +266,7 @@
               "maximumCriticalPathLatencyMs": 35.5
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -302,7 +303,7 @@
               "maximumCriticalPathLatencyMs": 35.3
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -327,7 +328,8 @@
     },
     {
       "caseId": "nohelmet-10fps-16ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-10fps-16ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 10,
       "configuredChannels": 16,
       "outcome": "setup-blocked",
@@ -343,7 +345,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.28,
               "minimumFpsRatio": 1.028,
@@ -370,7 +372,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.08,
               "minimumFpsRatio": 1.008,
@@ -397,7 +399,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.07,
               "minimumFpsRatio": 1.007,
@@ -424,7 +426,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10,
               "minimumFpsRatio": 1,
@@ -451,7 +453,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.05,
               "minimumFpsRatio": 1.005,
@@ -478,7 +480,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.97,
               "minimumFpsRatio": 0.997,
@@ -505,7 +507,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.8,
               "minimumFpsRatio": 0.98,
@@ -532,7 +534,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.71,
               "minimumFpsRatio": 0.971,
@@ -559,7 +561,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.76,
               "minimumFpsRatio": 0.976,
@@ -586,7 +588,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.69,
               "minimumFpsRatio": 0.969,
@@ -613,7 +615,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.78,
               "minimumFpsRatio": 0.978,
@@ -640,7 +642,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.49,
               "minimumFpsRatio": 0.949,
@@ -667,7 +669,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 8.61,
               "minimumFpsRatio": 0.861,
@@ -692,7 +694,8 @@
     },
     {
       "caseId": "nohelmet-10fps-8ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-10fps-8ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 10,
       "configuredChannels": 8,
       "outcome": "completed",
@@ -708,7 +711,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.28,
               "minimumFpsRatio": 1.028,
@@ -735,7 +738,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10,
               "minimumFpsRatio": 1,
@@ -762,7 +765,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.91,
               "minimumFpsRatio": 0.991,
@@ -789,7 +792,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.02,
               "minimumFpsRatio": 1.002,
@@ -816,7 +819,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.92,
               "minimumFpsRatio": 0.992,
@@ -843,7 +846,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.86,
               "minimumFpsRatio": 0.986,
@@ -870,7 +873,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.8,
               "minimumFpsRatio": 0.98,
@@ -897,7 +900,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 9.73,
               "minimumFpsRatio": 0.973,
@@ -922,7 +925,8 @@
     },
     {
       "caseId": "nohelmet-24fps-8ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-24fps-8ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 24,
       "configuredChannels": 8,
       "outcome": "stopped",
@@ -938,7 +942,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 24.21,
               "minimumFpsRatio": 1.009,
@@ -965,7 +969,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 23.87,
               "minimumFpsRatio": 0.994,
@@ -992,7 +996,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 23.74,
               "minimumFpsRatio": 0.989,
@@ -1019,7 +1023,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 23.76,
               "minimumFpsRatio": 0.99,
@@ -1046,7 +1050,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 23.39,
               "minimumFpsRatio": 0.975,
@@ -1073,7 +1077,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 22.54,
               "minimumFpsRatio": 0.939,
@@ -1100,7 +1104,7 @@
           "result": "STOP",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 19.94,
               "minimumFpsRatio": 0.831,
@@ -1125,7 +1129,8 @@
     },
     {
       "caseId": "nohelmet-5fps-16ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-5fps-16ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 5,
       "configuredChannels": 16,
       "outcome": "completed",
@@ -1141,7 +1146,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.21,
               "minimumFpsRatio": 1.041,
@@ -1168,7 +1173,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.07,
               "minimumFpsRatio": 1.014,
@@ -1195,7 +1200,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.97,
               "minimumFpsRatio": 0.993,
@@ -1222,7 +1227,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -1249,7 +1254,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -1276,7 +1281,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.02,
               "minimumFpsRatio": 1.003,
@@ -1303,7 +1308,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -1330,7 +1335,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -1357,7 +1362,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -1384,7 +1389,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -1411,7 +1416,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -1438,7 +1443,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.97,
               "minimumFpsRatio": 0.993,
@@ -1465,7 +1470,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.02,
               "minimumFpsRatio": 1.003,
@@ -1492,7 +1497,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -1519,7 +1524,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -1546,7 +1551,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.92,
               "minimumFpsRatio": 0.983,
@@ -1571,7 +1576,8 @@
     },
     {
       "caseId": "nohelmet-5fps-8ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-5fps-8ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 5,
       "configuredChannels": 8,
       "outcome": "completed",
@@ -1587,7 +1593,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.21,
               "minimumFpsRatio": 1.041,
@@ -1614,7 +1620,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.05,
               "minimumFpsRatio": 1.01,
@@ -1641,7 +1647,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -1668,7 +1674,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -1695,7 +1701,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.02,
               "minimumFpsRatio": 1.003,
@@ -1722,7 +1728,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.02,
               "minimumFpsRatio": 1.003,
@@ -1749,7 +1755,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.95,
               "minimumFpsRatio": 0.99,
@@ -1776,7 +1782,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 4.98,
               "minimumFpsRatio": 0.997,
@@ -1801,7 +1807,8 @@
     },
     {
       "caseId": "nohelmet-7fps-16ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-7fps-16ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 7,
       "configuredChannels": 16,
       "outcome": "completed",
@@ -1817,7 +1824,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.07,
               "minimumFpsRatio": 1.01,
@@ -1844,7 +1851,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.03,
               "minimumFpsRatio": 1.005,
@@ -1871,7 +1878,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.05,
               "minimumFpsRatio": 1.008,
@@ -1898,7 +1905,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.03,
               "minimumFpsRatio": 1.005,
@@ -1925,7 +1932,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.03,
               "minimumFpsRatio": 1.005,
@@ -1952,7 +1959,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.95,
               "minimumFpsRatio": 0.993,
@@ -1979,7 +1986,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.93,
               "minimumFpsRatio": 0.99,
@@ -2006,7 +2013,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.92,
               "minimumFpsRatio": 0.988,
@@ -2033,7 +2040,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.92,
               "minimumFpsRatio": 0.988,
@@ -2060,7 +2067,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.95,
               "minimumFpsRatio": 0.993,
@@ -2087,7 +2094,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7,
               "minimumFpsRatio": 1,
@@ -2114,7 +2121,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.83,
               "minimumFpsRatio": 0.976,
@@ -2141,7 +2148,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.86,
               "minimumFpsRatio": 0.981,
@@ -2168,7 +2175,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.8,
               "minimumFpsRatio": 0.971,
@@ -2195,7 +2202,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.66,
               "minimumFpsRatio": 0.952,
@@ -2222,7 +2229,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 5.98,
               "minimumFpsRatio": 0.855,
@@ -2247,7 +2254,8 @@
     },
     {
       "caseId": "nohelmet-7fps-8ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-7fps-8ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 7,
       "configuredChannels": 8,
       "outcome": "completed",
@@ -2263,7 +2271,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.31,
               "minimumFpsRatio": 1.044,
@@ -2290,7 +2298,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.14,
               "minimumFpsRatio": 1.02,
@@ -2317,7 +2325,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.05,
               "minimumFpsRatio": 1.007,
@@ -2344,7 +2352,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.1,
               "minimumFpsRatio": 1.015,
@@ -2371,7 +2379,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.07,
               "minimumFpsRatio": 1.01,
@@ -2398,7 +2406,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7,
               "minimumFpsRatio": 1,
@@ -2425,7 +2433,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.88,
               "minimumFpsRatio": 0.983,
@@ -2452,7 +2460,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 6.92,
               "minimumFpsRatio": 0.988,
@@ -2477,6 +2485,7 @@
     },
     {
       "caseId": "person-10fps-16ch",
+      "sourceCaseId": "person-10fps-16ch",
       "workload": "person-detector",
       "targetFps": 10,
       "configuredChannels": 16,
@@ -2896,6 +2905,7 @@
     },
     {
       "caseId": "person-10fps-8ch",
+      "sourceCaseId": "person-10fps-8ch",
       "workload": "person-detector",
       "targetFps": 10,
       "configuredChannels": 8,
@@ -3126,6 +3136,7 @@
     },
     {
       "caseId": "person-24fps-16ch",
+      "sourceCaseId": "person-24fps-16ch",
       "workload": "person-detector",
       "targetFps": 24,
       "configuredChannels": 16,
@@ -3356,6 +3367,7 @@
     },
     {
       "caseId": "person-24fps-8ch",
+      "sourceCaseId": "person-24fps-8ch",
       "workload": "person-detector",
       "targetFps": 24,
       "configuredChannels": 8,
@@ -3586,6 +3598,7 @@
     },
     {
       "caseId": "person-5fps-16ch",
+      "sourceCaseId": "person-5fps-16ch",
       "workload": "person-detector",
       "targetFps": 5,
       "configuredChannels": 16,
@@ -4032,6 +4045,7 @@
     },
     {
       "caseId": "person-5fps-8ch",
+      "sourceCaseId": "person-5fps-8ch",
       "workload": "person-detector",
       "targetFps": 5,
       "configuredChannels": 8,
@@ -4262,6 +4276,7 @@
     },
     {
       "caseId": "person-7fps-16ch",
+      "sourceCaseId": "person-7fps-16ch",
       "workload": "person-detector",
       "targetFps": 7,
       "configuredChannels": 16,
@@ -4708,6 +4723,7 @@
     },
     {
       "caseId": "person-7fps-8ch",
+      "sourceCaseId": "person-7fps-8ch",
       "workload": "person-detector",
       "targetFps": 7,
       "configuredChannels": 8,

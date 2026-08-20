@@ -15,6 +15,6 @@ The small-model benchmark uses a 640×640 person detector and a 224×224 helmet 
 
 The no-safety-helmet workload is a two-stage detector-plus-classifier pipeline. Both stages receive the requested 24, 10, 7, or 5 FPS setting.
 
-Existing VLM identities remain in the three release-platform JSON files; VLM evidence was not refreshed by this small-model run.
+Existing VLM identities remain in the BM1688, CV186X, and RK3576 platform JSON files; VLM evidence was not refreshed by this small-model run, and this pack contains no RV1126B VLM observation.
 
 Model binaries are not redistributed by this benchmark. Full hashes and contracts are recorded in `bm1688.json`, `cv186x.json`, `rk3576.json`, and `rv1126b.json`.

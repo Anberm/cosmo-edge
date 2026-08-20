@@ -1,21 +1,21 @@
 # CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark
 
-> Person detection, no-safety-helmet analysis, and concurrent-task results on BM1688, CV186X, and RK3576. RV1126B is included as an additional experimental platform.
+> Person detection, no-safety-helmet analysis, and concurrent mixed-workload results on BM1688, CV186X, RK3576, and RV1126B.
 
 Entry points: [English report](report.html) · [中文报告](report.zh-CN.html) · [methodology](methodology.md) · [canonical case schema](results/cases.schema.json)
 
 The HTML reports and aggregate indexes linked from this page are generated during the documentation build. The repository keeps the canonical measurements, not duplicate report payloads.
 
-## Concurrent-task results
+## Concurrent mixed-workload matrix
 
-Each channel runs person detection and no-safety-helmet analysis concurrently at 5 FPS per task.
+Each channel runs two business tasks across three model stages: person detection has one detector stage, while no-safety-helmet analysis has a detector followed by a classifier. Both business tasks are configured at 5 FPS.
 
-| Platform | Passing channels | Task bindings | Hold per step |
-| --- | ---: | ---: | ---: |
-| BM1688 | ≥16 | 32/32 | 30 s |
-| CV186X | ≥8 | 16/16 | 30 s |
-| RK3576 | ≥8 | 16/16 | 30 s |
-| RV1126B (additional experimental platform) | ≥4 | 8/8 | 30 s |
+| Platform | Workload per channel | Model stages/ch | Target FPS/task | Passing channels | Business-task bindings |
+| --- | --- | ---: | ---: | ---: | ---: |
+| BM1688 | Person detection + no-safety-helmet analysis | 3 | 5 | ≥16 | 32/32 |
+| CV186X | Person detection + no-safety-helmet analysis | 3 | 5 | ≥8 | 16/16 |
+| RK3576 | Person detection + no-safety-helmet analysis | 3 | 5 | ≥8 | 16/16 |
+| RV1126B | Person detection + no-safety-helmet analysis | 3 | 5 | ≥4 | 8/8 |
 
 ## Single-task capacity matrix
 
@@ -29,13 +29,8 @@ Values are the last passing channel count. `≥` means the highest configured co
 | CV186X | No-safety-helmet analysis | 6 | ≥13* | ≥16 | ≥16 |
 | RK3576 | Person detection | 6 | 12 | ≥16 | ≥8† |
 | RK3576 | No-safety-helmet analysis | 6 | 10 | 12 | ≥16 |
-
-### Additional RV1126B results
-
-| Task | 24 FPS | 10 FPS | 7 FPS | 5 FPS |
-| --- | ---: | ---: | ---: | ---: |
-| Person detection | 2 | ≥4 | ≥4 | ≥4 |
-| No-safety-helmet analysis | 2 | ≥4 | ≥4 | ≥4 |
+| RV1126B | Person detection | 2 | ≥4 | ≥4 | ≥4 |
+| RV1126B | No-safety-helmet analysis | 2 | ≥4 | ≥4 | ≥4 |
 
 ## Controlled setup
 
@@ -53,10 +48,10 @@ The 49 small-model cases are stored once in four platform-level canonical JSON f
 
 | Platform | Canonical cases | Generated overview | Generated case pages | Generated workload reports | Existing VLM |
 | --- | --- | --- | --- | --- | --- |
-| BM1688 | [JSON](results/bm1688/cases.json) | <a href="./results/bm1688/report.html">open</a> | <a href="./results/bm1688/cases/report.html">open</a> | <a href="./results/bm1688/single-detector/report.html">single</a> · <a href="./results/bm1688/dual-detector/report.html">concurrent</a> | <a href="./results/bm1688/vlm-observation/report.html">open</a> |
-| CV186X | [JSON](results/cv186x/cases.json) | <a href="./results/cv186x/report.html">open</a> | <a href="./results/cv186x/cases/report.html">open</a> | <a href="./results/cv186x/single-detector/report.html">single</a> · <a href="./results/cv186x/dual-detector/report.html">concurrent</a> | <a href="./results/cv186x/vlm-observation/report.html">open</a> |
-| RK3576 | [JSON](results/rk3576/cases.json) | <a href="./results/rk3576/report.html">open</a> | <a href="./results/rk3576/cases/report.html">open</a> | <a href="./results/rk3576/single-detector/report.html">single</a> · <a href="./results/rk3576/dual-detector/report.html">concurrent</a> | <a href="./results/rk3576/vlm-observation/report.html">open</a> |
-| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="./results/rv1126b/report.html">open</a> | <a href="./results/rv1126b/cases/report.html">open</a> | <a href="./results/rv1126b/single-detector/report.html">single</a> · <a href="./results/rv1126b/dual-detector/report.html">concurrent</a> | — |
+| BM1688 | [JSON](results/bm1688/cases.json) | <a href="./results/bm1688/report.html">open</a> | <a href="./results/bm1688/cases/report.html">open</a> | <a href="./results/bm1688/single-workload/report.html">single</a> · <a href="./results/bm1688/concurrent-mixed/report.html">mixed</a> | <a href="./results/bm1688/vlm-observation/report.html">open</a> |
+| CV186X | [JSON](results/cv186x/cases.json) | <a href="./results/cv186x/report.html">open</a> | <a href="./results/cv186x/cases/report.html">open</a> | <a href="./results/cv186x/single-workload/report.html">single</a> · <a href="./results/cv186x/concurrent-mixed/report.html">mixed</a> | <a href="./results/cv186x/vlm-observation/report.html">open</a> |
+| RK3576 | [JSON](results/rk3576/cases.json) | <a href="./results/rk3576/report.html">open</a> | <a href="./results/rk3576/cases/report.html">open</a> | <a href="./results/rk3576/single-workload/report.html">single</a> · <a href="./results/rk3576/concurrent-mixed/report.html">mixed</a> | <a href="./results/rk3576/vlm-observation/report.html">open</a> |
+| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="./results/rv1126b/report.html">open</a> | <a href="./results/rv1126b/cases/report.html">open</a> | <a href="./results/rv1126b/single-workload/report.html">single</a> · <a href="./results/rv1126b/concurrent-mixed/report.html">mixed</a> | — |
 
 This refresh updates small-model results only. The preceding VLM observations are consolidated in [one canonical file](results/vlm-observations.json) and remain experimental because FPS was not an enabled gate.
 

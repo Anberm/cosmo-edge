@@ -6,9 +6,9 @@ The 2026-08-19 refresh covers three small-model workloads:
 
 1. person detection at 24, 10, 7, and 5 FPS;
 2. no-safety-helmet analysis at 24, 10, 7, and 5 FPS;
-3. person detection plus no-safety-helmet analysis at 5 FPS per task.
+3. a concurrent mixed workload combining person detection with no-safety-helmet analysis at 5 FPS per business task.
 
-BM1688, CV186X, and RK3576 form the CosmoEdge 1.1 release-platform report. RV1126B is listed as an additional experimental platform.
+BM1688, CV186X, RK3576, and RV1126B form the CosmoEdge 1.1 release-platform report.
 
 ## Fixed variables
 
@@ -20,7 +20,7 @@ BM1688, CV186X, and RK3576 form the CosmoEdge 1.1 release-platform report. RV112
 - Sampling: approximately every 3 seconds; the second half of each step is the steady window.
 - Models: platform identities and hashes are in `models/`.
 
-The no-safety-helmet workflow contains one detector node followed by one classifier node. ScenarioBench applies the requested FPS to both nodes.
+The no-safety-helmet workflow contains one detector node followed by one classifier node. In the concurrent mixed workload, each channel therefore contains two business tasks and three model stages: one person detector plus the detector-and-classifier helmet-analysis pipeline. ScenarioBench applies the requested FPS to both business tasks and to both stages of the helmet-analysis pipeline.
 
 ## Gates
 

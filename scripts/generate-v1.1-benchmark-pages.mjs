@@ -52,8 +52,8 @@ export function generateBenchmarkPages({ sourceRoot = defaultSourceRoot, outputR
     for (const platform of platforms) {
       writeReport(outputRoot, `results/${platform.id}/report${suffix}`, renderPlatformReport(locale, manifest, platform, vlmByPlatform.get(platform.id)));
       writeReport(outputRoot, `results/${platform.id}/cases/report${suffix}`, renderCaseIndex(locale, platform));
-      writeReport(outputRoot, `results/${platform.id}/single-detector/report${suffix}`, renderSingleDetectorReport(locale, manifest, platform));
-      writeReport(outputRoot, `results/${platform.id}/dual-detector/report${suffix}`, renderDualDetectorReport(locale, platform));
+      writeReport(outputRoot, `results/${platform.id}/single-workload/report${suffix}`, renderSingleWorkloadReport(locale, manifest, platform));
+      writeReport(outputRoot, `results/${platform.id}/concurrent-mixed/report${suffix}`, renderConcurrentMixedReport(locale, platform));
       reportCount += 4;
 
       const observation = vlmByPlatform.get(platform.id);
@@ -121,6 +121,7 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
       platformId: platform.id,
       platform: platform.name,
       caseId: item.caseId,
+      sourceCaseId: item.sourceCaseId,
       workload: item.workload,
       targetFps: item.targetFps,
       configuredChannels: item.configuredChannels,
@@ -133,7 +134,7 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
     }));
     globalCases.push(...cases);
     writeJson(path.join(resultsRoot, platform.id, 'cases', 'index.json'), {
-      schemaVersion: 2,
+      schemaVersion: 3,
       platformId: platform.id,
       caseCount: cases.length,
       canonical: '../cases.json',
@@ -152,7 +153,7 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
     });
   }
   writeJson(path.join(resultsRoot, 'cases.json'), {
-    schemaVersion: 2,
+    schemaVersion: 3,
     benchmark: 'CosmoEdge 1.1 small-model capacity benchmark',
     caseCount: globalCases.length,
     cases: globalCases,
@@ -162,8 +163,8 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
     schemaVersion: 3,
     publicationStatus: manifest.release.publicationState,
     interpretation: {
-      singleDetector: 'last passing short-run channel count under enabled CV gates',
-      dualDetector: 'highest configured short-run point passed; observed lower bound only',
+      singleWorkload: 'last passing short-run channel count under enabled CV gates',
+      concurrentMixed: 'highest configured short-run point passed; observed lower bound only',
       vlm: 'Experimental runtime observation; analysis FPS is not a gate',
       bindingBlocked: 'the next configured channel was blocked during task binding before measurement',
       storageBlocked: 'the expansion run was blocked before measurement by its storage precondition',
@@ -172,8 +173,8 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
       platformId: platform.id,
       platform: platform.name,
       scope: platform.scope,
-      singleDetector: platform.cases.filter((item) => item.workload !== 'dual-detector').map(matrixEntry),
-      dualDetector: platform.cases.filter((item) => item.workload === 'dual-detector').map(matrixEntry),
+      singleWorkload: platform.cases.filter((item) => item.workload !== 'concurrent-mixed').map(matrixEntry),
+      concurrentMixed: platform.cases.filter((item) => item.workload === 'concurrent-mixed').map(matrixEntry),
     })),
     vlmEvidenceStatus: vlm.evidenceStatus,
   });
@@ -182,23 +183,24 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
 function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
   const zh = locale === 'zh-CN';
   const targetFpsValues = manifest.controls.smallModelTargetFps;
-  const official = platforms.filter((item) => item.scope === 'release-platform');
-  const experimental = platforms.filter((item) => item.scope !== 'release-platform');
-  const dualRows = platforms.map((platform) => {
-    const item = findWorkloadCase(platform, 'dual-detector');
-    return [platformLabel(platform, locale), displayBoundary(item), `${item.configuredChannels * 2}/${item.configuredChannels * 2}`, '30 s'];
+  const mixedRows = platforms.map((platform) => {
+    const item = findWorkloadCase(platform, 'concurrent-mixed');
+    const passingTaskBindings = item.lastPassingChannels * 2;
+    return [
+      platformLabel(platform, locale),
+      zh ? '人员检测 + 未佩戴安全帽分析' : 'Person detection + no-safety-helmet analysis',
+      3,
+      item.targetFps,
+      displayBoundary(item),
+      `${passingTaskBindings}/${passingTaskBindings}`,
+    ];
   });
-  const singleRows = official.flatMap((platform) => ['person-detector', 'safety-helmet-detector'].map((workload) => [
+  const singleRows = platforms.flatMap((platform) => ['person-detector', 'no-safety-helmet-analysis'].map((workload) => [
     platform.name,
     workloadLabel(workload, locale),
     ...targetFpsValues.map((fps) => displayBoundary(findCase(platform, workload, fps))),
   ]));
-  const experimentalRows = experimental.flatMap((platform) => ['person-detector', 'safety-helmet-detector'].map((workload) => [
-    platform.name,
-    workloadLabel(workload, locale),
-    ...targetFpsValues.map((fps) => displayBoundary(findCase(platform, workload, fps))),
-  ]));
-  const vlmRows = official.flatMap((platform) => {
+  const vlmRows = platforms.flatMap((platform) => {
     const item = vlmByPlatform.get(platform.id);
     if (!item) return [];
     const lastPassingStep = item.steps.find(
@@ -212,7 +214,7 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
       value(item.observedBoundary.firstNonFpsStopChannels),
     ]];
   });
-  const environmentRows = official.map((platform) => [
+  const environmentRows = platforms.map((platform) => [
     platform.name,
     platform.environment.deviceDescription,
     platform.environment.os,
@@ -223,21 +225,24 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
     platformLabel(platform, locale),
     link(`results/${platform.id}/report${zh ? '.zh-CN' : ''}.html`, zh ? '平台汇总' : 'Platform overview'),
     link(`results/${platform.id}/cases/report${zh ? '.zh-CN' : ''}.html`, `${platform.cases.length} ${zh ? '个用例' : 'cases'}`),
-    link(`results/${platform.id}/single-detector/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务' : 'Single-task'),
-    link(`results/${platform.id}/dual-detector/report${zh ? '.zh-CN' : ''}.html`, zh ? '并发任务' : 'Concurrent'),
-    platform.id === 'rv1126b' ? '—' : link(`results/${platform.id}/vlm-observation/report${zh ? '.zh-CN' : ''}.html`, 'VLM'),
+    link(`results/${platform.id}/single-workload/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务' : 'Single-task'),
+    link(`results/${platform.id}/concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务' : 'Mixed workload'),
+    vlmByPlatform.has(platform.id) ? link(`results/${platform.id}/vlm-observation/report${zh ? '.zh-CN' : ''}.html`, 'VLM') : '—',
   ]);
 
   const body = [
     `<h1>${zh ? 'CosmoEdge 1.1 多平台视频分析容量基准' : 'CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark'}</h1>`,
-    `<p class="lead">BM1688 · CV186X · RK3576${experimental.length ? ' · RV1126B Experimental' : ''}</p>`,
+    `<p class="lead">${platforms.map((platform) => platformLabel(platform, locale)).join(' · ')}</p>`,
     notice(zh
       ? '本报告记录30秒本地循环输入下的短时容量边界，不是长稳、RTSP 韧性或生产推荐配置结论。'
       : 'This report records 30-second local-loop capacity boundaries. It is not long-run, RTSP-resilience, or recommended production-profile qualification.'),
-    `<h2>${zh ? '双任务并发观测' : 'Concurrent dual-detector observations'}</h2>`,
+    `<h2>${zh ? '并发混合任务矩阵' : 'Concurrent mixed-workload matrix'}</h2>`,
+    `<p>${zh ? '每路包含两个业务任务和三个模型阶段：人员检测为单检测阶段，未佩戴安全帽分析为检测加分类两阶段。' : 'Each channel contains two business tasks across three model stages: one person-detector stage plus detector and classifier stages for no-safety-helmet analysis.'}</p>`,
     table(
-      zh ? ['平台', '通过路数', '任务绑定', '单级时长'] : ['Platform', 'Passing channels', 'Task bindings', 'Hold / step'],
-      dualRows,
+      zh
+        ? ['平台', '每路任务组成', '模型阶段/路', '目标 FPS/任务', '通过路数', '业务任务绑定']
+        : ['Platform', 'Workload per channel', 'Model stages/ch', 'Target FPS/task', 'Passing channels', 'Business-task bindings'],
+      mixedRows,
     ),
     `<h2>${zh ? '单任务容量矩阵' : 'Single-task capacity matrix'}</h2>`,
     `<p>${boundaryLegend(locale)}</p>`,
@@ -245,20 +250,7 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
       [zh ? '平台' : 'Platform', zh ? '任务' : 'Workload', ...targetFpsValues.map((fps) => `${fps} FPS`)],
       singleRows,
     ),
-    `<img src="assets/capacity-overview${zh ? '.zh-CN' : ''}.svg" alt="${zh ? '容量概览图' : 'Capacity overview'}">`,
-    `<img src="assets/throughput-curves${zh ? '.zh-CN' : ''}.svg" alt="${zh ? '吞吐与延时曲线' : 'Throughput and latency curves'}">`,
-    `<img src="assets/resource-peaks${zh ? '.zh-CN' : ''}.svg" alt="${zh ? '资源峰值图' : 'Resource peaks'}">`,
   ];
-
-  if (experimentalRows.length) {
-    body.push(
-      `<h2>${zh ? '附加实验平台' : 'Additional experimental platform'}</h2>`,
-      table(
-        [zh ? '平台' : 'Platform', zh ? '任务' : 'Workload', ...targetFpsValues.map((fps) => `${fps} FPS`)],
-        experimentalRows,
-      ),
-    );
-  }
 
   body.push(
     `<h2>${zh ? 'VLM 实验运行观测' : 'Experimental VLM runtime observations'}</h2>`,
@@ -267,7 +259,7 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
       : 'The retained VLM observations are preceding evidence. FPS is recorded but excluded from PASS/FAIL and cannot support a capacity claim.', 'experimental'),
     table(zh ? ['平台', '目标 FPS/路', '最后非 FPS 通过路数', '最后通过级等效 FPS/路', '非 FPS 停止路数'] : ['Platform', 'Target FPS/ch', 'Last non-FPS pass', 'Last-passing equivalent FPS/ch', 'Non-FPS stop'], vlmRows),
     `<h2>${zh ? '证据入口' : 'Evidence entry points'}</h2>`,
-    table(zh ? ['平台', '平台报告', '用例', '单任务', '并发任务', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Concurrent', 'VLM'], linksRows),
+    table(zh ? ['平台', '平台报告', '用例', '单任务', '混合任务', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Mixed workload', 'VLM'], linksRows),
     `<h2>${zh ? '测试环境' : 'Test environment'}</h2>`,
     table(zh ? ['平台', '设备', '操作系统', '运行时 / 媒体', 'CosmoEdge'] : ['Platform', 'Device', 'OS', 'Runtime / media', 'CosmoEdge'], environmentRows),
     `<h2>${zh ? '方法与复现' : 'Method and reproduction'}</h2>`,
@@ -282,18 +274,21 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
 function renderPlatformReport(locale, manifest, platform, observation) {
   const zh = locale === 'zh-CN';
   const targetFpsValues = manifest.controls.smallModelTargetFps;
-  const singleRows = ['person-detector', 'safety-helmet-detector'].map((workload) => [
+  const singleRows = ['person-detector', 'no-safety-helmet-analysis'].map((workload) => [
     workloadLabel(workload, locale),
     ...targetFpsValues.map((fps) => displayBoundary(findCase(platform, workload, fps))),
   ]);
-  const dual = findWorkloadCase(platform, 'dual-detector');
+  const mixed = findWorkloadCase(platform, 'concurrent-mixed');
   const body = [
     `<h1>${escapeHtml(platform.name)} · ${zh ? '短时容量概览' : 'Short-run capacity overview'}</h1>`,
     notice(zh
       ? '所有数值均绑定本报告的受控本地循环输入、30秒单级窗口和禁用预览条件。'
       : 'All values are bound to the controlled local-loop input, 30-second step window, and preview-disabled conditions in this report.'),
-    `<h2>${zh ? '并发任务' : 'Concurrent workload'}</h2>`,
-    table(zh ? ['工作负载', '目标 FPS/任务', '通过边界', '设定上限'] : ['Workload', 'Target FPS/task', 'Observed boundary', 'Configured maximum'], [[workloadLabel(dual.workload, locale), dual.targetFps, displayBoundary(dual), dual.configuredChannels]]),
+    `<h2>${zh ? '并发混合任务' : 'Concurrent mixed workload'}</h2>`,
+    table(
+      zh ? ['工作负载', '模型阶段/路', '目标 FPS/任务', '通过边界', '设定上限'] : ['Workload', 'Model stages/ch', 'Target FPS/task', 'Observed boundary', 'Configured maximum'],
+      [[workloadLabel(mixed.workload, locale), 3, mixed.targetFps, displayBoundary(mixed), mixed.configuredChannels]],
+    ),
     `<h2>${zh ? '单任务' : 'Single-task workloads'}</h2>`,
     `<p>${boundaryLegend(locale)}</p>`,
     table([zh ? '任务' : 'Workload', ...targetFpsValues.map((fps) => `${fps} FPS`)], singleRows),
@@ -308,8 +303,8 @@ function renderPlatformReport(locale, manifest, platform, observation) {
     ]]),
     `<h2>${zh ? '详细结果' : 'Detailed results'}</h2>`,
     `<ul><li>${anchor(`cases/report${zh ? '.zh-CN' : ''}.html`, `${platform.cases.length} ${zh ? '个用例' : 'cases'}`)}</li>` +
-      `<li>${anchor(`single-detector/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务汇总' : 'Single-task summary')}</li>` +
-      `<li>${anchor(`dual-detector/report${zh ? '.zh-CN' : ''}.html`, zh ? '并发任务汇总' : 'Concurrent summary')}</li>` +
+      `<li>${anchor(`single-workload/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务汇总' : 'Single-task summary')}</li>` +
+      `<li>${anchor(`concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务汇总' : 'Mixed-workload summary')}</li>` +
       (observation ? `<li>${anchor(`vlm-observation/report${zh ? '.zh-CN' : ''}.html`, zh ? 'VLM 实验观测' : 'Experimental VLM observation')}</li>` : '') +
       `</ul>`,
     `<p>${zh ? '测试源码' : 'Test source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></p>`,
@@ -335,10 +330,10 @@ function renderCaseIndex(locale, platform) {
   return page(locale, `${platform.name} ${zh ? '用例' : 'cases'}`, caseIndexNav(locale), body);
 }
 
-function renderSingleDetectorReport(locale, manifest, platform) {
+function renderSingleWorkloadReport(locale, manifest, platform) {
   const zh = locale === 'zh-CN';
   const sections = [];
-  for (const workload of ['person-detector', 'safety-helmet-detector']) {
+  for (const workload of ['person-detector', 'no-safety-helmet-analysis']) {
     sections.push(`<h2>${escapeHtml(workloadLabel(workload, locale))}</h2>`);
     for (const fps of manifest.controls.smallModelTargetFps) {
       const item = findCase(platform, workload, fps);
@@ -352,15 +347,15 @@ function renderSingleDetectorReport(locale, manifest, platform) {
   return page(locale, `${platform.name} ${zh ? '单任务容量' : 'single-task capacity'}`, workloadNav(locale), body);
 }
 
-function renderDualDetectorReport(locale, platform) {
+function renderConcurrentMixedReport(locale, platform) {
   const zh = locale === 'zh-CN';
-  const item = findWorkloadCase(platform, 'dual-detector');
-  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? '双任务并发观测' : 'Concurrent dual-detector observation'}</h1>` +
+  const item = findWorkloadCase(platform, 'concurrent-mixed');
+  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? '并发混合任务观测' : 'Concurrent mixed-workload observation'}</h1>` +
     notice(zh
-      ? `每路同时运行人员检测与未佩戴安全帽分析，每任务 ${item.targetFps} FPS。`
-      : `Each channel runs person detection and no-safety-helmet analysis concurrently at ${item.targetFps} FPS per task.`) +
+      ? `每路同时运行人员检测与未佩戴安全帽分析，共两个业务任务、三个模型阶段；每个业务任务 ${item.targetFps} FPS。`
+      : `Each channel runs person detection and two-stage no-safety-helmet analysis concurrently: two business tasks across three model stages, at ${item.targetFps} FPS per business task.`) +
     renderStepTable(locale, item);
-  return page(locale, `${platform.name} ${zh ? '并发任务' : 'concurrent workload'}`, workloadNav(locale), body);
+  return page(locale, `${platform.name} ${zh ? '并发混合任务' : 'concurrent mixed workload'}`, workloadNav(locale), body);
 }
 
 function renderCaseReport(locale, platform, item) {
@@ -397,12 +392,12 @@ function renderVlmReport(locale, platform, observation) {
 
 function renderStepTable(locale, item) {
   const zh = locale === 'zh-CN';
-  const dual = item.workload === 'dual-detector';
+  const mixed = item.workload === 'concurrent-mixed';
   const rows = item.steps.map((step) => {
     const base = [step.channels, `${step.holdSeconds} s`];
-    if (dual) {
+    if (mixed) {
       base.push(value(step.tasks.find((task) => task.name === 'person-detector')?.minimumProcessingFps));
-      base.push(value(step.tasks.find((task) => task.name === 'safety-helmet-detector')?.minimumProcessingFps));
+      base.push(value(step.tasks.find((task) => task.name === 'no-safety-helmet-analysis')?.minimumProcessingFps));
     } else {
       base.push(value(step.minimumProcessingFps));
     }
@@ -417,8 +412,8 @@ function renderStepTable(locale, item) {
     );
     return base;
   });
-  const headers = dual
-    ? (zh ? ['路数', '时长', '人员检测最低 FPS', '安全帽最低 FPS', '关键路径 ms', '平均丢弃', '加速器', 'CPU', '内存', '结果', '原因'] : ['Channels', 'Hold', 'Person min FPS', 'Helmet min FPS', 'Critical path ms', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Result', 'Reason'])
+  const headers = mixed
+    ? (zh ? ['路数', '时长', '人员检测最低 FPS', '安全帽分析最低 FPS', '关键路径 ms', '平均丢弃', '加速器', 'CPU', '内存', '结果', '原因'] : ['Channels', 'Hold', 'Person min FPS', 'Helmet-analysis min FPS', 'Critical path ms', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Result', 'Reason'])
     : (zh ? ['路数', '时长', '最低 FPS', '关键路径 ms', '平均丢弃', '加速器', 'CPU', '内存', '结果', '原因'] : ['Channels', 'Hold', 'Minimum FPS', 'Critical path ms', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Result', 'Reason']);
   return table(headers, rows);
 }
@@ -536,8 +531,9 @@ function platformLabel(platform, locale) {
 function workloadLabel(workload, locale) {
   const zh = locale === 'zh-CN';
   if (workload === 'person-detector') return zh ? '人员检测' : 'Person detector';
-  if (workload === 'safety-helmet-detector') return zh ? '未佩戴安全帽分析' : 'No-safety-helmet analysis';
-  return zh ? '人员检测 + 安全帽分析' : 'Person + no-safety-helmet';
+  if (workload === 'no-safety-helmet-analysis') return zh ? '未佩戴安全帽分析' : 'No-safety-helmet analysis';
+  if (workload === 'concurrent-mixed') return zh ? '并发混合任务' : 'Concurrent mixed workload';
+  return workload;
 }
 
 function caseLabel(item, locale) {
@@ -621,6 +617,8 @@ function removeGeneratedPages(outputRoot, platformIds) {
       `results/${platform}/cases`,
       `results/${platform}/single-detector`,
       `results/${platform}/dual-detector`,
+      `results/${platform}/single-workload`,
+      `results/${platform}/concurrent-mixed`,
       `results/${platform}/vlm-observation`,
     ]) removePath(path.join(outputRoot, ...relative.split('/')));
   }

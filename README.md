@@ -33,11 +33,11 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 
 ## CosmoEdge 1.1
 
-> This branch is the CosmoEdge 1.1 source line. The linked benchmark pack contains the current controlled single-detector, dual-detector, and VLM evidence.
+> This branch is the CosmoEdge 1.1 source line. The linked benchmark pack contains the current controlled single-workload, concurrent mixed-workload, and VLM evidence.
 
-- **Multi-platform release:** BM1688, CV186X, and RK3576 use the same video-ingest, orchestration, event, and observability workflow with target-specific model artifacts.
-- **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single-detector, dual-detector, and Experimental VLM workloads with sanitized reproducibility attachments.
-- **Rockchip RK3576:** cross-build, board operation, RKNN inference, and MPP/RGA media paths are integrated. The public benchmark includes the complete 24/10/7/5 FPS single-detector matrix and an 8-channel concurrent dual-detector run at 5 FPS.
+- **Multi-platform release:** BM1688, CV186X, RK3576, and RV1126B use the same video-ingest, orchestration, event, and observability workflow with target-specific model artifacts.
+- **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single workloads, concurrent mixed workloads, and Experimental VLM observations with sanitized reproducibility attachments.
+- **Rockchip release platforms:** RK3576 and RV1126B both include cross-build, board operation, RKNN inference, and MPP/RGA media paths and share the same v1.1 release tier.
 - **Sophon model handling:** chip-aware validation supports target-specific `.nn` artifacts for BM1688 and CV186X. The benchmark records an exact Open-package and running-engine binding for both reference devices.
 - **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 tensor decoding paths with explicit fallbacks.
 - **Agent-assisted development:** a repository-guided path for handing model porting, integration, and UI tasks to the coding agent you already use and receiving verifiable deliverables.
@@ -52,6 +52,7 @@ CosmoEdge provides one engine architecture and orchestration experience, but eac
 | --- | --- | --- | --- |
 | Sophon BM1688 | v1.1 supported / primary | BMRT / `.nn` | Production deployment path with [v1.1 workload evidence](docs/benchmarks/scenario-bench/v1.1/README.md) and published [v1.0 baselines](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/) |
 | Rockchip RK3576 | v1.1 supported | RKNN / `.rknn` | Cross-build and board paths validated; see the [integration guide](docs/en/guide/rk3576-rknn-development.md) and [v1.1 workload evidence](docs/benchmarks/scenario-bench/v1.1/README.md) |
+| Rockchip RV1126B | v1.1 supported | RKNN / `.rknn` | Board, media, and inference paths validated; capacity results appear alongside RK3576 in the [v1.1 workload evidence](docs/benchmarks/scenario-bench/v1.1/README.md) |
 | Sophon CV186X | v1.1 supported | BMRT / target-specific `.nn` | Model import and device workload evidence included in the [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.md) |
 | x86 Linux / Windows; Apple Silicon macOS | Linux / Windows supported; macOS Preview | ONNX Runtime / `.onnx` | Mac uses amd64 emulation for one local-video developer workflow, not native performance evidence |
 | Sophon BM1684X | Planned | — | Not part of the current release scope |
@@ -181,7 +182,7 @@ Start with [Agent-Assisted Development](docs/en/development/agent-assisted-devel
 
 ### CosmoEdge 1.1 multi-platform performance report
 
-The v1.1 report covers BM1688, CV186X, and RK3576, with RV1126B listed as an additional experimental platform. It includes 49 independent small-model case reports for person detection, no-safety-helmet analysis, and concurrent 5 FPS workloads. Existing VLM attachments remain available separately.
+The v1.1 report covers BM1688, CV186X, RK3576, and RV1126B. It includes 49 independent small-model case reports for person detection, no-safety-helmet analysis, and a concurrent mixed workload at 5 FPS per business task. Existing VLM attachments remain available separately.
 
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
 - [中文基准报告索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
@@ -190,29 +191,16 @@ The v1.1 report covers BM1688, CV186X, and RK3576, with RV1126B listed as an add
 
 The controlled run uses source commit `89c73a7464a81ef378686447d7c1eeb88b988455`, tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`, one fixed 1080p24 input, 30-second steps, and the gates recorded in the [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json).
 
-The following table preserves the previously published **v1.0 baseline** for historical comparison:
+Each channel concurrently runs two business tasks across three model stages: person detection has one detector stage, while no-safety-helmet analysis has a detector followed by a classifier.
 
-| ScenarioBench workload | Hardware | Max verified channels | Target FPS | Result | Evidence |
-| --- | --- | ---: | ---: | --- | --- |
-| No Safety Helmet | YY-16T01-Preview / NPU | 16 | 3/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/helmet-7463-npu/report.html) |
-| Pedestrian Detection | YY-16T01-Preview / NPU | 16 | 5/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/pedestrian-45626-npu/report.html) |
-| Pedestrian + No Safety Helmet | YY-16T01-Preview / NPU | 16 | 3/channel/task | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/pedestrian-helmet-mixed-npu/report.html) |
-| VLM Review | YY-16T01-Preview / NPU | 8 | 0.1/channel | PASS | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/vlm-55009-npu/report.html) |
-| No Safety Helmet x86 baseline | x86 CPU | 7 | 3/channel | LIMITED; 8 channels exceeded latency limits | [report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/helmet-7463-x86/report.html) |
+| Platform | Workload per channel | Model stages/ch | Target FPS/task | Passing channels | Business-task bindings |
+| --- | --- | ---: | ---: | ---: | ---: |
+| BM1688 | Person detection + no-safety-helmet analysis | 3 | 5 | ≥16 | 32/32 |
+| CV186X | Person detection + no-safety-helmet analysis | 3 | 5 | ≥8 | 16/16 |
+| RK3576 | Person detection + no-safety-helmet analysis | 3 | 5 | ≥8 | 16/16 |
+| RV1126B | Person detection + no-safety-helmet analysis | 3 | 5 | ≥4 | 8/8 |
 
-See the [v1.0 benchmark manifest](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/manifest.json), [environment notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/environment), and [current refresh notes](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/) for the legacy methodology and publication boundaries.
-
-### RK3576 long-duration validation context
-
-This earlier long-duration evidence remains bound to source [`8f8b4b8e`](https://github.com/cosmo-wander-ai/cosmo-edge/commit/8f8b4b8e793172963ef92da7fc9942a1c860534b) (tree `fd1b646f`), engine SHA-256 `bc829d9513334c4520fad1b58439bb3e6e31338c664e93eb15babdaaa564d886`, RKNN Runtime `2.3.2-429f97ae6b`, driver `0.9.8`, RGA `1.10.1_[4]`, and MPP `1.5.0-1`.
-
-| ScenarioBench workload | Hardware | Max verified channels | Target FPS | Result |
-| --- | --- | ---: | ---: | --- |
-| No Safety Helmet | Rockchip RK3576 EVB1 V10 / RKNN | 8 | 5/channel | PASS |
-
-The 1 / 2 / 4 / 8-channel steps all passed with zero discarded frames or inference, RGA, or MPP failures. Single-channel Detect average decreased from 142.3 ms to 58.2 ms (-59.1%). A separate 12-hour run at 4 channels and 5 FPS, with four algorithm previews, recorded 720 continuous hold samples, CPU avg/P95/max of 33.92% / 39% / 43%, and zero discarded frames or runtime/preview failures.
-
-The four-channel, 5 FPS profile completed the 12-hour run. The 8-channel step records engineering headroom and is not a release capacity guarantee. This historical evidence is retained as long-duration context and is not silently rebound to the newer v1.1 source baseline.
+These are short-run boundaries under 30-second, preview-disabled steps—not production recommendations or long-duration conclusions. See the [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.md) for the complete 24/10/7/5 FPS matrix. Previously published data remains available in the [v1.0 historical report archive](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.0/).
 
 ## Architecture
 

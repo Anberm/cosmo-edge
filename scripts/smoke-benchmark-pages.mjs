@@ -22,8 +22,8 @@ for (const platform of platforms) {
     expectedReports.push(
       `results/${platform.id}/report${suffix}.html`,
       `results/${platform.id}/cases/report${suffix}.html`,
-      `results/${platform.id}/single-detector/report${suffix}.html`,
-      `results/${platform.id}/dual-detector/report${suffix}.html`,
+      `results/${platform.id}/single-workload/report${suffix}.html`,
+      `results/${platform.id}/concurrent-mixed/report${suffix}.html`,
     );
     if (vlmPlatformIds.has(platform.id)) {
       expectedReports.push(`results/${platform.id}/vlm-observation/report${suffix}.html`);
@@ -66,8 +66,8 @@ for (const reportName of ['report.html', 'report.zh-CN.html']) {
   for (const platform of platforms) {
     for (const target of [
       `results/${platform.id}/${reportName}`,
-      `results/${platform.id}/single-detector/${reportName}`,
-      `results/${platform.id}/dual-detector/${reportName}`,
+      `results/${platform.id}/single-workload/${reportName}`,
+      `results/${platform.id}/concurrent-mixed/${reportName}`,
       `results/${platform.id}/cases/${reportName}`,
       ...(vlmPlatformIds.has(platform.id) ? [`results/${platform.id}/vlm-observation/${reportName}`] : []),
     ]) {

@@ -88,16 +88,16 @@
     },
     {
       "id": "rv1126b",
-      "scope": "additional-experimental-platform",
+      "scope": "release-platform",
       "environment": "environments/rv1126b.json",
       "models": "models/rv1126b.json",
       "results": "results/rv1126b/cases.json"
     }
   ],
   "workloads": {
-    "personDetection": "scenarios/single-detector/person-detector.public.yml",
-    "noSafetyHelmet": "scenarios/single-detector/safety-helmet-detector.public.yml",
-    "dualCv": "scenarios/dual-detector/scenario.public.yml",
+    "personDetection": "scenarios/single-workload/person-detector.public.yml",
+    "noSafetyHelmetAnalysis": "scenarios/single-workload/no-safety-helmet-analysis.public.yml",
+    "concurrentMixed": "scenarios/concurrent-mixed/scenario.public.yml",
     "vlmObservation": "scenarios/vlm-observation/scenario.public.yml"
   },
   "evidence": {

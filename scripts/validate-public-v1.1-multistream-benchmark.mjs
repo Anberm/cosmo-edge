@@ -130,6 +130,11 @@ function validateManifest(value) {
   if (ids.some((id) => typeof id !== 'string' || !/^[a-z0-9-]+$/.test(id))) fail('manifest contains an invalid platform id');
   if (new Set(ids).size !== ids.length) fail('manifest contains duplicate platform ids');
   if (!definitions.some((item) => item?.scope === 'release-platform')) fail('manifest must declare at least one release platform');
+  const rk3576 = definitions.find((item) => item?.id === 'rk3576');
+  const rv1126b = definitions.find((item) => item?.id === 'rv1126b');
+  if (rk3576?.scope !== 'release-platform' || rv1126b?.scope !== 'release-platform') {
+    fail('RK3576 and RV1126B must share the release-platform scope');
+  }
 
   const allowedScopes = new Set(['release-platform', 'additional-experimental-platform']);
   for (const definition of definitions) {
@@ -165,7 +170,7 @@ function validateCanonicalCases(manifestValue, definitions) {
       '$schema', 'schemaVersion', 'benchmark', 'platformId', 'platform', 'scope', 'evidenceDate', 'caseCount', 'gates', 'cases',
     ], label);
     if (value.$schema !== '../cases.schema.json') fail(`${label} has an incorrect schema reference`);
-    if (value.schemaVersion !== 2) fail(`${label} schemaVersion must be 2`);
+    if (value.schemaVersion !== 3) fail(`${label} schemaVersion must be 3`);
     if (value.platformId !== definition.id) fail(`${label} platformId does not match the manifest`);
     if (value.scope !== definition.scope) fail(`${label} scope does not match the manifest`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value.evidenceDate ?? '')) fail(`${label} evidenceDate is invalid`);
@@ -187,14 +192,14 @@ function validateCanonicalCases(manifestValue, definitions) {
         sourceSummaryHashes.add(benchmarkCase.sourceSummarySha256);
       }
     }
-    for (const workload of ['person-detector', 'safety-helmet-detector']) {
+    for (const workload of ['person-detector', 'no-safety-helmet-analysis']) {
       for (const fps of manifestValue?.controls?.smallModelTargetFps ?? []) {
         if (!cases.some((item) => item.workload === workload && item.targetFps === fps)) {
           fail(`${label} is missing ${workload} at ${fps} FPS`);
         }
       }
     }
-    if (!cases.some((item) => item.workload === 'dual-detector')) fail(`${label} is missing a dual-detector case`);
+    if (!cases.some((item) => item.workload === 'concurrent-mixed')) fail(`${label} is missing a concurrent-mixed case`);
   }
 
   const actualCount = result.reduce((count, item) => count + (item.cases?.length ?? 0), 0);
@@ -207,14 +212,19 @@ function validateCanonicalCases(manifestValue, definitions) {
 function validateCase(definition, gates, value) {
   const label = `${definition.id}/${value?.caseId ?? '<missing-case-id>'}`;
   expectObjectKeys(value, [
-    'caseId', 'workload', 'targetFps', 'configuredChannels', 'outcome', 'boundaryKind', 'lastPassingChannels',
+    'caseId', 'sourceCaseId', 'workload', 'targetFps', 'configuredChannels', 'outcome', 'boundaryKind', 'lastPassingChannels',
     'firstBlockedChannels', 'blockedReason', 'sourceSummarySha256', 'steps',
   ], label);
   const identity = parseCaseId(value?.caseId);
+  const sourceIdentity = parseSourceCaseId(value?.sourceCaseId);
   if (!identity) fail(`${label} caseId does not encode workload, target FPS, and configured channels`);
+  if (!sourceIdentity) fail(`${label} sourceCaseId does not encode the archived workload, target FPS, and configured channels`);
   if (identity && value.workload !== identity.workload) fail(`${label} workload differs from its caseId`);
   if (identity && value.targetFps !== identity.targetFps) fail(`${label} targetFps differs from its caseId`);
   if (identity && value.configuredChannels !== identity.configuredChannels) fail(`${label} configuredChannels differs from its caseId`);
+  if (sourceIdentity && value.workload !== sourceIdentity.workload) fail(`${label} workload differs from its archived sourceCaseId`);
+  if (sourceIdentity && value.targetFps !== sourceIdentity.targetFps) fail(`${label} targetFps differs from its archived sourceCaseId`);
+  if (sourceIdentity && value.configuredChannels !== sourceIdentity.configuredChannels) fail(`${label} configuredChannels differs from its archived sourceCaseId`);
   if (!sha256(value?.sourceSummarySha256)) fail(`${label} sourceSummarySha256 is invalid`);
   if (!positiveInteger(value?.configuredChannels) || !positiveInteger(value?.lastPassingChannels)) fail(`${label} channel boundaries must be positive integers`);
   if (value?.lastPassingChannels > value?.configuredChannels) fail(`${label} lastPassingChannels exceeds configuredChannels`);
@@ -274,8 +284,8 @@ function validateStep(caseLabel, benchmarkCase, gates, step, index) {
   if (step?.result !== 'PASS' && typeof step?.failureReason !== 'string') fail(`${label} non-PASS result must contain a failure reason`);
 
   const tasks = Array.isArray(step?.tasks) ? step.tasks : [];
-  const expectedTaskNames = benchmarkCase.workload === 'dual-detector'
-    ? ['person-detector', 'safety-helmet-detector']
+  const expectedTaskNames = benchmarkCase.workload === 'concurrent-mixed'
+    ? ['person-detector', 'no-safety-helmet-analysis']
     : [benchmarkCase.workload];
   if (!sameArray(tasks.map((task) => task?.name).sort(), [...expectedTaskNames].sort())) fail(`${label} task inventory differs from its workload`);
   for (const task of tasks) {
@@ -362,7 +372,7 @@ function validateArchivedEvidence(file, manifestValue, platforms, vlmValue) {
   const archiveRoot = 'docs/benchmarks/scenario-bench/v1.1/results';
   for (const platform of platforms) {
     for (const benchmarkCase of platform.cases) {
-      const entry = `${archiveRoot}/${platform.platformId}/cases/${benchmarkCase.caseId}/summary.json`;
+      const entry = `${archiveRoot}/${platform.platformId}/cases/${benchmarkCase.sourceCaseId}/summary.json`;
       const bytes = readArchiveEntry(resolved, entry);
       if (!bytes) continue;
       const digest = crypto.createHash('sha256').update(bytes).digest('hex');
@@ -374,13 +384,18 @@ function validateArchivedEvidence(file, manifestValue, platforms, vlmValue) {
         fail(`archive summary is invalid JSON for ${platform.platformId}/${benchmarkCase.caseId}: ${error.message}`);
         continue;
       }
+      const normalizedRaw = normalizeArchivedCase(raw);
+      if (raw.caseId !== benchmarkCase.sourceCaseId) {
+        fail(`canonical sourceCaseId differs from archived caseId for ${platform.platformId}/${benchmarkCase.caseId}`);
+      }
       for (const key of [
-        'caseId', 'workload', 'targetFps', 'configuredChannels', 'outcome', 'boundaryKind',
+        'workload', 'targetFps', 'configuredChannels', 'outcome', 'boundaryKind',
         'lastPassingChannels', 'firstBlockedChannels', 'blockedReason', 'steps',
       ]) {
-        if (!deepEqual(raw[key], benchmarkCase[key])) fail(`canonical ${key} differs from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
+        if (!deepEqual(normalizedRaw[key], benchmarkCase[key])) fail(`canonical ${key} differs from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
       }
-      if (raw.platformId !== platform.platformId || raw.platform !== platform.platform || raw.platformScope !== platform.scope) {
+      const archivedScope = normalizeArchivedPlatformScope(platform.platformId, raw.platformScope);
+      if (raw.platformId !== platform.platformId || raw.platform !== platform.platform || archivedScope !== platform.scope) {
         fail(`canonical platform identity differs from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
       }
       if (raw.evidenceDate !== platform.evidenceDate) fail(`canonical evidenceDate differs from archived summary for ${platform.platformId}/${benchmarkCase.caseId}`);
@@ -451,6 +466,7 @@ function validateSchemaDocument() {
   for (const definition of ['gates', 'case', 'step', 'task']) {
     if (!schema.$defs?.[definition]) fail(`case schema is missing $defs.${definition}`);
   }
+  if (!schema.$defs?.case?.required?.includes('sourceCaseId')) fail('case schema must require sourceCaseId provenance');
 }
 
 function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, generationResult) {
@@ -462,8 +478,8 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
       expectedReports.push(
         `results/${platform.platformId}/report${localeSuffix}.html`,
         `results/${platform.platformId}/cases/report${localeSuffix}.html`,
-        `results/${platform.platformId}/single-detector/report${localeSuffix}.html`,
-        `results/${platform.platformId}/dual-detector/report${localeSuffix}.html`,
+        `results/${platform.platformId}/single-workload/report${localeSuffix}.html`,
+        `results/${platform.platformId}/concurrent-mixed/report${localeSuffix}.html`,
       );
       if (vlmIds.has(platform.platformId)) {
         expectedReports.push(`results/${platform.platformId}/vlm-observation/report${localeSuffix}.html`);
@@ -495,6 +511,17 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
     const wrappers = html.match(/<div class="table"/gi)?.length ?? 0;
     if (tables !== wrappers) fail(`generated report lacks responsive table wrappers: ${report}`);
     if (/\b(?:undefined|NaN)\b|\[object Object\]/.test(html)) fail(`generated report contains an unresolved value: ${report}`);
+    if (/dual-detector|RV1126B\s+(?:Experimental|实验)/i.test(html)) fail(`generated report contains obsolete public terminology: ${report}`);
+  }
+
+  for (const rootReport of ['report.html', 'report.zh-CN.html']) {
+    const html = fs.readFileSync(path.join(outputRoot, rootReport), 'utf8');
+    for (const platform of platforms) {
+      if (!html.includes(platform.platform)) fail(`${rootReport} is missing release platform ${platform.platform}`);
+    }
+    if (!html.includes(rootReport.endsWith('.zh-CN.html') ? '并发混合任务矩阵' : 'Concurrent mixed-workload matrix')) {
+      fail(`${rootReport} is missing the concurrent mixed-workload matrix`);
+    }
   }
 
   const index = readJsonIfPresent(outputRoot, 'results/index.json');
@@ -593,7 +620,7 @@ function validateLinksAndLanguages(packRoot, files, generatedFallbackRoot) {
 function validateJsonReferences(packRoot, file, value, generatedFallbackRoot) {
   const referenceKeys = new Set([
     '$schema', 'manifest', 'releaseManifest', 'environment', 'models', 'dataset', 'card', 'overview',
-    'dualDetector', 'singleDetector', 'vlmObservation', 'vlmObservations', 'caseSchema', 'canonicalSmallModelCases',
+    'concurrentMixed', 'singleWorkload', 'vlmObservation', 'vlmObservations', 'caseSchema', 'canonicalSmallModelCases',
     'cases', 'canonical', 'summary', 'report', 'reportZhCn', 'metrics', 'command', 'testLog', 'results',
   ]);
   visit(value, null);
@@ -644,13 +671,39 @@ function validateRelativeLink(packRoot, sourceFile, rawTarget, kind, generatedFa
 }
 
 function parseCaseId(caseId) {
-  const match = /^(person|nohelmet|dual-cv)-(\d+(?:\.\d+)?)fps-(\d+)ch$/.exec(caseId ?? '');
+  const match = /^(person|nohelmet|mixed-cv)-(\d+(?:\.\d+)?)fps-(\d+)ch$/.exec(caseId ?? '');
   if (!match) return null;
   return {
-    workload: match[1] === 'person' ? 'person-detector' : match[1] === 'nohelmet' ? 'safety-helmet-detector' : 'dual-detector',
+    workload: match[1] === 'person' ? 'person-detector' : match[1] === 'nohelmet' ? 'no-safety-helmet-analysis' : 'concurrent-mixed',
     targetFps: Number(match[2]),
     configuredChannels: Number(match[3]),
   };
+}
+
+function parseSourceCaseId(caseId) {
+  const match = /^(person|nohelmet|dual-cv)-(\d+(?:\.\d+)?)fps-(\d+)ch$/.exec(caseId ?? '');
+  if (!match) return null;
+  return {
+    workload: match[1] === 'person' ? 'person-detector' : match[1] === 'nohelmet' ? 'no-safety-helmet-analysis' : 'concurrent-mixed',
+    targetFps: Number(match[2]),
+    configuredChannels: Number(match[3]),
+  };
+}
+
+function normalizeArchivedCase(value) {
+  const normalized = JSON.parse(JSON.stringify(value));
+  if (normalized.workload === 'safety-helmet-detector') normalized.workload = 'no-safety-helmet-analysis';
+  if (normalized.workload === 'dual-detector') normalized.workload = 'concurrent-mixed';
+  for (const step of normalized.steps ?? []) {
+    for (const task of step.tasks ?? []) {
+      if (task.name === 'safety-helmet-detector') task.name = 'no-safety-helmet-analysis';
+    }
+  }
+  return normalized;
+}
+
+function normalizeArchivedPlatformScope(platformId, scope) {
+  return platformId === 'rv1126b' && scope === 'additional-experimental-platform' ? 'release-platform' : scope;
 }
 
 function parseArchiveArgument(args) {

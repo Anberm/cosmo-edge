@@ -18,7 +18,7 @@
   ],
   "properties": {
     "$schema": { "const": "../cases.schema.json" },
-    "schemaVersion": { "const": 2 },
+    "schemaVersion": { "const": 3 },
     "benchmark": { "const": "CosmoEdge 1.1 small-model capacity benchmark" },
     "platformId": { "type": "string", "pattern": "^[a-z0-9-]+$" },
     "platform": { "type": "string", "minLength": 1 },
@@ -61,6 +61,7 @@
       "additionalProperties": false,
       "required": [
         "caseId",
+        "sourceCaseId",
         "workload",
         "targetFps",
         "configuredChannels",
@@ -74,8 +75,9 @@
       ],
       "properties": {
         "caseId": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "sourceCaseId": { "type": "string", "pattern": "^[a-z0-9-]+$" },
         "workload": {
-          "enum": ["person-detector", "safety-helmet-detector", "dual-detector"]
+          "enum": ["person-detector", "no-safety-helmet-analysis", "concurrent-mixed"]
         },
         "targetFps": { "type": "number", "exclusiveMinimum": 0 },
         "configuredChannels": { "type": "integer", "minimum": 1 },
@@ -149,7 +151,7 @@
         "maximumCriticalPathLatencyMs"
       ],
       "properties": {
-        "name": { "enum": ["person-detector", "safety-helmet-detector"] },
+        "name": { "enum": ["person-detector", "no-safety-helmet-analysis"] },
         "targetFps": { "type": "number", "exclusiveMinimum": 0 },
         "minimumProcessingFps": { "$ref": "#/$defs/nullableNonNegativeNumber" },
         "minimumFpsRatio": { "$ref": "#/$defs/nullableNonNegativeNumber" },

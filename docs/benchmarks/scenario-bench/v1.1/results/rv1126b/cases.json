@@ -1,10 +1,10 @@
 {
   "$schema": "../cases.schema.json",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "benchmark": "CosmoEdge 1.1 small-model capacity benchmark",
   "platformId": "rv1126b",
   "platform": "RV1126B",
-  "scope": "additional-experimental-platform",
+  "scope": "release-platform",
   "evidenceDate": "2026-08-19",
   "caseCount": 9,
   "gates": {
@@ -16,8 +16,9 @@
   },
   "cases": [
     {
-      "caseId": "dual-cv-5fps-4ch",
-      "workload": "dual-detector",
+      "caseId": "mixed-cv-5fps-4ch",
+      "sourceCaseId": "dual-cv-5fps-4ch",
+      "workload": "concurrent-mixed",
       "targetFps": 5,
       "configuredChannels": 4,
       "outcome": "completed",
@@ -43,7 +44,7 @@
               "maximumCriticalPathLatencyMs": 46.2
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.17,
               "minimumFpsRatio": 1.034,
@@ -80,7 +81,7 @@
               "maximumCriticalPathLatencyMs": 45.4
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5,
               "minimumFpsRatio": 1,
@@ -117,7 +118,7 @@
               "maximumCriticalPathLatencyMs": 46
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.02,
               "minimumFpsRatio": 1.004,
@@ -154,7 +155,7 @@
               "maximumCriticalPathLatencyMs": 49.8
             },
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.07,
               "minimumFpsRatio": 1.014,
@@ -179,7 +180,8 @@
     },
     {
       "caseId": "nohelmet-10fps-4ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-10fps-4ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 10,
       "configuredChannels": 4,
       "outcome": "completed",
@@ -195,7 +197,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.14,
               "minimumFpsRatio": 1.014,
@@ -222,7 +224,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.07,
               "minimumFpsRatio": 1.007,
@@ -249,7 +251,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.15,
               "minimumFpsRatio": 1.015,
@@ -276,7 +278,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 10,
               "minimumProcessingFps": 10.03,
               "minimumFpsRatio": 1.003,
@@ -301,7 +303,8 @@
     },
     {
       "caseId": "nohelmet-24fps-4ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-24fps-4ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 24,
       "configuredChannels": 4,
       "outcome": "stopped",
@@ -317,7 +320,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 24.14,
               "minimumFpsRatio": 1.006,
@@ -344,7 +347,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 20.97,
               "minimumFpsRatio": 0.874,
@@ -371,7 +374,7 @@
           "result": "STOP",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 24,
               "minimumProcessingFps": 14.65,
               "minimumFpsRatio": 0.611,
@@ -396,7 +399,8 @@
     },
     {
       "caseId": "nohelmet-5fps-4ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-5fps-4ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 5,
       "configuredChannels": 4,
       "outcome": "completed",
@@ -412,7 +416,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.17,
               "minimumFpsRatio": 1.034,
@@ -439,7 +443,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.1,
               "minimumFpsRatio": 1.02,
@@ -466,7 +470,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.14,
               "minimumFpsRatio": 1.027,
@@ -493,7 +497,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 5,
               "minimumProcessingFps": 5.1,
               "minimumFpsRatio": 1.02,
@@ -518,7 +522,8 @@
     },
     {
       "caseId": "nohelmet-7fps-4ch",
-      "workload": "safety-helmet-detector",
+      "sourceCaseId": "nohelmet-7fps-4ch",
+      "workload": "no-safety-helmet-analysis",
       "targetFps": 7,
       "configuredChannels": 4,
       "outcome": "completed",
@@ -534,7 +539,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.17,
               "minimumFpsRatio": 1.025,
@@ -561,7 +566,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.07,
               "minimumFpsRatio": 1.01,
@@ -588,7 +593,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.08,
               "minimumFpsRatio": 1.012,
@@ -615,7 +620,7 @@
           "result": "PASS",
           "tasks": [
             {
-              "name": "safety-helmet-detector",
+              "name": "no-safety-helmet-analysis",
               "targetFps": 7,
               "minimumProcessingFps": 7.07,
               "minimumFpsRatio": 1.01,
@@ -640,6 +645,7 @@
     },
     {
       "caseId": "person-10fps-4ch",
+      "sourceCaseId": "person-10fps-4ch",
       "workload": "person-detector",
       "targetFps": 10,
       "configuredChannels": 4,
@@ -762,6 +768,7 @@
     },
     {
       "caseId": "person-24fps-4ch",
+      "sourceCaseId": "person-24fps-4ch",
       "workload": "person-detector",
       "targetFps": 24,
       "configuredChannels": 4,
@@ -884,6 +891,7 @@
     },
     {
       "caseId": "person-5fps-4ch",
+      "sourceCaseId": "person-5fps-4ch",
       "workload": "person-detector",
       "targetFps": 5,
       "configuredChannels": 4,
@@ -1006,6 +1014,7 @@
     },
     {
       "caseId": "person-7fps-4ch",
+      "sourceCaseId": "person-7fps-4ch",
       "workload": "person-detector",
       "targetFps": 7,
       "configuredChannels": 4,
