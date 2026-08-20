@@ -143,13 +143,13 @@ RKLLM Runtime 会随安装包发布，但 Qwen3.5 模型文件不随 Open 包分
 构建时依赖解析使用宿主机网络；一次性构建服务不发布或监听应用端口。
 
 RK3576 的板端网络由系统 NetworkManager 管理，不由 CosmoEdge 的 Sophon netplan 路径
-接管。清空 `/data/cwaiuserdata` 会重新生成默认 JSON，但不会把现有 NetworkManager
+接管。清空 `/userdata/cwaiuserdata` 会重新生成默认 JSON，但不会把现有 NetworkManager
 连接改成 `192.168.100.1`；部署和恢复时应以 `ip -4 addr`/`nmcli` 的实际地址为准。
 
 运行时应隔离可变数据目录和包内应用目录：
 
 ```bash
-export COSMO_DATA_DIR=/data/cwaiuserdata
+export COSMO_DATA_DIR=/userdata/cwaiuserdata
 export COSMO_APP_DATA_DIR=/appfs/cosmo_wander/cwai_data
 export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
@@ -178,7 +178,7 @@ export LD_LIBRARY_PATH="$COSMO_APP_DATA_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_P
 再在设备上运行：
 
 ```bash
-MODEL_DIR=/data/cwaiuserdata/resource/models/<qwen3.5-model-directory>
+MODEL_DIR=/userdata/cwaiuserdata/resource/models/<qwen3.5-model-directory>
 export LD_LIBRARY_PATH=./lib
 ./demo smoke.jpg "$MODEL_DIR/vision.rknn" "$MODEL_DIR/model.rkllm" \
   64 4096 2 rk3576 \

@@ -23,16 +23,32 @@ script_path="$(readlink -f "$0")"
 payload_root="${script_path%/scripts/install.sh}"
 [ "$payload_root" != "$script_path" ] || fail "installer is outside the package scripts directory"
 
+COSMO_PACKAGE_DATA_DIR='/data/cwaiuserdata'
+COSMO_PACKAGE_APP_DATA_DIR='/appfs/cosmo_wander/cwai_data'
+runtime_paths_file="${payload_root}/share/cosmo/runtime-paths.env"
+if [ -f "$runtime_paths_file" ]; then
+    # Generated and packaged by CMake; values are validated before use.
+    # shellcheck disable=SC1090
+    . "$runtime_paths_file"
+fi
+case "$COSMO_PACKAGE_DATA_DIR" in
+    /*) ;;
+    *) fail "package data directory must be absolute" ;;
+esac
+[ "$COSMO_PACKAGE_DATA_DIR" != / ] || fail "package data directory is invalid"
+[ "$COSMO_PACKAGE_APP_DATA_DIR" = /appfs/cosmo_wander/cwai_data ] ||
+    fail "package application directory is incompatible"
+
 if [ -n "${COSMO_MIGRATION_TEST_ROOT:-}" ]; then
     case "$COSMO_MIGRATION_TEST_ROOT" in /*) ;; *) fail "test root must be absolute" ;; esac
     [ "$COSMO_MIGRATION_TEST_ROOT" != / ] || fail "test root is invalid"
     active_root="${COSMO_MIGRATION_TEST_ROOT}/appfs/cosmo_wander/cwai_data"
     systemd_root="${COSMO_MIGRATION_TEST_ROOT}/etc/systemd/system"
-    upgrade_sign="${COSMO_MIGRATION_TEST_ROOT}/data/cwaiuserdata/mqttUpgradeApp"
+    upgrade_sign="${COSMO_MIGRATION_TEST_ROOT}${COSMO_PACKAGE_DATA_DIR}/mqttUpgradeApp"
 else
     active_root='/appfs/cosmo_wander/cwai_data'
     systemd_root='/etc/systemd/system'
-    upgrade_sign='/data/cwaiuserdata/mqttUpgradeApp'
+    upgrade_sign="${COSMO_PACKAGE_DATA_DIR}/mqttUpgradeApp"
 fi
 active_parent="${active_root%/*}"
 staging_root="${active_parent}/.cosmo-migration-staging.$$"
@@ -105,6 +121,7 @@ umask 022
         '[Service]' \
         'Type=simple' \
         'User=root' \
+        'EnvironmentFile=-/appfs/cosmo_wander/cwai_data/share/cosmo/runtime-paths.env' \
         'ExecStart=/appfs/cosmo_wander/cwai_data/scripts/inte_run_start.sh' \
         'Restart=on-failure' \
         'RestartSec=10' \
