@@ -88,6 +88,7 @@ loadProfile:
   assert.equal(params.find((param) => param.key === 'param.videoRepeatCount')?.value, '0');
   assert.equal(params.find((param) => param.key === 'param.videoReadFps')?.value, '0.1');
   assert.equal(pkg.loadProfile[0].holdSec, 120);
+  assert.equal(pkg.tasks[0].vlmCompletionActionId, 'DA_00003');
 });
 
 test('defaults omitted VLM hold seconds to 60', (t) => {

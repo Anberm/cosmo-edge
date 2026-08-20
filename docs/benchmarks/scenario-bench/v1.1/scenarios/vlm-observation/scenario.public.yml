@@ -1,14 +1,14 @@
 version: 2
-name: vlm-0p1fps-runtime-observation
-displayName: VLM 0.1 FPS per-channel runtime observation
-sampleIntervalSec: 10
+name: vlm-0p1fps-current-route-observation
+displayName: VLM 0.1 FPS current-route runtime observation
+sampleIntervalSec: 3
 
 channels:
   mode: local
   repeatCount: 0
   sources:
     - name: public-1080p24-sample
-      file: "../../dataset/vlm-sample.mp4"
+      file: "../../dataset/controlled-1080p24-sample.mp4"
 
 tasks:
   - id: vlm-observation
@@ -23,21 +23,21 @@ bindings:
 
 loadProfile:
   - channels: 1
-    holdSec: 120
+    holdSec: 60
   - channels: 2
-    holdSec: 120
+    holdSec: 60
   - channels: 3
-    holdSec: 120
+    holdSec: 60
   - channels: 4
-    holdSec: 120
+    holdSec: 60
   - channels: 5
-    holdSec: 120
+    holdSec: 60
   - channels: 6
-    holdSec: 120
+    holdSec: 60
   - channels: 7
-    holdSec: 120
+    holdSec: 60
   - channels: 8
-    holdSec: 120
+    holdSec: 60
 
 thresholds:
   pass:
@@ -47,6 +47,8 @@ thresholds:
       minFpsRatio: null
       maxMissingRate: 0
 
-# Analysis FPS is observed but deliberately excluded from PASS/FAIL in this
-# historical evidence. Results must be labelled Experimental runtime observation,
-# never validated VLM capacity or an official supported-channel claim.
+# Analysis FPS is observed but deliberately excluded from PASS/FAIL. The current
+# tool waits for each newly added route to complete task-local inference and
+# expose direct Qwen latency before formal sampling. Results must remain labelled
+# Experimental runtime observation, never validated VLM capacity or an official
+# supported-channel claim.

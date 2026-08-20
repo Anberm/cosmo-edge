@@ -71,6 +71,9 @@ packages, environments, thresholds, and durations recorded in their linked evide
 - Simplified linkage runtime task handling and made task saves atomic under resource pressure.
 - Hardened change validation, sharded Sophon tests, and aligned ScenarioBench capacity, VLM
   throughput, preview-load, report, and cleanup behavior with the current staging protocol.
+- Refreshed the controlled-input VLM observations for BM1688, CV186X, and RK3576, and strengthened
+  ScenarioBench with per-route readiness, task-local completion counters, and current-route FPS.
+  Public summaries now report the gate-passing channel count from each run.
 
 ### Fixed
 

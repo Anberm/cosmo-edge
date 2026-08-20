@@ -32,9 +32,9 @@
 | RV1126B | 人员检测 | 2 | ≥4 | ≥4 | ≥4 |
 | RV1126B | 未佩戴安全帽分析 | 2 | ≥4 | ≥4 | ≥4 |
 
-## 统一测试条件
+## 小模型统一测试条件
 
-- CosmoEdge 源码：`89c73a7464a81ef378686447d7c1eeb88b988455`，tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`。
+- 小模型 CosmoEdge 源码：`89c73a7464a81ef378686447d7c1eeb88b988455`，tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`。
 - 视频：固定 1920×1080、H.264、24 FPS 本地循环样本，SHA-256 `3e1c5b97cd5bcc081e47ec631f84c36e72f075c8b9da6a19de3d9705fb887f92`。
 - 路数逐路增加；每级保持 30 秒；约每 3 秒采样；不加载预览客户端。
 - FPS 达标率门禁 80%，遥测缺失率 0，平均丢弃率上限 5%。
@@ -46,18 +46,20 @@ BM1688 与 CV186X 使用字节一致的检测和分类模型；RK3576、RV1126B 
 
 49 个小模型用例只在 4 份平台级 canonical JSON 中保存一次。每条记录保留完整实测阶梯，以及冻结分支中原始 `summary.json` 的 SHA-256。双语用例页、平台/工作负载汇总、索引与矩阵都从这些文件生成，不再作为额外证据副本提交。
 
-| 平台 | Canonical 用例 | 构建生成概览 | 构建生成用例页 | 构建生成工作负载报告 | 既有 VLM |
+| 平台 | Canonical 用例 | 构建生成概览 | 构建生成用例页 | 构建生成工作负载报告 | 最新 VLM |
 | --- | --- | --- | --- | --- | --- |
 | BM1688 | [JSON](results/bm1688/cases.json) | <a href="./results/bm1688/report.zh-CN.html">打开</a> | <a href="./results/bm1688/cases/report.zh-CN.html">打开</a> | <a href="./results/bm1688/single-workload/report.zh-CN.html">单任务</a> · <a href="./results/bm1688/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="./results/bm1688/vlm-observation/report.zh-CN.html">打开</a> |
 | CV186X | [JSON](results/cv186x/cases.json) | <a href="./results/cv186x/report.zh-CN.html">打开</a> | <a href="./results/cv186x/cases/report.zh-CN.html">打开</a> | <a href="./results/cv186x/single-workload/report.zh-CN.html">单任务</a> · <a href="./results/cv186x/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="./results/cv186x/vlm-observation/report.zh-CN.html">打开</a> |
 | RK3576 | [JSON](results/rk3576/cases.json) | <a href="./results/rk3576/report.zh-CN.html">打开</a> | <a href="./results/rk3576/cases/report.zh-CN.html">打开</a> | <a href="./results/rk3576/single-workload/report.zh-CN.html">单任务</a> · <a href="./results/rk3576/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="./results/rk3576/vlm-observation/report.zh-CN.html">打开</a> |
 | RV1126B | [JSON](results/rv1126b/cases.json) | <a href="./results/rv1126b/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/cases/report.zh-CN.html">打开</a> | <a href="./results/rv1126b/single-workload/report.zh-CN.html">单任务</a> · <a href="./results/rv1126b/concurrent-mixed/report.zh-CN.html">混合任务</a> | — |
 
-本次刷新只更新小模型结果。此前的 VLM 观测合并到[一份 canonical 文件](results/vlm-observations.json)中；由于 FPS 未启用门禁，它们仍然只能作为实验观测。
+VLM 观测已于 2026-08-20 使用相同的 1080p24 受控输入刷新，每级保持 60 秒。BM1688 本轮 8 路通过，CV186X 与 RK3576 本轮均 6 路通过。Canonical 数据统一收录在[一份文件](results/vlm-observations.json)中。
 
-候选绑定的 VLM 压测与长稳验证正在执行，当前保留的观测数据和 30 秒阶梯均不代表这些最终结论。只有在运行完成，并冻结源码、安装包、模型、环境、阈值、持续时间和清理状态后，本文才会更新对应结果。
+VLM FPS 仍然只作观测、不参与 PASS/FAIL，因此这些结果记录的是本轮已启用门禁下的短时观测，不是长稳资格结论。完整测试口径与停止条件见[方法说明](methodology.md)和 canonical 数据；后续运行会使用本次提交的逐路就绪探测。
 
-精简前的完整证据树（含逐用例命令、脱敏日志、summary、metrics 与 HTML）作为独立归档记录在 manifest 中。其哈希已经冻结，但归档状态是**已准备、未发布**，也不进入 Git 仓库。
+VLM 执行源码为 `f0a26546c60c57e70166f18d556f712a273a866d`，tree 为 `a9ebe3921771d8aaa0d29244074e7bfe3d098cf3`；每个平台观测都记录了源 summary、源 metrics 和工具补丁哈希。
+
+manifest 中的精简前完整归档仅覆盖 49 个小模型用例，包含逐用例命令、脱敏日志、summary、metrics 与 HTML。其哈希已经冻结，但归档状态是**已准备、未发布**，也不进入 Git 仓库。刷新后的 VLM 原始运行仍是按平台保存的私有证据，通过上述哈希引用，不属于该归档。
 
 ## 复现文件
 

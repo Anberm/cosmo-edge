@@ -22,9 +22,12 @@ import { runPreviewValidation } from './preview-validator.js';
 import { auditLongRunFile, writeLongRunAudit } from './longrun-auditor.js';
 import {
   installShutdownSignalHandlers,
-  sleepWithSignal,
   throwIfAborted,
 } from './shutdown-signal.js';
+import {
+  resolveVlmReadyTimeoutSec,
+  waitForVlmReady,
+} from './vlm-readiness.js';
 
 function parseArgs(argv) {
   const args = {};
@@ -76,6 +79,7 @@ run options:
   --only-channels <n>  Run only one exact channel-count step from the effective profile
   --ramp-batch-size <n>
   --ramp-batch-delay-sec <n>
+  --vlm-ready-timeout-sec <n> Wait for each new VLM route, default 180
   --preview <mode>      none (default) | raw | algorithm
   --preview-streams <n> Number of preview streams or all (default)
   --preview-clients <n> Media clients per preview stream, default 1
@@ -367,6 +371,9 @@ thresholds:
 
 async function runBenchmark(args) {
   requireArgs(args, ['device', 'scenario', 'output']);
+  // Validate every new run option before loading/saving a layout or creating
+  // channels on the target device.
+  const vlmReadyTimeoutSec = resolveVlmReadyTimeoutSec(args['vlm-ready-timeout-sec']);
   const auth = deviceAuth(args);
 
   const log = new Logger({ verbose: args.verbose });
@@ -386,6 +393,7 @@ async function runBenchmark(args) {
   let runError = null;
   let currentChannels = 0;
   let currentStepIndex = -1;
+  const currentVlmBindingsByStep = new Map();
   const writer = new ReportWriter(args.output);
   let effectiveLoadProfile = [];
   const abortController = new AbortController();
@@ -407,6 +415,7 @@ async function runBenchmark(args) {
       algorithmCode: task.algorithmCode,
       scheduleId: task.scheduleId,
       targetFps: task.targetFps,
+      vlmCompletionActionId: task.vlmCompletionActionId,
       templateFile: task.templateFile,
       taskConfig: task.taskConfig,
     })) ?? [],
@@ -443,7 +452,13 @@ async function runBenchmark(args) {
     startedAt,
     endedAt: new Date().toISOString(),
     samples,
-    steps: effectiveLoadProfile.map((s, i) => ({ index: i, ...s })),
+    steps: effectiveLoadProfile.map((s, i) => ({
+      index: i,
+      ...s,
+      ...(currentVlmBindingsByStep.has(i)
+        ? { currentVlmBindings: currentVlmBindingsByStep.get(i) }
+        : {}),
+    })),
   });
 
   const writePartial = async () => {
@@ -608,20 +623,37 @@ async function runBenchmark(args) {
     };
 
     const staircaseResult = await runner.runStaircase(effectiveLoadProfile, {
-      onRampBatch: async (step, active) => {
+      onRampBatch: async (step, active, added, entries) => {
         currentChannels = active.length;
         currentStepIndex = step.index;
+        const addedChannels = new Set(added);
+        const addedVlmEntries = entries.filter(
+          (entry) => strategyForTaskType(entry.taskType).id === 'vlm'
+            && addedChannels.has(entry.channelId),
+        );
+        if (addedVlmEntries.length) {
+          currentVlmBindingsByStep.set(step.index, addedVlmEntries.map((entry) => ({
+            taskKey: entry.taskKey,
+            channelId: entry.channelId,
+          })));
+          log.info(
+            `[ready] waiting up to ${vlmReadyTimeoutSec}s for ${addedVlmEntries.length} `
+            + 'new VLM binding(s) to complete task-local inference...',
+          );
+          await waitForVlmReady({
+            entries: addedVlmEntries,
+            probe: (probeEntries) => sampler.sample(probeEntries),
+            timeoutSec: vlmReadyTimeoutSec,
+            signal,
+            logger: log,
+          });
+        }
         return quickFuse(await captureSample('ramp', step.channels));
       },
       onStepStart: async (step, active, entries) => {
         currentChannels = active.length;
         currentStepIndex = step.index;
 
-        const hasVLM = activeEntries().some((e) => e.taskType === 'vlm');
-        if (hasVLM && step.index === 0) {
-          log.info(`[warmup] VLM detected in first step, waiting 30 seconds for model loading before sampling...`);
-          await sleepWithSignal(30_000, signal);
-        }
         await previewLoad.sync(entries);
         throwIfAborted(signal);
       },
@@ -629,7 +661,10 @@ async function runBenchmark(args) {
         return quickFuse(await captureSample('hold', currentChannels));
       },
       onStepEnd: async (step) => {
-        const summary = summarizeStep(step, samples, pkg.thresholds, pkg.videoMode);
+        const summary = summarizeStep({
+          ...step,
+          currentVlmBindings: currentVlmBindingsByStep.get(step.index) ?? [],
+        }, samples, pkg.thresholds, pkg.videoMode);
         const minFps = summary.minFpsAcross;
         const meanDiscard = summary.avgDiscard;
         const maxNpu = summary.maxNpu;

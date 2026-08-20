@@ -4,6 +4,25 @@ import test from 'node:test';
 import { ShutdownSignalError } from '../src/shutdown-signal.js';
 import { TaskRunner } from '../src/task-runner.js';
 
+test('task runner preserves the VLM completion counter contract in expected bindings', () => {
+  const runner = new TaskRunner({}, {
+    tasks: [{
+      id: 'vlm',
+      type: 'vlm',
+      algorithmId: '89336',
+      algorithmCode: '89336',
+      scheduleId: 'always',
+      vlmCompletionActionId: 'PDA_00003',
+    }],
+  });
+  runner.setChannels(['channel-1']);
+
+  assert.equal(
+    runner.expectedTaskEntries(['channel-1'])[0].vlmCompletionActionId,
+    'PDA_00003',
+  );
+});
+
 test('task runner aborts when a hold sample cannot be captured', async () => {
   const client = {
     async taskApplyParamsBatch() {

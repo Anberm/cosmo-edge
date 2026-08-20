@@ -210,8 +210,7 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
       platform.name,
       '0.1',
       value(item.observedBoundary.highestNonFpsPassingChannels),
-      value(lastPassingStep?.observedEquivalentPerChannelFps),
-      value(item.observedBoundary.firstNonFpsStopChannels),
+      value(lastPassingStep?.currentRouteFps),
     ]];
   });
   const environmentRows = platforms.map((platform) => [
@@ -255,17 +254,18 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
   body.push(
     `<h2>${zh ? 'VLM 实验运行观测' : 'Experimental VLM runtime observations'}</h2>`,
     notice(zh
-      ? 'VLM 保留的是上一批独立证据；FPS 只记录、不参与 PASS/FAIL，不能作为容量结论。'
-      : 'The retained VLM observations are preceding evidence. FPS is recorded but excluded from PASS/FAIL and cannot support a capacity claim.', 'experimental'),
-    table(zh ? ['平台', '目标 FPS/路', '最后非 FPS 通过路数', '最后通过级等效 FPS/路', '非 FPS 停止路数'] : ['Platform', 'Target FPS/ch', 'Last non-FPS pass', 'Last-passing equivalent FPS/ch', 'Non-FPS stop'], vlmRows),
+      ? 'VLM 已使用 2026-08-20 受控输入刷新，各平台按本轮记录的门禁汇总；FPS 只记录、不参与 PASS/FAIL，因此不能作为正式支持路数或长稳结论。'
+      : 'VLM was refreshed with the 2026-08-20 controlled input and summarized against the gates recorded for each run. FPS is recorded but excluded from PASS/FAIL, so the results are not supported-channel or long-running claims.', 'experimental'),
+    table(zh ? ['平台', '目标 FPS/路', '本轮通过路数', '该级新增路 FPS'] : ['Platform', 'Target FPS/ch', 'Channels passed in this run', 'New-route FPS at that step'], vlmRows),
     `<h2>${zh ? '证据入口' : 'Evidence entry points'}</h2>`,
     table(zh ? ['平台', '平台报告', '用例', '单任务', '混合任务', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Mixed workload', 'VLM'], linksRows),
     `<h2>${zh ? '测试环境' : 'Test environment'}</h2>`,
     table(zh ? ['平台', '设备', '操作系统', '运行时 / 媒体', 'CosmoEdge'] : ['Platform', 'Device', 'OS', 'Runtime / media', 'CosmoEdge'], environmentRows),
     `<h2>${zh ? '方法与复现' : 'Method and reproduction'}</h2>`,
-    `<ul><li>${zh ? '源码' : 'Source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></li>` +
+    `<ul><li>${zh ? '小模型测试源码' : 'Small-model source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></li>` +
+      `<li>${zh ? 'VLM 测试源码' : 'VLM source'}: <code>${escapeHtml(manifest.evidence?.vlmRefresh?.sourceCommit ?? '—')}</code> · ${anchor('results/vlm-observations.json', zh ? 'VLM canonical 数据' : 'VLM canonical data')}</li>` +
       `<li>${zh ? '受控输入 SHA-256' : 'Controlled input SHA-256'}: <code>${escapeHtml(manifest.dataset.sha256)}</code></li>` +
-      `<li>${zh ? '四份 canonical case 数据是唯一机器可读事实源；HTML、索引和矩阵由构建生成。' : 'Four canonical case datasets are the only machine-readable source of truth; HTML, indexes, and matrices are generated at build time.'}</li></ul>`,
+      `<li>${zh ? '四份小模型 canonical case 数据和一份 VLM canonical 数据是机器可读事实源；HTML、索引和矩阵由构建生成。' : 'Four small-model canonical case datasets plus one VLM canonical dataset are the machine-readable sources of truth; HTML, indexes, and matrices are generated at build time.'}</li></ul>`,
   );
 
   return page(locale, zh ? 'CosmoEdge 1.1 多平台容量基准' : 'CosmoEdge 1.1 Multi-Platform Benchmark', rootNav(locale), body.join(''));
@@ -307,7 +307,7 @@ function renderPlatformReport(locale, manifest, platform, observation) {
       `<li>${anchor(`concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务汇总' : 'Mixed-workload summary')}</li>` +
       (observation ? `<li>${anchor(`vlm-observation/report${zh ? '.zh-CN' : ''}.html`, zh ? 'VLM 实验观测' : 'Experimental VLM observation')}</li>` : '') +
       `</ul>`,
-    `<p>${zh ? '测试源码' : 'Test source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></p>`,
+    `<p>${zh ? '小模型测试源码' : 'Small-model test source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></p>`,
   ];
   return page(locale, `${platform.name} ${zh ? '容量概览' : 'capacity overview'}`, platformNav(locale), body.join(''));
 }
@@ -374,7 +374,8 @@ function renderVlmReport(locale, platform, observation) {
     step.channels,
     `${step.holdSeconds} s`,
     step.targetFpsPerChannel,
-    step.observedEquivalentPerChannelFps,
+    step.currentRouteFps,
+    `${value(step.minimumActiveRouteFps)} / ${percent(step.minimumActiveRouteFpsRatioObserved)}`,
     percent(step.averageDiscardRate),
     percentWhole(step.acceleratorPeakPercent),
     percentWhole(step.cpuPeakPercent),
@@ -384,9 +385,13 @@ function renderVlmReport(locale, platform, observation) {
   ]);
   const body = `<h1>${escapeHtml(platform.name)} · ${zh ? 'VLM 实验运行观测' : 'Experimental VLM runtime observation'}</h1>` +
     notice(zh
-      ? '这是本轮小模型刷新之前的保留证据。FPS 门禁已禁用，因此不支持容量结论。'
-      : 'This is retained evidence from before the small-model refresh. The FPS gate was disabled, so it does not support a capacity claim.', 'experimental') +
-    table(zh ? ['路数', '时长', '目标 FPS/路', '等效 FPS/路', '平均丢弃', '加速器', 'CPU', '内存', '非 FPS 门禁', '停止原因'] : ['Channels', 'Hold', 'Target FPS/ch', 'Equivalent FPS/ch', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Non-FPS gate', 'Stop reason'], rows);
+      ? '这是 2026-08-20 受控输入短时观测。新增路 FPS 来自任务本地完成计数；FPS 门禁未启用，因此不支持正式容量或长稳结论。'
+      : 'This is the 2026-08-20 controlled short-run observation. New-route FPS comes from task-local completion counts; the FPS gate was disabled, so it does not support a capacity or long-running claim.', 'experimental') +
+    table(zh ? ['路数', '时长', '目标 FPS/路', '当前新增路 FPS', '全路最低 FPS / 目标比例', '平均丢弃', '加速器', 'CPU', '内存', '非 FPS 门禁', '停止原因'] : ['Channels', 'Hold', 'Target FPS/ch', 'Current new-route FPS', 'Minimum active-route FPS / target ratio', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Non-FPS gate', 'Stop reason'], rows) +
+    `<p>${zh ? '测试源码' : 'Test source'}: <code>${escapeHtml(observation.source?.commit ?? '—')}</code> · ` +
+    `${zh ? '工具补丁' : 'tool patch'}: <code>${escapeHtml(observation.source?.toolPatchSha256 ?? '—')}</code> · ` +
+    `${anchor('../../vlm-observations.json', zh ? 'canonical 数据' : 'canonical data')} · ` +
+    `${anchor('../../../methodology.md', zh ? '方法说明' : 'methodology')}</p>`;
   return page(locale, `${platform.name} VLM`, workloadNav(locale), body);
 }
 

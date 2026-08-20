@@ -160,6 +160,7 @@ export class ScenarioPackage {
     const algorithmCode = String(spec.algorithmCode ?? template.algorithmCode ?? template.algorithmId ?? algorithmId);
     const scheduleId = spec.scheduleId ?? '';
     const vlm = detectVlmMode(template);
+    const vlmCompletionActionId = vlm.direct ? detectVlmCompletionActionId(template) : null;
     const type = vlm.direct ? 'vlm' : (spec.type ?? 'cv');
     const explicitTargetFps = spec.targetFps != null ? Number(spec.targetFps) : null;
     const targetFps = explicitTargetFps ?? extractTargetFpsFromTemplate(template);
@@ -178,6 +179,7 @@ export class ScenarioPackage {
       displayName: spec.displayName ?? template.algorithmName ?? id,
       type,
       hasNestedVlmReview: vlm.review,
+      vlmCompletionActionId,
       algorithmId,
       algorithmCode,
       scheduleId,
@@ -482,6 +484,23 @@ export function detectVlmMode(template) {
         param?.key === 'enableLlmReview' && String(param.value) === '1');
   });
   return { direct, review };
+}
+
+/**
+ * Select the counter that represents one completed result for this direct VLM
+ * graph. Video VLM graphs dispatch completed results through BA_00004, while
+ * the picture-only PDA graph owns its PDA_00003 counter directly. DA-only is
+ * retained as the legacy fallback for external templates.
+ */
+export function detectVlmCompletionActionId(template) {
+  const actionIds = new Set(parseProcessData(template).map(
+    (node) => String(node?.actionId ?? '').trim().toUpperCase(),
+  ));
+  const hasDirectVlm = [...VLM_ACTION_IDS].some((actionId) => actionIds.has(actionId));
+  if (!hasDirectVlm) return null;
+  if (actionIds.has('BA_00004')) return 'BA_00004';
+  if (actionIds.has('PDA_00003')) return 'PDA_00003';
+  return actionIds.has('DA_00003') ? 'DA_00003' : null;
 }
 
 // Re-export for unit testing of the fps extractor on arbitrary template objects.

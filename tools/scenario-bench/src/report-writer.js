@@ -151,6 +151,8 @@ export class ReportWriter {
   }
 
   _renderHtml(r, stepSummaries, summary) {
+    const isVlmReport = (r.tasks ?? []).some((task) => strategyForTask(task).id === 'vlm');
+    const throughputHeader = isVlmReport ? '当前新增路处理FPS' : '处理FPS(参考)';
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const pass = r.thresholds?.pass ?? {};
     const sampleInterval = estimateSampleIntervalSec(r.samples ?? []);
@@ -205,13 +207,14 @@ export class ReportWriter {
 
     const stepRows = stepSummaries.map((s, rowIndex) => {
       const status = stepStatus(s);
+      const displayedFps = isVlmReport ? (s.currentRouteFps ?? s.minFpsAcross) : s.minFpsAcross;
       return `
       <tr>
         <td>${rowIndex + 1}</td>
         <td>${s.channels}</td>
         <td>${s.holdSec}s</td>
         <td>${s.targetFps ?? '-'}</td>
-        <td>${s.minFpsAcross ?? '-'}</td>
+        <td>${displayedFps ?? '-'}</td>
         <td>${s.criticalPathLatencyMs ?? '-'}</td>
         <td>${s.detectorLatencyMs ?? '-'}</td>
         <td>${s.avgDiscard != null ? s.avgDiscard : '-'}</td>
@@ -321,7 +324,7 @@ ${bottleneckBanner}
 <table>${baseRows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>路数结果</h2>
 <table>
-  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>磁盘峰值</th><th>内存池在用/分配MiB/占用率</th><th>结果</th><th>失败原因</th></tr>
+  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>${throughputHeader}</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>磁盘峰值</th><th>内存池在用/分配MiB/占用率</th><th>结果</th><th>失败原因</th></tr>
   ${stepRows}
 </table>
 <h2>媒体与预览分阶段指标</h2>

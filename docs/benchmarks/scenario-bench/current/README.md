@@ -1,14 +1,18 @@
 # ScenarioBench Current Benchmark Refresh
 
-This directory contains refreshed benchmark reports generated after the v1.0 release documentation freeze. These reports keep the same publication policy as the v1.0 benchmark artifacts: public summaries and HTML reports are committed, while raw `metrics.json` traces stay out of the repository.
+This directory points to the newest reviewed benchmark refresh generated after the v1.0 release documentation freeze. Canonical measurements live in the versioned v1.1 pack; raw `metrics.json` traces stay out of the repository.
 
 ## Summary
 
-| ID | Scenario | Hardware profile | Target FPS | Max stable channels | Result | Chinese report |
-| --- | --- | --- | ---: | ---: | --- | --- |
-| [vlm-77175-npu](vlm-77175-npu/report.html) | VLM Review NPU Benchmark (77175) | npu-yy-16t01-preview | 0.1 | 8 | PASS | [zh-CN](vlm-77175-npu/report.zh-CN.html) |
+| Platform | Target FPS/ch | Gate result in this run | English | Chinese |
+| --- | ---: | --- | --- | --- |
+| BM1688 | 0.1 | 8 channels passed | <a href="../v1.1/results/bm1688/vlm-observation/report.html">open</a> | <a href="../v1.1/results/bm1688/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| CV186X | 0.1 | 6 channels passed | <a href="../v1.1/results/cv186x/vlm-observation/report.html">open</a> | <a href="../v1.1/results/cv186x/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| RK3576 | 0.1 | 6 channels passed | <a href="../v1.1/results/rk3576/vlm-observation/report.html">open</a> | <a href="../v1.1/results/rk3576/vlm-observation/report.zh-CN.html">zh-CN</a> |
 
 ## Notes
 
-- The VLM report uses the refreshed ScenarioBench VLM methodology: local input is throttled by `targetFps`, each step holds for 60s, and throughput is computed from stable-window completion counters.
-- The report is based on the same YY-16T01-Preview NPU device class and is published as a benchmark refresh, not as a new product release.
+- The 2026-08-20 refresh uses one controlled 1080p24 local-loop input, 60-second steps, and task-local completion counters.
+- VLM FPS is recorded but not gated. These are short-run runtime observations, not supported-channel or long-running qualification claims.
+- Results are recorded against the gates enabled for this run; see the v1.1 methodology and canonical data for the complete evaluation contract.
+- The [previous single-device report](vlm-77175-npu/report.html) remains available for old links and is superseded by the versioned three-platform refresh above.

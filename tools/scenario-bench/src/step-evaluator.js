@@ -10,7 +10,12 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     samples.filter((s) => s.stepIndex === (step.sampleStepIndex ?? step.index)),
     step,
   );
-  const ticks = allTicks.slice(Math.floor(allTicks.length / 2));
+  const hasVlm = allTicks.some((tick) =>
+    (tick.channels ?? []).some((channel) => strategyForTaskType(channel.taskType).id === 'vlm'));
+  // VLM steps already have an explicit model-loading phase. Keep the complete
+  // hold window so low-frequency completions are divided by the real observed
+  // time instead of a shortened first-event-to-end interval.
+  const ticks = hasVlm ? allTicks : allTicks.slice(Math.floor(allTicks.length / 2));
   if (!allTicks.length) {
     return {
       step,
@@ -95,6 +100,13 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
   const targetFpsValues = [...new Set(channelStats.map((stat) => stat.targetFps).filter((v) => v != null))];
   const targetFps = targetFpsValues.length <= 1 ? (targetFpsValues[0] ?? null) : targetFpsValues.join(' / ');
   const minFpsAcross = allThroughputFps.length ? Math.min(...allThroughputFps) : null;
+  const currentVlmStats = selectCurrentVlmStats(step, ticks, channelStats);
+  const currentRouteChannelId = currentVlmStats.at(-1)?.channelId ?? null;
+  const currentRouteTaskKey = currentVlmStats.at(-1)?.taskKey ?? null;
+  const currentRouteValues = currentVlmStats
+    .map((stat) => stat.minThroughputFps)
+    .filter((value) => value != null);
+  const currentRouteFps = currentRouteValues.length ? Math.min(...currentRouteValues) : null;
   const maxDiscard = allDiscard.length ? Math.max(...allDiscard) : null;
   const avgDiscard = allDiscard.length ? round(mean(allDiscard), 4) : null;
   const maxPrimaryLat = allPrimaryLat.length ? Math.max(...allPrimaryLat) : null;
@@ -186,6 +198,9 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     holdSec: step.holdSec,
     targetFps,
     minFpsAcross,
+    currentRouteChannelId,
+    currentRouteTaskKey,
+    currentRouteFps,
     maxDiscard,
     avgDiscard,
     detectorLatencyMs: maxPrimaryLat,
@@ -207,6 +222,30 @@ export function summarizeStep(step, samples, thresholds = {}, videoMode = 'local
     reasons: overall.reasons,
     qualified: step.qualified !== false,
   };
+}
+
+function selectCurrentVlmStats(step, ticks, channelStats) {
+  const vlmStats = channelStats.filter(
+    (stat) => strategyForTaskType(stat.taskType).id === 'vlm',
+  );
+  if (!vlmStats.length) return [];
+
+  const byBinding = new Map(vlmStats.map((stat) => [bindingKey(stat), stat]));
+  const requested = Array.isArray(step.currentVlmBindings) ? step.currentVlmBindings : [];
+  const selected = requested
+    .map((binding) => byBinding.get(bindingKey(binding)))
+    .filter(Boolean);
+  if (selected.length) return [...new Map(selected.map((stat) => [bindingKey(stat), stat])).values()];
+
+  const latestVlmChannel = [...(ticks.at(-1)?.channels ?? [])].reverse().find(
+    (channel) => strategyForTaskType(channel.taskType).id === 'vlm',
+  );
+  const latest = latestVlmChannel ? byBinding.get(bindingKey(latestVlmChannel)) : null;
+  return latest ? [latest] : [vlmStats.at(-1)];
+}
+
+function bindingKey(binding) {
+  return `${binding?.taskKey ?? 'default'}::${binding?.channelId ?? ''}`;
 }
 
 function summarizeMediaStages(ticks, inferMs) {
