@@ -33,15 +33,15 @@ CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编�
 
 ## CosmoEdge 1.1
 
-- **多平台发布：**BM1688、CV186X、RK3576 与 RV1126B 共享同一套视频接入、任务编排、事件和可观测流程，并分别使用目标平台模型产物。
-- **公开 benchmark 包：**[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单任务、并发混合任务与保守 VLM 性能展示边界，提供脱敏后的可复现附件。
-- **Rockchip 发布平台：**RK3576 与 RV1126B 均已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径，并纳入同一档 v1.1 发布范围；各自 benchmark 与长稳证据继续分开追溯，但不改变发布档位。
-- **Sophon 模型处理：**芯片感知校验支持 BM1688 与 CV186X 的目标 `.nn` 产物；benchmark 已记录两台参考设备的 Open 安装包和运行引擎精确绑定。
-- **RKNN 数据路径：**包含 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 张量直接解码路径，并保留明确 fallback。
-- **智能体辅助二开：**提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
-- **Model Guard 2.3：**为 Sophon Protected 包中的商业预置模型提供分发保护；Open 与 Protected 的应用软件能力一致，不以 SKU 解锁软件功能，区别在于模型是否加密以及是否包含设备授权工具。
-- **macOS Docker Preview：**为 Apple Silicon 提供隔离的 `linux/amd64` 单路本地视频体验路径，已完成多轮线下端到端验证。由于它不启用 Model Guard、不提供原生 macOS/NPU 路径、不覆盖多路部署，也不代表生产性能，因此仍保持 Preview 定位。
-- **验证边界：**VLM 原始运行仍是短时观测，公开矩阵在不改写实际门禁的前提下统一采用 80% 保守性能参考；长稳验证独立进行，不能由容量阶梯替代。
+- **多平台发布**：BM1688、CV186X、RK3576 与 RV1126B 共享同一套视频接入、任务编排、事件和可观测流程，并分别使用目标平台模型产物。
+- **公开 benchmark 包**：[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单任务、并发混合任务与保守 VLM 性能展示边界，提供脱敏后的可复现附件。
+- **Rockchip 发布平台**：RK3576 与 RV1126B 均已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径，并纳入同一档 v1.1 发布范围；各自 benchmark 与长稳证据继续分开追溯，但不改变发布档位。
+- **Sophon 模型处理**：芯片感知校验支持 BM1688 与 CV186X 的目标 `.nn` 产物；benchmark 已记录两台参考设备的 Open 安装包和运行引擎精确绑定。
+- **RKNN 数据路径**：包含 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 张量直接解码路径，并保留明确 fallback。
+- **智能体辅助二开**：提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
+- **Model Guard 2.3**：为 Sophon Protected 包中的商业预置模型提供分发保护；Open 与 Protected 的应用软件能力一致，不以 SKU 解锁软件功能，区别在于模型是否加密以及是否包含设备授权工具。
+- **macOS Docker Preview**：为 Apple Silicon 提供隔离的 `linux/amd64` 单路本地视频体验路径，已完成多轮线下端到端验证。由于它不启用 Model Guard、不提供原生 macOS/NPU 路径、不覆盖多路部署，也不代表生产性能，因此仍保持 Preview 定位。
+- **验证边界**：VLM 原始运行仍是短时观测，公开矩阵在不改写实际门禁的前提下统一采用 80% 保守性能参考；长稳验证独立进行，不能由容量阶梯替代。
 
 ## 选择平台
 
@@ -122,10 +122,10 @@ CV186X 请按照 [CV186X 快速开始](docs/guide/cv186x-quick-start.md)完成�
 
 ## 你可以构建什么
 
-- **实时视频分析：**检测、分类、跟踪、区域规则、计数、OSD 和告警截图。
-- **提示词驱动视觉：**让 VLM 状态判断和 GroundingDINO 开放词汇检测与传统 CV 流水线协同工作。
-- **可视化应用工作流：**在浏览器中连接模型、规则、事件和输出动作。
-- **边缘系统集成：**管理场景任务，并通过 REST、WebSocket、MQTT 或 HTTP webhook 输出结构化事件。
+- **实时视频分析**：检测、分类、跟踪、区域规则、计数、OSD 和告警截图。
+- **提示词驱动视觉**：让 VLM 状态判断和 GroundingDINO 开放词汇检测与传统 CV 流水线协同工作。
+- **可视化应用工作流**：在浏览器中连接模型、规则、事件和输出动作。
+- **边缘系统集成**：管理场景任务，并通过 REST、WebSocket、MQTT 或 HTTP webhook 输出结构化事件。
 
 ## 核心能力
 
@@ -195,19 +195,19 @@ VLM 原始运行没有启用 FPS PASS/FAIL。统一按“全路最低 FPS 达到
 
 ```text
 +------------------------------------------------------------------+
-| Web 控制台 | 可视化编排 | REST / WebSocket / MQTT                 |
+| Web 控制台 | 可视化编排 | REST / WebSocket / MQTT                |
 +--------------------------------+---------------------------------+
                                  |
 +--------------------------------v---------------------------------+
 | C++ 引擎核心                                                     |
-| 媒体 | 推理 | 任务 | 规则 | 告警 | 事件 | 模型                    |
+| 媒体 | 推理 | 任务 | 规则 | 告警 | 事件 | 模型                   |
 +--------------------------------+---------------------------------+
                                  |
 +--------------------------------v---------------------------------+
 | 推理与媒体后端接口                                               |
 +--------------------+----------------------+----------------------+
 | Sophon BMRT/VPU    | RKNN + MPP/RGA       | ONNX Runtime/FFmpeg  |
-| BM1688；CV186X      | RK3576                | x86 Linux / Windows  |
+| BM1688；CV186X     | RK3576               | x86 Linux / Windows  |
 +--------------------+----------------------+----------------------+
 ```
 
@@ -228,7 +228,7 @@ VLM 原始运行没有启用 FPS PASS/FAIL。统一按“全路最低 FPS 达到
 
 认证设备提供预配置加速、经过验证的商业模型包和专属部署支持，但不解锁另一套软件功能。中国大陆可通过[淘宝购买认证设备](https://item.taobao.com/item.htm?id=1066672051450)；其他地区或项目部署支持请联系 <hello@cosmowander.ai>。
 
-欢迎提交范围明确的 bug 报告、文档改进、场景示例和集成说明。提交 pull request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。社区支持入口为 [GitHub Discussions](https://github.com/cosmo-wander-ai/cosmo-edge/discussions)和 [Gitee Issues](https://gitee.com/cosmo-wander-ai/cosmo-edge/issues)；安全问题请按 [SECURITY.md](SECURITY.md) 私密报告。
+欢迎提交范围明确的 bug 报告、文档改进、场景示例和集成说明。提交 pull request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。社区支持入口为 [GitHub Discussions](https://github.com/cosmo-wander-ai/cosmo-edge/discussions) 和 [Gitee Issues](https://gitee.com/cosmo-wander-ai/cosmo-edge/issues)；安全问题请按 [SECURITY.md](SECURITY.md) 私密报告。
 
 中文实时交流可加入 [CosmoEdge 微信开发者交流群](https://github.com/cosmo-wander-ai/cosmo-edge/discussions/112)；微信群用于开发者交流，群内形成的可复现问题和可复用结论请继续沉淀到 GitHub Discussions 或 Issues。
 
@@ -262,7 +262,7 @@ VLM 原始运行没有启用 FPS PASS/FAIL。统一按“全路最低 FPS 达到
 
 </details>
 
-### License
+## 许可证
 
 CosmoEdge 使用 [Apache License 2.0](LICENSE) 开源许可。Copyright 2026 CosmoEdge Contributors。
 
