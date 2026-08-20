@@ -17,6 +17,7 @@ Status: **prepared for repository review; not yet published**
 - [x] Canonical JSON semantics, generated HTML links/languages, public-data scrub, and source/generated checksums validated.
 - [x] The 49-case small-model pre-simplification archive is frozen separately by commit, tree, and SHA-256.
 - [x] Refreshed VLM projections retain their projected-artifact and private original-run source hashes.
+- [ ] CV186X and RK3576 VLM re-measurement with the unified readiness probe — deferred until the long-duration qualification releases the devices.
 
 This checklist qualifies the benchmark publication candidate only. It does not claim product-release qualification, soak stability, RTSP resilience, accuracy acceptance, or customer-journey acceptance.
 

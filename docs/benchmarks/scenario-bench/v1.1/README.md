@@ -64,7 +64,7 @@ The VLM observations were refreshed on 2026-08-20 with the same controlled 1080p
 | RK3576 | 0.1 | ≥80% | 4 channels | 5-channel minimum across active routes: 0.07 FPS (70%) |
 | RV1126B | — | — | — | No VLM observation in this refresh |
 
-Per-route readiness is a precondition outside formal hold sampling, and its probes do not enter FPS statistics. The CV186X and RK3576 runs predate the final per-route readiness protocol, so their startup-sensitive stops neither count as performance failures nor increase the displayed boundary. These values are conservative publication display boundaries, not exact hardware limits, formal capacity, or long-running qualification. The canonical raw measurements are consolidated in [one canonical file](results/vlm-observations.json).
+Per-route readiness is a precondition outside formal hold sampling, and its probes do not enter FPS statistics. The CV186X and RK3576 runs predate the final per-route readiness protocol, so their startup-sensitive stops neither count as performance failures nor increase the displayed boundary. These values are conservative publication display boundaries, not exact hardware limits, formal capacity, or long-running qualification. CV186X and RK3576 will be re-measured with the unified readiness probe once the ongoing long-duration qualification releases the devices. The canonical raw measurements are consolidated in [one canonical file](results/vlm-observations.json).
 
 The VLM execution source is `f0a26546c60c57e70166f18d556f712a273a866d`, tree `a9ebe3921771d8aaa0d29244074e7bfe3d098cf3`; each platform observation records its source-summary, source-metrics, and tool-patch hashes.
 
