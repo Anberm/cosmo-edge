@@ -71,6 +71,9 @@ jobs:
       - name: Validate Rockchip package policy tooling
         run: |
           bash -n scripts/build_rknn.sh scripts/build_rockchip_package.sh
+          bash test/test_runtime_paths.sh
+          bash test/test_legacy_migration_installer.sh
+          bash test/test_upgrade_start_fallback.sh
           python3 -m unittest discover -s test -p 'test_package_profile.py'
           python3 -m unittest discover -s test/agent \
             -p 'test_rknn_media_sysroot_lock.py'
