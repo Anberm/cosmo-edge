@@ -68,6 +68,11 @@ packages, environments, thresholds, and durations recorded in their linked evide
 - Unified Sophon package upgrades on the legacy-compatible permanent-MD5 lifecycle, including
   legacy installer invocation, safe internal symlinks, upgrade recovery, and Open/Protected model
   lifecycle checks. Application archives themselves remain unsigned.
+- Added a fail-closed Rockchip data-root bridge for prerelease installations: durable state is
+  transactionally copied from `/data/cwaiuserdata` to `/userdata/cwaiuserdata`, the source remains
+  available for recovery, transient upload/runtime data is excluded, and ambiguous dual-root
+  persistent state is rejected before service shutdown. A rejected installation resumes the
+  previously active application instead of leaving the service in an upgrade retry loop.
 - Simplified linkage runtime task handling and made task saves atomic under resource pressure.
 - Hardened change validation, sharded Sophon tests, and aligned ScenarioBench capacity, VLM
   throughput, preview-load, report, and cleanup behavior with the current staging protocol.
@@ -115,6 +120,8 @@ packages, environments, thresholds, and durations recorded in their linked evide
   descriptors, release manifest, and file checksums.
 - Added the agent-assisted development entry, environment and model-conversion guidance, and a
   contributor pre-commit hook guide.
+- Added the bilingual v1.0.0-to-v1.1.0 upgrade and recovery guide, maintainer-ready per-platform
+  v1.1.0 release-note drafts, and an explicit GitHub Discussions English-support boundary.
 
 ## [1.0.0] - 2026-07-03
 

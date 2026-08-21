@@ -246,7 +246,9 @@ One build selects one inference backend. Model artifacts are generated for the t
 
 Certified devices add preconfigured acceleration, validated commercial model packages, and dedicated deployment support; they do not unlock separate software features. Devices are available in mainland China from the [Taobao store](https://item.taobao.com/item.htm?id=1066672051450); contact <hello@cosmowander.ai> for other regions or project support.
 
-Contributions are welcome through scoped bug reports, documentation improvements, scenarios, and integration notes. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Community support is available through [GitHub Discussions](https://github.com/cosmo-wander-ai/cosmo-edge/discussions) and [Gitee Issues](https://gitee.com/cosmo-wander-ai/cosmo-edge/issues); report vulnerabilities through [SECURITY.md](SECURITY.md).
+Contributions are welcome through scoped bug reports, documentation improvements, scenarios, and integration notes. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+[GitHub Discussions](https://github.com/cosmo-wander-ai/cosmo-edge/discussions) is the official searchable English Q&A and community-support channel for v1.1. Send reproducible defects to [GitHub Issues](https://github.com/cosmo-wander-ai/cosmo-edge/issues), use [Gitee Issues](https://gitee.com/cosmo-wander-ai/cosmo-edge/issues) for the mainland China mirror, and report vulnerabilities privately through [SECURITY.md](SECURITY.md). No Discord channel is operated for this release.
 
 ## FAQ
 
