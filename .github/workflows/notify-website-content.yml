@@ -44,8 +44,13 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::WEBSITE_SYNC_TOKEN is required to dispatch the private website workflow."
-            exit 1
+            echo "::notice::WEBSITE_SYNC_TOKEN is not configured; the website's scheduled pull remains active."
+            {
+              echo "### Website dispatch skipped"
+              echo
+              echo "\`WEBSITE_SYNC_TOKEN\` is not configured. The website repository will pick up \`main\` through its scheduled pull workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
           source_ref="main"
