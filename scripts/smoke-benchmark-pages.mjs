@@ -55,6 +55,7 @@ for (const report of expectedReports) {
   const tables = html.match(/<table\b/giu)?.length ?? 0;
   const wrappers = html.match(/<div class="table"/giu)?.length ?? 0;
   if (tables !== wrappers) failures.push(`${report}: ${tables} table(s) but ${wrappers} responsive wrapper(s)`);
+  if (!html.includes('overflow-wrap:anywhere')) failures.push(`${report}: long tokens can escape the mobile viewport`);
   if (!html.includes('class="report-nav"')) failures.push(`${report}: report navigation is missing`);
   if (/\b(?:undefined|NaN)\b|\[object Object\]/u.test(html)) failures.push(`${report}: unresolved generated value`);
 }

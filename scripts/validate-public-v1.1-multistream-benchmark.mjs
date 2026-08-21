@@ -639,6 +639,7 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
     const tables = html.match(/<table\b/gi)?.length ?? 0;
     const wrappers = html.match(/<div class="table"/gi)?.length ?? 0;
     if (tables !== wrappers) fail(`generated report lacks responsive table wrappers: ${report}`);
+    if (!html.includes('overflow-wrap:anywhere')) fail(`generated report lacks long-token wrapping: ${report}`);
     if (/\b(?:undefined|NaN)\b|\[object Object\]/.test(html)) fail(`generated report contains an unresolved value: ${report}`);
     if (/dual-detector|RV1126B\s+(?:Experimental|实验)/i.test(html)) fail(`generated report contains obsolete public terminology: ${report}`);
   }
