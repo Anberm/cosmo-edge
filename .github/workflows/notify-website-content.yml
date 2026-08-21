@@ -10,7 +10,6 @@ on:
       - README.zh-CN.md
       - CHANGELOG.md
       - .github/release-notes/**
-      - .github/workflows/notify-website-content.yml
       - scripts/generate-v1.1-benchmark-pages.mjs
       - scripts/validate-public-v1.1-multistream-benchmark.mjs
       - tools/scenario-bench/**
