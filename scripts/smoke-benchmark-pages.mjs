@@ -82,6 +82,7 @@ const actualCaseCount = platforms.reduce((count, platform) => count + (platform.
 if (actualCaseCount !== expectedCaseCount) {
   failures.push(`canonical case count ${actualCaseCount} differs from manifest count ${expectedCaseCount}`);
 }
+const canonicalPublicReportLinks = validateCanonicalPublicReportLinks();
 
 if (failures.length) {
   console.error(`Benchmark page smoke test failed with ${failures.length} issue(s):`);
@@ -91,7 +92,8 @@ if (failures.length) {
 
 console.log(
   `Benchmark page smoke test passed: ${expectedReports.length} generated bilingual reports across ` +
-  `${platforms.length} manifest-defined platforms and ${actualCaseCount} canonical cases.`,
+  `${platforms.length} manifest-defined platforms, ${actualCaseCount} canonical cases, and ` +
+  `${canonicalPublicReportLinks} canonical website report links.`,
 );
 
 function readJson(relativePath) {
@@ -118,4 +120,61 @@ function walk(directory) {
     const full = path.join(directory, entry.name);
     return entry.isDirectory() ? walk(full) : [full];
   });
+}
+
+function validateCanonicalPublicReportLinks() {
+  const docsRoot = path.join(repositoryRoot, 'docs');
+  const benchmarkSourceRoot = path.join(docsRoot, 'benchmarks', 'scenario-bench');
+  const markdownFiles = [
+    path.join(repositoryRoot, 'README.md'),
+    path.join(repositoryRoot, 'README.zh-CN.md'),
+    ...walk(docsRoot).filter((file) => file.endsWith('.md') && !file.includes(`${path.sep}.vitepress${path.sep}`)),
+  ];
+  let checked = 0;
+
+  for (const file of markdownFiles) {
+    const source = fs.readFileSync(file, 'utf8');
+    const targets = new Set([
+      ...[...source.matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^)]*)?\)/g)]
+        .map((match) => match[1].replace(/^<|>$/g, '')),
+      ...[...source.matchAll(/<a\b[^>]*href=["']([^"']+)["']/gi)].map((match) => match[1]),
+    ]);
+    const benchmarkReadme = file.startsWith(`${benchmarkSourceRoot}${path.sep}`)
+      && /^README(?:\.zh-CN)?\.md$/u.test(path.basename(file));
+
+    for (const target of targets) {
+      if (!/\.html(?:[?#].*)?$/iu.test(target)) continue;
+      if (!benchmarkReadme && !target.includes('benchmarks/scenario-bench')) continue;
+      checked += 1;
+
+      let url;
+      try {
+        url = new URL(target);
+      } catch {
+        failures.push(`${path.relative(repositoryRoot, file)}: benchmark report must use the canonical website URL: ${target}`);
+        continue;
+      }
+      if (url.origin !== 'https://www.cosmowander.ai') {
+        failures.push(`${path.relative(repositoryRoot, file)}: benchmark report uses a non-canonical origin: ${target}`);
+        continue;
+      }
+
+      const match = url.pathname.match(/^\/(?:zh\/)?docs\/(benchmarks\/scenario-bench\/.+\.html)$/u);
+      if (!match) {
+        failures.push(`${path.relative(repositoryRoot, file)}: benchmark report has a non-canonical website path: ${target}`);
+        continue;
+      }
+      const chineseReport = url.pathname.endsWith('.zh-CN.html');
+      const chineseRoute = url.pathname.startsWith('/zh/docs/');
+      if (chineseReport !== chineseRoute) {
+        failures.push(`${path.relative(repositoryRoot, file)}: report language and website locale differ: ${target}`);
+      }
+
+      const builtTarget = path.resolve(distRoot, ...decodeURIComponent(match[1]).split('/'));
+      if (!builtTarget.startsWith(`${distRoot}${path.sep}`) || !fs.existsSync(builtTarget)) {
+        failures.push(`${path.relative(repositoryRoot, file)}: canonical website report is missing from the build: ${target}`);
+      }
+    }
+  }
+  return checked;
 }

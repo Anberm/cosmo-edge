@@ -166,7 +166,7 @@ v1.1 报告覆盖 BM1688、CV186X、RK3576 与 RV1126B。报告包含人员检�
 
 - [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
-- [中文主报告（官网渲染版）](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
+- [中文主报告（官网渲染版）](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
 - [方法与复现](docs/benchmarks/scenario-bench/v1.1/methodology.md)
 
 本轮受控测试使用源码 commit `89c73a7464a81ef378686447d7c1eeb88b988455`、tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`，统一固定 1080p24 视频、30 秒单级时长和 [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json) 中记录的门禁。

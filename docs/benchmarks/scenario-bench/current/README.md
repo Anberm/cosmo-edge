@@ -6,13 +6,13 @@ This directory points to the newest reviewed benchmark refresh generated after t
 
 | Platform | Target FPS/ch | Conservative 80% display boundary | English | Chinese |
 | --- | ---: | --- | --- | --- |
-| BM1688 | 0.1 | 6 channels | <a href="../v1.1/results/bm1688/vlm-observation/report.html">open</a> | <a href="../v1.1/results/bm1688/vlm-observation/report.zh-CN.html">zh-CN</a> |
-| CV186X | 0.1 | 6 channels | <a href="../v1.1/results/cv186x/vlm-observation/report.html">open</a> | <a href="../v1.1/results/cv186x/vlm-observation/report.zh-CN.html">zh-CN</a> |
-| RK3576 | 0.1 | 4 channels | <a href="../v1.1/results/rk3576/vlm-observation/report.html">open</a> | <a href="../v1.1/results/rk3576/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| BM1688 | 0.1 | 6 channels | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html">open</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| CV186X | 0.1 | 6 channels | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html">open</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| RK3576 | 0.1 | 4 channels | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html">open</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.zh-CN.html">zh-CN</a> |
 
 ## Notes
 
 - The 2026-08-20 refresh uses one controlled 1080p24 local-loop input, 60-second steps, and task-local completion counters.
 - VLM FPS was recorded but not gated in the raw runs. The table applies the v1.1 conservative post-evaluation and is not an exact capacity or long-running claim.
 - Startup-sensitive windows do not count as performance failures and do not increase the displayed boundary; see the v1.1 methodology and canonical data for the complete contract.
-- The [previous single-device report](vlm-77175-npu/report.html) remains available only as a superseded historical observation.
+- The [previous single-device report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/vlm-77175-npu/report.html) remains available only as a superseded historical observation.
