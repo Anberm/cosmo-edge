@@ -306,9 +306,8 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     }
     std::string file_name = absolute_file.filename().string();
     std::string file_name_md5sum;
-    auto ret = UpgradeFileNameCheck(file_name, file_name_md5sum);
-    if (ret != util::ErrorEnum::Success) {
-        return ret;
+    if (UpgradeFileNameCheck(file_name, file_name_md5sum) != util::ErrorEnum::Success) {
+        return util::ErrorEnum::UpgradeFileVerifyFailed;
     }
 
     std::string resolved_file;
@@ -340,9 +339,6 @@ util::ErrorEnum PacketUpgrade(const fs::path& filePath) {
     if (!budget.valid) {
         throw util::ErrorMessage(util::ErrorEnum::SysErr, "Cannot inspect upgrade extraction storage");
     }
-    // A valid package replaces the previous prepared upgrade tree. Include
-    // those allocated blocks in the admission budget, while keeping the tree
-    // intact until all package validation above has succeeded.
     const auto usable_bytes =
         util::UsableStorageBytesAfterReclaim(budget, AllocatedTreeBytes(upgradeFileDir));
     if (inspection.total_bytes > usable_bytes) {

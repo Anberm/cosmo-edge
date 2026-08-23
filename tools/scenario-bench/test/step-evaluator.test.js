@@ -11,13 +11,39 @@ test('step summary records accelerator and accelerator-memory peaks', () => {
     hardware: {
       npuUtilization: { usedPercent: 20 + index },
       specialMemoryUtilization: { usedPercent: 30 + index },
+      eMMCUtilization: { usedPercent: 40 + index },
     },
   }));
 
-  const summary = summarizeStep({ index: 0, channels: 0, holdSec: 24 }, samples);
+  const summary = summarizeStep(
+    { index: 0, channels: 0, holdSec: 24 },
+    samples,
+    { pass: { maxDiskUsedPercent: 50 } },
+  );
 
   assert.equal(summary.maxNpu, 27);
   assert.equal(summary.maxAcceleratorMem, 37);
+  assert.equal(summary.maxDiskUsedPercent, 47);
+  assert.equal(summary.perThreshold.find((item) => item.name === 'maxDiskUsedPercent')?.result, 'PASS');
+});
+
+test('step summary fails when device disk usage exceeds the configured gate', () => {
+  const samples = Array.from({ length: 4 }, (_, index) => ({
+    stepIndex: 0,
+    ts: index * 3000,
+    channels: [],
+    hardware: { eMMCUtilization: { usedPercent: 88 + index } },
+  }));
+
+  const summary = summarizeStep(
+    { index: 0, channels: 0, holdSec: 12 },
+    samples,
+    { pass: { maxDiskUsedPercent: 90 } },
+  );
+
+  assert.equal(summary.maxDiskUsedPercent, 91);
+  assert.equal(summary.pass, false);
+  assert.match(summary.reasons.join('; '), /磁盘使用率 91%/);
 });
 
 test('runtime decision stops CV tasks when steady throughput falls below half baseline', () => {
@@ -64,7 +90,7 @@ test('runtime decision stops VLM tasks by configured FPS ratio instead of CV bas
   assert.doesNotMatch(decision.reason, /baseline/);
 });
 
-test('VLM step summary uses window counter throughput instead of minimum instant delta', () => {
+test('VLM step summary uses the complete hold window for counter throughput', () => {
   const samples = [0, 1, 2, 3, 4, 5].map((index) => ({
     stepIndex: 0,
     ts: index * 10_000,
@@ -94,9 +120,90 @@ test('VLM step summary uses window counter throughput instead of minimum instant
     'local',
   );
 
-  assert.equal(summary.pass, true);
-  assert.equal(summary.channelStats[0].windowThroughputFps, 0.1);
-  assert.equal(summary.taskStats[0].minFpsRatio, 1);
+  assert.equal(summary.pass, false);
+  assert.equal(summary.channelStats[0].windowThroughputFps, 0.06);
+  assert.equal(summary.taskStats[0].minFpsRatio, 0.6);
+  assert.equal(summary.channelStats[0].sampleCount, 6);
+});
+
+test('VLM step summary exposes the newest route throughput separately', () => {
+  const samples = [0, 1, 2, 3].map((index) => ({
+    stepIndex: 1,
+    ts: index * 10_000,
+    channels: [
+      {
+        taskKey: 'vlm', taskType: 'vlm', channelId: 'ch1', targetFps: 0.1,
+        primaryProcessTotal: 10 + index * 2, measuredFps: 0.2, discardRate: 0,
+        telemetryMissing: false,
+        nodeDurationInfos: [{ name: 'Qwen3VLWorker', durationAvgUs: 1_000_000 }],
+      },
+      {
+        taskKey: 'vlm', taskType: 'vlm', channelId: 'ch2', targetFps: 0.1,
+        primaryProcessTotal: 20 + index, measuredFps: 0.1, discardRate: 0,
+        telemetryMissing: false,
+        nodeDurationInfos: [{ name: 'Qwen3VLWorker', durationAvgUs: 1_000_000 }],
+      },
+    ],
+    hardware: {},
+  }));
+
+  const summary = summarizeStep(
+    {
+      index: 1,
+      channels: 2,
+      holdSec: 40,
+      currentVlmBindings: [{ taskKey: 'vlm', channelId: 'ch2' }],
+    },
+    samples,
+    { taskTypes: { vlm: { minFpsRatio: null, maxMissingRate: 0 } } },
+    'local',
+  );
+
+  assert.equal(summary.currentRouteChannelId, 'ch2');
+  assert.equal(summary.currentRouteFps, 0.1);
+});
+
+test('current-route FPS uses only the explicitly newest VLM binding in a mixed workload', () => {
+  const samples = [0, 1, 2, 3].map((index) => ({
+    stepIndex: 1,
+    ts: index * 10_000,
+    channels: [
+      {
+        taskKey: 'vlm-new', taskType: 'vlm', channelId: 'ch2', targetFps: 0.1,
+        primaryProcessTotal: 20 + index, measuredFps: 0.1, discardRate: 0,
+        telemetryMissing: false,
+        nodeDurationInfos: [{ name: 'Qwen3VLWorker', durationAvgUs: 1_000_000 }],
+      },
+      {
+        taskKey: 'cv', taskType: 'cv', channelId: 'ch2', targetFps: 5,
+        measuredFps: 0.01, discardRate: 0, telemetryMissing: false,
+        nodeDurationInfos: [{ name: 'detector', durationAvgUs: 10_000 }],
+      },
+      {
+        taskKey: 'vlm-old', taskType: 'vlm', channelId: 'ch1', targetFps: 0.1,
+        primaryProcessTotal: 100 + index * 3, measuredFps: 0.3, discardRate: 0,
+        telemetryMissing: false,
+        nodeDurationInfos: [{ name: 'Qwen3VLWorker', durationAvgUs: 1_000_000 }],
+      },
+    ],
+    hardware: {},
+  }));
+
+  const summary = summarizeStep(
+    {
+      index: 1,
+      channels: 2,
+      holdSec: 40,
+      currentVlmBindings: [{ taskKey: 'vlm-new', channelId: 'ch2' }],
+    },
+    samples,
+    { taskTypes: { vlm: { minFpsRatio: null, maxMissingRate: 0 } } },
+    'local',
+  );
+
+  assert.equal(summary.currentRouteTaskKey, 'vlm-new');
+  assert.equal(summary.currentRouteChannelId, 'ch2');
+  assert.equal(summary.currentRouteFps, 0.1);
 });
 
 test('step summary ignores ramp samples when hold samples are available', () => {

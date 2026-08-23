@@ -669,8 +669,7 @@ export default {
             algorithmUsage: Number(this.addAlgorithmicForm.algorithmUsage),
             eventType: this.addAlgorithmicForm.eventType,
             checkType: this.addAlgorithmicForm.checkType,
-            remark: this.addAlgorithmicForm.remark,
-            filePath: '/appfs/cosmo_wander/cwai_data/resource/algorithm'
+            remark: this.addAlgorithmicForm.remark
           }
           params.algorithmCategory = Number(params.algorithmCategory)
           params.checkType = Number(params.checkType)

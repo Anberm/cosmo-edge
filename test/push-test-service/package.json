@@ -4,8 +4,12 @@
   "private": true,
   "description": "HTTP and MQTT test service for AI Box push interface verification.",
   "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
+    "test": "node --test image-analysis-client.test.js",
     "test:mqtt": "node server.js"
   },
   "dependencies": {

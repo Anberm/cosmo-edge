@@ -126,10 +126,24 @@ TEST_CASE("LinkageServiceImpl: CRUD and query operations", "[linkage-service]") 
         REQUIRE(ret == ErrorEnum::Failed);
     }
 
-    SECTION("Add rejects an empty workflow") {
+    SECTION("Add creates a draft for an empty workflow") {
         std::string id;
         auto ret = sut.Add("test_strategy", "[]", id);
-        REQUIRE(ret == ErrorEnum::ParameterException);
+        REQUIRE(ret == ErrorEnum::Success);
+        REQUIRE_FALSE(id.empty());
+
+        size_t total       = 0;
+        const auto results = sut.Query(1, 10, "test_strategy", total);
+        REQUIRE(total == 1);
+        REQUIRE(results.size() == 1);
+        REQUIRE(results.front().id == id);
+        REQUIRE(nlohmann::json::parse(results.front().workFlow).empty());
+    }
+
+    SECTION("Update still rejects an empty workflow") {
+        std::string id;
+        REQUIRE(sut.Add("configured", MakeValidWorkflow(), id) == ErrorEnum::Success);
+        REQUIRE(sut.Update("draft", id, "[]") == ErrorEnum::ParameterException);
     }
 
     SECTION("Add then Delete succeeds") {
@@ -281,6 +295,26 @@ TEST_CASE("LinkageServiceImpl: CRUD and query operations", "[linkage-service]") 
         REQUIRE(result == true);
         REQUIRE(totalSize >= 0);
     }
+}
+
+TEST_CASE("LinkageServiceImpl: empty workflow draft survives reload", "[linkage-service]") {
+    LinkageTestEnv env;
+    cosmo::test::MockServiceRegistry mocks;
+    env.SetupPaths();
+
+    std::string id;
+    {
+        LinkageServiceImpl writer;
+        REQUIRE(writer.Add("draft", "[]", id) == ErrorEnum::Success);
+    }
+
+    LinkageServiceImpl reader;
+    size_t total       = 0;
+    const auto results = reader.Query(1, 10, "draft", total);
+    REQUIRE(total == 1);
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().id == id);
+    REQUIRE(nlohmann::json::parse(results.front().workFlow).empty());
 }
 
 TEST_CASE("LinkageServiceImpl: persistence failure does not publish a ghost strategy",

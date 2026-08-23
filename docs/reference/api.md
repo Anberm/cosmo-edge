@@ -5,13 +5,13 @@ prev:
   text: 架构概览
   link: /guide/architecture
 next:
-  text: 字段级 API 参考
-  link: /reference/api-fields
+  text: 图片检测 API 接入指南
+  link: /reference/image-detection-api
 ---
 
 # API 概览
 
-本文只记录当前源码中可以确认的 API 类别和入口。字段级接口说明请继续阅读[字段级 API 参考](api-fields.md)、[MQTT 接入参考](mqtt.md)和[HTTP Webhook 参考](webhook.md)。
+本文只记录当前源码中可以确认的 API 类别和入口。图片上传与同步推理的完整调用流程请阅读[图片检测 API 接入指南](image-detection-api.md)；其他字段级接口说明请继续阅读[字段级 API 参考](api-fields.md)、[MQTT 接入参考](mqtt.md)和[HTTP Webhook 参考](webhook.md)。
 
 ## 路由入口
 
@@ -145,6 +145,11 @@ QueryLogs
 控制面 JSON 请求默认限制为 1 MB；普通单次 multipart 请求默认限制为 10 MB；推荐上传分片为 8 MB。这里的 MB 均按 1024 × 1024 bytes 计算。它们是单次 HTTP 请求的内存与解析边界，不是业务文件总量限制。超过边界时服务端返回 HTTP 413 和 `HTTP_BODY_TOO_LARGE`，并建议 `USE_CHUNKED_UPLOAD` 或 `REDUCE_REQUEST_BODY`。
 
 ### 升级恢复状态
+
+升级请求接受 `uploadId`，其原始文件名必须匹配
+`cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz`。后端在重启前校验
+文件名、MD5、归档安全和目录结构；重启后由统一启动脚本再次校验 MD5 并安装。
+Open 与 Protected 包使用相同升级协议，模型授权不参与应用包校验。
 
 `POST /gtw/cwai/System/QueryDeviceStatus` 成功时返回：
 

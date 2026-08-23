@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 
+#include "RuntimePathsConfig.h"
 #include "api/ApiRouter.h"
 #include "app/AppConstants.h"
 #include "media/IOsdTextRenderer.h"
@@ -67,6 +68,8 @@
 #include "service/model/IModelQuery.h"
 #include "service/model/IModelService.h"
 #include "service/model/impl/ModelServiceImpl.h"
+#include "service/modelguard/IModelAuthorizationService.h"
+#include "service/modelguard/impl/ModelAuthorizationServiceImpl.h"
 #include "service/network/INetworkService.h"
 #include "service/network/impl/AuthServiceImpl.h"
 #include "service/network/impl/ClientMessageServiceImpl.h"
@@ -100,6 +103,7 @@
 #include "service/task/ITaskService.h"
 #include "service/task/impl/ScheduleServiceImpl.h"
 #include "service/task/impl/TaskServiceImpl.h"
+#include "util/EnvUtil.h"
 #include "util/Log.h"
 #include "util/NnBackendConstants.h"
 #include "util/PathUtil.h"
@@ -107,6 +111,9 @@
 namespace cosmo::app {
 
 void SwDevicePreInit() {
+    cosmo::path::OverrideRootPaths(
+        cosmo::util::GetEnvOrDefault("COSMO_DATA_DIR", cosmo::runtime::kDefaultDataDir),
+        cosmo::util::GetEnvOrDefault("COSMO_APP_DATA_DIR", cosmo::runtime::kDefaultAppDataDir));
     cosmo::path::Init();
 }
 
@@ -222,6 +229,8 @@ static void RegisterBusinessServices() {
     registry.Register<cosmo::service::ISystemOperationService>(
         std::make_unique<cosmo::service::SystemOperationServiceImpl>());
     registry.Register<cosmo::service::IModelService>(std::make_unique<cosmo::service::ModelServiceImpl>());
+    registry.Register<cosmo::service::IModelAuthorizationService>(
+        std::make_unique<cosmo::service::ModelAuthorizationServiceImpl>());
     auto& modelImpl = registry.Get<cosmo::service::IModelService>();
     registry.Set<cosmo::service::IModelQuery>(static_cast<cosmo::service::IModelQuery*>(&modelImpl));
     registry.Set<cosmo::service::IModelPathMapping>(
@@ -326,12 +335,14 @@ static void InitializeExternalComponents() {
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IStorageCleanService>().Start();
 
     // HTTP Server Init
+    const int http_port = cosmo::util::GetEnvIntOrDefault("COSMO_HTTP_PORT", kDefaultHttpPort);
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::INetworkService>().InitHttpServer(
-        "0.0.0.0", kDefaultHttpPort);
+        "0.0.0.0", static_cast<uint16_t>(http_port));
 
     // uWebSockets Server Init
+    const int websocket_port = cosmo::util::GetEnvIntOrDefault("COSMO_WEBSOCKET_PORT", kDefaultWebSocketPort);
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IEventNotifier>().InitializeWebSocket(
-        "0.0.0.0", kDefaultWebSocketPort);
+        "0.0.0.0", websocket_port);
 
     // Device discovery multicast service (async init with retry).
     cosmo::service::ServiceRegistry::Instance().Get<cosmo::service::IDeviceDiscoveryService>().Start();

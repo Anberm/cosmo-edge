@@ -117,7 +117,7 @@ StreamViewer::StreamViewer(AlgChannelPtr channelInst, const std::string& channel
         ctrl_fps_ = 10.0;
     }
     url = BuildRtmpPushUrl(channelId, algId);
-    LOG_INFO("{}/{} RTMP push url: {}", channel_id_, alg_id_, url);
+    LOG_INFO("{}/{} RTMP push URL prepared", channel_id_, alg_id_);
 
     out_fps_ctl_.ChangeFps(attr.fps, ctrl_fps_);
     const bool shouldEncodeForPreview = !((algId.empty()) && (attr.codec == "H264"));
@@ -167,7 +167,12 @@ StreamViewer::StreamViewer(AlgChannelPtr channelInst, const std::string& channel
             channelInst->AddViewerPacketQueue(async_packet_queue_);
             packet_queue_attached_ = true;
         } else {
+#ifdef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
+            channelInst->AddViewerFrameQueue(alg_id_, async_frame_queue_,
+                                             [this]() { return PrepareFrameForDecode(); });
+#else
             channelInst->AddViewerFrameQueue(alg_id_, async_frame_queue_);
+#endif
             frame_queue_attached_ = true;
         }
     } else  // Task preview, overlay
@@ -175,7 +180,12 @@ StreamViewer::StreamViewer(AlgChannelPtr channelInst, const std::string& channel
         if (EncoderReady()) {
             data_overview_ = true;
             overviewer_    = std::make_shared<StreamViewerOverview>(channel_id_, alg_id_);
+#ifdef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
+            channelInst->AddViewerFrameQueue(alg_id_, async_frame_queue_,
+                                             [this]() { return PrepareFrameForDecode(); });
+#else
             channelInst->AddViewerFrameQueue(alg_id_, async_frame_queue_);
+#endif
             frame_queue_attached_ = true;
 #ifdef COSMO_MEDIA_USE_CPU_BACKEND
         } else if (attr.codec == "H264" && IsEnabledEnv("COSMO_CPU_OVERLAY_RAW_FALLBACK")) {
@@ -261,20 +271,42 @@ void StreamViewer::UpdateCtrlFps() {
     }
 }
 
+bool StreamViewer::PrepareFrameForDecode() {
+    if (stopped_.load()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(frame_filter_mtx_);
+    in_fps_ = input_fps_calc_.Fps();
+    data_index_++;
+    UpdateCtrlFps();
+    if (out_fps_ctl_.IsFilter(data_index_)) {
+        return false;
+    }
+    if (!async_frame_queue_.CanAccept()) {
+        async_frame_queue_.RecordDiscard();
+        return false;
+    }
+    return true;
+}
+
 void StreamViewer::HandleFrame(VideoFramePtr frame) {
     if (stopped_.load()) {
         return;
     }
+#ifndef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
     in_fps_ = input_fps_calc_.Fps();
     data_index_++;
     UpdateCtrlFps();
+#endif
     if (!VideoFrameValid(frame)) {
         return;
     }
+#ifndef COSMO_MEDIA_USE_ROCKCHIP_BACKEND
     if (out_fps_ctl_.IsFilter(data_index_))  // Frame rate filtering
     {
         return;
     }
+#endif
 
     if (overviewer_) {
         if (encoder_) {

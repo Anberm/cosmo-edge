@@ -22,6 +22,7 @@ class IConfigNetworkService;
 class IDeviceInfoService;
 class ISystemOperationService;
 class ITimeService;
+class IModelAuthorizationService;
 }  // namespace cosmo::service
 
 namespace cosmo {
@@ -33,6 +34,11 @@ public:
                          service::IConfigNetworkService& config_network,
                          service::IDeviceInfoService& device_info,
                          service::ISystemOperationService& system_op, service::ITimeService& time_service);
+    MessageSystemHandler(service::IConfigReadService& config_read, service::IConfigWriteService& config_write,
+                         service::IConfigNetworkService& config_network,
+                         service::IDeviceInfoService& device_info,
+                         service::ISystemOperationService& system_op, service::ITimeService& time_service,
+                         service::IModelAuthorizationService& model_authorization);
 
     System::MsgQueryDeviceInfoSend Handle(System::MsgQueryDeviceInfoRecv&& data,
                                           std::error_condition& errc);  //
@@ -71,6 +77,15 @@ public:
     System::MsgUpgradeSend Handle(System::MsgUpgradeRecv&& data, std::error_condition& errc);  //
     System::MsgUpgradeSend Handle(System::MsgUpgradeRecv&& data, const RequestDispatchContext& context,
                                   std::error_condition& errc);
+    System::MsgCheckUpgradeSpaceSend Handle(System::MsgCheckUpgradeSpaceRecv&& data,
+                                            std::error_condition& errc);
+    System::MsgQueryModelAuthorizationSend Handle(System::MsgQueryModelAuthorizationRecv&& data,
+                                                  std::error_condition& errc);
+    System::MsgDownloadModelAuthorizationRequestSend Handle(
+        System::MsgDownloadModelAuthorizationRequestRecv&& data, std::error_condition& errc);
+    System::MsgInstallModelAuthorizationSend Handle(System::MsgInstallModelAuthorizationRecv&& data,
+                                                    const RequestDispatchContext& context,
+                                                    std::error_condition& errc);
 
     System::MsgQuerySystemLogoSend Handle(System::MsgQuerySystemLogoRecv&& data,
                                           std::error_condition& errc);                                     //
@@ -137,6 +152,7 @@ private:
     service::IDeviceInfoService& device_info_;
     service::ISystemOperationService& system_op_;
     service::ITimeService& time_service_;
+    service::IModelAuthorizationService& model_authorization_;
 };
 
 }  // namespace cosmo

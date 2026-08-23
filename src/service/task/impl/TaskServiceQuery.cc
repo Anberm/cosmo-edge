@@ -150,9 +150,9 @@ std::vector<cosmo::MsgOverviewMem> TaskServiceImpl::GetTaskLiveOverviewInfo(cons
     auto now = cosmo::util::GetMilliseconds();
     if ((now - last_overview_log_ts_) > 1000) {
         last_overview_log_ts_ = now;
-        LOG_INFO("[TASK_OV_READ] taskId:{} channel:{} infos:{} aiData:{} aiFrames:{} aiTargets:{} alarm:{}",
-                 taskId, task->channelId, infos.size(), ai_data_cnt, ai_frame_cnt, ai_target_cnt,
-                 alarm_data_cnt);
+        LOG_DEBUG("[TASK_OV_READ] taskId:{} channel:{} infos:{} aiData:{} aiFrames:{} aiTargets:{} alarm:{}",
+                  taskId, task->channelId, infos.size(), ai_data_cnt, ai_frame_cnt, ai_target_cnt,
+                  alarm_data_cnt);
     }
     return infos;
 }

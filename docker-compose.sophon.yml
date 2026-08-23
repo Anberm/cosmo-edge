@@ -2,17 +2,25 @@ services:
   cosmo-sophon-package:
     image: ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_sophon:v1
     container_name: cosmo-sophon-package
+    network_mode: host
     volumes:
       - .:/workspace
       - ./build_output:/build_output
+      - cosmo-npm-cache:/root/.npm
     working_dir: /workspace
-    command: >
-      bash -lc "
-      set -e;
-      echo 'Starting cross-compilation...';
-      ./scripts/build.sh -T -m data/resource/aiboxresource;
-      mkdir -p /build_output;
-      cp -f build/packages/* /build_output/ 2>/dev/null || echo 'Warning: No packages found to copy.';
-      ls -lh /build_output;
-      echo 'Build finished.'
-      "
+    environment:
+      COSMO_MODEL_GUARD_BUILD_PROFILE: "${COSMO_MODEL_GUARD_BUILD_PROFILE:-public-runtime}"
+      COSMO_PACKAGE_MODELS: "${COSMO_PACKAGE_MODELS:-include}"
+      NPM_CONFIG_MAXSOCKETS: "${NPM_CONFIG_MAXSOCKETS:-1}"
+      NPM_CONFIG_PROGRESS: "${NPM_CONFIG_PROGRESS:-false}"
+      NPM_CONFIG_FETCH_RETRIES: "${NPM_CONFIG_FETCH_RETRIES:-3}"
+      NPM_CONFIG_FETCH_TIMEOUT: "${NPM_CONFIG_FETCH_TIMEOUT:-120000}"
+      NPM_CONFIG_PREFER_OFFLINE: "${NPM_CONFIG_PREFER_OFFLINE:-true}"
+      NPM_CONFIG_UPDATE_NOTIFIER: "${NPM_CONFIG_UPDATE_NOTIFIER:-false}"
+    entrypoint:
+      - /bin/bash
+      - /workspace/scripts/build_sophon_package.sh
+    command: []
+
+volumes:
+  cosmo-npm-cache:

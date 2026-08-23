@@ -12,6 +12,7 @@
 #include "api/MessageFaceLibHandler.h"
 #include "flow/face/FaceLib.h"
 #include "flow/face/FaceManager.h"
+#include "flow/face/Person.h"
 #include "mock/MockFaceLibService.h"
 #include "mock/MockPersonDaoService.h"
 #include "mock/MockServiceRegistry.h"
@@ -224,6 +225,31 @@ TEST_CASE("FaceLibHandler: person update rejects partially resolved face librari
     data.faceLibId.emplace_back(std::string("lib-missing"));
     std::error_condition errc;
     REQUIRE_THROWS(handler.Handle(std::move(data), errc));
+}
+
+TEST_CASE("FaceLibHandler: staged person picture reaches image processing before database commit",
+          "[face-lib-handler][staged-upload]") {
+    MockServiceRegistry mocks;
+    auto person = std::make_shared<Person>("person-1");
+
+    REQUIRE_CALL(mocks.faceLibSvc, GetFaceLibs(_)).RETURN(std::vector<FaceLibPtr>{});
+    REQUIRE_CALL(mocks.faceLibSvc, IsValidSerialNumber(_, _)).RETURN(true);
+    REQUIRE_CALL(mocks.faceLibSvc, CreatePerson()).RETURN(person);
+    REQUIRE_CALL(mocks.faceLibSvc, GetPersonId(person)).RETURN("person-1");
+    REQUIRE_CALL(mocks.faceLibSvc, GetPersonPictures(person)).RETURN(std::vector<FacePicPtr>{});
+    REQUIRE_CALL(mocks.videoCodecSvc, DecodeJpeg(_)).RETURN(nullptr);
+    FORBID_CALL(mocks.personDaoSvc, Begin());
+    ALLOW_CALL(mocks.faceLibSvc, ReleaseFaceModels());
+
+    auto handler = MakeHandler(mocks);
+    Lib::MsgModifyFacePicLibRecv data{};
+    data.personOperation = static_cast<int>(Operation::Add);
+    data.personName      = "staged upload";
+    data.pictureData.push_back({0xFF, 0xD8, 0xFF});
+
+    std::error_condition errc;
+    (void)handler.Handle(std::move(data), errc);
+    REQUIRE(errc == util::ErrorEnum::InternalError);
 }
 
 TEST_CASE("FaceManager: selected-person export does not require a prior query",

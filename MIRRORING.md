@@ -33,6 +33,23 @@ CosmoEdge 在 [Gitee](https://gitee.com/cosmo-wander-ai/cosmo-edge) 维护只读
 - Manual trigger available via `workflow_dispatch` (支持手动触发)
 - Typical sync delay: < 2 minutes (同步延迟通常 < 2 分钟)
 
+## README Rendering / README 展示
+
+- GitHub continues to render `README.md` and `README.zh-CN.md`, including its
+  native attachment-video players.
+- Gitee prioritizes `Readme.osc.md`. That generated file keeps the Chinese
+  README content but replaces attachment videos with poster images linked to
+  stable playback pages on `www.cosmowander.ai`.
+- `Readme.osc.md` is generated from `README.zh-CN.md`; do not edit it directly.
+  Run `npm run gitee:readme:generate` after changing the Chinese README, and
+  `npm run gitee:readme:check` to verify that it is current.
+
+- GitHub 继续展示 `README.md` 与 `README.zh-CN.md`，保留原生附件视频播放器。
+- Gitee 优先展示 `Readme.osc.md`。该生成文件保留中文 README 内容，只把附件视频替换为跳转
+  `www.cosmowander.ai` 稳定播放页的封面图。
+- `Readme.osc.md` 由 `README.zh-CN.md` 生成，请勿直接编辑。中文 README 更新后运行
+  `npm run gitee:readme:generate`，并使用 `npm run gitee:readme:check` 验证一致性。
+
 ## For Mainland China Users / 国内用户
 
 If you experience slow access to GitHub, use the Gitee mirror:

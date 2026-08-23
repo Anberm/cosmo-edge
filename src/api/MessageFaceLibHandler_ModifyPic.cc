@@ -142,7 +142,7 @@ void MessageFaceLibHandler::HandleModifyFacePicUpdate(Lib::MsgModifyFacePicLibRe
     std::vector<std::string> vRemovePicId;
     std::vector<std::pair<std::string, std::vector<float>>> faceFeature;
 
-    if (!data.retainPictureId.empty() || !data.pictureBase64.empty()) {
+    if (!data.retainPictureId.empty() || !data.pictureBase64.empty() || !data.pictureData.empty()) {
         ProcessNewPictures(data, errc, retData, faceFeature, vFacePic);
         if (errc != util::ErrorEnum::Success) {
             return;

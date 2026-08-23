@@ -26,7 +26,9 @@ Layer 3 (接口层)         cosmo_api
 
 每个对象库对应 `src/` 下的一个源码目录。
 
-## 构建入口
+## 构建系统
+
+### 构建入口
 
 | 文件 / 脚本                      | 用途                           |
 | -------------------------------- | ------------------------------ |
@@ -35,7 +37,7 @@ Layer 3 (接口层)         cosmo_api
 | `scripts/build.sh`               | Sophon / aarch64 构建          |
 | `CMakeLists.txt`                 | 顶层构建和打包入口             |
 
-## CMake 选项
+### CMake 选项
 
 | 选项                            | 默认值     | 说明                                  |
 | ------------------------------- | :--------: | ------------------------------------- |
@@ -107,15 +109,22 @@ API 路由定义在 `src/api/ApiRouter.cc` 和 `src/api/ApiRouterRoutes.cc` 中�
 路由注册使用宏模式（定义在 `ApiRouterInternal.h`）：
 
 ```cpp
-ROUTE("/gtw/cwai/System/QueryDeviceInfo", Mtk, system_handler_, System, QueryDeviceInfo)
+ROUTE("/gtw/cwai/System/", kAuth, system_handler_, System, QueryDeviceInfo);
 ```
 
+宏把路径前缀和最后一个参数 `X` 拼接为完整 URL；上例注册
+`/gtw/cwai/System/QueryDeviceInfo`。不要把完整端点作为第一个参数，否则会再次拼接
+`QueryDeviceInfo`。
+
 展开后完成以下流程：
-1. 匹配 URL（通过 `util::ToLower` 做大小写不敏感匹配）。
-2. 若路由标记为 `Mtk`，校验 `mtk` token；标记为 `None` 则跳过校验。
+1. 通过 `util::ToLower` 注册并匹配大小写不敏感的完整 URL。
+2. `kAuth` 校验 HTTP `mtk`；`kNoAuth` 允许匿名访问。
 3. 将请求 JSON 反序列化为 `NS::MsgQueryDeviceInfoSend`。
 4. 调用对应的 handler 方法。
 5. 将响应 `NS::MsgQueryDeviceInfoRecv` 序列化为 JSON 返回。
+
+需要上传会话主体、已认证 principal 等请求上下文时使用 `ROUTE_CONTEXT`；Core DTO 使用
+`ROUTE_CORE` 或 `ROUTE_CORE_CONTEXT`。这些宏仍要求传入路径前缀，而不是完整端点。
 
 ### 标准响应信封
 
@@ -125,9 +134,10 @@ ROUTE("/gtw/cwai/System/QueryDeviceInfo", Mtk, system_handler_, System, QueryDev
 | ----------- | -------- | ------------------------------- |
 | `resCode`   | number   | `1` 成功，`0` 失败              |
 | `resMsg`    | object[] | 错误或提示信息列表              |
-| `resData`   | object   | 业务数据，按接口不同而变化      |
 | `resultCode` | string  | ChinaMobile 兼容响应码          |
 | `resultMsg` | string   | ChinaMobile 兼容响应文本        |
+
+`MsgSendHead` 本身不声明 `resData`；具体响应 DTO 在公共响应头之外定义自己的业务数据字段。
 
 ### 新增路由组
 
@@ -140,9 +150,9 @@ ROUTE("/gtw/cwai/System/QueryDeviceInfo", Mtk, system_handler_, System, QueryDev
 
 | 注册函数                    | URL 前缀                                | 领域             |
 | --------------------------- | ---------------------------------------- | ----------------- |
-| `RegisterCoreRoutes()`      |（登录、接口列表等）                      | 核心 / 认证       |
-| `RegisterNetworkRoutes()`   | `/gtw/cwai/Network/`                     | 网络、DNS、NTP    |
-| `RegisterAlgorithmRoutes()` | `/gtw/cwai/Algorithm/`                   | 算法管理          |
+| `RegisterCoreRoutes()`      | `/v1/cwai/aihost/`、`/gtw/cwai/aihost/`、`/gtw/cwai/login/` | 核心、兼容入口、登录 |
+| `RegisterNetworkRoutes()`   | `/gtw/cwai/network/`                     | 网络、DNS、NTP    |
+| `RegisterAlgorithmRoutes()` | `/gtw/cwai/Algorithm/`、`/gtw/cwai/algorithm/layout/` | 算法管理、编排    |
 | `RegisterModelRoutes()`     | `/gtw/cwai/atomic/Model/`                | 模型仓库          |
 | `RegisterScheduleRoutes()`  | `/gtw/cwai/schedule/`                    | 时间模板          |
 | `RegisterEventRoutes()`     | `/gtw/cwai/Event/`                       | 事件、告警        |
@@ -154,12 +164,13 @@ ROUTE("/gtw/cwai/System/QueryDeviceInfo", Mtk, system_handler_, System, QueryDev
 | `RegisterAudioRoutes()`     | `/gtw/cwai/Audio/`                       | 音频文件、设备    |
 | `RegisterLinkageRoutes()`   | `/gtw/cwai/AlarmStrage/`                 | 告警联动          |
 | `RegisterLiveStreamRoutes()`| `/gtw/cwai/LiveStream/`                  | 直播流生命周期    |
+| `RegisterOnboardingRoutes()`| `/gtw/cwai/Onboarding/`                  | 首次使用引导      |
 
 ## 测试
 
 ### 框架
 
-测试使用 [Catch2](https://github.com/catchorg/Catch2) + [Trompeloeil](https://github.com/rollbear/trompeloeil) mock 框架。测试文件放在 `test/` 目录下，与服务或组件一对一对应。
+测试使用 [Catch2](https://github.com/catchorg/Catch2) + [Trompeloeil](https://github.com/rollbear/trompeloeil) mock 框架。测试文件放在 `test/`，可复用的服务 mock 位于 `test/mock/`。
 
 ### 构建和运行
 
@@ -170,7 +181,18 @@ bash scripts/build_cpu_test.sh
 
 ### Mock
 
-`ServiceRegistry::Set<T>(ptr)` 不持有所有权的注入方式是测试中替换真实服务的主要手段。公共 mock 头文件（`test/test_mock_services.h`）为常用接口提供了可复用的 mock 实现。
+`ServiceRegistry::Set<T>(ptr)` 不持有所有权的注入方式是测试中替换真实服务的主要手段。
+每个常用接口在 `test/mock/Mock*Service.h` 中维护独立 mock；
+`test/mock/MockServiceRegistry.h` 和 `.cc` 负责把常用 mock 注册到测试用 `ServiceRegistry`。
+
+```cpp
+#include "mock/MockServiceRegistry.h"
+
+cosmo::test::MockServiceRegistry mocks;
+```
+
+新增服务时，为接口增加对应的窄 mock；只有多个测试都需要统一依赖装配时，才把它加入
+`MockServiceRegistry` 聚合器。
 
 ### 测试文件命名
 
@@ -179,7 +201,7 @@ bash scripts/build_cpu_test.sh
 - `test_video_frame_service_impl.cc` → 测试 `VideoFrameServiceImpl`
 - `test_api_router.cc` → 测试 `ApiRouter`
 
-新增服务时，应同步新增对应的测试文件，为每个依赖项提供 Trompeloeil mock。
+新增服务时，应增加覆盖其行为的测试文件，并为需要隔离的依赖提供 Trompeloeil mock。
 
 ## 代码风格
 

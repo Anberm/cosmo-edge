@@ -20,6 +20,7 @@ enum class UploadPurpose {
     kAlgorithm,
     kUpgrade,
     kImage,
+    kModelAuthorizationCertificate,
 };
 
 [[nodiscard]] std::string_view UploadPurposeName(UploadPurpose purpose);

@@ -107,6 +107,11 @@ TEST_CASE("CameraServiceImpl: operations on non-existent camera return proper er
         REQUIRE(frame == nullptr);
     }
 
+    SECTION("Preview lease for non-existent camera returns CameraNotExist") {
+        REQUIRE(svc.AcquirePreviewChannel("cam_not_exist") == cosmo::util::ErrorEnum::CameraNotExist);
+        REQUIRE_NOTHROW(svc.ReleasePreviewChannel("cam_not_exist"));
+    }
+
     SECTION("GetChannelName for non-existent camera returns empty") {
         auto name = svc.GetChannelName("cam_not_exist");
         REQUIRE(name.empty());
@@ -134,6 +139,47 @@ TEST_CASE("CameraServiceImpl: operations on non-existent camera return proper er
         auto ret = svc.DeleteTask("cam_not_exist", "alg1");
         REQUIRE(ret == cosmo::util::ErrorEnum::CameraNotExist);
     }
+}
+
+TEST_CASE("CameraServiceImpl: live preview leases keep the channel active", "[CameraService][preview]") {
+    const auto test_base = "/tmp/cosmo_camera_preview_lease_" +
+                           std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_base);
+    cosmo::path::OverrideRootPathForTest(test_base, test_base);
+
+    cosmo::test::MockServiceRegistry mocks;
+    CameraServiceImpl svc;
+
+    MsgCameraInfo config;
+    config.videoChannelId = "preview-camera";
+    config.channelName    = "Preview Camera";
+    config.url            = "rtsp://127.0.0.1:1/test";
+    config.channelType    = MsgCameraType::MsgCameraTypeLive;
+    std::string id;
+    REQUIRE(svc.Add(config, id) == cosmo::util::ErrorEnum::Success);
+
+    trompeloeil::sequence sequence;
+    REQUIRE_CALL(mocks.taskSvc, TaskIsStart("preview-camera-ChannelTask"))
+        .IN_SEQUENCE(sequence)
+        .RETURN(false);
+    REQUIRE_CALL(mocks.taskSvc, TaskStart("preview-camera", "preview-camera-ChannelTask"))
+        .IN_SEQUENCE(sequence)
+        .RETURN(true);
+    REQUIRE(svc.AcquirePreviewChannel("preview-camera") == cosmo::util::ErrorEnum::Success);
+    REQUIRE(svc.AcquirePreviewChannel("preview-camera") == cosmo::util::ErrorEnum::Success);
+
+    // The first release retains the shared lease. The final release rechecks
+    // task demand and stops the otherwise idle channel.
+    svc.ReleasePreviewChannel("preview-camera");
+    REQUIRE_CALL(mocks.taskSvc, TaskIsStart("preview-camera-ChannelTask")).IN_SEQUENCE(sequence).RETURN(true);
+    REQUIRE_CALL(mocks.taskSvc, TaskStop("preview-camera-ChannelTask")).IN_SEQUENCE(sequence).RETURN(true);
+    REQUIRE_CALL(mocks.taskSvc, GetChannelInst("preview-camera")).IN_SEQUENCE(sequence).RETURN(nullptr);
+    svc.ReleasePreviewChannel("preview-camera");
+    REQUIRE_NOTHROW(svc.ReleasePreviewChannel("preview-camera"));
+
+    REQUIRE_NOTHROW(svc.Stop());
+    std::filesystem::remove_all(test_base);
+    cosmo::path::OverrideRootPathForTest("/tmp/cosmo_test", "/tmp/cosmo_test_app");
 }
 
 // ============================================================

@@ -131,7 +131,7 @@ bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, cosmo::FMsgR
     }
     std::string json_str = FileServerRespTrim(http_req.GetContent());
     if (!cosmo::util::DecodeJson(json_str, rgtOut)) {
-        LOG_ERRO("{} DecodeJson failed: {}", kTag, json_str);
+        LOG_ERRO("{} DecodeJson failed, response_bytes:{}", kTag, json_str.size());
         return false;
     }
     return true;
@@ -164,7 +164,7 @@ bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, const std::s
     http_post_req.AppendHeader("token", token);
     http_post_req.AppendHeader("isHttps", is_https ? "true" : "false");
 
-    LOG_INFO("{} HttpclientSubmit fileUrl[{}]", kTag, fileUrl);
+    LOG_DEBUG("{} HttpclientSubmit file_url_bytes:{}", kTag, fileUrl.size());
     http_post_req.AppendHeader("fileUrl", fileUrl);
     http_post_req.SetTimeout(200);
     if (!http_req.SetFile("file", rgtIn, "application/octet-stream")) {
@@ -183,7 +183,7 @@ bool HttpFileServerCli::HttpclientSubmit(FileServerClientType type, const std::s
     }
     std::string json_str = FileServerRespTrim(http_req.GetContent());
     if (!cosmo::util::DecodeJson(json_str, rgtOut)) {
-        LOG_ERRO("{} DecodeJson failed: {}", kTag, json_str);
+        LOG_ERRO("{} DecodeJson failed, response_bytes:{}", kTag, json_str.size());
         return false;
     }
     return true;

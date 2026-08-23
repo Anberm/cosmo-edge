@@ -1,6 +1,6 @@
 ---
 title: CI and Quality Checks
-description: Entry points for documentation site, frontend, C++ formatting, static analysis, and release build quality checks for open-source collaboration.
+description: Entry points for documentation, frontend, C++, static analysis, and platform release-build checks.
 prev:
   text: Backend Development
   link: /en/development/backend
@@ -23,7 +23,8 @@ This page collects the quality-check entry points that already exist in the repo
 | C++ static analysis | `scripts/static_analysis.sh --cppcheck`, `scripts/static_analysis.sh --clang-tidy` | Periodic / manual / self-hosted |
 | CPU test build | `scripts/build_cpu_test.sh`, `build_cpu/cosmo-tests` | Pull request / manual |
 | x86 Docker | `docker compose -f docker-compose.x86.yml up -d --build` (use `docker-compose.x86.windows.yml` on Windows) | Manual / before release |
-| Sophon release package | `docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package` | Manual / self-hosted |
+| Sophon release package | `./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package [--chip <model>]`; supports `bm1688` / `cv186x` (defaults to `bm1688`) | Manual / self-hosted |
+| Rockchip release package | `COSMO_TARGET_CHIP=<rk3576|rv1126b> docker compose -f docker-compose.rockchip.yml run --rm cosmo-rockchip-package` | Relevant PRs / daily at 02:12 Beijing Time / manual |
 
 ## Documentation Site Checks
 
@@ -173,13 +174,57 @@ Before a release, confirm at minimum:
 Sophon/aarch64 release package build entry point:
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+# Defaults to bm1688 when the chip model is omitted
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
 ```
 
 Windows PowerShell:
 
 ```powershell
+# Defaults to bm1688 when the chip model is omitted
 .\scripts\build_sophon_package.ps1
+.\scripts\build_sophon_package.ps1 -Chip cv186x
 ```
 
-The Sophon release package build depends on the cross-compilation environment and the Sophon SDK. The package exported into `build_output/` is named in the form `cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz`.
+The Sophon release package build depends on the cross-compilation environment and
+the Sophon SDK. The chip model selects both the internal resource directory and
+the chip-scoped output. Each `build_output/<profile>/<chip>/` directory contains
+`TARGET_CHIP`, `SHA256SUMS`, and one
+`cosmo-V<major>.<minor>.<patch>-<md5>.tar.gz` archive.
+
+## Rockchip Cross-Build Matrix
+
+`.github/workflows/ci-build-rockchip.yml` uses the shared Rockchip Compose entry
+for separate RK3576 and RV1126B matrix jobs. It runs for relevant pull requests,
+manual dispatches, and every day at 02:12 Beijing Time (18:12 UTC on the
+previous day). A schedule is active only on the GitHub default branch.
+
+Local builds use the public digest-pinned GHCR image without registry login:
+
+```bash
+docker compose -f docker-compose.rockchip.yml pull cosmo-rockchip-package
+COSMO_TARGET_CHIP=rk3576 docker compose -f docker-compose.rockchip.yml \
+  run --rm cosmo-rockchip-package
+```
+
+The workflow applies these checks:
+
+1. Builds one locked image from `Dockerfile.rockchip` and validates the shared
+   Compose entry.
+2. Cross-compiles, builds validation programs, and packages each chip from a
+   clean `build_rknn/` directory.
+3. Requires exactly one regular archive under `build_output/<chip>/` and checks
+   its target marker, media profile, and SHA-256.
+4. Confirms that `cosmo-tests`, `cosmo-rknn-backend-smoke`, and
+   `cosmo-rknn-fastpath-qualify` are ARM aarch64 programs.
+5. Requires RKLLM and its license in RK3576 and forbids them in RV1126B.
+6. Uploads each package, identity files, checksum, and validation programs for
+   7 days.
+
+The RV1126B matrix uses `COSMO_PACKAGE_MODELS=preserve` because its target model
+overlay is not committed. A deployable candidate must still be rebuilt with
+real models in an authorized environment and run on the board. Normal jobs have
+only `contents: read`; only a default-branch or manually dispatched publication
+job receives `packages: write` and pushes a matrix-qualified shared image to
+GHCR. The hosted x86 runner does not execute aarch64 programs.

@@ -17,7 +17,8 @@ This document describes the model and resource organization that can be confirme
 
 | Directory | Purpose |
 | --- | --- |
-| `data/resource/aiboxresource` | Resources for the Sophon release package. |
+| `data/resource/aiboxresource_bm1688` | Resources for the Sophon BM1688 release package. |
+| `data/resource/aiboxresource_cv186x` | Resources for the Sophon CV186X release package. |
 | `data/resource/aiboxresource_x86` | Resources for the x86 Docker / CPU backend. |
 
 The resource directory is selected through `RESOURCE_DIR` at build time.
@@ -92,7 +93,8 @@ data/resource/aiboxresource_x86
 Sophon path:
 
 ```text
-data/resource/aiboxresource
+data/resource/aiboxresource_bm1688
+data/resource/aiboxresource_cv186x
 ```
 
 The code shows the differences between handling x86 ONNX files and Sophon model packages. The full model porting workflow should be re-validated against the currently releasable model packages.

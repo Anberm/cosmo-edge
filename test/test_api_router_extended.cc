@@ -85,6 +85,7 @@ TEST_CASE("ApiRouter: Route registration completeness", "[ApiRouter][routes]") {
         REQUIRE(router.InterfaceSupport("/gtw/cwai/System/QueryDeviceInfo"));
         REQUIRE(router.InterfaceSupport("/gtw/cwai/System/QueryHardwareResource"));
         REQUIRE(router.InterfaceSupport("/gtw/cwai/System/Upgrade"));
+        REQUIRE(router.InterfaceSupport("/gtw/cwai/System/CheckUpgradeSpace"));
         REQUIRE(router.InterfaceSupport("/gtw/cwai/System/DebugQuit"));
     }
 

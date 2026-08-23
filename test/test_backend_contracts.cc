@@ -11,6 +11,7 @@ TEST_CASE("backend capabilities identify host memory boundaries", "[nn][backend]
 
     CHECK(UsesHostMemory(DEVICE_NAIVE));
     CHECK(UsesHostMemory(DEVICE_CPU));
+    CHECK(UsesHostMemory(DEVICE_RKNN));
     CHECK_FALSE(UsesHostMemory(DEVICE_SOPHON_TPU));
 }
 

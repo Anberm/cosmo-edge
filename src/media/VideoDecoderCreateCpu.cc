@@ -12,5 +12,9 @@ namespace media {
         return std::make_unique<VideoDecoderCpu>(name);
     }
 
+    VideoDecoderCapability VideoDecoder::Probe(VideoCodecType type) {
+        return VideoDecoderCpu::Probe(type);
+    }
+
 }  // namespace media
 }  // namespace cosmo

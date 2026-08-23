@@ -38,7 +38,7 @@
       </aside>
 
       <div class="flow-container" ref="containerRef">
-        <ArrangeFlow ref="flowRef" :width="width" :height="height" :workFlow="currentStrategy.workFlow" :actionList="actionList" :atomicCode="''" @onMetadata="onMetadata" />
+        <ArrangeFlow ref="flowRef" :width="width" :height="height" :strategyId="currentStrategy.id" :workFlow="currentStrategy.workFlow" :actionList="actionList" :atomicCode="''" @onMetadata="onMetadata" />
       </div>
       <el-dialog :title="strategyMode === 'edit' ? t('linkageStrategy.editStrategy') : t('linkageStrategy.addStrategy')" v-model="strategyDialogVisible" center width="420px" @close="onDialogClose">
         <el-form ref="strategyFormRef" :model="strategyForm" :rules="strategyRules" :label-width="currentLocale === 'en-US' ? '170px' : '120px'" label-position="right">
@@ -121,7 +121,10 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   // 加载可编排动作
   $API.boxActionList({}).then((res) => {
-    actionList.value = res?.resData?.strages || []
+    actionList.value = (res?.resData?.strages || []).map((item) => ({
+      ...item,
+      actionType: item.actionType || item.businessCategory
+    }))
     queryStrategyList()
   })
 })

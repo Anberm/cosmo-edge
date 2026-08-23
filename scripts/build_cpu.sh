@@ -33,6 +33,12 @@ fi
 
 BUILD_DIR=${PROJECT_ROOT_PATH}/build_cpu
 INSTALL_DIR=${BUILD_DIR}/install
+BUILD_JOBS="${COSMO_BUILD_JOBS:-$(nproc)}"
+
+if [[ ! "${BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: COSMO_BUILD_JOBS must be a positive integer; got '${BUILD_JOBS}'" >&2
+    exit 1
+fi
 
 clean_external_project() {
     local name="$1"
@@ -73,6 +79,7 @@ cd ${BUILD_DIR}
 echo "Dev mode: ${DEV_MODE}"
 echo "Backend: CPU (ONNX Runtime)"
 echo "Resource dir: ${RESOURCE_DIR}"
+echo "Parallel build jobs: ${BUILD_JOBS}"
 echo "Requires: pkg-config and openh264 development package (for x86 realtime OSD H264 encoding)"
 echo "Configuring..."
 cmake   -DCMAKE_BUILD_TYPE=Release \
@@ -94,7 +101,7 @@ cmake   -DCMAKE_BUILD_TYPE=Release \
 ln -sf "${BUILD_DIR}/compile_commands.json" "${PROJECT_ROOT_PATH}/compile_commands.json" 2>/dev/null || true
 
 echo "Building Cosmo (CPU backend) ..."
-cmake --build . --target install -j$(nproc)
+cmake --build . --target install -j"${BUILD_JOBS}"
 
 echo "Packaging..."
 cmake --build . --target package_all

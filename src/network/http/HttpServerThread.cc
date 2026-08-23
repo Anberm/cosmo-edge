@@ -75,23 +75,21 @@ void MsgHanderThread::DelTmpPath(const HttpReqTask& task) {
 void MsgHanderThread::ProcessHttpReqTask(HttpReqTask& task) {
     const auto& uri = task.interface;
     if (!task.x_forwarded_for.empty()) {
-        LOG_INFO("{} Handle {}, From:{}", Name(), uri, task.x_forwarded_for);
+        LOG_DEBUG("{} Handle {}, From:{}", Name(), uri, task.x_forwarded_for);
     } else {
-        LOG_INFO("{} Handle {}", Name(), uri);
+        LOG_DEBUG("{} Handle {}", Name(), uri);
     }
     std::string request_id;
 
-    // Truncate large bodies in logs to avoid memory/disk pressure
-    if (task.body.size() > 4096) {
-        LOG_INFO("{} Receive uri:{}, body: {:.4096} ...", Name(), uri, task.body);
-    } else {
-        LOG_INFO("{} Receive uri:{}, body: {}", Name(), uri, task.body);
-    }
+    // Request bodies can contain passwords, tokens, stream credentials, and
+    // model parameters. Log metadata only, at debug level, so routine polling
+    // cannot disclose payloads or flood production logs.
+    LOG_DEBUG("{} Receive uri:{} request_bytes:{}", Name(), uri, task.body.size());
 
     RequestDispatchResponse dispatch_response;
 
     if (!handler_->SupportsRoute(uri)) {
-        LOG_INFO("{} Handle uri:{} BAD REQUEST", Name(), uri);
+        LOG_WARN("{} Handle uri:{} BAD REQUEST", Name(), uri);
         SendHttpAck(HttpResponseCode::kBadRequest, task.request_token, std::string("{}"),
                     std::move(request_id));
         return;
@@ -109,9 +107,11 @@ void MsgHanderThread::ProcessHttpReqTask(HttpReqTask& task) {
     context.multipart_file_size = task.multipart_file_size;
     context.transport           = RequestTransport::kHttp;
     if (!handler_->DispatchRequestResponse(context, task.body, dispatch_response)) {
-        LOG_INFO("{} Handle uri:{} With {} Ms Rsp: MV_HTTP_NEED_AUTHENTICATE", Name(), uri,
-                 chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - task.request_time)
-                     .count());
+        LOG_DEBUG("{} Handle uri:{} status:{} elapsed_ms:{} response_bytes:{}", Name(), uri,
+                  static_cast<int>(HttpResponseCode::kNeedAuthenticate),
+                  chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - task.request_time)
+                      .count(),
+                  dispatch_response.body.size());
         SendHttpAck(HttpResponseCode::kNeedAuthenticate, task.request_token,
                     std::move(dispatch_response.body), std::move(request_id));
         return;
@@ -125,16 +125,17 @@ void MsgHanderThread::ProcessHttpReqTask(HttpReqTask& task) {
         ack_task->file_name              = std::move(dispatch_response.file_name);
         ack_task->range_request          = task.range_request;
         ack_task->delete_file_after_send = dispatch_response.delete_file_after_send;
-        LOG_INFO("{} Handle {} file:{}", Name(), uri, ack_task->file_name);
+        LOG_DEBUG("{} Handle {} file:{}", Name(), uri, ack_task->file_name);
         cosmo::MsgEnvelope msg(static_cast<int>(InnerMsgId::kHttpOctetAck), std::move(ack_task));
         server_->Put(std::move(msg));
         return;
     }
 
-    LOG_INFO(
-        "{} Handle uri:{} With {} Ms Rsp: {:.4096}{}", Name(), uri,
+    LOG_DEBUG(
+        "{} Handle uri:{} status:{} elapsed_ms:{} response_bytes:{}", Name(), uri,
+        static_cast<int>(HttpResponseCode::kOk),
         chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - task.request_time).count(),
-        dispatch_response.body, dispatch_response.body.size() > 4096 ? " ..." : "");
+        dispatch_response.body.size());
     SendHttpAck(HttpResponseCode::kOk, task.request_token, std::move(dispatch_response.body),
                 std::move(request_id));
 }
@@ -194,7 +195,7 @@ void MsgHanderThread::ProcessHttpOctetReqTask(HttpReqTask& task) {
     ackTask->file_name     = file_name;
     ackTask->file_path     = std::move(resolved_path);
     ackTask->range_request = task.range_request;
-    LOG_INFO("{} Handle {} interface:{}", Name(), uri, ackTask->file_name);
+    LOG_DEBUG("{} Handle {} interface:{}", Name(), uri, ackTask->file_name);
     cosmo::MsgEnvelope msg(static_cast<int>(InnerMsgId::kHttpOctetAck), std::move(ackTask));
     server_->Put(std::move(msg));
 }

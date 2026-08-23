@@ -14,14 +14,14 @@ next: false
 | Who this is for | ML engineers and integration developers bringing a custom detector or classifier to CosmoEdge |
 | What you will accomplish | Evaluate runtime compatibility, convert and upload a model, configure parsing, and complete image, video, and sustained-run validation |
 | Prerequisites | Understand Pipelines and know the model input, output, preprocessing, postprocessing, and label order |
-| Estimated time | About 40–60 minutes for x86 ONNX; Sophon conversion commonly adds 30–60 minutes |
-| Device required | x86 requires an ONNX Runtime CosmoEdge build; Sophon requires a BM1688/CV186X device and matching conversion toolchain |
+| Estimated time | About 40–60 minutes for x86 ONNX; Sophon or Rockchip conversion commonly adds 30–60 minutes |
+| Device required | x86 requires an ONNX Runtime CosmoEdge build; Sophon and Rockchip require the actual target device and matching conversion toolchain |
 | Final acceptance result | The model loads, its output is parsed correctly, image and video results pass, and it runs without resource failure on the target device |
 
 Complete third-party integration in this order:
 
 1. Confirm support conditions and the model contract.
-2. Export ONNX; for Sophon, convert it again into a chip-specific `bmodel`.
+2. Export ONNX; convert it into a chip-specific `bmodel` for Sophon or `rknn` for Rockchip.
 3. Validate the artifact on the conversion host.
 4. Upload and configure the model.
 5. Run positive and negative image tests first.
@@ -39,12 +39,14 @@ output layout, and postprocessing are compatible with CosmoEdge.
 | --- | --- | --- | --- | --- |
 | x86 CPU | `.onnx` | `model.onnx` | ONNX Runtime CPU | x86_64 host and matching CosmoEdge build |
 | Sophon | `.bmodel` | `model.nn` | Sophon BMRT | BM1688 or CV186X; the artifact must target the actual chip |
+| Rockchip RKNN | `.rknn` | `model.rknn` | RKNN Runtime | RK3576 or RV1126B; the artifact must target the actual chip |
 
 `model.nn` is the internal file name in a CosmoEdge model package. It wraps the device model. When adding
 an individual Sophon model in the UI, select its `.bmodel`; do not rename an extension to `.nn`.
 
 PyTorch `.pt`, TensorFlow SavedModel, and other training-framework artifacts cannot be uploaded directly.
-Export them to ONNX first. Sophon deployments then convert ONNX into a chip-specific `.bmodel`.
+Export them to ONNX first. Sophon deployments then convert ONNX into a chip-specific `.bmodel`, while
+Rockchip deployments produce a chip-specific `.rknn`. RK3576 and RV1126B `.rknn` artifacts are not interchangeable.
 
 ### 1.2 Contracts Beyond the File Format
 
@@ -66,7 +68,7 @@ or runtime code.
 ### 1.3 Verified Capability vs Conditional Compatibility
 
 - **Directly supported by current code**: Add `.onnx` on x86, add `.bmodel` on Sophon, and import packages
-  containing `model.onnx` or `model.nn`.
+  containing `model.onnx` or `model.nn`; RKNN builds add `.rknn` and package it as `model.rknn`.
 - **Reference evidence in this repository**: a YOLOv8 detector has completed x86 ONNX import, live overlay,
   and event output.
 - **Still required on the target candidate**: validate your exact model, Sophon artifact, performance,
@@ -387,6 +389,32 @@ task acceptance, but it must not borrow another example's fixed shapes or hashes
 
 The Sophon Add Model page requires a `.bmodel` file.
 
+## Rockchip RKNN Path: Shared Backend, Target-Specific Artifacts
+
+RK3576 and RV1126B share one CosmoEdge RKNN inference implementation, Rockchip media interface, and model
+contract. Chip differences come from `config/rknn/platforms/<chip>.json`. A model spec does not hard-code a
+chip, but every conversion binds one platform profile, so the resulting `.rknn` remains target-specific and
+must not be copied between chips.
+
+The agent-assisted flow always enters through `scripts/agent/convert_model.sh` and `verify.sh`. It selects
+RKNN Toolkit2 from the task contract and freezes Python, wheel, platform profile, model spec, calibration
+set, and artifact hashes. RK3576 and RV1126B do not maintain separate conversion scripts. For manual
+diagnosis, follow the [RK3576 RKNN development guide](/en/guide/rk3576-rknn-development) and select the
+actual target profile:
+
+```bash
+python tools/rknn/convert_model.py \
+  --spec config/rknn/models/yolov8.json \
+  --platform-profile config/rknn/platforms/rv1126b.json \
+  --model yolov8-heads.onnx \
+  --output yolov8-rv1126b-int8.rknn \
+  --quantize --dataset calibration/dataset.txt
+```
+
+Conversion-host success is not device acceptance. Validate the matching Runtime/driver, numerical output,
+image and video postprocessing, OSD, rules, alerts, the 5 FPS target, and stability on the actual device,
+with results bound to the target chip and artifact SHA-256.
+
 ## 4. Upload and Configure the Model
 
 ### 4.1 Open Model Repository
@@ -595,10 +623,8 @@ without producing an event.
 
 ![Drawing and saving the detection region](images/img_40.webp)
 
-Under **Running Strategy**, ensure the current time is in an active period. The current form accepts
-`0–100`: `0` means an infinite loop, and a positive value is the total play count. Resource help text that
-says “negative means infinite and zero means one” conflicts with form validation and runtime code. Follow
-the earlier screenshot and enter `0` to loop on this version; a negative value is rejected by the form.
+Under **Running Strategy**, ensure the current time is in an active period. Offline Video Play Count accepts
+`0–100`: `0` loops indefinitely, while `1–100` is the total number of plays.
 
 ![Configuring offline-video strategy and repeat count](images/img_41.webp)
 

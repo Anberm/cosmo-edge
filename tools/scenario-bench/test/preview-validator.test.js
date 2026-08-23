@@ -12,6 +12,22 @@ test('preview validator counts saturated overlay-like pixels', () => {
   assert.equal(_previewValidatorTest.countOverlayLikePixels(rgb), 2);
 });
 
+test('preview validator disables the heuristic pixel delta gate at zero', () => {
+  assert.deepEqual(_previewValidatorTest.evaluateOsdPixelCheck(201, 192, 0), {
+    rawMaxOverlayPixels: 201,
+    algorithmMaxOverlayPixels: 192,
+    delta: -9,
+    minimumDelta: 0,
+    enabled: false,
+    pass: true,
+  });
+});
+
+test('preview validator enforces an explicitly positive pixel delta gate', () => {
+  assert.equal(_previewValidatorTest.evaluateOsdPixelCheck(100, 105, 6).pass, false);
+  assert.equal(_previewValidatorTest.evaluateOsdPixelCheck(100, 106, 6).pass, true);
+});
+
 test('preview validator analyzes bounded raw RGB frames and progress timestamps', () => {
   const first = Buffer.from([255, 0, 0, 10, 10, 10]);
   const second = Buffer.from([0, 255, 0, 0, 0, 255]);

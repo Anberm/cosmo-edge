@@ -30,3 +30,11 @@ if(COSMO_NN_USE_CPU_BACKEND)
         COSMO_NN_USE_HOST_BACKEND
         COSMO_NN_USE_ONNX_BACKEND)
 endif()
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    target_link_libraries(cosmo_service PRIVATE rknnrt)
+    target_compile_definitions(cosmo_service PRIVATE
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+endif()

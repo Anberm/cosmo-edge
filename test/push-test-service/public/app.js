@@ -1260,3 +1260,495 @@ if (autoTestTab) {
         initAutoTestPage();
     }, { once: true });
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// 图片分析 API 测试页面
+// ══════════════════════════════════════════════════════════════════════════
+
+const imageAnalysisState = {
+    connected: false,
+    busy: false,
+    baseUrl: '',
+    mtk: '',
+    file: null,
+    previewUrl: '',
+    targets: [],
+    activeTask: null,
+};
+
+const imageUi = {
+    deviceUrl: document.getElementById('image-device-url'),
+    account: document.getElementById('image-account'),
+    password: document.getElementById('image-password'),
+    connect: document.getElementById('image-connect'),
+    connection: document.getElementById('image-analysis-connection'),
+    algorithm: document.getElementById('image-algorithm'),
+    taskId: document.getElementById('image-task-id'),
+    regenerateTask: document.getElementById('image-regenerate-task'),
+    file: document.getElementById('image-file'),
+    fileMeta: document.getElementById('image-file-meta'),
+    run: document.getElementById('image-run'),
+    release: document.getElementById('image-release'),
+    status: document.getElementById('image-analysis-status'),
+    statusText: document.getElementById('image-analysis-status-text'),
+    summary: document.getElementById('image-analysis-summary'),
+    targetCount: document.getElementById('image-target-count'),
+    faceCount: document.getElementById('image-face-count'),
+    elapsed: document.getElementById('image-elapsed'),
+    chunks: document.getElementById('image-chunks'),
+    originalEmpty: document.getElementById('image-original-empty'),
+    originalStage: document.getElementById('image-original-stage'),
+    originalPreview: document.getElementById('image-original-preview'),
+    overlay: document.getElementById('image-overlay-canvas'),
+    resultEmpty: document.getElementById('image-result-empty'),
+    resultPreview: document.getElementById('image-result-preview'),
+    targetsEmpty: document.getElementById('image-targets-empty'),
+    targetsWrap: document.getElementById('image-targets-table-wrap'),
+    targetsBody: document.getElementById('image-targets-body'),
+    rawResponse: document.getElementById('image-raw-response'),
+};
+
+function newImageTaskId() {
+    const suffix = typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return `image-test-${suffix}`;
+}
+
+function setImageStatus(kind, text) {
+    imageUi.status.className = `analysis-status ${kind}`;
+    imageUi.statusText.textContent = text;
+}
+
+function setImageConnection(connected, label) {
+    imageUi.connection.className = `connection-badge ${connected ? 'connected' : 'disconnected'}`;
+    imageUi.connection.textContent = label || (connected ? '已连接' : '未连接');
+}
+
+function updateImageButtons() {
+    const taskLocked = Boolean(imageAnalysisState.activeTask);
+    imageUi.connect.disabled = imageAnalysisState.busy;
+    imageUi.algorithm.disabled = !imageAnalysisState.connected || imageAnalysisState.busy || taskLocked;
+    imageUi.taskId.disabled = imageAnalysisState.busy || taskLocked;
+    imageUi.regenerateTask.disabled = imageAnalysisState.busy || taskLocked;
+    imageUi.file.disabled = imageAnalysisState.busy;
+    imageUi.run.disabled = imageAnalysisState.busy
+        || !imageAnalysisState.connected
+        || !imageAnalysisState.file
+        || !imageUi.algorithm.value
+        || !imageUi.taskId.value.trim();
+    imageUi.release.disabled = imageAnalysisState.busy || !taskLocked;
+}
+
+function imageApiError(payload, fallback) {
+    const deviceMessage = payload?.deviceResponse?.resMsg?.[0];
+    return deviceMessage?.msgText
+        || deviceMessage?.messageKey
+        || payload?.error
+        || fallback;
+}
+
+async function parseTestApiResponse(response) {
+    let payload = {};
+    try {
+        payload = await response.json();
+    } catch (_) {
+        throw new Error(`测试服务返回非 JSON 数据（HTTP ${response.status}）`);
+    }
+    if (!response.ok || payload.success !== true) {
+        throw new Error(imageApiError(payload, `请求失败（HTTP ${response.status}）`));
+    }
+    return payload;
+}
+
+function fillImageAlgorithms(algorithms) {
+    imageUi.algorithm.innerHTML = '';
+    if (!algorithms.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '设备上没有图片分析算法';
+        imageUi.algorithm.appendChild(option);
+        return;
+    }
+    algorithms.forEach(algorithm => {
+        const option = document.createElement('option');
+        option.value = algorithm.algorithmId || '';
+        option.textContent = `${algorithm.algorithmName || '未命名算法'} (${algorithm.algorithmId || '-'})`;
+        imageUi.algorithm.appendChild(option);
+    });
+}
+
+async function connectImageDevice() {
+    if (imageAnalysisState.activeTask) {
+        const released = await releaseImageTask(true);
+        if (!released) {
+            setImageStatus('error', '当前任务释放失败，请先重试释放任务再连接其他设备');
+            return;
+        }
+    }
+    const baseUrl = imageUi.deviceUrl.value.trim();
+    const account = imageUi.account.value.trim();
+    const password = imageUi.password.value;
+    if (!baseUrl || !account || !password) {
+        setImageStatus('error', '请填写设备地址、账号和密码');
+        return;
+    }
+
+    imageAnalysisState.busy = true;
+    imageAnalysisState.connected = false;
+    imageAnalysisState.mtk = '';
+    setImageConnection(false, '连接中');
+    setImageStatus('running', '正在登录设备并查询图片分析算法…');
+    updateImageButtons();
+
+    try {
+        const response = await fetch('/api/image-analysis/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ baseUrl, account, password }),
+        });
+        const payload = await parseTestApiResponse(response);
+        imageUi.password.value = '';
+        if (payload.passwordChangeRequired) {
+            fillImageAlgorithms([]);
+            setImageConnection(false, '需修改密码');
+            setImageStatus('error', '设备仍在使用初始密码，请先登录设备控制台修改密码');
+            return;
+        }
+
+        imageAnalysisState.baseUrl = payload.baseUrl;
+        imageAnalysisState.mtk = payload.mtk;
+        imageAnalysisState.connected = true;
+        fillImageAlgorithms(Array.isArray(payload.algorithms) ? payload.algorithms : []);
+        setImageConnection(true, `已连接 · ${payload.accountName || account}`);
+        if (payload.algorithms?.length) {
+            setImageStatus('success', `已加载 ${payload.algorithms.length} 个图片分析算法`);
+        } else {
+            setImageStatus('error', '连接成功，但设备上没有可用的图片分析算法');
+        }
+    } catch (error) {
+        fillImageAlgorithms([]);
+        setImageConnection(false);
+        setImageStatus('error', error.message);
+    } finally {
+        imageAnalysisState.busy = false;
+        updateImageButtons();
+    }
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function clearImageResult() {
+    imageAnalysisState.targets = [];
+    imageUi.summary.classList.add('hidden');
+    imageUi.targetsBody.innerHTML = '';
+    imageUi.targetsWrap.classList.add('hidden');
+    imageUi.targetsEmpty.classList.remove('hidden');
+    imageUi.resultPreview.removeAttribute('src');
+    imageUi.resultPreview.classList.add('hidden');
+    imageUi.resultEmpty.classList.remove('hidden');
+    imageUi.rawResponse.textContent = '尚未调用图片分析接口。';
+    const ctx = imageUi.overlay.getContext('2d');
+    ctx.clearRect(0, 0, imageUi.overlay.width, imageUi.overlay.height);
+}
+
+function selectImageFile() {
+    const file = imageUi.file.files?.[0] || null;
+    const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/bmp']);
+    if (file && (!supportedTypes.has(file.type) || file.size <= 0)) {
+        imageUi.file.value = '';
+        imageAnalysisState.file = null;
+        setImageStatus('error', '请选择非空的 JPEG、PNG 或 BMP 图片');
+        updateImageButtons();
+        return;
+    }
+
+    if (imageAnalysisState.previewUrl) URL.revokeObjectURL(imageAnalysisState.previewUrl);
+    imageAnalysisState.file = file;
+    imageAnalysisState.previewUrl = file ? URL.createObjectURL(file) : '';
+    clearImageResult();
+
+    if (!file) {
+        imageUi.fileMeta.textContent = '支持 JPEG、PNG、BMP；设备能力为最终限制。';
+        imageUi.originalPreview.removeAttribute('src');
+        imageUi.originalStage.classList.add('hidden');
+        imageUi.originalEmpty.classList.remove('hidden');
+    } else {
+        imageUi.fileMeta.textContent = `${file.name} · ${formatFileSize(file.size)} · ${file.type || '未知类型'}`;
+        imageUi.originalPreview.src = imageAnalysisState.previewUrl;
+        imageUi.originalStage.classList.remove('hidden');
+        imageUi.originalEmpty.classList.add('hidden');
+        setImageStatus(imageAnalysisState.connected ? 'success' : 'idle', '图片已选择，等待开始分析');
+    }
+    updateImageButtons();
+}
+
+function responseData(response) {
+    return response?.resData?.resData || response?.resData || {};
+}
+
+function collectImageTargets(data) {
+    const targets = [];
+    (data.areaList || []).forEach(area => {
+        (area.targetList || []).forEach(target => targets.push({
+            ...target,
+            _areaName: area.areaName || area.areaId || 'default',
+        }));
+    });
+    return targets;
+}
+
+function targetConfidenceText(target) {
+    const confidence = Array.isArray(target.confidence) ? target.confidence : [];
+    if (!confidence.length) return '-';
+    return confidence.map(item => {
+        const score = typeof item.confidence === 'number'
+            ? `${(item.confidence * 100).toFixed(1)}%`
+            : '-';
+        return `${item.label || 'unknown'} ${score}`;
+    }).join(' / ');
+}
+
+function primaryTargetLabel(target) {
+    const confidence = Array.isArray(target.confidence) ? target.confidence : [];
+    return confidence[0]?.label || 'unknown';
+}
+
+function renderImageTargets(targets) {
+    imageUi.targetsBody.innerHTML = '';
+    if (!targets.length) {
+        imageUi.targetsWrap.classList.add('hidden');
+        imageUi.targetsEmpty.classList.remove('hidden');
+        imageUi.targetsEmpty.textContent = '分析成功，未检测到目标';
+        return;
+    }
+
+    targets.forEach((target, index) => {
+        const row = document.createElement('tr');
+        const box = target.box || {};
+        const cells = [
+            String(index + 1),
+            target._areaName,
+            primaryTargetLabel(target),
+            targetConfidenceText(target),
+            `${box.x ?? '-'}, ${box.y ?? '-'}, ${box.width ?? '-'}, ${box.height ?? '-'}`,
+            String(Array.isArray(target.landmark) ? target.landmark.length : 0),
+        ];
+        cells.forEach((value, cellIndex) => {
+            const cell = document.createElement('td');
+            if (cellIndex === 2) {
+                const pill = document.createElement('span');
+                pill.className = 'target-label-pill';
+                pill.textContent = value;
+                cell.appendChild(pill);
+            } else {
+                cell.textContent = value;
+                if (cellIndex === 3) cell.className = 'target-confidence';
+            }
+            row.appendChild(cell);
+        });
+        imageUi.targetsBody.appendChild(row);
+    });
+    imageUi.targetsEmpty.classList.add('hidden');
+    imageUi.targetsWrap.classList.remove('hidden');
+}
+
+function drawImageOverlay() {
+    const image = imageUi.originalPreview;
+    const canvas = imageUi.overlay;
+    if (!image.naturalWidth || !image.naturalHeight) return;
+
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.style.width = `${image.clientWidth}px`;
+    canvas.style.height = `${image.clientHeight}px`;
+    canvas.style.left = `${image.offsetLeft}px`;
+    canvas.style.top = `${image.offsetTop}px`;
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = Math.max(2, image.naturalWidth / 500);
+    ctx.font = `${Math.max(14, image.naturalWidth / 55)}px sans-serif`;
+    const colors = ['#ef4444', '#2563eb', '#16a34a', '#f59e0b', '#9333ea', '#0891b2'];
+
+    imageAnalysisState.targets.forEach((target, index) => {
+        const box = target.box || {};
+        const x = Number(box.x);
+        const y = Number(box.y);
+        const width = Number(box.width);
+        const height = Number(box.height);
+        if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return;
+
+        const color = colors[index % colors.length];
+        ctx.strokeStyle = color;
+        ctx.strokeRect(x, y, width, height);
+
+        const label = targetConfidenceText(target);
+        const metrics = ctx.measureText(label);
+        const labelHeight = Math.max(20, image.naturalWidth / 40);
+        const labelY = Math.max(labelHeight, y);
+        ctx.fillStyle = color;
+        ctx.fillRect(x, labelY - labelHeight, metrics.width + 12, labelHeight);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, x + 6, labelY - 5);
+
+        ctx.fillStyle = '#22c55e';
+        (target.landmark || []).forEach(point => {
+            const px = Number(point.x ?? point.xRatio);
+            const py = Number(point.y ?? point.yRatio);
+            if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+            ctx.beginPath();
+            ctx.arc(px, py, Math.max(2, image.naturalWidth / 300), 0, Math.PI * 2);
+            ctx.fill();
+        });
+    });
+}
+
+function resolveResultImage(value) {
+    if (!value) return '';
+    if (value.startsWith('data:') || /^https?:\/\//i.test(value)) return value;
+    try {
+        return new URL(value, `${imageAnalysisState.baseUrl}/`).href;
+    } catch (_) {
+        return '';
+    }
+}
+
+function sanitizedRawResult(result) {
+    const copy = JSON.parse(JSON.stringify(result));
+    const data = responseData(copy.response);
+    if (typeof data.fullPicture === 'string' && data.fullPicture.startsWith('data:')) {
+        data.fullPicture = `<Base64 标注图已省略，共 ${data.fullPicture.length} 字符>`;
+    }
+    return copy;
+}
+
+function renderImageAnalysisResult(result) {
+    const data = responseData(result.response);
+    const targets = collectImageTargets(data);
+    imageAnalysisState.targets = targets;
+
+    const faces = targets.filter(target =>
+        (target.confidence || []).some(item => String(item.label || '').toLowerCase() === 'face')
+    );
+    imageUi.targetCount.textContent = String(targets.length);
+    imageUi.faceCount.textContent = String(faces.length);
+    imageUi.elapsed.textContent = `${result.elapsedMs} ms`;
+    imageUi.chunks.textContent = String(result.upload?.totalChunks || 0);
+    imageUi.summary.classList.remove('hidden');
+    renderImageTargets(targets);
+
+    const resultImage = resolveResultImage(data.fullPicture || '');
+    if (resultImage) {
+        imageUi.resultPreview.src = resultImage;
+        imageUi.resultPreview.classList.remove('hidden');
+        imageUi.resultEmpty.classList.add('hidden');
+    } else {
+        imageUi.resultPreview.classList.add('hidden');
+        imageUi.resultEmpty.classList.remove('hidden');
+        imageUi.resultEmpty.textContent = '设备未返回标注图片，已在左侧原图绘制结构化检测框';
+    }
+
+    imageUi.rawResponse.textContent = JSON.stringify(sanitizedRawResult(result), null, 2);
+    requestAnimationFrame(drawImageOverlay);
+}
+
+async function runImageAnalysisTest() {
+    const taskId = imageUi.taskId.value.trim();
+    if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(taskId)) {
+        setImageStatus('error', '任务 ID 仅支持 1-128 位字母、数字、点、下划线、冒号和连字符');
+        return;
+    }
+    if (!imageAnalysisState.file || !imageUi.algorithm.value) {
+        setImageStatus('error', '请选择算法和测试图片');
+        return;
+    }
+
+    imageAnalysisState.busy = true;
+    setImageStatus('running', '正在创建任务、上传图片并执行推理…');
+    imageUi.rawResponse.textContent = '请求执行中…';
+    updateImageButtons();
+
+    try {
+        const response = await fetch('/api/image-analysis/run', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/octet-stream',
+                'x-cosmo-base-url': imageAnalysisState.baseUrl,
+                'x-cosmo-mtk': imageAnalysisState.mtk,
+                'x-cosmo-algorithm-code': imageUi.algorithm.value,
+                'x-cosmo-task-id': taskId,
+                'x-cosmo-file-name': encodeURIComponent(imageAnalysisState.file.name),
+            },
+            body: imageAnalysisState.file,
+        });
+        const result = await parseTestApiResponse(response);
+        imageAnalysisState.activeTask = {
+            taskId,
+            algorithmCode: imageUi.algorithm.value,
+        };
+        renderImageAnalysisResult(result);
+        setImageStatus('success', `分析完成：检测到 ${imageAnalysisState.targets.length} 个目标`);
+    } catch (error) {
+        imageUi.rawResponse.textContent = error.message;
+        setImageStatus('error', error.message);
+    } finally {
+        imageAnalysisState.busy = false;
+        updateImageButtons();
+    }
+}
+
+async function releaseImageTask(silent = false) {
+    const task = imageAnalysisState.activeTask;
+    if (!task) return true;
+
+    imageAnalysisState.busy = true;
+    if (!silent) setImageStatus('running', '正在释放图片分析任务…');
+    updateImageButtons();
+    try {
+        const response = await fetch('/api/image-analysis/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                baseUrl: imageAnalysisState.baseUrl,
+                mtk: imageAnalysisState.mtk,
+                algorithmCode: task.algorithmCode,
+                taskId: task.taskId,
+            }),
+        });
+        await parseTestApiResponse(response);
+        imageAnalysisState.activeTask = null;
+        if (!silent) setImageStatus('success', '任务已释放，可切换算法或任务 ID');
+        return true;
+    } catch (error) {
+        if (!silent) setImageStatus('error', `释放任务失败：${error.message}`);
+        return false;
+    } finally {
+        imageAnalysisState.busy = false;
+        updateImageButtons();
+    }
+}
+
+function initImageAnalysisPage() {
+    if (!imageUi.connect) return;
+    imageUi.taskId.value = newImageTaskId();
+    imageUi.connect.onclick = connectImageDevice;
+    imageUi.file.onchange = selectImageFile;
+    imageUi.run.onclick = runImageAnalysisTest;
+    imageUi.release.onclick = () => releaseImageTask(false);
+    imageUi.regenerateTask.onclick = () => {
+        imageUi.taskId.value = newImageTaskId();
+        updateImageButtons();
+    };
+    imageUi.algorithm.onchange = updateImageButtons;
+    imageUi.taskId.oninput = updateImageButtons;
+    imageUi.originalPreview.onload = drawImageOverlay;
+    window.addEventListener('resize', drawImageOverlay);
+    updateImageButtons();
+}
+
+initImageAnalysisPage();

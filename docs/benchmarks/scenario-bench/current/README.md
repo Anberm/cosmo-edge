@@ -1,14 +1,18 @@
 # ScenarioBench Current Benchmark Refresh
 
-This directory contains refreshed benchmark reports generated after the v1.0 release documentation freeze. These reports keep the same publication policy as the v1.0 benchmark artifacts: public summaries and HTML reports are committed, while raw `metrics.json` traces stay out of the repository.
+This directory points to the newest reviewed benchmark refresh generated after the v1.0 release documentation freeze. Canonical measurements live in the versioned v1.1 pack; raw `metrics.json` traces stay out of the repository.
 
 ## Summary
 
-| ID | Scenario | Hardware profile | Target FPS | Max stable channels | Result | Chinese report |
-| --- | --- | --- | ---: | ---: | --- | --- |
-| [vlm-77175-npu](vlm-77175-npu/report.html) | VLM Review NPU Benchmark (77175) | npu-yy-16t01-preview | 0.1 | 8 | PASS | [zh-CN](vlm-77175-npu/report.zh-CN.html) |
+| Platform | Target FPS/ch | Conservative 80% display boundary | English | Chinese |
+| --- | ---: | --- | --- | --- |
+| BM1688 | 0.1 | 6 channels | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html">open</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| CV186X | 0.1 | 6 channels | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html">open</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.zh-CN.html">zh-CN</a> |
+| RK3576 | 0.1 | 4 channels | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html">open</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.zh-CN.html">zh-CN</a> |
 
 ## Notes
 
-- The VLM report uses the refreshed ScenarioBench VLM methodology: local input is throttled by `targetFps`, each step holds for 60s, and throughput is computed from stable-window completion counters.
-- The report is based on the same YY-16T01-Preview NPU device class and is published as a benchmark refresh, not as a new product release.
+- The 2026-08-20 refresh uses one controlled 1080p24 local-loop input, 60-second steps, and task-local completion counters.
+- VLM FPS was recorded but not gated in the raw runs. The table applies the v1.1 conservative post-evaluation and is not an exact capacity or long-running claim.
+- Startup-sensitive windows do not count as performance failures and do not increase the displayed boundary; see the v1.1 methodology and canonical data for the complete contract.
+- The [previous single-device report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/current/vlm-77175-npu/report.html) remains available only as a superseded historical observation.

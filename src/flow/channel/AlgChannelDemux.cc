@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "flow/channel/VideoEofPolicy.h"
 #include "service/detail/ServiceRegistry.h"
 #include "service/event/IEventNotifier.h"
 #include "service/system/IConfigReadService.h"
@@ -19,7 +20,7 @@ static constexpr const char* kTag = "ChannelDemux ";
 namespace cosmo {
 
 AlgChannelDemux::~AlgChannelDemux() {
-    LOG_INFO("{}:{} Url:{} Delete", kTag, channel_id_, url_);
+    LOG_INFO("{}:{} Delete", kTag, channel_id_);
     ClearLastFrame();
 }
 
@@ -33,14 +34,14 @@ AlgChannelDemux::AlgChannelDemux(const std::string& channel_id, const std::strin
     action_status_    = util::ErrorEnum::ActionReady;
     status_.status    = service::camera::AlgDemuxStatus::AlgDemuxInit;
     status_.timePoint = chrono::steady_clock::now();
-    LOG_INFO("{}:{} Url:{} Init", kTag, channel_id_, url_);
+    LOG_INFO("{}:{} Init", kTag, channel_id_);
 }
 
 bool AlgChannelDemux::SetUrl(const std::string& url) {
     if (url.empty())
         return false;
     if (url_ != url) {
-        LOG_INFO("{}:{} Url Change From {} To {}", kTag, channel_id_, url_, url);
+        LOG_INFO("{}:{} URL changed", kTag, channel_id_);
         url_              = url;
         is_url_changed_   = true;
         video_read_count_ = 0;
@@ -101,14 +102,14 @@ bool AlgChannelDemux::SetPollChannel(const std::string& channel_id) {
 void AlgChannelDemux::Start() {
     std::lock_guard<std::mutex> lock(lifecycle_mtx_);
     if (is_running_.exchange(true)) {
-        LOG_INFO("{}:{} Url:{} Already Running", kTag, channel_id_, url_);
+        LOG_INFO("{}:{} Already Running", kTag, channel_id_);
         return;
     }
     ResetDistributor();
     if (!start()) {
         is_running_    = false;
         action_status_ = util::ErrorEnum::ActionStop;
-        LOG_ERRO("{}:{} Url:{} Start failed: previous thread still joinable", kTag, channel_id_, url_);
+        LOG_ERRO("{}:{} Start failed: previous thread still joinable", kTag, channel_id_);
         return;
     }
     action_status_ = util::ErrorEnum::ActionStart;
@@ -118,7 +119,7 @@ void AlgChannelDemux::Stop() {
     std::lock_guard<std::mutex> lock(lifecycle_mtx_);
     LOG_INFO("{}:{} Wait To Stop", kTag, channel_id_);
     if (!is_running_.exchange(false)) {
-        LOG_INFO("{}:{} Url:{} Already Stopped", kTag, channel_id_, url_);
+        LOG_INFO("{}:{} Already Stopped", kTag, channel_id_);
         return;
     }
     stop();
@@ -174,11 +175,11 @@ bool AlgChannelDemux::OpenStream() {
     NotifyOnInfo();
     video_read_count_ += 1;
 
-    bool was_repeat  = is_need_repeat_;
-    is_need_repeat_  = false;
-    is_have_report_  = false;
-    is_opened_       = true;
-    read_frames_     = 0;
+    bool was_repeat = is_need_repeat_;
+    is_need_repeat_ = false;
+    is_have_report_ = false;
+    is_opened_      = true;
+    read_frames_    = 0;
     SetStatusInfo(service::camera::AlgDemuxStatus::AlgDemuxOpened);
     if (!was_repeat) {
         action_status_ = util::ErrorEnum::DemuxStreamStart;
@@ -218,36 +219,36 @@ void AlgChannelDemux::HandleStream() {
     duration_stat_.EndSample();
     if (media::ReadFrameStatus::Success != ret) {
         if (media::ReadFrameStatus::StreamEnd == ret) {
-            if ((video_read_count_ < video_repeat_count_) || (video_repeat_count_ <= 0)) {
+            const bool is_live_stream = IsLiveStream();
+            const auto disposition =
+                flow::DecideVideoEof(is_live_stream, video_read_count_, video_repeat_count_);
+            if (flow::VideoEofDisposition::Reopen == disposition) {
+                is_need_repeat_ = true;
+                if (is_live_stream) {
+                    LOG_INFO("{}:{} Live Stream End Need ReOpen Or Request Url", kTag, channel_id_);
+                    SetStatusInfo(service::camera::AlgDemuxStatus::AlgDemuxReadFailed);
+                    action_status_ = util::ErrorEnum::DemuxReadStreamFail;
+                    return;
+                }
+
                 LOG_INFO("{}:{} Stream End Now RepeatCount:{} Max RepeatCount:{}", kTag, channel_id_,
                          video_read_count_, video_repeat_count_);
-                is_need_repeat_ = true;
-            } else {
-                // Do not report completion for live streams.
-                if ((!is_have_report_) && (!IsLiveStream())) {
-                    is_have_report_ = true;
-                    NotifyOnComplete();
-                }
-            }
-            if (IsLiveStream()) {
-                LOG_INFO("{}:{} Live Stream End  Need ReOpen Or Request Url", kTag, channel_id_);
-                // Live stream has no definitive end — request new URL or reopen.
-                SetStatusInfo(service::camera::AlgDemuxStatus::AlgDemuxReadFailed);
-                is_need_repeat_ = true;
-                action_status_  = util::ErrorEnum::DemuxReadStreamFail;
-            } else {
-                SetStatusInfo(service::camera::AlgDemuxStatus::AlgDemuxReadEnd);
-                if (!is_need_repeat_) {
-                    action_status_ = util::ErrorEnum::DemuxStreamClosed;
-                }
-                // When is_need_repeat_ is true the stream is about to loop —
-                // keep action_status_ as Success from the last frame read to
-                // prevent transient "取流无数据" during the loop transition.
-
-                // Signal unfinished recording tasks to finalize.
+                // A loop boundary is not terminal. Keep the last Reading state
+                // and successful action status until OpenStream publishes the
+                // next Opened/Reading transition.
                 frame_packet->index = -1;
                 recorder_->TaskFrame(frame_packet);
+                return;
             }
+
+            if (!is_have_report_) {
+                is_have_report_ = true;
+                NotifyOnComplete();
+            }
+            SetStatusInfo(service::camera::AlgDemuxStatus::AlgDemuxReadEnd);
+            action_status_      = util::ErrorEnum::DemuxStreamClosed;
+            frame_packet->index = -1;
+            recorder_->TaskFrame(frame_packet);
             return;
         }
         SetStatusInfo(service::camera::AlgDemuxStatus::AlgDemuxReadFailed);

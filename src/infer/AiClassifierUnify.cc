@@ -23,8 +23,10 @@ util::ErrorEnum AiClassifierUnify::Init() {
         return util::ErrorEnum::Created;
     }
 
+    cosmo::nn::DefaultComponent::Options options;
+    options.profiler = &profiler_;
     classifier_ =
-        std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(), &profiler_);
+        std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     LOG_DEBUG("DEBUG: Classifier {} Init", model_path_);
 
     max_batch_size_ = static_cast<size_t>(classifier_->GetMaxBatchSize());
@@ -93,7 +95,8 @@ void AiClassifierUnify::AppendClassifyResults(AiDetectRstEl& io_el,
 
 /* Input data must not exceed hardware-supported max batch; most edge devices support single batch only */
 util::ErrorEnum AiClassifierUnify::Classify(const std::vector<VideoFramePtr>& images,
-                                            std::vector<AiDetectRstEl>& io_rst, bool use_box) {
+                                            std::vector<AiDetectRstEl>& io_rst, bool use_box,
+                                            const std::vector<media::NativeVideoBufferPtr>& native_buffers) {
     if (!classifier_) {
         LOG_WARN("{}", "SDK Classifier Not Init");
         return util::ErrorEnum::NotInit;
@@ -107,7 +110,7 @@ util::ErrorEnum AiClassifierUnify::Classify(const std::vector<VideoFramePtr>& im
     }
 
     std::vector<std::shared_ptr<cosmo::nn::Blob>> image_blobs{};
-    auto ret = ConvertImagesToBlobs(images, image_blobs);
+    auto ret = ConvertImagesToBlobs(images, native_buffers, image_blobs);
     if (util::ErrorEnum::Success != ret) {
         LOG_ERRO("ConvertImagesToBlobs Failed. Ret:{}", ret);
         return ret;
@@ -144,11 +147,11 @@ util::ErrorEnum AiClassifierUnify::Classify(const std::vector<VideoFramePtr>& im
     return util::ErrorEnum::Success;
 }
 
-util::ErrorEnum AiClassifierUnify::ClassifyMultSub(const std::vector<VideoFramePtr>& images,
-                                                   std::vector<std::vector<AiDetectRstEl>>& io_rst,
-                                                   const bool& use_mult_sub, bool use_box) {
+util::ErrorEnum AiClassifierUnify::ClassifyMultSub(
+    const std::vector<VideoFramePtr>& images, std::vector<std::vector<AiDetectRstEl>>& io_rst,
+    const bool& use_mult_sub, bool use_box, const std::vector<media::NativeVideoBufferPtr>& native_buffers) {
     if (!use_mult_sub) {
-        return Classify(images, io_rst, use_box);
+        return Classify(images, io_rst, use_box, native_buffers);
     }
     if (io_rst.empty()) {
         return util::ErrorEnum::Success;
@@ -161,6 +164,8 @@ util::ErrorEnum AiClassifierUnify::ClassifyMultSub(const std::vector<VideoFrameP
     for (i = 0; i < images.size(); i++) {
         std::vector<VideoFramePtr> imageInputs;
         imageInputs.push_back(images[i]);
+        std::vector<media::NativeVideoBufferPtr> nativeInputs;
+        nativeInputs.push_back(i < native_buffers.size() ? native_buffers[i] : nullptr);
         for (size_t j = 0; j < io_rst[i].size(); j++) {
             for (size_t k = 0; k < io_rst[i][j].relatedEls.size(); k++) {
                 AiDetectRstEl el;
@@ -168,7 +173,7 @@ util::ErrorEnum AiClassifierUnify::ClassifyMultSub(const std::vector<VideoFrameP
                 std::vector<AiDetectRstEl> io_puts;
                 io_puts.push_back(el);
 
-                auto ret = Classify(imageInputs, io_puts, use_box);
+                auto ret = Classify(imageInputs, io_puts, use_box, nativeInputs);
                 if (util::ErrorEnum::Success != ret) {
                     LOG_INFO("{}", "Classify Fail");
                     return ret;
@@ -211,7 +216,8 @@ void AiClassifierUnify::DispatchBatchResults(const std::vector<std::vector<cosmo
 }
 
 util::ErrorEnum AiClassifierUnify::Classify(const std::vector<VideoFramePtr>& images,
-                                            std::vector<std::vector<AiDetectRstEl>>& io_rst, bool use_box) {
+                                            std::vector<std::vector<AiDetectRstEl>>& io_rst, bool use_box,
+                                            const std::vector<media::NativeVideoBufferPtr>& native_buffers) {
     if (!classifier_) {
         LOG_WARN("{}", "SDK Classifier Not Init");
         return util::ErrorEnum::NotInit;
@@ -225,6 +231,7 @@ util::ErrorEnum AiClassifierUnify::Classify(const std::vector<VideoFramePtr>& im
     }
 
     std::vector<VideoFramePtr> input_images;
+    std::vector<media::NativeVideoBufferPtr> input_native_buffers;
     std::vector<std::vector<std::vector<int>>> input_datas;
     std::vector<std::pair<size_t, size_t>> indexes;
     size_t total = std::accumulate(io_rst.begin(), io_rst.end(), size_t{0},
@@ -243,15 +250,18 @@ util::ErrorEnum AiClassifierUnify::Classify(const std::vector<VideoFramePtr>& im
                     if (img != indexes[k].first) {
                         img = indexes[k].first;
                         input_images.push_back(images[img]);
+                        input_native_buffers.push_back(img < native_buffers.size() ? native_buffers[img]
+                                                                                   : nullptr);
                     }
                 }
                 std::vector<std::vector<cosmo::nn::ObjectInfoV1>> outputs;
-                auto ret = Forward(input_images, input_datas, outputs, use_box);
+                auto ret = Forward(input_images, input_datas, outputs, use_box, input_native_buffers);
                 if (util::ErrorEnum::Success != ret) {
                     LOG_ERRO("Forward Failed. Ret:{}", ret);
                 }
                 DispatchBatchResults(outputs, indexes, io_rst);
                 input_images.clear();
+                input_native_buffers.clear();
                 input_datas.clear();
                 indexes.clear();
                 datas.clear();

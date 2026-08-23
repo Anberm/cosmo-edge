@@ -14,7 +14,9 @@ import { parse as parseYaml } from 'yaml';
 import { normalizeTaskType } from './task-strategies.js';
 
 const FPS_ACTION_ID = 'AA_00001';
+const CLASSIFIER_FPS_ACTION_ID = 'AA_00002';
 const VLM_ACTION_IDS = new Set(['DA_00003', 'PDA_00003']);
+const FPS_ACTION_IDS = new Set([FPS_ACTION_ID, CLASSIFIER_FPS_ACTION_ID, ...VLM_ACTION_IDS]);
 const SUPPORTED_VIDEO_MODES = new Set(['local', 'rtsp-fidelity', 'rtsp-deterministic']);
 export const DEFAULT_HOLD_SEC = 30;
 export const DEFAULT_VLM_HOLD_SEC = 60;
@@ -158,17 +160,26 @@ export class ScenarioPackage {
     const algorithmCode = String(spec.algorithmCode ?? template.algorithmCode ?? template.algorithmId ?? algorithmId);
     const scheduleId = spec.scheduleId ?? '';
     const vlm = detectVlmMode(template);
+    const vlmCompletionActionId = vlm.direct ? detectVlmCompletionActionId(template) : null;
     const type = vlm.direct ? 'vlm' : (spec.type ?? 'cv');
-    const targetFps = spec.targetFps != null ? Number(spec.targetFps) : extractTargetFpsFromTemplate(template);
+    const explicitTargetFps = spec.targetFps != null ? Number(spec.targetFps) : null;
+    const targetFps = explicitTargetFps ?? extractTargetFpsFromTemplate(template);
     const normalizedType = normalizeTaskType(type);
     const videoReadFps = this.videoMode === 'local' && normalizedType === 'vlm' ? targetFps : null;
-    const taskConfig = buildTaskConfig(template, this.videoRepeatCount, videoReadFps);
+    const taskConfig = buildTaskConfig(
+      template,
+      this.videoRepeatCount,
+      videoReadFps,
+      spec.taskConfig,
+      `tasks[${index}]`,
+    );
 
     return {
       id,
       displayName: spec.displayName ?? template.algorithmName ?? id,
       type,
       hasNestedVlmReview: vlm.review,
+      vlmCompletionActionId,
       algorithmId,
       algorithmCode,
       scheduleId,
@@ -176,7 +187,7 @@ export class ScenarioPackage {
       template,
       targetFps: Number.isFinite(targetFps) && targetFps > 0 ? targetFps : null,
       taskConfig,
-      layoutSavePayload: buildLayoutSavePayload(template),
+      layoutSavePayload: buildLayoutSavePayload(template, explicitTargetFps),
     };
   }
 
@@ -281,9 +292,32 @@ export class ScenarioPackage {
   }
 }
 
-function buildTaskConfig(template, videoRepeatCount, videoReadFps = null) {
+function buildTaskConfig(
+  template,
+  videoRepeatCount,
+  videoReadFps = null,
+  taskConfigOverride = null,
+  taskPath = 'task',
+) {
   const base = template.taskConfig ?? { params: [], areas: [] };
-  const params = Array.isArray(base.params) ? [...base.params] : [];
+  if (taskConfigOverride != null
+      && (typeof taskConfigOverride !== 'object' || Array.isArray(taskConfigOverride))) {
+    throw new Error(`scenario.yml: ${taskPath}.taskConfig must be an object`);
+  }
+
+  const override = taskConfigOverride ?? {};
+  if (override.params != null && !Array.isArray(override.params)) {
+    throw new Error(`scenario.yml: ${taskPath}.taskConfig.params must be an array`);
+  }
+  if (override.areas != null && !Array.isArray(override.areas)) {
+    throw new Error(`scenario.yml: ${taskPath}.taskConfig.areas must be an array`);
+  }
+
+  const params = mergeTaskConfigParams(
+    Array.isArray(base.params) ? base.params : [],
+    override.params ?? [],
+    taskPath,
+  );
   const hasRepeat = params.some((p) => p?.key === 'param.videoRepeatCount');
   if (!hasRepeat) {
     params.push({ key: 'param.videoRepeatCount', value: String(videoRepeatCount) });
@@ -292,7 +326,51 @@ function buildTaskConfig(template, videoRepeatCount, videoReadFps = null) {
   if (!hasReadFps && Number.isFinite(videoReadFps) && videoReadFps > 0) {
     params.push({ key: 'param.videoReadFps', value: String(videoReadFps) });
   }
-  return { ...base, params, areas: base.areas ?? [] };
+  return {
+    ...base,
+    ...override,
+    params,
+    areas: override.areas ?? base.areas ?? [],
+  };
+}
+
+function mergeTaskConfigParams(baseParams, overrideParams, taskPath) {
+  const params = baseParams.map((param) => ({ ...param }));
+  const indexByKey = new Map();
+  for (const [index, param] of params.entries()) {
+    if (param?.key != null && !indexByKey.has(String(param.key))) {
+      indexByKey.set(String(param.key), index);
+    }
+  }
+
+  const overrideKeys = new Set();
+  for (const [index, param] of overrideParams.entries()) {
+    const key = String(param?.key ?? '').trim();
+    if (!key) {
+      throw new Error(
+        `scenario.yml: ${taskPath}.taskConfig.params[${index}].key must be a non-empty string`,
+      );
+    }
+    if (param.value == null) {
+      throw new Error(
+        `scenario.yml: ${taskPath}.taskConfig.params[${index}].value is required`,
+      );
+    }
+    if (overrideKeys.has(key)) {
+      throw new Error(`scenario.yml: ${taskPath}.taskConfig.params has duplicate key "${key}"`);
+    }
+    overrideKeys.add(key);
+
+    const normalized = { ...param, key, value: String(param.value) };
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex == null) {
+      indexByKey.set(key, params.length);
+      params.push(normalized);
+    } else {
+      params[existingIndex] = normalized;
+    }
+  }
+  return params;
 }
 
 export function defaultHoldSecForTasks(tasks) {
@@ -303,7 +381,7 @@ export function defaultHoldSecForTasks(tasks) {
   return hasVlm ? DEFAULT_VLM_HOLD_SEC : DEFAULT_HOLD_SEC;
 }
 
-function buildLayoutSavePayload(template) {
+function buildLayoutSavePayload(template, targetFpsOverride = null) {
   const algorithmId = String(template.algorithmId ?? template.id ?? template.algorithmCode ?? '');
   if (!algorithmId) throw new Error('template: cannot derive algorithmId for layout save');
   const str = (v) => (v == null ? undefined : String(v));
@@ -315,10 +393,51 @@ function buildLayoutSavePayload(template) {
     algorithmUsage: str(template.algorithmUsage),
     remark: str(template.remark),
     atomicList: str(template.atomicList),
-    algorithmProcessdata: str(template.algorithmProcessdata),
+    algorithmProcessdata: str(overrideProcessTargetFps(template.algorithmProcessdata, targetFpsOverride)),
     algorithmMetadata: str(template.algorithmMetadata),
     filePath: str(template.filePath),
   };
+}
+
+function overrideProcessTargetFps(raw, targetFps) {
+  if (!Number.isFinite(targetFps) || targetFps <= 0 || raw == null) return raw;
+
+  let nodes;
+  try {
+    nodes = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    return raw;
+  }
+  if (!Array.isArray(nodes)) return raw;
+
+  let updated = false;
+  const nextNodes = nodes.map((node) => {
+    if (!FPS_ACTION_IDS.has(String(node?.actionId ?? ''))) return node;
+
+    const configWasString = typeof node.configObject === 'string';
+    let configObject = node.configObject;
+    if (configWasString) {
+      try { configObject = JSON.parse(configObject); } catch { return node; }
+    }
+    if (!Array.isArray(configObject?.params)) return node;
+
+    let nodeUpdated = false;
+    const params = configObject.params.map((param) => {
+      if (param?.key !== 'fps') return param;
+      nodeUpdated = true;
+      return { ...param, value: String(targetFps) };
+    });
+    if (!nodeUpdated) return node;
+
+    updated = true;
+    const nextConfig = { ...configObject, params };
+    return {
+      ...node,
+      configObject: configWasString ? JSON.stringify(nextConfig) : nextConfig,
+    };
+  });
+
+  return updated ? JSON.stringify(nextNodes) : raw;
 }
 
 function parseProcessData(template) {
@@ -365,6 +484,23 @@ export function detectVlmMode(template) {
         param?.key === 'enableLlmReview' && String(param.value) === '1');
   });
   return { direct, review };
+}
+
+/**
+ * Select the counter that represents one completed result for this direct VLM
+ * graph. Video VLM graphs dispatch completed results through BA_00004, while
+ * the picture-only PDA graph owns its PDA_00003 counter directly. DA-only is
+ * retained as the legacy fallback for external templates.
+ */
+export function detectVlmCompletionActionId(template) {
+  const actionIds = new Set(parseProcessData(template).map(
+    (node) => String(node?.actionId ?? '').trim().toUpperCase(),
+  ));
+  const hasDirectVlm = [...VLM_ACTION_IDS].some((actionId) => actionIds.has(actionId));
+  if (!hasDirectVlm) return null;
+  if (actionIds.has('BA_00004')) return 'BA_00004';
+  if (actionIds.has('PDA_00003')) return 'PDA_00003';
+  return actionIds.has('DA_00003') ? 'DA_00003' : null;
 }
 
 // Re-export for unit testing of the fps extractor on arbitrary template objects.

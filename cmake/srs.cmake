@@ -58,6 +58,12 @@ ExternalProject_Add(
         --srtp-nasm=off
         --utest=off
         --jobs=4
+        COMMAND ${CMAKE_COMMAND}
+            "-DSRS_AUTO_HEADERS=<SOURCE_DIR>/objs/srs_auto_headers.hpp"
+            "-DSRS_BUILD_EPOCH=${COSMO_REPRODUCIBLE_BUILD_EPOCH}"
+            "-DSRS_BUILD_DATE=${COSMO_REPRODUCIBLE_BUILD_UTC}"
+            "-DSRS_BUILD_UNAME=${COSMO_REPRODUCIBLE_BUILD_UNAME}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/normalize_srs_build_metadata.cmake
 
     BUILD_COMMAND $(MAKE)
     BUILD_IN_SOURCE ON
@@ -77,49 +83,8 @@ add_dependencies(third_build srs_external)
 # Install SRS binary
 install(PROGRAMS ${SRS_SOURCE_DIR}/objs/srs DESTINATION bin)
 
-# Generate and install SRS configuration inline (no external file dependency).
-# Uses bracket argument [=[...]=] to preserve semicolons verbatim.
-file(WRITE ${CMAKE_BINARY_DIR}/srs.conf [=[
-# SRS configuration for Cosmo device deployment.
-# @see full.conf for all available options.
-
-listen              1936;
-max_connections     1000;
-daemon              on;
-pid                 /data/cwaiuserdata/log/logs/srs.pid;
-srs_log_tank        file;
-srs_log_file        /data/cwaiuserdata/log/logs/srs.log;
-
-http_api {
-    enabled         on;
-    listen          1985;
-}
-http_server {
-    enabled         on;
-    listen          18088;
-    dir             ./objs/nginx/html;
-}
-rtc_server {
-    enabled on;
-    listen 8000;
-    candidate *;
-}
-vhost __defaultVhost__ {
-    hls {
-        enabled     on;
-    }
-    http_remux {
-        enabled     on;
-        mount       [vhost]/[app]/[stream].flv;
-    }
-    rtc {
-        enabled     on;
-        rtmp_to_rtc on;
-        rtc_to_rtmp on;
-    }
-    play {
-        gop_cache_max_frames 2500;
-    }
-}
-]=])
-install(FILES ${CMAKE_BINARY_DIR}/srs.conf DESTINATION bin/srs_conf)
+# Install a runtime template so SRS logs and its PID follow the package-specific
+# mutable data root and any explicit COSMO_DATA_DIR override.
+install(FILES ${CMAKE_CURRENT_LIST_DIR}/srs.conf.in
+    DESTINATION bin/srs_conf
+    RENAME srs.conf)

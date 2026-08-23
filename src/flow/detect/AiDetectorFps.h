@@ -38,6 +38,8 @@ inline constexpr size_t kUnknownFpsReuseCount = 3;
 
 namespace ai_detector_fps {
 
+    inline constexpr size_t kMaxDetectorDrainBatch = 4;
+
     struct ReuseRule {
         float max_fps{0.0f};
         size_t reuse_count{0};
@@ -48,6 +50,19 @@ namespace ai_detector_fps {
     // Tested placement gradient: <=8fps reuse 3, <=12fps reuse 2, higher fps reuse 1.
     inline ReuseProfile DefaultReuseProfile() {
         return {{8.0f, 3}, {12.0f, 2}, {100.0f, 1}};
+    }
+
+    // RKNN CV graphs use a conservative default across Rockchip targets until
+    // a model/candidate-specific capacity result proves that sharing is safe.
+    // Environment overrides remain available for qualified combinations.
+    inline ReuseProfile RknnDefaultReuseProfile() {
+        return {{100.0f, 1}};
+    }
+
+    inline size_t EffectiveDetectorDrainBatch(size_t configured_batch, size_t model_max_batch) {
+        const size_t safe_configured = std::max<size_t>(1, configured_batch);
+        const size_t safe_model_max  = std::max<size_t>(1, model_max_batch);
+        return std::min(safe_configured, safe_model_max);
     }
 
     inline bool HasConfiguredFps(float fps) {
@@ -69,8 +84,8 @@ namespace ai_detector_fps {
             return false;
         }
 
-        char* end = nullptr;
-        errno     = 0;
+        char* end          = nullptr;
+        errno              = 0;
         const float result = std::strtof(trimmed.c_str(), &end);
         if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE || !HasConfiguredFps(result)) {
             return false;
@@ -85,8 +100,8 @@ namespace ai_detector_fps {
             return false;
         }
 
-        char* end = nullptr;
-        errno     = 0;
+        char* end                       = nullptr;
+        errno                           = 0;
         const unsigned long long result = std::strtoull(trimmed.c_str(), &end, 10);
         if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE || result == 0 ||
             result > std::numeric_limits<size_t>::max()) {

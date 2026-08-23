@@ -38,7 +38,9 @@ static constexpr const char* kNewDirPrefix = "prod_SOPHGO_";
 static constexpr const char* kPlatformDirRegex = "prod_[A-Z0-9]+_([0-9]+)_.*";
 
 /// Engine type identifier reported to frontend / device info API.
-static constexpr const char* kEngineType = "BM1688";
+static constexpr const char* kBackendType = "SOPHON";
+static constexpr const char* kEngineType  = "BM1688";
+static constexpr bool kSupportsRkllm      = false;
 
 /// Model binary file extension for Sophon backend (.nn wraps .bmodel).
 static constexpr const char* kModelFileExt = ".nn";
@@ -46,6 +48,32 @@ static constexpr const char* kModelFileExt = ".nn";
 /// Supported Sophon chip types, as written to config.json "chip_type".
 /// Add a new chip here to support it across the model pipeline.
 static constexpr const char* kSupportedChips[] = {"BM1688", "CV186X"};
+
+#elif defined(COSMO_NN_USE_RKNN_BACKEND)
+
+#ifndef COSMO_RKNN_TARGET_CHIP
+#error "RKNN builds must define COSMO_RKNN_TARGET_CHIP through COSMO_TARGET_CHIP"
+#endif
+#ifndef COSMO_RKNN_TARGET_CHIP_LABEL
+#error "RKNN builds must define COSMO_RKNN_TARGET_CHIP_LABEL through COSMO_TARGET_CHIP"
+#endif
+
+/// Legacy target-labelled directories remain readable. Newly imported models
+/// use a vendor-level token; config.json chip_type is the compatibility gate.
+static constexpr const char* kPlatformDirPrefix    = "prod_" COSMO_RKNN_TARGET_CHIP_LABEL "_";
+static constexpr const char* kNewDirPrefix         = "prod_ROCKCHIP_";
+static constexpr const char* kPlatformDirRegex     = "prod_[A-Z0-9]+_([0-9]+)_.*";
+static constexpr const char* kBackendType          = "RKNN";
+static constexpr const char* kEngineType           = COSMO_RKNN_TARGET_CHIP_LABEL;
+static constexpr const char* kTargetChip           = COSMO_RKNN_TARGET_CHIP;
+static constexpr const char* kHardwareSpecFallback = "rockchip," COSMO_RKNN_TARGET_CHIP;
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+static constexpr bool kSupportsRkllm = true;
+#else
+static constexpr bool kSupportsRkllm = false;
+#endif
+static constexpr const char* kModelFileExt     = ".rknn";
+static constexpr const char* kSupportedChips[] = {COSMO_RKNN_TARGET_CHIP_LABEL};
 
 #elif defined(COSMO_NN_USE_CPU_BACKEND)
 
@@ -60,7 +88,9 @@ static constexpr const char* kNewDirPrefix = "prod_X86_";
 static constexpr const char* kPlatformDirRegex = "prod_[A-Z0-9]+_([0-9]+)_.*";
 
 /// Engine type identifier reported to frontend / device info API.
-static constexpr const char* kEngineType = "X86";
+static constexpr const char* kBackendType = "ONNX_RUNTIME";
+static constexpr const char* kEngineType  = "X86";
+static constexpr bool kSupportsRkllm      = false;
 
 /// Model binary file extension for CPU backend (.onnx used directly).
 static constexpr const char* kModelFileExt = ".onnx";
@@ -69,7 +99,7 @@ static constexpr const char* kModelFileExt = ".onnx";
 static constexpr const char* kSupportedChips[] = {"X86"};
 
 #else
-#error "Either COSMO_NN_USE_SOPHON_BACKEND or COSMO_NN_USE_CPU_BACKEND must be defined"
+#error "A Sophon, CPU, or RKNN backend must be defined"
 #endif
 
 /// Case-insensitive check whether `chip` is a supported chip/platform type for the

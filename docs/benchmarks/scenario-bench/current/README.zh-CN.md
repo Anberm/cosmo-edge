@@ -1,14 +1,18 @@
 # ScenarioBench 当前基准刷新报告
 
-本目录保存 v1.0 发布文档冻结后刷新生成的 benchmark 报告。发布策略与 v1.0 benchmark 材料一致：仓库只提交公开摘要和 HTML 报告，原始 `metrics.json` 不放入仓库。
+本目录指向 v1.0 发布文档冻结后的最新已审阅 benchmark 刷新。Canonical 数据保存在带版本号的 v1.1 报告包中，原始 `metrics.json` 不进入仓库。
 
 ## 汇总
 
-| ID | 场景 | 硬件档位 | 目标 FPS | 最大稳定路数 | 结果 | 英文报告 |
-| --- | --- | --- | ---: | ---: | --- | --- |
-| [vlm-77175-npu](vlm-77175-npu/report.zh-CN.html) | VLM 算法压测 (77175) | npu-yy-16t01-preview | 0.1 | 8 | 通过 | [English](vlm-77175-npu/report.html) |
+| 平台 | 目标 FPS/路 | 80% 保守展示边界 | 中文 | English |
+| --- | ---: | --- | --- | --- |
+| BM1688 | 0.1 | 6 路 | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html">English</a> |
+| CV186X | 0.1 | 6 路 | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html">English</a> |
+| RK3576 | 0.1 | 4 路 | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html">English</a> |
 
 ## 说明
 
-- VLM 报告使用更新后的 ScenarioBench VLM 口径：local 模式按 `targetFps` 注入取帧率，阶梯保持 60s，并以稳定窗口累计完成数计算 VLM 吞吐。
-- 该报告基于同一 YY-16T01-Preview NPU 设备档位，作为 benchmark refresh 发布，不代表新的产品版本。
+- 2026-08-20 刷新统一使用 1080p24 受控本地循环输入、60 秒阶梯和任务本地完成计数。
+- VLM 原始运行只记录 FPS、未启用 FPS 门禁；表格采用 v1.1 保守回算，不是精确容量或长稳结论。
+- 启动敏感窗口不作为性能失败，也不增加展示路数；完整判定口径见 v1.1 方法说明和 canonical 数据。
+- [此前的单设备报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/current/vlm-77175-npu/report.zh-CN.html)只作为已被取代的历史观测保留旧链接。

@@ -293,7 +293,8 @@ util::ErrorEnum ModelImportExporter::ImportDirectoryArchive(const std::string& t
             has_model =
                 std::any_of(fs::directory_iterator(sub_dir), fs::directory_iterator(), [](const auto& f) {
                     return f.path().extension() == cosmo::util::kModelFileExt ||
-                           f.path().extension() == ".bmodel" || f.path().extension() == ".onnx";
+                           f.path().extension() == ".bmodel" || f.path().extension() == ".onnx" ||
+                           f.path().extension() == ".rknn";
                 });
         }
         if (!has_model) {
@@ -424,7 +425,7 @@ util::ErrorEnum ModelImportExporter::ImportModel(const std::string& archivePath)
             if (!f.is_regular_file())
                 continue;
             auto ext = f.path().extension().string();
-            if (ext == cosmo::util::kModelFileExt || ext == ".bmodel" || ext == ".onnx") {
+            if (ext == cosmo::util::kModelFileExt || ext == ".bmodel" || ext == ".onnx" || ext == ".rknn") {
                 flat_structure = true;
                 break;
             }

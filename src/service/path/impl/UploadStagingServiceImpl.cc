@@ -304,14 +304,17 @@ std::string_view UploadPurposeName(UploadPurpose purpose) {
             return "upgrade";
         case UploadPurpose::kImage:
             return "image";
+        case UploadPurpose::kModelAuthorizationCertificate:
+            return "model-authorization-certificate";
     }
     return {};
 }
 
 bool ParseUploadPurpose(std::string_view value, UploadPurpose& purpose) {
-    for (auto candidate : {UploadPurpose::kModelComponent, UploadPurpose::kModelArchive,
-                           UploadPurpose::kVideo, UploadPurpose::kFaceImport, UploadPurpose::kAudio,
-                           UploadPurpose::kAlgorithm, UploadPurpose::kUpgrade, UploadPurpose::kImage}) {
+    for (auto candidate :
+         {UploadPurpose::kModelComponent, UploadPurpose::kModelArchive, UploadPurpose::kVideo,
+          UploadPurpose::kFaceImport, UploadPurpose::kAudio, UploadPurpose::kAlgorithm,
+          UploadPurpose::kUpgrade, UploadPurpose::kImage, UploadPurpose::kModelAuthorizationCertificate}) {
         if (value == UploadPurposeName(candidate)) {
             purpose = candidate;
             return true;
@@ -1086,6 +1089,7 @@ bool UploadStagingServiceImpl::IsPurposeValid(UploadPurpose purpose) {
         case UploadPurpose::kAlgorithm:
         case UploadPurpose::kUpgrade:
         case UploadPurpose::kImage:
+        case UploadPurpose::kModelAuthorizationCertificate:
             return true;
     }
     return false;

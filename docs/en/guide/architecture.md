@@ -109,7 +109,8 @@ Two inference backend paths currently exist in the project:
 
 Resource directories:
 
-- `data/resource/aiboxresource`
+- `data/resource/aiboxresource_bm1688`
+- `data/resource/aiboxresource_cv186x`
 - `data/resource/aiboxresource_x86`
 
-The current templates cover detection (YOLO v5/v8/v9/v11/v12/v26), classification, keypoints, feature, segmentation (SAM2), object localization (DINO), and vision-language models (Qwen3VL, Qwen3.5). The complete list is subject to the actual files under `data/resource/aiboxresource/model_template/` and `data/resource/aiboxresource_x86/model_template/`.
+The current templates cover detection (YOLO v5/v8/v9/v11/v12/v26), classification, keypoints, feature, segmentation (SAM2), object localization (DINO), and vision-language models (Qwen3VL, Qwen3.5). The complete list is subject to the actual files under each `data/resource/aiboxresource_*/model_template/` directory.

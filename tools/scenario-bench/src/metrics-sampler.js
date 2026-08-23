@@ -1,5 +1,9 @@
 // metrics-sampler.js — Collect RunningDetail + HardwareResource each tick.
-import { isPrimaryThroughputAction, normalizeTaskType } from './task-strategies.js';
+import {
+  isPrimaryThroughputAction,
+  isThroughputBearingAction,
+  normalizeTaskType,
+} from './task-strategies.js';
 //
 // Response shapes (verified against source DTOs):
 //   RunningDetail: resData.status[] where each item has
@@ -53,14 +57,19 @@ export class MetricsSampler {
     const activeChannelIds = [...new Set(expected.map((entry) => entry.channelId))];
     const activeTaskIds = [...new Set(expected.map((entry) => entry.taskId))];
 
-    // Sample both endpoints in parallel; either may fail independently.
-    const [taskDetail, hwRes] = await Promise.allSettled([
+    // Sample all endpoints in parallel; each may fail independently.
+    const [taskDetail, hwRes, memoryPoolRes] = await Promise.allSettled([
       activeTaskIds.length ? this.client.taskRunningDetail(activeTaskIds) : Promise.resolve({ status: [] }),
       this.client.queryHardwareResource(),
+      typeof this.client.queryDeviceMemoryPool === 'function'
+        ? this.client.queryDeviceMemoryPool()
+        : Promise.resolve(null),
     ]);
 
     const perBinding = this._parseRunningDetail(taskDetail, expected, ts);
     const hw = this._parseHardware(hwRes);
+    const memoryPool = this._parseMemoryPool(memoryPoolRes);
+    if (memoryPool) hw.memoryPool = memoryPool;
 
     return {
       ts,
@@ -96,7 +105,13 @@ export class MetricsSampler {
       }
       out.push({
         ...entry,
-        ...this._summarizeTask(st, entry.targetFps, entry.taskType, ts),
+        ...this._summarizeTask(
+          st,
+          entry.targetFps,
+          entry.taskType,
+          ts,
+          entry.vlmCompletionActionId,
+        ),
         taskKey: entry.taskKey,
         taskDisplayName: entry.taskDisplayName,
         taskType: entry.taskType,
@@ -112,8 +127,9 @@ export class MetricsSampler {
    * FPS uses the slowest effective action rate instead of summing pipeline nodes,
    * otherwise multi-node graphs overcount the channel throughput.
    */
-  _summarizeTask(st, targetFps, taskType, ts) {
+  _summarizeTask(st, targetFps, taskType, ts, expectedVlmCompletionActionId = null) {
     const actions = Array.isArray(st.actionStatus) ? st.actionStatus : [];
+    const isVlm = normalizeTaskType(taskType) === 'vlm';
     let insertPeriod = 0, processPeriod = 0, discardPeriod = 0;
     let periodMs = 0, holdCount = 0, alarmCount = 0;
     let insertTotal = 0, processTotal = 0, discardTotal = 0;
@@ -144,21 +160,22 @@ export class MetricsSampler {
       const actionName = String(a.name ?? '');
       const actionId = String(a.actionId ?? '');
       const primaryThroughputAction = isPrimaryThroughputAction(actionName, actionId, taskType);
+      const throughputBearingAction = isThroughputBearingAction(actionName, actionId, taskType);
       if (primaryAction == null && primaryThroughputAction) {
         primaryAction = a;
-        primaryProcessTotal = num(a.processCount);
       }
       actionSummaries.push({
         actionId,
         name: actionName,
         fps: actionFps != null ? round(actionFps, 2) : null,
+        processTotal: num(a.processCount),
         insertPeriod: actionInsertPeriod,
         processPeriod: actionProcessPeriod,
         discardPeriod: actionDiscardPeriod,
         periodMs: actionPeriodMs,
       });
 
-      if (actionFps != null && actionProcessPeriod > 0) {
+      if (actionFps != null && actionProcessPeriod > 0 && throughputBearingAction) {
         pipelineMinFps = Math.min(pipelineMinFps, actionFps);
         if (primaryFps == null && primaryThroughputAction) {
           primaryFps = actionFps;
@@ -170,21 +187,54 @@ export class MetricsSampler {
       }
     }
 
-    const isVlm = normalizeTaskType(taskType) === 'vlm';
-    if (isVlm && primaryAction) {
+    // Qwen workers may batch and share up to several task bindings, so their
+    // DA_00003 processCount is a worker-batch counter rather than a per-task
+    // completion counter. In a direct VLM graph every completed AlgData is
+    // dispatched once to the task-local BA_00004 queue. Prefer that counter
+    // when present, while keeping DA_00003 as the inference/latency signal.
+    const expectedCompletionActionId = isVlm
+      ? normalizeActionId(expectedVlmCompletionActionId)
+      : null;
+    const completionAction = isVlm
+      ? (expectedCompletionActionId
+        ? actions.find((a) => normalizeActionId(a.actionId) === expectedCompletionActionId)
+        : (actions.find((a) => normalizeActionId(a.actionId) === 'BA_00004') ?? primaryAction))
+      : primaryAction;
+    const strictCompletionCounterMissing = isVlm && expectedCompletionActionId != null
+      && (!completionAction || finiteNumber(completionAction.processCount) == null);
+    if (isVlm && completionAction && !strictCompletionCounterMissing) {
+      primaryProcessTotal = expectedCompletionActionId
+        ? finiteNumber(completionAction.processCount)
+        : num(completionAction.processCount);
       const deltaFps = this._counterFps(
-        `${st.taskId}:${primaryAction.actionId ?? primaryAction.name ?? 'vlm'}`,
-        num(primaryAction.processCount),
+        `${st.taskId}:${normalizeActionId(completionAction.actionId)
+          ?? completionAction.name ?? 'vlm'}`,
+        primaryProcessTotal,
         ts,
       );
-      if (deltaFps != null) primaryFps = deltaFps;
+      const completionPeriodMs = num(completionAction.periodMs);
+      const completionPeriodFps = completionPeriodMs > 0
+        ? (num(completionAction.processCountPeriod) * 1000) / completionPeriodMs
+        : null;
+      primaryFps = deltaFps ?? completionPeriodFps ?? primaryFps;
+    } else if (isVlm && expectedCompletionActionId) {
+      // Never cross counter domains. In particular, a DA+BA graph must not
+      // silently substitute the shared DA worker counter when BA disappears.
+      primaryFps = null;
+      primaryProcessTotal = null;
     }
     if (primaryFps == null && !isVlm) {
       const firstEffective = actionSummaries.find((a) => a.fps != null && a.processPeriod > 0);
       primaryFps = firstEffective?.fps ?? null;
     }
-    const measuredFps = primaryFps ?? (isVlm ? null : 0);
     const minPipelineFps = pipelineMinFps !== Infinity ? pipelineMinFps : 0;
+    // A detector instance may be shared by several channels. Its AA_00001 counter is then the
+    // aggregate rate and is repeated in every task detail, while downstream per-channel actions
+    // retain the actual channel rate. CV throughput is therefore the slowest effective pipeline
+    // frame-throughput action. Terminal event/report actions run only when a
+    // business event fires and are intentionally excluded. Direct VLM keeps
+    // its dedicated completion-counter semantics.
+    const measuredFps = isVlm ? primaryFps : minPipelineFps;
     const discardRate = maxDiscardRate;
     const fpsRatio = targetFps && targetFps > 0 && measuredFps != null ? measuredFps / targetFps : null;
 
@@ -196,8 +246,12 @@ export class MetricsSampler {
       actionCount: actions.length,
       measuredFps: measuredFps != null ? round(measuredFps, 2) : null,
       throughputFps: measuredFps != null ? round(measuredFps, 2) : null,
-      telemetryMissing: isVlm && primaryAction == null,
+      telemetryMissing: isVlm && (primaryAction == null || strictCompletionCounterMissing),
       primaryProcessTotal,
+      completionActionId: completionAction && !strictCompletionCounterMissing
+        ? normalizeActionId(completionAction.actionId)
+        : null,
+      expectedCompletionActionId,
       pipelineMinFps: round(minPipelineFps, 2),
       targetFps,
       fpsRatio: fpsRatio != null ? round(fpsRatio, 3) : null,
@@ -229,13 +283,37 @@ export class MetricsSampler {
     const byKey = new Map(itemList.map((it) => [it.key, it]));
     for (const key of HW_KEYS) {
       const it = byKey.get(key);
-      if (it) {
+      if (it && it.available !== 0) {
         hw[key] = { usedPercent: num(it.usedPercent), usedSize: it.usedSize, unusedSize: it.unusedSize };
       }
     }
     hw.customScore = hwResult.value?.customScore ?? null;
     hw.accelerator = normalizeAccelerator(hwResult.value?.accelerator);
     return hw;
+  }
+
+  _parseMemoryPool(poolResult) {
+    if (poolResult.status !== 'fulfilled') {
+      return { _error: String(poolResult.reason?.message ?? poolResult.reason) };
+    }
+    if (!poolResult.value || typeof poolResult.value !== 'object') return null;
+
+    const totalAllocatedBytes = num(poolResult.value.totalMalloc);
+    const totalInUseBytes = num(poolResult.value.totalInUsing);
+    return {
+      totalAllocatedBytes,
+      totalInUseBytes,
+      utilizationPercent: totalAllocatedBytes > 0
+        ? round((totalInUseBytes / totalAllocatedBytes) * 100, 2)
+        : 0,
+      pools: Array.isArray(poolResult.value.status)
+        ? poolResult.value.status.map((pool) => ({
+            blockSize: num(pool.poolSize),
+            usedBlocks: num(pool.mallocCnt),
+            freeBlocks: num(pool.freeCnt),
+          }))
+        : [],
+    };
   }
 }
 
@@ -250,6 +328,17 @@ function normalizeAccelerator(value) {
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeActionId(value) {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  return normalized || null;
 }
 
 function round(v, digits) {
@@ -276,6 +365,7 @@ function normalizeExpectedBindings(expectedBindings, legacyTargetFps) {
     taskKey: entry.taskKey ?? entry.taskId,
     taskDisplayName: entry.taskDisplayName ?? entry.taskKey ?? entry.taskId,
     taskType: entry.taskType ?? 'cv',
+    vlmCompletionActionId: normalizeActionId(entry.vlmCompletionActionId),
     algorithmId: entry.algorithmId ?? null,
     algorithmCode: entry.algorithmCode ?? null,
     targetFps: entry.targetFps ?? null,

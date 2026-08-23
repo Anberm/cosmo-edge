@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,9 @@ namespace media {
         bool Open() override;
 
         VideoPacketPtr SendYUVFrame(void* data) override;
+
+        static VideoEncoderCapability Probe(VideoCodecType type);
+        static bool IsAllowedEncoderName(VideoCodecType type, std::string_view name);
 
     private:
         void Clean();

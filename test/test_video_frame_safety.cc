@@ -69,6 +69,41 @@ TEST_CASE("Decoder failure logging handles empty and short packets", "[video-fra
     REQUIRE_FALSE(result);
 }
 
+TEST_CASE("Deferred decoded frames materialize or discard exactly once", "[video-frame-safety][decoder]") {
+    int materialize_count = 0;
+    int discard_count     = 0;
+    DecodedVideoFrame discarded(
+        41, 1920, 1080, PixelFormat::PIXEL_I420,
+        [&]() {
+            materialize_count++;
+            return VideoFramePtr{};
+        },
+        [&]() { discard_count++; });
+
+    REQUIRE(discarded.HasFrame());
+    REQUIRE(discarded.IsDeferred());
+    CHECK(discarded.GetFrameIndex() == 41);
+    CHECK(discarded.GetWidth() == 1920);
+    CHECK(discarded.GetHeight() == 1080);
+    discarded.Discard();
+    discarded.Discard();
+    CHECK(materialize_count == 0);
+    CHECK(discard_count == 1);
+    CHECK_FALSE(discarded.HasFrame());
+
+    DecodedVideoFrame materialized(
+        42, 1280, 720, PixelFormat::PIXEL_I420,
+        [&]() {
+            materialize_count++;
+            return VideoFramePtr{};
+        },
+        [&]() { discard_count++; });
+    CHECK(materialized.Materialize() == nullptr);
+    materialized.Discard();
+    CHECK(materialize_count == 1);
+    CHECK(discard_count == 1);
+}
+
 TEST_CASE("Frame size calculation rejects unsafe dimensions", "[video-frame-safety]") {
     REQUIRE_FALSE(PixelFormatUtils::CalculateFrameSize(-1, 1080, PixelFormat::PIXEL_I420));
     REQUIRE_FALSE(PixelFormatUtils::CalculateFrameSize(1920, 0, PixelFormat::PIXEL_I420));

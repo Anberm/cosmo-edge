@@ -1,4 +1,7 @@
-FROM ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_x86:v1 AS builder
+ARG BUILD_ENV_IMAGE=ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_x86:v1
+ARG RUNTIME_BASE_IMAGE=debian:12-slim
+
+FROM ${BUILD_ENV_IMAGE} AS builder
 
 WORKDIR /src
 COPY . .
@@ -19,13 +22,14 @@ RUN find prebuild 3rd -path '*/lib/*.so*' -type f -size -256c -print | while IFS
     done
 
 ARG RESOURCE_DIR=data/resource/aiboxresource_x86
+ARG COSMO_BUILD_JOBS
 RUN if [ -n "${RESOURCE_DIR}" ]; then \
         bash ./scripts/build_cpu.sh -t -m "${RESOURCE_DIR}"; \
     else \
         bash ./scripts/build_cpu.sh -t; \
     fi
 
-FROM debian:12-slim AS runtime
+FROM ${RUNTIME_BASE_IMAGE} AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV INSTALLPATH=/appfs/cosmo_wander/cwai_data
@@ -85,8 +89,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /src/build_cpu/install/ /appfs/cosmo_wander/cwai_data/
 COPY --from=builder /src/build_cpu/packages/ /cosmo-packages/
 COPY scripts/docker-entrypoint.x86.sh /usr/local/bin/cosmo-x86-entrypoint
+COPY scripts/docker-healthcheck.x86.sh /usr/local/bin/cosmo-x86-healthcheck
 
-RUN chmod +x /usr/local/bin/cosmo-x86-entrypoint \
+RUN chmod +x /usr/local/bin/cosmo-x86-entrypoint /usr/local/bin/cosmo-x86-healthcheck \
     && mkdir -p /data/cwaiuserdata/log/logs /data/cwaiuserdata/upgrade \
     && mkdir -p /appfs/cosmo_wander/cwai_data/bin/nginx_conf/logs \
     && mkdir -p /appfs/cosmo_wander/cwai_data/web/staticfile \

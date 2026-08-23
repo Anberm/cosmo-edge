@@ -9,9 +9,9 @@
 #include "util/UuidUtil.h"
 
 namespace cosmo {
-Sam2SegmenterUnify::Sam2SegmenterUnify(const std::string &atomicCode, const std::string &jsonPath,
+Sam2SegmenterUnify::Sam2SegmenterUnify(const std::string &, const std::string &jsonPath,
                                        const std::string &modelPath)
-    : atomic_code_(atomicCode), cfg_path_(jsonPath), model_path_(modelPath) {}
+    : cfg_path_(jsonPath), model_path_(modelPath) {}
 
 Sam2SegmenterUnify::~Sam2SegmenterUnify() {
     LOG_INFO("{}", "Sam2SegmenterUnify Delete");
@@ -25,8 +25,10 @@ util::ErrorEnum Sam2SegmenterUnify::Init() {
 
     try {
         // SAM2 contains encoder+decoder; current SDK does not support chaining, use single model for now
-        segmenter_ = std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(),
-                                                                   &profiler_);
+        cosmo::nn::DefaultComponent::Options options;
+        options.profiler = &profiler_;
+        segmenter_ =
+            std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     } catch (const std::exception &e) {
         LOG_ERRO("Init SDK SAM2 Segmenter Failed. CfgPath:{} ModelPath:{}, {}", cfg_path_, model_path_,
                  e.what());

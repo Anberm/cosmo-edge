@@ -382,7 +382,7 @@ void HttpServer::InsertHttpMsg(struct evhttp_request* req, InnerMsgId msg_id,
         DispatchJsonMsg(&response_task);
         return;
     }
-    LOG_INFO("Put request {} token {} to HTTP pool", static_cast<int>(msg_id), token);
+    LOG_DEBUG("Put request {} token {} to HTTP pool", static_cast<int>(msg_id), token);
 }
 
 std::unique_ptr<HttpReqTask> HttpServer::BuildHttpReqTask(struct evhttp_request* req,

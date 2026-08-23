@@ -256,7 +256,7 @@ cosmo::util::ErrorEnum ModelServiceImpl::CheckModelValid(std::string un_zip_file
 
     for (const auto& file : files) {
         if (file.find(cosmo::util::kModelFileExt) != std::string::npos ||
-            file.find(".onnx") != std::string::npos) {
+            file.find(".onnx") != std::string::npos || file.find(".rknn") != std::string::npos) {
             found_model = true;
         }
         if (file.find(".json") != std::string::npos) {

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -134,6 +135,33 @@ class ModelConversionWorkflowTest(unittest.TestCase):
             ["active", "revoked"],
         )
         self.assertIn("deviceValidation", schema["properties"])
+
+    def test_checker_only_cli_does_not_request_runtime_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model_path = Path(directory) / "source.onnx"
+            report_path = Path(directory) / "report.json"
+            model_path.write_bytes(b"fixture")
+            result = {
+                "schemaVersion": "1.0",
+                "status": "PASS",
+                "validationMode": "checker-only",
+                "model": {"path": model_path.name, "sha256": "fixture"},
+                "inputs": [],
+                "outputs": [],
+            }
+            with mock.patch.object(
+                check_onnx_model, "inspect_model", return_value=result
+            ) as inspect:
+                self.assertEqual(
+                    check_onnx_model.main(
+                        [str(model_path), "--checker-only", "--json", str(report_path)]
+                    ),
+                    0,
+                )
+            inspect.assert_called_once_with(model_path.resolve(), {}, run_runtime=False)
+            self.assertEqual(
+                json.loads(report_path.read_text())["validationMode"], "checker-only"
+            )
 
     def test_candidate_shapes_and_chip_come_from_contract(self):
         with tempfile.TemporaryDirectory() as directory:

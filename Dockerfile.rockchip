@@ -1,0 +1,124 @@
+# syntax=docker/dockerfile:1.7
+
+ARG ROCKCHIP_LEGACY_BASE=ghcr.io/cosmo-wander-ai/cosmo_edge-build-env_rk3576@sha256:0dbb35f5a4336777c311b5f881886cd9b284371d61ceffff55a8216c01d2b076
+
+FROM ${ROCKCHIP_LEGACY_BASE} AS rockchip-toolchain
+
+ARG MPP_REVISION=c08762ebfadeb4e986d2fed993bc7a54862d3ebe
+ARG RGA_REVISION=2b32edcb97b601b25683e2941d888c8515da6d55
+
+FROM rockchip-toolchain AS rockchip-common
+
+COPY config/rknn/platforms/ /opt/cosmo/config/rknn/platforms/
+COPY config/rockchip-media/ /opt/cosmo/config/rockchip-media/
+COPY config/rockchip-build/builder-lock.json /opt/cosmo/rockchip-builder-lock.json
+COPY tools/rknn/media_sysroot_lock.py /usr/local/bin/cosmo-rockchip-media-lock
+
+# The legacy image exposes one RK3576 media root. Move its contents under the
+# shared builder's chip-scoped layout before adding another Rockchip profile.
+RUN set -eux; \
+    mv /opt/rockchip-media /tmp/legacy-rockchip-media; \
+    mkdir -p /opt/rockchip-media/rk3576; \
+    cp -a /tmp/legacy-rockchip-media/. /opt/rockchip-media/rk3576/; \
+    rm -rf /tmp/legacy-rockchip-media; \
+    python3 /usr/local/bin/cosmo-rockchip-media-lock verify \
+      --platform-profile /opt/cosmo/config/rknn/platforms/rk3576.json \
+      --root /opt/rockchip-media/rk3576
+
+FROM rockchip-toolchain AS rv1126b-media-build
+
+RUN set -eux; \
+    rm -rf /opt/rockchip-media; \
+    git clone --depth 1 --branch 1.1.0 \
+      https://github.com/rockchip-linux/mpp.git \
+      /opt/cosmo/rockchip-sources/mpp-1.1.0; \
+    test "$(git -C /opt/cosmo/rockchip-sources/mpp-1.1.0 rev-parse HEAD)" = "${MPP_REVISION}"; \
+    git init /opt/cosmo/rockchip-sources/librga-1.10.6; \
+    git -C /opt/cosmo/rockchip-sources/librga-1.10.6 remote add origin \
+      https://github.com/airockchip/librga.git; \
+    git -C /opt/cosmo/rockchip-sources/librga-1.10.6 fetch --depth 1 \
+      origin "${RGA_REVISION}"; \
+    git -C /opt/cosmo/rockchip-sources/librga-1.10.6 checkout --detach FETCH_HEAD; \
+    test "$(git -C /opt/cosmo/rockchip-sources/librga-1.10.6 rev-parse HEAD)" = "${RGA_REVISION}"
+
+RUN set -eux; \
+    cmake \
+      -S /opt/cosmo/rockchip-sources/mpp-1.1.0 \
+      -B /opt/cosmo/rockchip-build/mpp-1.1.0 \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/cosmo/rockchip-sources/mpp-1.1.0/build/linux/aarch64/arm.linux.cross.cmake \
+      -DCMAKE_C_FLAGS="-ffile-prefix-map=/opt/cosmo/rockchip-sources/mpp-1.1.0=/usr/src/rockchip/mpp-1.1.0 -ffile-prefix-map=/opt/cosmo/rockchip-build/mpp-1.1.0=/usr/src/rockchip/mpp-1.1.0-build" \
+      -DCMAKE_CXX_FLAGS="-ffile-prefix-map=/opt/cosmo/rockchip-sources/mpp-1.1.0=/usr/src/rockchip/mpp-1.1.0 -ffile-prefix-map=/opt/cosmo/rockchip-build/mpp-1.1.0=/usr/src/rockchip/mpp-1.1.0-build" \
+      -DTOOLCHAIN=aarch64-linux-gnu- \
+      -DCMAKE_INSTALL_PREFIX=/opt/rockchip-media/rv1126b \
+      -DBUILD_TEST=ON; \
+    cmake --build /opt/cosmo/rockchip-build/mpp-1.1.0 --parallel 8; \
+    cmake --install /opt/cosmo/rockchip-build/mpp-1.1.0; \
+    mkdir -p /opt/rockchip-media/rv1126b/include/rga; \
+    cp -a /opt/cosmo/rockchip-sources/librga-1.10.6/include/. \
+      /opt/rockchip-media/rv1126b/include/rga/; \
+    cp -a /opt/cosmo/rockchip-sources/librga-1.10.6/libs/Linux/gcc-aarch64/librga.so \
+      /opt/rockchip-media/rv1126b/lib/librga.so; \
+    mkdir -p \
+      /opt/rockchip-media/rv1126b/share/licenses/rockchip-media/mpp \
+      /opt/rockchip-media/rv1126b/share/licenses/rockchip-media/librga; \
+    cp -a /opt/cosmo/rockchip-sources/mpp-1.1.0/LICENSES/Apache-2.0 \
+      /opt/rockchip-media/rv1126b/share/licenses/rockchip-media/mpp/Apache-2.0; \
+    cp -a /opt/cosmo/rockchip-sources/mpp-1.1.0/LICENSES/MIT \
+      /opt/rockchip-media/rv1126b/share/licenses/rockchip-media/mpp/MIT; \
+    cp -a /opt/cosmo/rockchip-sources/librga-1.10.6/COPYING \
+      /opt/rockchip-media/rv1126b/share/licenses/rockchip-media/librga/COPYING; \
+    rm -rf /opt/rockchip-media/rv1126b/bin
+
+FROM rv1126b-media-build AS rv1126b-media-sealed
+
+COPY config/rknn/platforms/ /opt/cosmo/config/rknn/platforms/
+COPY config/rockchip-media/ /opt/cosmo/config/rockchip-media/
+COPY tools/rknn/media_sysroot_lock.py /usr/local/bin/cosmo-rockchip-media-lock
+
+RUN set -eux; \
+    SOURCE_DATE_EPOCH="$(git -C /opt/cosmo/rockchip-sources/mpp-1.1.0 show -s --format=%ct HEAD)"; \
+    export SOURCE_DATE_EPOCH; \
+    python3 /usr/local/bin/cosmo-rockchip-media-lock seal \
+      --platform-profile /opt/cosmo/config/rknn/platforms/rv1126b.json \
+      --root /opt/rockchip-media/rv1126b \
+      --source "mpp=${MPP_REVISION}" \
+      --source "rga=${RGA_REVISION}"; \
+    python3 /usr/local/bin/cosmo-rockchip-media-lock verify \
+      --platform-profile /opt/cosmo/config/rknn/platforms/rv1126b.json \
+      --root /opt/rockchip-media/rv1126b
+
+FROM rockchip-common AS rockchip-builder
+
+COPY --from=rv1126b-media-sealed /opt/rockchip-media/rv1126b/ /opt/rockchip-media/rv1126b/
+COPY scripts/install_rkllm_sdk.py /tmp/install_rkllm_sdk.py
+
+RUN set -eux; \
+    python3 -I -B /tmp/install_rkllm_sdk.py --root /opt/rkllm; \
+    rm -f /tmp/install_rkllm_sdk.py; \
+    test -f /opt/rkllm/include/rkllm.h; \
+    test -f /opt/rkllm/lib/librkllmrt.so; \
+    test -f /opt/rkllm/LICENSE; \
+    python3 /usr/local/bin/cosmo-rockchip-media-lock verify \
+      --platform-profile /opt/cosmo/config/rknn/platforms/rk3576.json \
+      --root /opt/rockchip-media/rk3576; \
+    python3 /usr/local/bin/cosmo-rockchip-media-lock verify \
+      --platform-profile /opt/cosmo/config/rknn/platforms/rv1126b.json \
+      --root /opt/rockchip-media/rv1126b
+
+ENV RKNN_ROOT=/opt/rknn \
+    RKLLM_ROOT=/opt/rkllm \
+    ROCKCHIP_MEDIA_ROOT=/opt/rockchip-media/rk3576 \
+    COSMO_TARGET_CHIP=rk3576 \
+    COSMO_ROCKCHIP_BUILDER_LOCK=/opt/cosmo/rockchip-builder-lock.json
+
+LABEL org.opencontainers.image.title="CosmoEdge Rockchip build environment" \
+      org.opencontainers.image.description="Shared RKNN build environment with isolated RK3576 and RV1126B MPP/RGA profiles" \
+      org.opencontainers.image.source="https://github.com/cosmo-wander-ai/cosmo-edge" \
+      org.opencontainers.image.version="v1" \
+      org.opencontainers.image.rkllm.version="1.3.0" \
+      org.opencontainers.image.rkllm.revision="878f9361fd3afa7e167b7079918918f78d2c1c2a" \
+      io.cosmo.rockchip.targets="rk3576,rv1126b"
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

@@ -748,6 +748,7 @@ const handleBatchCommand = (command) => {
 const addChannelClick = () => {
   channelDialogMode.value = 'add'
   Object.assign(channelForm, {
+    videoChannelId: '',
     channelType: 0,
     channelName: '',
     url: '',

@@ -1,3 +1,9 @@
+[CmdletBinding()]
+param(
+    [ValidateSet("bm1688", "cv186x")]
+    [string]$Chip = "bm1688"
+)
+
 $ErrorActionPreference = "Stop"
 
 # =============================================================================
@@ -15,12 +21,21 @@ $ErrorActionPreference = "Stop"
 # Subsequent builds copy only changed files.
 #
 # Prerequisites: Docker Desktop
-# Output:         build_output/cosmo-*.tar.gz
+# Output:         build_output/<build-profile>/<chip>/cosmo-*.tar.gz
 # =============================================================================
 
 $VolumeName  = "cosmo-sophon-source"
 $ComposeFile = "docker-compose.sophon.yml"
 $OverrideFile = "docker-compose.sophon.override.yml"
+$BuildProfile = $env:COSMO_MODEL_GUARD_BUILD_PROFILE
+if ([string]::IsNullOrWhiteSpace($BuildProfile)) {
+    $BuildProfile = "public-runtime"
+}
+if ($BuildProfile -notin @("public-runtime", "production-release")) {
+    throw "COSMO_MODEL_GUARD_BUILD_PROFILE must be public-runtime or production-release"
+}
+$env:COSMO_MODEL_GUARD_BUILD_PROFILE = $BuildProfile
+$PackageVariant = if ($BuildProfile -eq "public-runtime") { "Open" } else { "Protected" }
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,7 +102,7 @@ Invoke-Docker run --rm `
     alpine `
     sh /workspace/scripts/restore-symlinks.sh
 
-Write-Step "Step 4/5 - Running Sophon cross-compilation"
+Write-Step "Step 4/5 - Running Sophon $Chip cross-compilation ($PackageVariant)"
 
 # Generate a compose override that swaps the bind mount for our named volume.
 # The override REPLACES the volumes list; we keep ./build_output as a bind
@@ -106,7 +121,7 @@ volumes:
 
 Push-Location $projectRoot
 try {
-    cmd /c "docker compose -f $ComposeFile -f $OverrideFile run --rm cosmo-sophon-package"
+    cmd /c "docker compose -f $ComposeFile -f $OverrideFile run --rm cosmo-sophon-package --chip $Chip"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Docker build failed with exit code $LASTEXITCODE."
         exit $LASTEXITCODE
@@ -117,7 +132,7 @@ try {
 }
 
 Write-Step "Step 5/5 - Build output"
-$outputDir = Join-Path $projectRoot "build_output"
+$outputDir = Join-Path (Join-Path (Join-Path $projectRoot "build_output") $BuildProfile) $Chip
 if (Test-Path $outputDir) {
     $packages = Get-ChildItem $outputDir -Filter "*.tar.gz"
     if ($packages) {
@@ -125,10 +140,16 @@ if (Test-Path $outputDir) {
             Write-Host "  $($pkg.Name)  ($('{0:N0}' -f $pkg.Length) bytes)" -ForegroundColor Green
         }
     } else {
-        Write-Warning "No .tar.gz found in build_output/"
+        Write-Warning "No .tar.gz found in build_output/$BuildProfile/$Chip/"
     }
 } else {
-    Write-Warning "build_output/ directory not found"
+    Write-Warning "build_output/$BuildProfile/$Chip/ directory not found"
+}
+
+if ($BuildProfile -eq "public-runtime") {
+    Write-Host "Open MD5 upgrade package created."
+} else {
+    Write-Host "Protected MD5 upgrade package created. Model use requires device authorization."
 }
 
 Write-Host "`n=== Sophon build completed ===" -ForegroundColor Green

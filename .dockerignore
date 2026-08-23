@@ -5,7 +5,10 @@
 /build_cpu
 /build_cpu_verify
 /build_cpu_windows
+/build_rknn
 /cmake-build-*
+/docs/.vitepress/dist
+/3rd/srs-*/trunk/objs
 /node_modules
 /src/web/node_modules
 /src/web/dist
@@ -13,3 +16,4 @@
 /tags
 /compile_commands.json
 /build_output
+/output

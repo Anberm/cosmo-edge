@@ -57,6 +57,12 @@ bool PClassifier::ActionInit() {
     return true;
 }
 
+void PClassifier::ActionDestroy() {
+    std::lock_guard<std::shared_mutex> lock(m_mtx);
+    m_inst.reset();
+    m_actionStatus = util::ErrorEnum::ActionStop;
+}
+
 // Key format reference: aiParam.#{labelCode}.confidence
 bool PClassifier::ValidKey(MsgDynamicKeyValue& param) {
     if (param.keys.empty()) {
@@ -111,6 +117,11 @@ bool PClassifier::SetParam(const std::string& /*taskId*/, std::vector<MsgDynamic
     return true;
 }
 
+bool PClassifier::SetArea(const std::string& /*taskId*/, std::vector<MsgTaskArea>& /*areas*/,
+                          std::vector<MsgTaskArea>& /*shieldedAreas*/) {
+    return true;
+}
+
 util::ErrorEnum PClassifier::HandPic(AlgDataPtr algData) {
     if (!algData || !algData->chanDataDec.frame || !algData->chanDataDec.frame->Active()) {
         return util::ErrorEnum::FrameDataInvalid;
@@ -124,9 +135,23 @@ util::ErrorEnum PClassifier::HandPic(AlgDataPtr algData) {
         return util::ErrorEnum::Success;
     }
 
+    std::shared_ptr<AiClassifierUnify> instance;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mtx);
+        instance = m_inst;
+    }
+    if (!instance)
+        return util::ErrorEnum::AI_INST_NOTCREATED;
+
     m_durationStat.BeginSample();
-    m_actionStatus = m_inst->Classify(algData->chanDataDec.frame, algData->chanDataDetect.detRet->targets);
+    const auto result =
+        instance->Classify(algData->chanDataDec.frame, algData->chanDataDetect.detRet->targets);
     m_durationStat.EndSample();
+    {
+        std::lock_guard<std::shared_mutex> lock(m_mtx);
+        if (m_inst == instance)
+            m_actionStatus = result;
+    }
 
     algData->dataType = AlgDataType::TaskDataClassify;
     return util::ErrorEnum::Success;

@@ -50,6 +50,8 @@ public:
     MAKE_MOCK1(NotifyAlgorithmsDeleted, void(const std::vector<std::string>&), override);
     MAKE_MOCK1(IsAlgorithmInUse, bool(const std::string&), const override);
     MAKE_MOCK1(ScheduleInUse, bool(const std::string&), override);
+    MAKE_MOCK1(AcquirePreviewChannel, cosmo::util::ErrorEnum(const std::string&), override);
+    MAKE_MOCK1(ReleasePreviewChannel, void(const std::string&), override);
     MAKE_MOCK2(CaptureImage, VideoFramePtr(const std::string&, int), override);
     MAKE_MOCK4(BindTaskLibPara,
                cosmo::util::ErrorEnum(const std::string&, const std::string&, const std::vector<std::string>&,

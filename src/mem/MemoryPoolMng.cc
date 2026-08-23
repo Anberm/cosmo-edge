@@ -244,10 +244,10 @@ void MemoryPoolMng::Recycle(Block* block) {
     // Periodically print pool status, assist in diagnosing if RealFree is triggered
     static thread_local uint64_t recycle_counter = 0;
     if (0 == (++recycle_counter % 100)) {
-        LOG_INFO("[POOL:{}] Recycle#{} Using:{} Idle:{} Total:{} FreeThres:{} MinLimit:{}{}",
-                 pool->BlockSize(), recycle_counter, pool->UsingCount(), pool->IdleCount(),
-                 pool->TotalBlockCount(), pool->GetFreeThres(), pool->GetMinLimit(),
-                 pool->IdleCount() > pool->GetFreeThres() ? " -> TriggerFree" : "");
+        LOG_DEBUG("[POOL:{}] Recycle#{} Using:{} Idle:{} Total:{} FreeThres:{} MinLimit:{}{}",
+                  pool->BlockSize(), recycle_counter, pool->UsingCount(), pool->IdleCount(),
+                  pool->TotalBlockCount(), pool->GetFreeThres(), pool->GetMinLimit(),
+                  pool->IdleCount() > pool->GetFreeThres() ? " -> TriggerFree" : "");
     }
 
     if (pool->IdleCount() > pool->GetFreeThres()) {

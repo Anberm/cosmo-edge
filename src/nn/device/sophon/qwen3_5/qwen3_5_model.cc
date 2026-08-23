@@ -250,16 +250,12 @@ namespace qwen3_5 {
         if (bm_handle_ != nullptr || p_bmrt_ != nullptr || model_path.empty()) {
             throw safety::RuntimeError("initialize model", "already initialized or empty model path");
         }
+
+        const RawBmodelLoadPlan load_plan = safety::AuthorizeRawBmodel(model_path);
+
         try {
             safety::CheckStatus(bm_dev_request(&bm_handle_, dev_id), "request device");
-            p_bmrt_ = bmrt_create(bm_handle_);
-            if (p_bmrt_ == nullptr) {
-                throw safety::RuntimeError("create runtime");
-            }
-            bmrt_set_flags(p_bmrt_, BM_RUNTIME_SHARE_MEM);
-            if (!bmrt_load_bmodel(p_bmrt_, model_path.c_str())) {
-                throw safety::RuntimeError("load model", model_path);
-            }
+            p_bmrt_ = safety::LoadSingleAuthorizedRawBmodel(load_plan, bm_handle_);
             safety::CheckStatus(bm_thread_sync(bm_handle_), "synchronize model load");
             init_by_names();
             const size_t token_capacity = static_cast<size_t>(std::max(SEQLEN, MAX_INPUT_LENGTH)) + 1U;

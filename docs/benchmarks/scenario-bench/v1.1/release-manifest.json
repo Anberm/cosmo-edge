@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 3,
+  "manifestStatus": "frozen-publication-candidate",
+  "release": {
+    "version": "1.1.0",
+    "tag": "v1.1.0",
+    "publicationState": "prepared-not-published",
+    "frozenAt": "2026-08-20T19:54:01+08:00"
+  },
+  "sourceBaseline": {
+    "repository": "https://github.com/cosmo-wander-ai/cosmo-edge",
+    "branch": "main",
+    "commit": "89c73a7464a81ef378686447d7c1eeb88b988455",
+    "tree": "6857fbcce72c7af64e6cb23a27e66a405e9df9af",
+    "commitTime": "2026-08-18T17:43:36+08:00",
+    "commitSubject": "Merge pull request #102 from cosmo-wander-ai/codex/rv1126b-submit-final"
+  },
+  "repositoryIntegration": {
+    "targetBranch": "main",
+    "documentationBaseCommit": "44209759f450e96cda265acfa8bc6d17a1138888"
+  },
+  "benchmarkTool": {
+    "name": "ScenarioBench",
+    "version": "0.1.0",
+    "role": "current publication and future-run tool; execution provenance remains attached to each evidence set",
+    "nodeRequirement": ">=20",
+    "cliSha256": "b93c3beebb3a453340038e307e296832da26263175cb34915a17b1d916a35eda",
+    "evaluatorSha256": "5b483c0b1217c383fc7ff9179357161d53a1d4ac7c943e5789ddecb171160799",
+    "metricsSamplerSha256": "db1f753ff2810aec938f60f872cbc3fba92cc3403b0c38044ed6f79e7adc0e8d",
+    "reportWriterSha256": "a3fe4e94b15cfc830426de7e96f20f589cb27ff44dbb875e9f8f722cba2fdb31",
+    "vlmReadinessSha256": "c265df2b10217af6ab15332d1441358b723a518be993853fcb03e83a5a664755",
+    "scenarioPackageSha256": "1779e426eeb82d230185166070192fea589a5b15bc64e74c574ef59ecf92da67",
+    "taskRunnerSha256": "3ed5a5aa8eac42d53fad6bb4a04ad2ac53026aefb7d1120afb246f3caf3e3161",
+    "lockfileSha256": "8da33a2d1e27df0aac4e9ba5ec279f9d85ef7be1eb398cb555a0e3b45ca1a6a7",
+    "classifierFpsOverride": "detector and classifier nodes receive the same requested FPS",
+    "vlmCompletionCounter": "task-local completion queue, not shared Qwen worker batches",
+    "vlmReadiness": "each newly added VLM route must advance its task-local completion counter and expose Qwen latency before formal sampling"
+  },
+  "dataset": {
+    "id": "cosmoedge-controlled-1080p24-v1",
+    "file": "controlled-1080p24-sample.mp4",
+    "sha256": "3e1c5b97cd5bcc081e47ec631f84c36e72f075c8b9da6a19de3d9705fb887f92",
+    "sizeBytes": 1300407,
+    "durationSeconds": 15,
+    "video": {
+      "codec": "H.264 High",
+      "width": 1920,
+      "height": 1080,
+      "pixelFormat": "yuv420p",
+      "sourceFps": 24
+    },
+    "distribution": "metadata and hash only"
+  },
+  "vlmDataset": {
+    "status": "2026-08-20 controlled refresh",
+    "card": "dataset/vlm-sample-card.md",
+    "sha256": "3e1c5b97cd5bcc081e47ec631f84c36e72f075c8b9da6a19de3d9705fb887f92"
+  },
+  "controls": {
+    "videoMode": "local infinite loop",
+    "channelRamp": "one channel per step",
+    "previewLoad": false,
+    "sampleIntervalSeconds": 3,
+    "smallModelHoldSecondsPerStep": 30,
+    "smallModelTargetFps": [24, 10, 7, 5],
+    "vlmHoldSecondsPerStep": 60,
+    "vlmTargetFpsPerChannel": 0.1,
+    "vlmFpsGateEnabled": false,
+    "vlmMaximumMissingRate": 0,
+    "vlmMaximumAverageDiscardRate": 0.05,
+    "cvGates": {
+      "minFpsRatio": 0.8,
+      "maxMissingRate": 0,
+      "maxAverageDiscardRate": 0.05,
+      "maxCriticalPathLatencyMs": 200,
+      "maxDetectorLatencyMs": 150
+    }
+  },
+  "platforms": [
+    {
+      "id": "bm1688",
+      "scope": "release-platform",
+      "environment": "environments/bm1688.json",
+      "models": "models/bm1688.json",
+      "results": "results/bm1688/cases.json"
+    },
+    {
+      "id": "cv186x",
+      "scope": "release-platform",
+      "environment": "environments/cv186x.json",
+      "models": "models/cv186x.json",
+      "results": "results/cv186x/cases.json"
+    },
+    {
+      "id": "rk3576",
+      "scope": "release-platform",
+      "environment": "environments/rk3576.json",
+      "models": "models/rk3576.json",
+      "results": "results/rk3576/cases.json"
+    },
+    {
+      "id": "rv1126b",
+      "scope": "release-platform",
+      "environment": "environments/rv1126b.json",
+      "models": "models/rv1126b.json",
+      "results": "results/rv1126b/cases.json"
+    }
+  ],
+  "workloads": {
+    "personDetection": "scenarios/single-workload/person-detector.public.yml",
+    "noSafetyHelmetAnalysis": "scenarios/single-workload/no-safety-helmet-analysis.public.yml",
+    "concurrentMixed": "scenarios/concurrent-mixed/scenario.public.yml",
+    "vlmObservation": "scenarios/vlm-observation/scenario.public.yml"
+  },
+  "evidence": {
+    "smallModelCaseCount": 49,
+    "smallModelRefresh": "2026-08-19 controlled run",
+    "caseSchema": "results/cases.schema.json",
+    "canonicalSmallModelCases": [
+      "results/bm1688/cases.json",
+      "results/cv186x/cases.json",
+      "results/rk3576/cases.json",
+      "results/rv1126b/cases.json"
+    ],
+    "vlm": "2026-08-20 controlled raw observations with conservative 80% publication boundaries; mixed readiness protocols are not cross-platform comparable",
+    "vlmObservations": "results/vlm-observations.json",
+    "vlmPublicationEvaluation": {
+      "classification": "conservative-post-evaluation",
+      "targetFpsPerChannel": 0.1,
+      "minimumActiveRouteFpsRatio": 0.8,
+      "requiresNonFpsGatePass": true,
+      "usesContiguousCompletedPrefix": true,
+      "startupSensitiveStopsArePerformanceFailures": false,
+      "capacityClaimAllowed": false
+    },
+    "vlmRefresh": {
+      "sourceCommit": "f0a26546c60c57e70166f18d556f712a273a866d",
+      "sourceTree": "a9ebe3921771d8aaa0d29244074e7bfe3d098cf3",
+      "finalToolPatchSha256": "b056be668748058d30863b7870f96272b07f2bd48d601bc8d840ea200b5bf0f3",
+      "preReadinessToolPatchSha256": "8fd1da3a8c7fc74fedc12c5b5e1603d044f65f190f06cba1ce49b361c1a0ca68",
+      "crossPlatformComparable": false,
+      "projectionPolicy": "CV186X/RK3576 public artifacts stop at the first non-FPS gate; execution continued beyond the projection cutoff",
+      "rawEvidence": "private per-platform runs referenced by source summary/metrics hashes; not included in fullEvidenceArchive"
+    },
+    "fullEvidenceArchive": {
+      "artifactName": "original-v1.1-5ec280a9.tar.gz",
+      "scope": "49 canonical small-model cases only",
+      "sha256": "99535bd47cc0ed6193dbdca61cef37f5b6db47c04c1ad6ab5ec607131de75f50",
+      "sourceCommit": "5ec280a93071d66027a8f3ae10715dab5dae1424",
+      "sourceTree": "1d92976871185b16833f2efc9f8ac4f8eedce740",
+      "publicationState": "prepared-not-published",
+      "includedInRepository": false
+    }
+  },
+  "qualification": {
+    "canonicalBenchmarkDatasetComplete": true,
+    "generatedReportContractVerified": true,
+    "publicAssetRedistributionSafe": true,
+    "readyForRepositoryReview": true,
+    "productReleaseQualified": false
+  }
+}

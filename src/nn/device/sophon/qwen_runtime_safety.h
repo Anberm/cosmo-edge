@@ -2,11 +2,13 @@
 
 #include <cstdio>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <string>
 
 #include "bmlib_runtime.h"
 #include "bmruntime_interface.h"
+#include "nn/guard/CemV2SophonLoader.h"
 
 namespace cosmo::nn::qwen_runtime_safety {
 
@@ -142,6 +144,43 @@ inline void FreeHandleNoThrow(bm_handle_t* handle) noexcept {
         std::fputs("[Qwen] bm_dev_free threw during cleanup\n", stderr);
     }
     *handle = nullptr;
+}
+
+inline RawBmodelLoadPlan RequireAuthorizedRawBmodel(RawBmodelLoadPlan plan) {
+    switch (plan.error) {
+        case RawBmodelAuthorizationError::kNone:
+            return plan;
+        case RawBmodelAuthorizationError::kPolicyRejected:
+        default:
+            throw RuntimeError("authorize model", "format rejected");
+    }
+}
+
+inline RawBmodelLoadPlan AuthorizeRawBmodel(const std::string& model_path) {
+    return RequireAuthorizedRawBmodel(PrepareRawBmodelLoad(ModelLoadPolicy::Production(), model_path));
+}
+
+inline void* LoadSingleAuthorizedRawBmodel(const RawBmodelLoadPlan& plan, const CemV2Api& guard_api,
+                                           const SophonRuntimeApi& runtime_api, bm_handle_t bm_handle) {
+    SophonModelLoadResult loaded = LoadRawBmodelByPlan(plan, guard_api, runtime_api, bm_handle);
+    if (!loaded.IsSuccess() || loaded.runtimes.size() != 1) {
+        if (loaded.IsOutOfMemory()) {
+            throw std::bad_alloc();
+        }
+        if (loaded.error == SophonModelLoadError::kNativeRuntimeCreateFailed) {
+            throw RuntimeError("create runtime");
+        }
+        if (loaded.error == SophonModelLoadError::kNativeLoadFailed &&
+            plan.decision.action == ModelLoadAction::kNativeRawBmodel) {
+            throw RuntimeError("load model", plan.decision.model_path);
+        }
+        throw RuntimeError("load authorized model");
+    }
+    return loaded.runtimes.front().release();
+}
+
+inline void* LoadSingleAuthorizedRawBmodel(const RawBmodelLoadPlan& plan, bm_handle_t bm_handle) {
+    return LoadSingleAuthorizedRawBmodel(plan, FrozenCemV2Api(), NativeSophonRuntimeApi(), bm_handle);
 }
 
 }  // namespace cosmo::nn::qwen_runtime_safety

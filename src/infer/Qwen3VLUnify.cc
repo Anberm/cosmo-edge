@@ -6,31 +6,48 @@
 #include <cstring>
 
 #include "infer/AiComponment.h"
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+#include "infer/RkllmVlmBackend.h"
+#endif
 #include "util/Log.h"
 #include "util/UuidUtil.h"
 
 namespace cosmo {
-Qwen3VLUnify::Qwen3VLUnify(const std::string& atomic_code, const std::string& json_path,
-                           const std::string& model_path, const std::string& tokenizer_path)
-    : atomic_code_(atomic_code),
-      cfg_path_(json_path),
-      model_path_(model_path),
-      tokenizer_path_(tokenizer_path) {}
+Qwen3VLUnify::Qwen3VLUnify(const std::string&, const std::string& json_path, const std::string& model_path,
+                           const std::string& tokenizer_path)
+    : cfg_path_(json_path), model_path_(model_path), tokenizer_path_(tokenizer_path) {}
 
 Qwen3VLUnify::~Qwen3VLUnify() {
     LOG_INFO("{}", "Qwen3VLUnify Delete");
 }
 
 util::ErrorEnum Qwen3VLUnify::Init() {
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    if (rkllm_backend_) {
+        return util::ErrorEnum::Created;
+    }
+    auto backend = std::make_unique<RkllmVlmBackend>(model_path_);
+    auto ret     = backend->Init();
+    if (ret != util::ErrorEnum::Success) {
+        LOG_ERRO("RKLLM Qwen3.5 initialization failed. ModelPath:{} Ret:{}", model_path_, ret);
+        return ret;
+    }
+    rkllm_backend_  = std::move(backend);
+    max_batch_size_ = 1;
+    LOG_INFO("RKLLM Qwen3.5 initialized. ModelPath:{}", model_path_);
+    return util::ErrorEnum::Success;
+#else
     if (generator_) {
         LOG_WARN("{}", "Init SDK Qwen3VL Failed. Already Init");
         return util::ErrorEnum::Created;
     }
 
     try {
-        // Pass tokenizer_path as the tokenizer_path parameter
-        generator_ = std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(),
-                                                                   &profiler_, tokenizer_path_);
+        cosmo::nn::DefaultComponent::Options options;
+        options.profiler       = &profiler_;
+        options.tokenizer_path = tokenizer_path_;
+        generator_ =
+            std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     } catch (const std::exception& e) {
         LOG_ERRO("Init SDK Qwen3VL Failed. CfgPath:{} ModelPath:{} TokenizerPath:{}, {}", cfg_path_,
                  model_path_, tokenizer_path_, e.what());
@@ -49,6 +66,7 @@ util::ErrorEnum Qwen3VLUnify::Init() {
     max_batch_size_ = static_cast<size_t>(generator_->GetMaxBatchSize());
 
     return util::ErrorEnum::Success;
+#endif
 }
 
 util::ErrorEnum Qwen3VLUnify::Generate(const std::vector<VideoFramePtr>& images,
@@ -56,7 +74,11 @@ util::ErrorEnum Qwen3VLUnify::Generate(const std::vector<VideoFramePtr>& images,
                                        const Qwen3VLGenerationParam& gen_param,
                                        std::vector<Qwen3VLResult>& results) {
     auto start = std::chrono::high_resolution_clock::now();
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    if (!rkllm_backend_) {
+#else
     if (!generator_) {
+#endif
         LOG_WARN("{}", "SDK Qwen3VL Not Init");
         return util::ErrorEnum::NotInit;
     }
@@ -104,8 +126,11 @@ util::ErrorEnum Qwen3VLUnify::Generate(const std::vector<VideoFramePtr>& images,
 
 util::ErrorEnum Qwen3VLUnify::Forward(const std::vector<VideoFramePtr>& images,
                                       const std::vector<std::string>& prompts,
-                                      const Qwen3VLGenerationParam& /*gen_param*/,
+                                      const Qwen3VLGenerationParam& gen_param,
                                       std::vector<Qwen3VLResult>& results) {
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    return rkllm_backend_->Generate(images, prompts, gen_param, results);
+#else
     // Qwen3VL uses host-memory BGR blobs (VideoFrame is decoded host memory)
     std::vector<std::shared_ptr<cosmo::nn::Blob>> image_blobs{};
     for (const auto& img : images) {
@@ -205,15 +230,20 @@ util::ErrorEnum Qwen3VLUnify::Forward(const std::vector<VideoFramePtr>& images,
     }
     LOG_DEBUG("[Qwen3VL] Forward done. images:{} results:{}", images.size(), results.size());
     return util::ErrorEnum::Success;
+#endif
 }
 
 util::ErrorEnum Qwen3VLUnify::GetMaxBatchSize(size_t* value) const {
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    if (!rkllm_backend_) {
+#else
     if (!generator_) {
+#endif
         LOG_WARN("{}", "SDK Qwen3VL Not Init");
         return util::ErrorEnum::NotInit;
     }
     if (value) {
-        *value = static_cast<size_t>(generator_->GetMaxBatchSize());
+        *value = max_batch_size_;
     }
     return util::ErrorEnum::Success;
 }

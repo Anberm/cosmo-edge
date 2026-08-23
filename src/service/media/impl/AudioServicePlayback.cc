@@ -251,20 +251,21 @@ struct AudioDeviceRsp {
 bool AudioServiceImpl::HttpSubmit(const std::string& url, const std::string& data) {
     auto response = ServiceRegistry::Instance().Get<cosmo::service::IHttpClient>().Post(url, data);
     if (response.statusCode != 200) {
-        LOG_ERRO("Request {} , data:{} status: {}", url, data, response.statusCode);
+        LOG_ERRO("Audio HTTP request failed, status:{} request_bytes:{} response_bytes:{}",
+                 response.statusCode, data.size(), response.body.size());
         return false;
     }
 
     // Get result
     auto ret_json = response.body;
-    // Print result
-    LOG_INFO("From {} Submit {} Get : {}", url, data, ret_json);
+    LOG_DEBUG("Audio HTTP completed, status:{} request_bytes:{} response_bytes:{}", response.statusCode,
+              data.size(), ret_json.size());
     AudioDeviceRsp rsp;
     try {
         auto j = nlohmann::json::parse(ret_json);
         j.get_to(rsp);
-    } catch (const std::exception& e) {
-        LOG_ERRO("Parse:{} Get {} ", ret_json, e.what());
+    } catch (const std::exception&) {
+        LOG_ERRO("Audio HTTP response parse failed, response_bytes:{}", ret_json.size());
         return false;
     }
 

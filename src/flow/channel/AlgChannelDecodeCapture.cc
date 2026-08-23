@@ -61,7 +61,8 @@ void AlgChannelDecode::CaptureJpeg(VideoFramePtr picture) {
 }
 
 void AlgChannelDecode::AddViewerFrameQueue(const std::string& alg_id,
-                                           AsyncQueue<VideoFramePtr>& async_frame_queue) {
+                                           AsyncQueue<VideoFramePtr>& async_frame_queue,
+                                           std::function<bool()> prepare_frame) {
     std::lock_guard<std::mutex> lock(mtx_);
     auto it = std::find_if(viewer_queue_.begin(), viewer_queue_.end(),
                            [&](const ChannelTaskViewerQueue& viewer) { return (viewer.alg_id == alg_id); });
@@ -71,6 +72,7 @@ void AlgChannelDecode::AddViewerFrameQueue(const std::string& alg_id,
     ChannelTaskViewerQueue viewer;
     viewer.alg_id            = alg_id;
     viewer.async_frame_queue = &async_frame_queue;
+    viewer.prepare_frame     = std::move(prepare_frame);
     viewer_queue_.push_back(viewer);
 }
 
@@ -91,6 +93,40 @@ void AlgChannelDecode::DistributeViewer(VideoFramePtr in_data) {
             viewer.async_frame_queue->Insert(in_data);
         }
     }
+}
+
+ViewerDistributionPlan AlgChannelDecode::PrepareViewerDistribution() {
+    ViewerDistributionPlan plan;
+    std::lock_guard<std::mutex> lock(mtx_);
+    for (auto& viewer : viewer_queue_) {
+        if (!viewer.async_frame_queue) {
+            continue;
+        }
+        if (viewer.prepare_frame && !viewer.prepare_frame()) {
+            continue;
+        }
+        plan.push_back(viewer.alg_id);
+    }
+    return plan;
+}
+
+void AlgChannelDecode::DistributePreparedViewer(const ViewerDistributionPlan& plan, VideoFramePtr in_data) {
+    if (!in_data || plan.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mtx_);
+    for (const auto& alg_id : plan) {
+        auto it = std::find_if(viewer_queue_.begin(), viewer_queue_.end(),
+                               [&](const ChannelTaskViewerQueue& viewer) { return viewer.alg_id == alg_id; });
+        if (it != viewer_queue_.end() && it->async_frame_queue) {
+            it->async_frame_queue->Insert(in_data);
+        }
+    }
+}
+
+bool AlgChannelDecode::NeedsHostFrame(int64_t stream_index) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    return is_capturing_ || stream_index != cap_image_stream_index_;
 }
 
 }  // namespace cosmo

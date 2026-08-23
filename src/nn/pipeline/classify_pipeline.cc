@@ -18,11 +18,12 @@ Status ClassifyPipeline::Init(const PipelineConfig& config, const std::string& m
         nlohmann::json p = pipeline_utils::ParseJsonObject(mc.params_json);
 
         ModelInfo model;
-        model.name      = mc.name;
-        model.filename  = mc.file_name;
-        model.file_md5  = mc.file_md5;
-        model.max_batch = mc.max_batch;
-        max_batch_      = mc.max_batch;
+        model.name           = mc.name;
+        model.filename       = mc.file_name;
+        model.file_md5       = mc.file_md5;
+        model.max_batch      = mc.max_batch;
+        max_batch_           = mc.max_batch;
+        model.input_contract = pipeline_utils::ReadString(p, "rknn_input_contract", std::string());
 
         std::vector<int> dsize = pipeline_utils::ReadIntArray(p, "input_size", {224, 224}, 2);
 

@@ -5,13 +5,13 @@ prev:
   text: Architecture Overview
   link: /en/guide/architecture
 next:
-  text: API Fields
-  link: /en/reference/api-fields
+  text: Image Detection API Integration
+  link: /en/reference/image-detection-api
 ---
 
 # API Overview
 
-This page only documents the API categories and entry points that can be verified from the current source tree. For field-level interface details, continue with [API Fields](api-fields.md), [MQTT Reference](mqtt.md), and [HTTP Webhook Reference](webhook.md).
+This page only documents the API categories and entry points that can be verified from the current source tree. For the complete upload and synchronous inference flow, continue with [Image Detection API Integration](image-detection-api.md). For other field-level details, see [API Fields](api-fields.md), [MQTT Reference](mqtt.md), and [HTTP Webhook Reference](webhook.md).
 
 ## Route Entry Points
 
@@ -145,6 +145,13 @@ The first chunk should carry a stable `clientRequestId`. The server returns an o
 Control-plane JSON requests are limited to 1 MB by default. A regular single multipart request is limited to 10 MB, and the recommended upload chunk is 8 MB. MB values here use 1024 × 1024 bytes. These are per-request parsing and memory boundaries, not business-file size limits. A request beyond the boundary returns HTTP 413 with `HTTP_BODY_TOO_LARGE` and recommends either `USE_CHUNKED_UPLOAD` or `REDUCE_REQUEST_BODY`.
 
 ### Upgrade Recovery Status
+
+The upgrade request accepts an `uploadId` whose original filename matches
+`cosmo-V<major>.<minor>.<patch>-<32-char-md5>.tar.gz`. Before reboot, the backend
+validates the filename, MD5, archive safety, and package layout. After reboot,
+the common startup script revalidates the MD5 and installs the package. Open and
+Protected packages use the same application-upgrade protocol; model authorization
+is independent.
 
 `POST /gtw/cwai/System/QueryDeviceStatus` returns these fields on success:
 

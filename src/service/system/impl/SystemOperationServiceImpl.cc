@@ -6,6 +6,7 @@
 
 #include "service/detail/ServiceRegistry.h"
 #include "service/system/impl/PacketUpgrade.h"
+#include "service/system/impl/UpgradeStorage.h"
 #include "util/ErrorCode.h"
 #include "util/Exec.h"
 #include "util/Log.h"
@@ -74,6 +75,14 @@ cosmo::util::ErrorEnum SystemOperationServiceImpl::Upgrade(const std::string& fi
         reboot_mgr_.Reboot("upgrade Reboot");
     }
     return result;
+}
+
+cosmo::util::ErrorEnum SystemOperationServiceImpl::CheckUpgradeSpace(std::uint64_t packageSizeBytes,
+                                                                     bool cleanupEventMedia,
+                                                                     UpgradeSpaceStatus& status) {
+    return cosmo::service::CheckUpgradeStorage(cosmo::path::GetBaseDir(),
+                                               cosmo::path::GetEventRootPath(false), packageSizeBytes,
+                                               cleanupEventMedia, status);
 }
 
 void SystemOperationServiceImpl::ShowThreadDebugInfo() {

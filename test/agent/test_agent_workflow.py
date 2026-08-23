@@ -262,6 +262,19 @@ class AgentWorkflowTest(unittest.TestCase):
         self.assertIsNone(invalid)
         self.assertIn("must be an object", error)
 
+    def test_rknn_target_selects_rknn_toolkit2_package_and_module(self):
+        specification, error = agent_workflow._toolchain_spec(
+            {"targetChip": "rv1126b"}
+        )
+        self.assertEqual(error, "")
+        self.assertEqual(specification["family"], "rknn")
+        self.assertEqual(specification["package"], "rknn-toolkit2")
+        self.assertEqual(specification["module"], "rknn.api")
+        self.assertEqual(
+            specification["officialReference"],
+            agent_workflow.RKNN_TOOLKIT2_OFFICIAL_REFERENCE,
+        )
+
     def test_target_chip_can_be_inferred_without_limiting_user_to_example_chips(self):
         contract = self._model_contract("other-chip")
         contract["parameters"].pop("targetChip")
@@ -330,6 +343,37 @@ class AgentWorkflowTest(unittest.TestCase):
             self.assertEqual(report["recommendedRoute"], "remote-linux-tpu-mlir")
             details = " ".join(item["detail"] for item in report["routeCandidates"])
             self.assertIn("不等于 CosmoEdge 不支持 Windows", details)
+
+    def test_rv1126b_assessment_routes_to_remote_rknn_toolkit2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = self._model_contract("rv1126b-assessment")
+            contract["parameters"]["targetChip"] = "rv1126b"
+            contract["parameters"]["developmentEnvironment"] = {
+                "os": "linux",
+                "architecture": "x86_64",
+                "reference": "isolated development host",
+            }
+            contract["authority"]["grants"] = ["remote-execution", "model-transfer"]
+            run_dir = root / "output" / "agent-runs" / contract["runId"]
+            run_dir.mkdir(parents=True)
+            (run_dir / "model.onnx").write_bytes(b"fixture")
+            contract_path = run_dir / "task-contract.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            inventory = self._model_inventory()
+            inventory["host"].update({"os": "Darwin", "architecture": "arm64"})
+            with mock.patch.object(agent_workflow, "host_inventory", return_value=inventory):
+                report = agent_workflow.assess_task_report(
+                    contract_path, run_dir, contract, project_root=root
+                )
+            self.assertEqual(report["routeVerdict"], "READY")
+            self.assertEqual(
+                report["recommendedRoute"], "remote-linux-rknn-toolkit2"
+            )
+            self.assertEqual(
+                report["routeCandidates"][-1]["officialReference"],
+                agent_workflow.RKNN_TOOLKIT2_OFFICIAL_REFERENCE,
+            )
 
     def test_remote_linux_assessment_consolidates_missing_authority(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -404,6 +448,29 @@ class AgentWorkflowTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(run_dir.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE(copied.stat().st_mode), 0o600)
             self.assertTrue((run_dir / "route-assessment.json").is_file())
+
+    def test_start_selects_single_model_when_other_materials_are_present(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "detector.onnx"
+            video = root / "sample.mp4"
+            board = root / "board.pdf"
+            model.write_bytes(b"model")
+            video.write_bytes(b"video")
+            board.write_bytes(b"pdf")
+            with mock.patch.object(
+                agent_workflow, "host_inventory", return_value=self._model_inventory()
+            ):
+                _, _, contract, report = agent_workflow.create_task_run(
+                    task="model-conversion",
+                    objective="Convert the detector for RV1126B.",
+                    materials=[model, video, board],
+                    target_chip="rv1126b",
+                    run_id="mixed-material-start",
+                    project_root=root,
+                )
+            self.assertEqual(contract["parameters"]["sourceModel"], "inputs/detector.onnx")
+            self.assertEqual(report["routeVerdict"], "READY")
 
     def test_start_refuses_overwrite_and_pt_cannot_bypass_route_gate(self):
         with tempfile.TemporaryDirectory() as directory:

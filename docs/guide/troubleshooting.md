@@ -35,6 +35,12 @@ http://127.0.0.1:8080
   docker compose -f docker-compose.x86.windows.yml ps
   ```
 
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh status
+  ```
+
 查看日志：
 
 - **Linux**:
@@ -47,6 +53,12 @@ http://127.0.0.1:8080
 
   ```powershell
   docker compose -f docker-compose.x86.windows.yml logs -f
+  ```
+
+- **Apple Silicon macOS (Preview)**:
+
+  ```bash
+  ./scripts/macos-docker-preview.sh logs --follow
   ```
 
 ## 端口冲突
@@ -76,6 +88,15 @@ docker compose -f docker-compose.x86.windows.yml up -d --build
 
 随后访问 `http://127.0.0.1:8280`。不设置该变量时仍默认使用 `8080`。
 
+Mac Preview 使用相同的 Web 端口变量，但仍只绑定本机：
+
+```bash
+COSMO_X86_WEB_PORT=8280 ./scripts/macos-docker-preview.sh up
+```
+
+Mac 上若构建速度异常慢，请同时检查 Docker Desktop 的 VMM 与 Rosetta 设置；
+完整边界见 [macOS Docker Preview](./macos-docker-preview.md)。
+
 ## Windows 构建脚本提示 `No such file or directory`
 
 如果 Docker 构建在执行 `configure`、`config` 或 `Configure` 时报告文件存在但无法执行，通常是 Git for Windows 将无扩展名脚本检出为 CRLF，导致容器无法识别 shebang。
@@ -88,7 +109,7 @@ git check-attr text eol -- 3rd/mp4v2-2.0.0/configure 3rd/openssl-3.5.3/config 3r
 
 三个文件都应显示 `text: auto` 和 `eol: lf`。
 
-## `build_output/` 没有发布包
+## `build_output/` 没有构建产物
 
 使用完整运行命令：
 
@@ -104,28 +125,74 @@ git check-attr text eol -- 3rd/mp4v2-2.0.0/configure 3rd/openssl-3.5.3/config 3r
   docker compose -f docker-compose.x86.windows.yml up -d --build
   ```
 
-Sophon 路径使用：
+Sophon 的完整构建入口、profile 和输出约定以[构建指南](./build.md#sophon-构建产物)为准。
+例如，默认 BM1688 Open 构建完成后可直接检查芯片目录：
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package
+cat build_output/public-runtime/bm1688/TARGET_CHIP
+(cd build_output/public-runtime/bm1688 && sha256sum -c SHA256SUMS)
 ```
 
-注意：`docker compose build` 只构建镜像，不一定执行导出发布包的容器命令。
+Sophon 产物不会直接写在 `build_output/` 根目录。每个
+`build_output/<profile>/<chip>/` 目录应包含 `TARGET_CHIP`、`SHA256SUMS` 和唯一的
+`cosmo-V<version>-<32位md5>.tar.gz`。先确认检查的是本次选择的 profile 和芯片目录。
+
+注意：不要使用 `docker compose build` 代替上述 `run` 入口；前者不会执行导出产物的
+容器命令。
 
 ## Sophon 构建失败
 
-Sophon 构建使用自包含的 `Dockerfile.sophon`（基于 `ubuntu:22.04`），无需外部基础镜像。
+`cosmo-sophon-package` 服务直接使用 `docker-compose.sophon.yml` 中配置的预构建 GHCR
+镜像，仓库没有 `Dockerfile.sophon` 本地构建路径。镜像和构建链路的当前事实统一见
+[构建指南](./build.md#sophon-构建产物)。
 
-如果构建失败，请检查 Docker 构建日志：
+如果构建失败，请重新运行同一入口并检查末尾日志：
 
 ```bash
-docker compose -f docker-compose.sophon.yml run --rm cosmo-sophon-package 2>&1 | tail -50
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x 2>&1 | tail -50
 ```
+
+检查 BM1688 构建时把末尾型号改为 `bm1688`，或省略型号。
 
 常见问题：
 
-- 网络问题导致 apt/npm/cargo 镜像下载失败 — 检查 `SOPHON_APT_MIRROR` 等环境变量。
+- 无法拉取预构建 GHCR 镜像或填充 npm 缓存——检查 Docker registry 网络、代理、DNS 和当前构建日志。
 - 磁盘空间不足 — 构建过程需要约 3GB 空间。
+- `COSMO_MODEL_GUARD_BUILD_PROFILE` 取值不受支持——只接受
+  `public-runtime` 和 `production-release`。
+- 芯片型号不受支持——只接受 `bm1688` 和 `cv186x`；省略时默认 `bm1688`。
+- 在非受控发布环境选择 `production-release`——缺少正式 SDK、设备初始化、
+  信任身份、签发者或发布引导输入时按设计拒绝构建。普通源码修改应使用
+  默认 Open（内部配置 `public-runtime`），不要绕过正式发布检查。
+
+## 受保护 preset 无法加载
+
+设备只需要以下一个 Guard 状态文件：
+
+```text
+/data/cwaiuserdata/model-guard/device-certificate.bin
+```
+
+先检查证书状态和服务日志：
+
+```bash
+sudo test -f /data/cwaiuserdata/model-guard/device-certificate.bin
+sudo journalctl -u cosmo.service -b --no-pager -n 200
+```
+
+如果受控 provisioner 仍在设备的临时目录，还可以运行
+`sudo /临时目录/cosmo-model-provision status` 直接校验证书和本机绑定；Open
+包本身不提供该工具。
+
+- `-2001`（`CMG_V2_CERTIFICATE_UNAVAILABLE`）：证书文件不存在或无法读取。
+- `-2002`（`CMG_V2_CERTIFICATE_REJECTED`）：证书损坏、签名无效，或证书不是
+  为本机签发。
+
+不要生成逐模型 license，也不要复制另一台设备的证书。使用本机生成的新请求在
+受控离线环境重新签发证书，再执行
+`cosmo-model-provision install --certificate <证书绝对路径>`。Open 安装器
+不会创建、删除或修复该证书。
 
 ## nginx / SRS / cosmo-engine 未启动
 

@@ -56,6 +56,16 @@ namespace media {
         return opened_.load() && !stop_.load();
     }
 
+    VideoDecoderCapability VideoDecoderSophon::Probe(VideoCodecType type) {
+        VideoDecoderCapability capability;
+        capability.backend        = "sophon-vpu";
+        capability.implementation = "bmvpu-decoder";
+        capability.available      = type == VideoCodecType::kH264 || type == VideoCodecType::kH265;
+        capability.detail =
+            capability.available ? "Sophon VPU decoder supports the requested codec" : "unsupported codec";
+        return capability;
+    }
+
     bool VideoDecoderSophon::Open() {
         std::lock_guard<std::mutex> operation_lock(operation_mutex_);
         if (opened_.load()) {

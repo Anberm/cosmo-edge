@@ -1,11 +1,20 @@
 <template>
   <div class="page">
     <main class="page-main" :style="{ width: `${width}px`, height: `${height}px` }">
-      <VueFlow v-model:nodes="nodes" v-model:edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes">
+      <VueFlow v-model:nodes="nodes" v-model:edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes" @node-click="handleNodeClick" @pane-click="closeDetailPanel" @move="handleViewportMove">
         <Background pattern-color="#e5e7eb" gap="16" />
         <Controls :show-interactive="false" />
         <!-- <MiniMap /> -->
       </VueFlow>
+      <NodeDetailPanel
+        v-if="detailPanelNodeId"
+        ref="detailPanelRef"
+        :node-id="detailPanelNodeId"
+        :node-data="detailPanelNodeData"
+        :position="screenPanelPosition"
+        @close="closeDetailPanel"
+        @config-change="handlePanelConfigChange"
+      />
     </main>
 
     <teleport to="body">
@@ -20,7 +29,7 @@
 
 
 <script setup>
-import { ref, markRaw, watch, nextTick } from 'vue'
+import { ref, markRaw, watch, nextTick, computed, onBeforeUnmount } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -39,6 +48,13 @@ import CustomFormNode from '@/views/gam/countManagement/arrangeDetail/flow/Custo
 import StartNode from '@/views/gam/countManagement/arrangeDetail/flow/StartNode.vue'
 import EndNode from '@/views/gam/countManagement/arrangeDetail/flow/EndNode.vue'
 import ActionEdge from '@/views/gam/countManagement/arrangeDetail/flow/ActionEdge.vue'
+import NodeDetailPanel from '@/views/gam/countManagement/arrangeDetail/flow/NodeDetailPanel.vue'
+import {
+  getDetailPanelAnchor,
+  getDetailPanelSize,
+  getFlowLayoutSpacing,
+  getFlowNodeDimensions
+} from '@/views/gam/countManagement/arrangeDetail/flow/layoutGeometry.js'
 
 const props = defineProps({
   width: {
@@ -48,6 +64,10 @@ const props = defineProps({
   height: {
     type: Number,
     default: 0
+  },
+  strategyId: {
+    type: [String, Number],
+    default: ''
   },
   actionList: {
     type: Array,
@@ -71,13 +91,14 @@ const nodeTypes = {
 const edgeTypes = {
   action: markRaw(ActionEdge)
 }
-
 const { setNodes, setEdges, addNodes, onPaneReady, getEdges } = useVueFlow()
 const flowInstance = ref(null)
 onPaneReady((instance) => {
   flowInstance.value = instance
-  // 设置默认视口，不使用自动适应
-  instance.setViewport({ x: 100, y: 200, zoom: 0.6 })
+  requestAnimationFrame(() => {
+    centerView()
+    centeredStrategyId.value = String(props.strategyId || '')
+  })
 })
 
 const addDialogVisible = ref(false)
@@ -87,11 +108,23 @@ const addDialogY = ref(0)
 const addDialogMode = ref('insert') // insert | branch
 const addDialogSourceId = ref('')
 
-const nodeWidth = 260
-const nodeHeight = 160
 const layoutDirection = 'LR'
 const newFlowData = ref([])
 const atomicList = ref([])
+const centeredStrategyId = ref(null)
+const detailPanelRef = ref(null)
+const detailPanelNodeId = ref(null)
+const detailPanelNodeData = ref(null)
+const detailPanelPosition = ref({ x: 0, y: 0 })
+const currentViewport = ref({ x: 0, y: 0, zoom: 1 })
+const screenPanelPosition = computed(() => ({
+  x:
+    detailPanelPosition.value.x * currentViewport.value.zoom +
+    currentViewport.value.x,
+  y:
+    detailPanelPosition.value.y * currentViewport.value.zoom +
+    currentViewport.value.y
+}))
 const parseArray = (val) => {
   if (Array.isArray(val)) return val
   if (typeof val === 'string' && val.trim()) {
@@ -106,23 +139,32 @@ const parseArray = (val) => {
 }
 
 const getNodeDimensions = (node) => {
-  if (node.type === 'detection') {
-    return { width: 550, height: 450 }
-  }
-  if (node.type === 'customForm') {
-    return { width: 550, height: 450 }
-  }
-  return { width: nodeWidth, height: nodeHeight }
+  // Keep the linkage graph on the same fixed card geometry as algorithm
+  // orchestration. Configuration is rendered in the floating panel and must
+  // not inflate Dagre's node bounds.
+  return getFlowNodeDimensions(node)
+}
+
+const getLayoutSpacing = () => {
+  let maxW = 0
+  let maxH = 0
+  nodes.value.forEach((node) => {
+    const dimensions = getNodeDimensions(node)
+    maxW = Math.max(maxW, dimensions.width)
+    maxH = Math.max(maxH, dimensions.height)
+  })
+  return getFlowLayoutSpacing({ width: maxW, height: maxH })
 }
 
 const applyLayout = () => {
   const dagreGraph = new dagre.graphlib.Graph()
   dagreGraph.setDefaultEdgeLabel(() => ({}))
 
+  const spacing = getLayoutSpacing()
   dagreGraph.setGraph({
     rankdir: layoutDirection,
-    nodesep: 150,
-    ranksep: 150
+    nodesep: spacing.nodesep,
+    ranksep: spacing.ranksep
   })
 
   nodes.value.forEach((node) => {
@@ -150,12 +192,17 @@ const applyLayout = () => {
     }
   })
 
+  nodes.value = positioned
   setNodes(positioned)
 
-  // 布局完成后居中显示
-  // requestAnimationFrame(() => {
-  //   centerView()
-  // })
+  const strategyId = String(props.strategyId || '')
+  if (centeredStrategyId.value !== strategyId) {
+    requestAnimationFrame(() => {
+      if (!flowInstance.value) return
+      centerView()
+      centeredStrategyId.value = strategyId
+    })
+  }
 }
 
 const focusNode = (nodeId) => {
@@ -201,9 +248,159 @@ const centerView = () => {
     flowInstance.value &&
     typeof flowInstance.value.setCenter === 'function'
   ) {
-    flowInstance.value.setCenter(cx, cy, { zoom: 0.8, duration: 300 })
+    flowInstance.value.setCenter(cx, cy, { zoom: 1.0, duration: 300 })
   }
 }
+
+const updateNodeConfig = (nodeId, config) => {
+  if (!nodeId || !config) return
+  nodes.value = nodes.value.map((node) => {
+    if (String(node.id) !== String(nodeId)) return node
+    const flowData = {
+      ...(node.data?.flowData || {}),
+      configObject: config
+    }
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        flowData,
+        actionDetail: {
+          ...(node.data?.actionDetail || {}),
+          configObject: config
+        }
+      }
+    }
+  })
+  setNodes(nodes.value)
+  detailPanelNodeData.value =
+    nodes.value.find((node) => String(node.id) === String(nodeId))?.data || null
+}
+
+const collectCurrentPanelConfig = () => {
+  if (!detailPanelNodeId.value || !detailPanelRef.value) return
+  updateNodeConfig(
+    detailPanelNodeId.value,
+    detailPanelRef.value.submitForm?.()
+  )
+}
+
+const handlePanelConfigChange = (config) => {
+  updateNodeConfig(detailPanelNodeId.value, config)
+}
+
+const handleViewportMove = (transform) => {
+  if (!transform) return
+  currentViewport.value = {
+    x: transform.x,
+    y: transform.y,
+    zoom: transform.zoom
+  }
+}
+
+const markNodeSelected = (nodeId) => {
+  const nextNodes = nodes.value.map((node) => ({
+    ...node,
+    data: {
+      ...(node.data || {}),
+      selected: String(node.id) === String(nodeId)
+    }
+  }))
+  nodes.value = nextNodes
+  setNodes(nextNodes)
+}
+
+const clearNodeSelected = () => {
+  const nextNodes = nodes.value.map((node) => ({
+    ...node,
+    data: {
+      ...(node.data || {}),
+      selected: false
+    }
+  }))
+  nodes.value = nextNodes
+  setNodes(nextNodes)
+}
+
+const handleNodeClick = ({ node } = {}) => {
+  if (!node || node.type === 'start' || node.type === 'end') return
+  if (detailPanelNodeId.value && detailPanelNodeId.value !== String(node.id)) {
+    collectCurrentPanelConfig()
+  }
+  const dimensions = getNodeDimensions(node)
+  const panelSize = getDetailPanelSize(node.data?.actionId)
+  const panelWidth = panelSize.width
+  const panelHeight = panelSize.height
+  const { x: panelX, y: panelY } = getDetailPanelAnchor(
+    node,
+    dimensions,
+    panelSize
+  )
+  detailPanelNodeId.value = String(node.id)
+  detailPanelNodeData.value = node.data
+  detailPanelPosition.value = {
+    x: panelX,
+    y: panelY
+  }
+  markNodeSelected(node.id)
+
+  nextTick(() => {
+    detailPanelRef.value?.resetDragOffset?.()
+    if (!flowInstance.value?.setCenter) return
+
+    const bounds = nodes.value.reduce(
+      (acc, item) => {
+        const size = getNodeDimensions(item)
+        return {
+          minX: Math.min(acc.minX, item.position.x),
+          minY: Math.min(acc.minY, item.position.y),
+          maxX: Math.max(acc.maxX, item.position.x + size.width),
+          maxY: Math.max(acc.maxY, item.position.y + size.height)
+        }
+      },
+      { minX: panelX, minY: panelY, maxX: panelX + panelWidth, maxY: panelY + panelHeight }
+    )
+    const viewport = flowInstance.value.getViewport?.()
+    const zoom = Math.min(viewport?.zoom || 1, 0.75)
+    flowInstance.value.setCenter(
+      (bounds.minX + bounds.maxX) / 2,
+      (bounds.minY + bounds.maxY) / 2,
+      { zoom, duration: 280 }
+    )
+    setTimeout(() => {
+      const viewportAfter = flowInstance.value?.getViewport?.()
+      if (viewportAfter) currentViewport.value = viewportAfter
+    }, 300)
+  })
+}
+
+const closeDetailPanel = () => {
+  collectCurrentPanelConfig()
+  detailPanelNodeId.value = null
+  detailPanelNodeData.value = null
+  clearNodeSelected()
+  nextTick(centerView)
+}
+
+const handleOpenDetailPanel = (nodeId) => {
+  const node = nodes.value.find((item) => String(item.id) === String(nodeId))
+  if (node) handleNodeClick({ node })
+}
+
+const handleCloseDetailPanel = (nodeId) => {
+  if (String(detailPanelNodeId.value) === String(nodeId)) {
+    detailPanelNodeId.value = null
+    detailPanelNodeData.value = null
+  }
+}
+
+EventBus.$on('flow:openDetailPanel', handleOpenDetailPanel)
+EventBus.$on('flow:closeDetailPanel', handleCloseDetailPanel)
+
+onBeforeUnmount(() => {
+  EventBus.$off('flow:openDetailPanel', handleOpenDetailPanel)
+  EventBus.$off('flow:closeDetailPanel', handleCloseDetailPanel)
+})
 
 EventBus.$on('edgeMenu:focus', (nodeId) => {
   // requestAnimationFrame(() => {
@@ -340,7 +537,7 @@ const addComponentFromDialog = (type, label, action) => {
       actionName: action?.actionName,
       actionType: action?.actionType,
       // businessCategory: action?.businessCategory,
-      description: action?.description,
+      description: action?.description ?? action?.remark,
       atomicList: atomicList.value || [],
       flowData: flowItem || {},
       actionDetail: {
@@ -580,6 +777,7 @@ const saveMetaDataParams = () => {
 }
 
 const saveFlowData = () => {
+  collectCurrentPanelConfig()
   EventBus.$emit('flow:collectConfigs')
   const incomingMap = new Map()
   edges.value.forEach((e) => {
@@ -652,6 +850,8 @@ const saveFlowData = () => {
 
 // Expose functions to parent component
 const clearFlow = () => {
+  detailPanelNodeId.value = null
+  detailPanelNodeData.value = null
   setNodes([])
   setEdges([])
   nodes.value = []
@@ -680,8 +880,10 @@ const branchInputParamConfig = ref(
   '[{"type":"condition","defaultValue":"","description":"配置条件使其结果为真，并运行下面的动作","failedTip":"请选择","key":"condition","name":"条件配置","level":"1","regexpr":""}]'
 )
 watch(
-  () => props.workFlow,
-  (newVal) => {
+  [() => props.strategyId, () => props.workFlow],
+  ([, newVal]) => {
+    detailPanelNodeId.value = null
+    detailPanelNodeData.value = null
     newFlowData.value = parseArray(newVal)
     atomicList.value = []
     if (newFlowData.value) {
@@ -736,6 +938,7 @@ watch(
   flex: none;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .page-main :deep(.vue-flow) {

@@ -2,36 +2,64 @@
 # Web Frontend Build (Vue 3 + Vite)
 ##########################################################
 find_program(NPM_EXECUTABLE npm REQUIRED)
+find_program(BASH_EXECUTABLE bash REQUIRED)
 set(WEB_BUILD_DIR ${CMAKE_BINARY_DIR}/web)
 set(WEB_SRC_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/src/web)
-set(WEB_STAMP     ${WEB_BUILD_DIR}/web_unified.stamp)
+set(WEB_STAGE_DIR ${WEB_BUILD_DIR}/web_unified)
+set(WEB_ENTRY     ${WEB_STAGE_DIR}/dist/index.html)
+if(DEFINED RESOURCE_DIR AND NOT "${RESOURCE_DIR}" STREQUAL "")
+    set(WEB_RESOURCE_DIR ${RESOURCE_DIR})
+else()
+    set(WEB_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data/resource/aiboxresource_bm1688)
+endif()
 
-file(GLOB_RECURSE WEB_SRC_FILES
+file(GLOB_RECURSE WEB_SRC_FILES CONFIGURE_DEPENDS
     ${WEB_SRC_DIR}/src/*
-    ${WEB_SRC_DIR}/index.html
+    ${WEB_SRC_DIR}/public/*
+    ${WEB_SRC_DIR}/scripts/*
 )
 list(APPEND WEB_SRC_FILES
+    ${CMAKE_CURRENT_LIST_FILE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/docs/i18n/GLOSSARY.md
+    ${CMAKE_CURRENT_SOURCE_DIR}/docs/i18n/SHORT-SCOPES.md
+    ${WEB_RESOURCE_DIR}/i18n/resource.en-US.json
+    ${WEB_RESOURCE_DIR}/i18n/resource.zh-CN.json
+    ${WEB_SRC_DIR}/.npmrc
+    ${WEB_SRC_DIR}/index.html
+    ${WEB_SRC_DIR}/package-lock.json
     ${WEB_SRC_DIR}/package.json
     ${WEB_SRC_DIR}/vite.config.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_npm_dependencies.sh
 )
 
-file(MAKE_DIRECTORY ${WEB_BUILD_DIR}/web_unified)
+file(MAKE_DIRECTORY ${WEB_BUILD_DIR})
 
 add_custom_command(
-    OUTPUT  ${WEB_STAMP}
+    OUTPUT  ${WEB_ENTRY}
     DEPENDS ${WEB_SRC_FILES}
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${WEB_SRC_DIR} ${WEB_BUILD_DIR}/web_unified
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${WEB_BUILD_DIR}/web_unified/package-lock.json
-    # copy_directory dereferences node_modules/.bin symlinks. Restore them when a cached
-    # dependency tree is present so npm can execute ESM command-line tools offline.
-    COMMAND ${CMAKE_COMMAND} -DWEB_SRC_DIR=${WEB_SRC_DIR} -DWEB_STAGING_DIR=${WEB_BUILD_DIR}/web_unified
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/repair_web_node_bins.cmake
-    COMMAND ${NPM_EXECUTABLE} install --loglevel=error
-    COMMAND chmod -R +x node_modules/.bin
-    COMMAND ${NPM_EXECUTABLE} run build
-    COMMAND ${CMAKE_COMMAND} -E touch ${WEB_STAMP}
-    WORKING_DIRECTORY ${WEB_BUILD_DIR}/web_unified
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${WEB_STAGE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${WEB_STAGE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${WEB_SRC_DIR}/src" "${WEB_STAGE_DIR}/src"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${WEB_SRC_DIR}/public" "${WEB_STAGE_DIR}/public"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${WEB_SRC_DIR}/scripts" "${WEB_STAGE_DIR}/scripts"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/.npmrc" "${WEB_STAGE_DIR}/.npmrc"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/index.html" "${WEB_STAGE_DIR}/index.html"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/package-lock.json" "${WEB_STAGE_DIR}/package-lock.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/package.json" "${WEB_STAGE_DIR}/package.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WEB_SRC_DIR}/vite.config.js" "${WEB_STAGE_DIR}/vite.config.js"
+    COMMAND ${BASH_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_npm_dependencies.sh"
+            "${WEB_STAGE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E chdir "${WEB_STAGE_DIR}"
+            ${CMAKE_COMMAND} -E env "AIBOX_RESOURCE_DIR=${WEB_RESOURCE_DIR}"
+            ${NPM_EXECUTABLE} run resource-i18n:check
+    COMMAND ${CMAKE_COMMAND} -E chdir "${WEB_STAGE_DIR}"
+            ${CMAKE_COMMAND} -E env "COSMO_REPO_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
+            ${NPM_EXECUTABLE} run build
     COMMENT "Building unified web frontend (Vue 3 + Vite)..."
+    VERBATIM
 )
-add_custom_target(web_frontend ALL DEPENDS ${WEB_STAMP})
+add_custom_target(web_frontend ALL DEPENDS ${WEB_ENTRY})
+# Serialize the frontend after the engine so compiler and npm/Vite output do
+# not interleave in canonical package-build logs.
 add_dependencies(web_frontend ${EXECUTABLE_NAME})

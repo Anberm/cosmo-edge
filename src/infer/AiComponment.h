@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "media/NativeVideoBuffer.h"
 #include "media/VideoFrame.h"
 #include "nn/core/blob.h"
 #include "nn/utils/profiler.h"
@@ -18,6 +19,9 @@ public:
 cosmo::nn::DeviceType GetDeviceType();
 
 util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
+                                     std::vector<std::shared_ptr<cosmo::nn::Blob>>& blobs);
+util::ErrorEnum ConvertImagesToBlobs(const std::vector<VideoFramePtr>& images,
+                                     const std::vector<media::NativeVideoBufferPtr>& native_buffers,
                                      std::vector<std::shared_ptr<cosmo::nn::Blob>>& blobs);
 
 util::ErrorEnum ConvertDatasToBlobs(const std::vector<std::vector<int>>& datas,

@@ -1,0 +1,5 @@
+--- a/cmake/AddEventLibrary.cmake
++++ b/cmake/AddEventLibrary.cmake
+@@ -162 +162 @@
+-                INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
++                INSTALL_RPATH "$ORIGIN")

@@ -15,14 +15,14 @@ next:
 | --- | --- |
 | Who this is for | First-time CosmoEdge users, deployment engineers, and developers |
 | What you will accomplish | Deploy or connect to the system, configure device network and time, add video, assign an algorithm, and verify its output |
-| Prerequisites | Docker is installed on an x86 host, or a CosmoEdge edge device is already provisioned |
-| Estimated time | About 15–30 minutes for the first x86 build; about 15–25 minutes for a provisioned device |
-| Device required | Choose either an x86 Docker host or a provisioned edge device; a camera is not required for the first test |
+| Prerequisites | Docker is installed on an x86 host, an Apple Silicon Mac has the Docker Desktop Preview environment, or a CosmoEdge edge device is provisioned |
+| Estimated time | About 15–30 minutes for a native x86 first build; Mac amd64 emulation can take longer; about 15–25 minutes for a provisioned device |
+| Device required | Choose an x86 Docker host, an Apple Silicon Mac Preview, or a provisioned edge device; a camera is not required for the first test |
 | Final acceptance result | The channel is running, Live Display shows the algorithm overlay, and Event Center contains a matching event or count result |
 
 The goal is not merely to open the UI. It is to complete a **verifiable first detection**:
 
-1. Make CosmoEdge reachable through either the x86 Docker path or the edge-device path.
+1. Make CosmoEdge reachable through the x86 Docker, macOS Preview, or edge-device path.
 2. For an edge device at its default static address, configure the computer first, then sign in and set the device network and time.
 3. Add an offline test video.
 4. Assign a scenario task and start analysis.
@@ -35,7 +35,8 @@ Changing the default password, setting the device network, and correcting device
 ### 1.1 Path A: Docker on an x86 Host
 
 Use this path on a Linux x86_64 host. On Windows, use
-`docker-compose.x86.windows.yml`; the acceptance workflow is otherwise the same.
+`docker-compose.x86.windows.yml`. Apple Silicon Macs use the separate Preview
+path in the next section.
 
 An earlier validated setup used Ubuntu 22.04.2, an Intel Core i9-13900F, 64 GB of memory,
 Docker 29.1.3, and Docker Compose v5.1.4. This is a recorded validation environment, not a minimum requirement. Use the root README, the current Compose files, and the resource requirements of your selected models as the current source of truth.
@@ -73,13 +74,61 @@ Success conditions:
 
 - `docker compose ... ps` reports the services as `Up` or `running`;
 - `http://127.0.0.1:8080` opens on the host;
-- for remote access, replace `127.0.0.1` with the host IP and allow TCP 8080 through the host firewall.
+- for remote access, replace `127.0.0.1` with the x86 host IP and allow TCP 8080 through the host firewall.
 
 ![CosmoEdge containers in the running state](images/container.webp)
 
-### 1.2 Path B: A Provisioned Edge Device
+### 1.2 Path B: Apple Silicon macOS Preview
 
-CosmoEdge currently supports the Sophon BM1688 platform. The following images show the BM1688 dual-Ethernet device used in the earlier walkthrough. Enclosures, labels, and specifications can differ by shipment; use the label and delivery manifest for the actual unit.
+The Mac path uses an isolated `linux/amd64` Docker Preview. Read its
+[admission, licensing, and capability boundaries](/en/guide/macos-docker-preview),
+then run:
+
+```bash
+./scripts/macos-docker-preview.sh doctor
+./scripts/macos-docker-preview.sh up
+./scripts/macos-docker-preview.sh status
+```
+
+When healthy, open `http://127.0.0.1:8080` on the same Mac. This path is for
+single-video local evaluation; it is not a native macOS binary, a Sophon or
+Rockchip NPU deployment, or production performance evidence.
+
+### 1.3 Path C: A Provisioned Edge Device
+
+CosmoEdge currently supports two Sophon chips: BM1688 and CV186X. The following images show the BM1688 dual-Ethernet device used in the earlier walkthrough. Enclosures, labels, and specifications can differ by shipment; use the label and delivery manifest for the actual unit.
+
+To build an upgrade package from source, select the target chip with the
+`--chip <model>` option at the repository root:
+
+```bash
+# BM1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+
+# CV186X
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+
+find build_output/public-runtime -mindepth 2 -maxdepth 2 -type f -print
+```
+
+Omitting the chip argument defaults to `bm1688`. The build script selects the
+matching model resource directory; you do not need to provide a model path.
+
+The model resources in the package must match the target chip. BM1688 and
+CV186X artifacts are not interchangeable.
+
+Use the one package name reported by the build for installation. To install it
+over SSH on a prepared Sophon Linux device, follow the
+[Deployment Guide: SSH Installation Path](/en/guide/deployment#ssh-installation-path).
+That section is the single source of truth for transfer, extraction, installation,
+reboot, base-system prerequisites, and recovery boundaries.
+
+When CosmoEdge is already running, you can instead open **System Management →
+System Maintenance → Software Upgrade** and upload the same package. Keep power
+connected during installation. After reboot and sign-in, verify that **Software
+Version** matches the package version. The SSH installer targets a Sophon device
+with its base Linux system already prepared; it is not an OS-image installer for
+arbitrary blank hardware.
 
 ![Example BM1688 edge-device connector panel](images/img_01.webp)
 
@@ -320,7 +369,8 @@ When position and direction are correct, click **Finish Drawing**.
 
 ### 6.3 Set the Offline-Video Running Strategy
 
-To observe the same sample repeatedly, use **Offline Video Play Count**. The current form accepts only `0–100`; the runtime treats `0` as an infinite loop and a positive value as the total play count. Some current resource help text still says “negative means infinite and zero means one,” but the form rejects negative values and that description conflicts with runtime code. Enter `0` to loop on this version.
+To observe the same sample repeatedly, use **Offline Video Play Count**. The form accepts `0–100`:
+`0` loops indefinitely, while `1–100` is the total number of plays.
 
 ![Setting offline-video play count and running strategy](images/img_24.webp)
 

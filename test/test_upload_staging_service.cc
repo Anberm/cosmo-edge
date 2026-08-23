@@ -79,6 +79,10 @@ TEST_CASE("Upload staging binds opaque sessions to owner and consumes once", "[u
     REQUIRE(ParseUploadPurpose("image", parsed_purpose));
     CHECK(parsed_purpose == UploadPurpose::kImage);
     CHECK(UploadPurposeName(UploadPurpose::kImage) == "image");
+    CHECK(ParseUploadPurpose("model-authorization-certificate", parsed_purpose));
+    CHECK(parsed_purpose == UploadPurpose::kModelAuthorizationCertificate);
+    CHECK(UploadPurposeName(UploadPurpose::kModelAuthorizationCertificate) ==
+          "model-authorization-certificate");
     CHECK_FALSE(ParseUploadPurpose("unknown", parsed_purpose));
 
     TempDirectory temp;

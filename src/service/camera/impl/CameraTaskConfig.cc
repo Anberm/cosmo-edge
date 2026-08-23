@@ -47,7 +47,7 @@ namespace {
 // ============================================================
 
 util::ErrorEnum CameraServiceImpl::CheckTaskStartResource() const {
-#ifdef COSMO_NN_USE_SOPHON_BACKEND
+#if defined(COSMO_NN_USE_SOPHON_BACKEND) || defined(COSMO_NN_USE_RKNN_BACKEND)
     if (!ServiceRegistry::Instance().Get<IConfigReadService>().GetResourceLimit()) {
         return util::ErrorEnum::Success;
     }
@@ -412,6 +412,65 @@ util::ErrorEnum CameraServiceImpl::QuerySwitch(const std::string& cameraId, cons
         }
         return util::ErrorEnum::TaskNotExist;
     });
+}
+
+util::ErrorEnum CameraServiceImpl::AcquirePreviewChannel(const std::string& cameraId) {
+    auto camera = GetCamera(cameraId);
+    if (!camera) {
+        LOG_INFO("{} Not Exist", cameraId);
+        return util::ErrorEnum::CameraNotExist;
+    }
+
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
+        return util::ErrorEnum::CameraNotExist;
+    }
+
+    const size_t previous = camera->preview_lease_count_.fetch_add(1, std::memory_order_acq_rel);
+    if (previous > 0) {
+        return util::ErrorEnum::Success;
+    }
+
+    auto& lifecycle = ServiceRegistry::Instance().Get<ITaskLifecycle>();
+    if (lifecycle.TaskIsStart(camera->channel_task_)) {
+        return util::ErrorEnum::Success;
+    }
+
+    LOG_INFO("[{}] Auto-starting ChannelTask for live preview", cameraId);
+    if (!lifecycle.TaskStart(cameraId, camera->channel_task_)) {
+        camera->preview_lease_count_.fetch_sub(1, std::memory_order_acq_rel);
+        LOG_WARN("[{}] Failed to auto-start ChannelTask for live preview", cameraId);
+        return util::ErrorEnum::DemuxNoData;
+    }
+    return util::ErrorEnum::Success;
+}
+
+void CameraServiceImpl::ReleasePreviewChannel(const std::string& cameraId) {
+    auto camera = GetCamera(cameraId);
+    if (!camera) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> command_lock(camera->command_mtx_);
+    if (camera->deleting_) {
+        return;
+    }
+
+    size_t current = camera->preview_lease_count_.load(std::memory_order_acquire);
+    while (current > 0 && !camera->preview_lease_count_.compare_exchange_weak(
+                              current, current - 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    }
+    if (current == 0) {
+        LOG_WARN("[{}] Live preview lease release ignored because no lease is active", cameraId);
+        return;
+    }
+    if (current > 1) {
+        return;
+    }
+
+    // UpdateChannelState reads the count again, so a concurrent acquire cannot
+    // have its channel stopped by this final release.
+    UpdateChannelState(camera);
 }
 
 VideoFramePtr CameraServiceImpl::CaptureImage(const std::string& cameraId, int timeOutMs) {

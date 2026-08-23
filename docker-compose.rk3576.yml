@@ -1,0 +1,11 @@
+# Deprecated compatibility entry. New automation should use
+# docker-compose.rockchip.yml and select the target with COSMO_TARGET_CHIP.
+services:
+  cosmo-rk3576-package:
+    extends:
+      file: docker-compose.rockchip.yml
+      service: cosmo-rockchip-package
+    command: ["--chip", "rk3576", "--models", "include"]
+
+volumes:
+  cosmo-npm-cache:

@@ -181,6 +181,10 @@ namespace {
     }
 }  // namespace
 
+void BmrtDeleter::operator()(void* runtime) const noexcept {
+    DestroyBmRuntime(&runtime);
+}
+
 std::mutex SophonNetNode::sophon_net_mutex;
 
 SophonNetNode::SophonNetNode() : NetNode() {}
@@ -436,9 +440,9 @@ Status SophonNetNode::LoadWeight(const char* data, size_t size) {
     }
 }
 
-Status SophonNetNode::AttachBmrt(void* bmrt_handle) {
+Status SophonNetNode::AttachOwnedBmrt(OwnedBmrt bmrt_handle) {
     if (!bmrt_handle)
-        return Status(COSMO_NN_ERR_LOAD_MODEL, "AttachBmrt: bmrt handle is null");
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "AttachOwnedBmrt: bmrt handle is null");
 
     if (shared_resource == nullptr) {
         return Status(COSMO_NN_ERR_GRAPH_NOT_INIT, "Sophon shared resource is null");
@@ -450,12 +454,10 @@ Status SophonNetNode::AttachBmrt(void* bmrt_handle) {
     std::unique_lock<std::mutex> lck(sophon_net_mutex);
 
     if (m_bmrt != nullptr) {
-        return Status(COSMO_NN_ERR_LOAD_MODEL, "AttachBmrt: runtime is already attached");
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "AttachOwnedBmrt: runtime is already attached");
     }
 
-    // Take ownership of the externally-created bmrt.
-    // The .so has already completed bmrt_create + bmrt_load_bmodel_data.
-    m_bmrt = bmrt_handle;
+    m_bmrt = bmrt_handle.release();
 
     try {
         Status status = SetupNetworkAfterBmrt();
@@ -472,6 +474,10 @@ Status SophonNetNode::AttachBmrt(void* bmrt_handle) {
         DestroyBmRuntime(&m_bmrt);
         m_netinfo = nullptr;
         return Status(COSMO_NN_ERR_LOAD_MODEL, error.what());
+    } catch (...) {
+        DestroyBmRuntime(&m_bmrt);
+        m_netinfo = nullptr;
+        return Status(COSMO_NN_ERR_LOAD_MODEL, "Sophon model setup failed with an unknown error");
     }
 }
 

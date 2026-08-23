@@ -15,14 +15,14 @@ next:
 | --- | --- |
 | 适合谁 | 第一次部署或使用 CosmoEdge 的用户、实施人员和开发者 |
 | 完成后能做什么 | 部署或连接系统，完成设备网络与时间设置，接入视频，分配算法并验证结果 |
-| 使用前提 | x86 主机已安装 Docker，或已有预装 CosmoEdge 的边缘设备 |
-| 预计时间 | x86 首次构建约 15–30 分钟；预装设备约 15–25 分钟 |
-| 是否需要设备 | 二选一：x86 Docker 主机，或预装 CosmoEdge 的边缘设备；首次检测不要求摄像机 |
+| 使用前提 | x86 主机已安装 Docker，Apple Silicon Mac 已准备 Docker Desktop Preview 环境，或已有预装 CosmoEdge 的边缘设备 |
+| 预计时间 | 原生 x86 首次构建约 15–30 分钟；Mac amd64 仿真可能更久；预装设备约 15–25 分钟 |
+| 是否需要设备 | 三选一：x86 Docker 主机、Apple Silicon Mac Preview，或预装 CosmoEdge 的边缘设备；首次检测不要求摄像机 |
 | 最终验收结果 | 通道处于运行状态，实时展示出现算法叠加结果，事件中心可查询到符合规则的事件或统计结果 |
 
 本页目标不是“把页面打开”，而是完成一次**可验证的首次检测**。完整路径是：
 
-1. 选择 x86 Docker 或边缘设备路径并让系统可访问。
+1. 选择 x86 Docker、macOS Preview 或边缘设备路径并让系统可访问。
 2. 如果使用默认静态 IP 的边缘设备，先配置电脑 IP，再登录并调整设备网络与时间。
 3. 接入一段离线测试视频。
 4. 为视频分配一个场景任务并启动分析。
@@ -35,7 +35,7 @@ next:
 ### 1.1 路径 A：x86 主机使用 Docker
 
 适用于 Linux x86_64 主机。Windows 用户使用仓库中的
-`docker-compose.x86.windows.yml`，其余验证路径相同。
+`docker-compose.x86.windows.yml`。Apple Silicon Mac 使用下一节的独立 Preview 路径。
 
 旧版教程记录过一套已验证环境：Ubuntu 22.04.2、Intel Core i9-13900F、64 GB 内存、
 Docker 29.1.3 和 Docker Compose v5.1.4。它只是一次验证快照，不是最低配置要求；实际支持情况以仓库根目录的 README、当前 Compose 文件和目标模型资源占用为准。
@@ -78,10 +78,50 @@ docker compose -f docker-compose.x86.windows.yml ps
 
 ![CosmoEdge 容器处于运行状态](images/container.webp)
 
-### 1.2 路径 B：预装 CosmoEdge 的边缘设备
+### 1.2 路径 B：Apple Silicon macOS Preview
 
-CosmoEdge 当前支持 Sophon BM1688 平台。下图是旧版教程使用的 BM1688 双网口边缘设备示例；
+Mac 使用隔离的 `linux/amd64` Docker Preview。先阅读
+[Mac 准入、许可和能力边界](/guide/macos-docker-preview)，再运行：
+
+```bash
+./scripts/macos-docker-preview.sh doctor
+./scripts/macos-docker-preview.sh up
+./scripts/macos-docker-preview.sh status
+```
+
+成功后只从本机打开 `http://127.0.0.1:8080`。这条路径面向单路离线视频体验，
+不是原生 macOS 二进制、Sophon/Rockchip NPU 部署或生产性能证据。
+
+### 1.3 路径 C：预装 CosmoEdge 的边缘设备
+
+CosmoEdge 当前支持 Sophon BM1688 和 CV186X 两种芯片。下图是旧版教程使用的 BM1688 双网口边缘设备示例；
 不同批次的外壳、接口标识和硬件参数可能不同，应以设备标签与交付清单为准。
+
+如果需要从源码构建升级包，在仓库根目录通过 `--chip <型号>` 选项指定目标芯片：
+
+```bash
+# BM1688
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip bm1688
+
+# CV186X
+./scripts/docker-compose.sh -f docker-compose.sophon.yml run --rm cosmo-sophon-package --chip cv186x
+
+find build_output/public-runtime -mindepth 2 -maxdepth 2 -type f -print
+```
+
+省略芯片型号参数时默认使用 `bm1688`。构建脚本会根据型号选择对应的模型资源目录，
+无需手动填写模型路径。
+
+构建包中的模型资源必须与目标芯片匹配；BM1688 与 CV186X 的产物不可互换。
+
+把构建日志列出的唯一包名用于安装。需要通过 SSH 安装到已准备好的 Sophon Linux
+设备时，请按[部署指南：SSH 安装路径](/guide/deployment#ssh安装路径)操作。文件传输、
+解压、安装、重启、基础系统前提和恢复边界统一在该章节维护。
+
+已有 CosmoEdge 正常运行时，也可以登录管理页面，进入
+**系统管理 → 系统维护 → 软件升级**，选择同一个安装包并确认。升级期间保持供电；设备重启并
+重新登录后，在设备信息中核对 **软件版本** 与安装包版本一致。SSH安装器面向已经准备好基础
+系统的Sophon设备，并不是任意空白硬件的操作系统镜像安装器。
 
 ![BM1688 边缘设备接口面板示例](images/img_01.webp)
 
@@ -328,7 +368,8 @@ data/test-video/Safety Helmet.mp4
 
 ### 6.3 设置离线视频运行策略
 
-需要重复观察同一素材时，使用页面显示的 **离线视频播放次数**。当前表单只允许 `0–100`，运行时把 `0` 作为无限循环，正数表示总播放次数。当前资源说明仍可能显示“负值无限、0 播放一次”，但负值会被表单拒绝，且与运行时代码不一致；在本版本页面中需要循环时填写 `0`。
+需要重复观察同一素材时，使用页面显示的 **离线视频播放次数**。表单允许 `0–100`：
+`0` 表示无限循环，`1–100` 表示总播放次数。
 
 ![设置离线测试视频的播放次数和运行策略](images/img_24.webp)
 

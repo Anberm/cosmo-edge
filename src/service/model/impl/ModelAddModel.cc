@@ -179,6 +179,23 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
     std::string& resolved_model_code, std::vector<std::string>& bmodel_paths) {
     namespace fs = std::filesystem;
 
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+    static const std::vector<std::string> kSupportedRknnModelTypes = [] {
+        // CV types share the RKNN tensor-contract path. Optional model families
+        // are exposed by compiled capability, not by a hard-coded chip name.
+        std::vector<std::string> types{"yolov8_det", "classify"};
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+        types.emplace_back("qwen3_5");
+#endif
+        return types;
+    }();
+    if (std::find(kSupportedRknnModelTypes.begin(), kSupportedRknnModelTypes.end(), modelType) ==
+        kSupportedRknnModelTypes.end()) {
+        LOG_WARN("[AddModel] Unsupported {} model type: {}", cosmo::util::kEngineType, modelType);
+        return util::ErrorEnum::InvalidParam;
+    }
+#endif
+
     resolved_model_code = generate_unique_model_code_();
     LOG_INFO("[AddModel] Using resolved model code: {} (request code: {})", resolved_model_code, modelCode);
     if (resolved_model_code.empty())
@@ -203,11 +220,20 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
     }
 
     bool is_sam2 = (modelType == "sam2");
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    const bool is_rkllm_qwen35 = (modelType == "qwen3_5");
+    if (is_rkllm_qwen35 && bmodel_files.size() != 2) {
+        LOG_WARN("[AddModel] {} Qwen3.5 requires model.rkllm and vision.rknn", cosmo::util::kEngineType);
+        return util::ErrorEnum::InvalidParam;
+    }
+#else
+    const bool is_rkllm_qwen35 = false;
+#endif
     if (is_sam2 && bmodel_files.size() != 2) {
         LOG_WARN("{}", "[AddModel] SAM2 model requires exactly 2 bmodel files (encoder and decoder)");
         return util::ErrorEnum::InvalidParam;
     }
-    if (!is_sam2 && bmodel_files.size() != 1) {
+    if (!is_sam2 && !is_rkllm_qwen35 && bmodel_files.size() != 1) {
         LOG_WARN("{}", "[AddModel] Non-SAM2 model must have exactly 1 bmodel file");
         return util::ErrorEnum::InvalidParam;
     }
@@ -243,15 +269,41 @@ util::ErrorEnum ModelImportExporter::ValidateAddModelInputs(
         return util::ErrorEnum::InvalidParam;
     }
 
-    // Check all bmodel files exist
-    for (const auto& bmodelFile : bmodel_files) {
+    // Check all model files exist. Keep RKLLM files in a deterministic language/vision order.
+    std::vector<const cosmo::Model::BmodelFileInfo*> ordered_model_files;
+    ordered_model_files.reserve(bmodel_files.size());
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    if (is_rkllm_qwen35) {
+        const cosmo::Model::BmodelFileInfo* language_model = nullptr;
+        const cosmo::Model::BmodelFileInfo* vision_model   = nullptr;
+        for (const auto& file : bmodel_files) {
+            if (file.role == "language")
+                language_model = &file;
+            else if (file.role == "vision")
+                vision_model = &file;
+        }
+        if (!language_model || !vision_model) {
+            LOG_WARN("[AddModel] {} Qwen3.5 model roles must be language and vision",
+                     cosmo::util::kEngineType);
+            return util::ErrorEnum::InvalidParam;
+        }
+        // Staged upload paths are opaque and intentionally do not preserve client filenames.
+        // The authenticated frontend validates the extensions; roles keep the server copy order safe.
+        ordered_model_files = {language_model, vision_model};
+    } else
+#endif
+    {
+        for (const auto& file : bmodel_files)
+            ordered_model_files.push_back(&file);
+    }
+    for (const auto* bmodelFile : ordered_model_files) {
         std::string resolved_path;
-        if (!ResolveManagedUploadFile(bmodelFile.filePath, resolved_path)) {
-            LOG_WARN("[AddModel] bmodel file is not a managed upload: {}", bmodelFile.filePath);
+        if (!ResolveManagedUploadFile(bmodelFile->filePath, resolved_path)) {
+            LOG_WARN("[AddModel] model file is not a managed upload: {}", bmodelFile->filePath);
             return util::ErrorEnum::FileNotExist;
         }
         bmodel_paths.push_back(std::move(resolved_path));
-        LOG_INFO("[AddModel] bmodel file: role={}, path={}", bmodelFile.role, bmodel_paths.back());
+        LOG_INFO("[AddModel] model file: role={}, path={}", bmodelFile->role, bmodel_paths.back());
     }
 
     return util::ErrorEnum::Success;
@@ -326,7 +378,44 @@ util::ErrorEnum ModelImportExporter::WriteNnFile(const std::string& modelType,
                                                  const std::string& model_dir) {
     namespace fs = std::filesystem;
 
-#ifdef COSMO_NN_USE_ONNX_BACKEND
+#ifdef COSMO_NN_USE_RKNN_BACKEND
+    std::string convert_error;
+#ifdef COSMO_NN_USE_RKLLM_BACKEND
+    const bool is_rkllm_qwen35 = (modelType == "qwen3_5");
+    if (modelType == "qwen3_5") {
+        if (bmodel_paths.size() != 2) {
+            convert_error = std::string(cosmo::util::kEngineType) +
+                            " Qwen3.5 requires one RKLLM file and one vision RKNN file";
+        } else {
+            const std::vector<std::string> destination_names = {"model.rkllm", "vision.rknn"};
+            for (size_t i = 0; i < destination_names.size(); ++i) {
+                std::error_code ec;
+                const auto destination = (fs::path(model_dir) / destination_names[i]).string();
+                fs::copy_file(bmodel_paths[i], destination, fs::copy_options::overwrite_existing, ec);
+                if (ec) {
+                    convert_error = "Failed to copy RKLLM component to " + destination + ": " + ec.message();
+                    break;
+                }
+                LOG_INFO("[AddModel] RKLLM: copied component to {}", destination);
+            }
+        }
+    }
+#endif
+#ifndef COSMO_NN_USE_RKLLM_BACKEND
+    const bool is_rkllm_qwen35 = false;
+#endif
+    if (!is_rkllm_qwen35 && bmodel_paths.size() != 1) {
+        convert_error = "RKNN add-model requires exactly one model file";
+    } else if (!is_rkllm_qwen35) {
+        const std::string model_file_path = model_dir + "/model.rknn";
+        std::error_code ec;
+        fs::copy_file(bmodel_paths[0], model_file_path, fs::copy_options::overwrite_existing, ec);
+        if (ec)
+            convert_error = "Failed to copy RKNN model to " + model_file_path + ": " + ec.message();
+        else
+            LOG_INFO("[AddModel] RKNN: copied model file to {}", model_file_path);
+    }
+#elif defined(COSMO_NN_USE_ONNX_BACKEND)
     // CPU/x86: copy .onnx file directly; no Sophon wrapper needed.
     std::string convert_error;
     if (modelType == "sam2") {

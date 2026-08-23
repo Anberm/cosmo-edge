@@ -15,4 +15,4 @@ ensure_runtime_dirs
 cosmo_log "BOOT" "Starting Cosmo services..."
 
 cd "$SCRIPT_DIR" || exit 1
-"$SCRIPT_DIR/start.sh" start
+exec "$SCRIPT_DIR/start.sh" start

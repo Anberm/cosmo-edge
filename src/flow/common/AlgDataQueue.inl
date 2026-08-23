@@ -103,6 +103,12 @@ bool AlgDataQueue<DataType, QueueType>::IsRunning() const {
 }
 
 template <typename DataType, typename QueueType>
+bool AlgDataQueue<DataType, QueueType>::CanAccept() const {
+    std::lock_guard<std::mutex> lock(m_mtxQueue);
+    return m_isRunning && m_queue.size() < m_maxSize;
+}
+
+template <typename DataType, typename QueueType>
 const std::string& AlgDataQueue<DataType, QueueType>::Name() const {
     std::lock_guard<std::mutex> lock(m_mtxQueue);
     return m_name;

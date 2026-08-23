@@ -14,14 +14,14 @@ next: false
 | 适合谁 | 需要把自有检测或分类模型接入 CosmoEdge 的算法工程师和集成开发者 |
 | 完成后能做什么 | 判断模型是否满足运行条件，转换并上传模型，配置解析参数，完成图片、视频和持续运行验证 |
 | 使用前提 | 已理解 Pipeline；掌握模型输入、输出、预处理、后处理和标签顺序 |
-| 预计时间 | x86 ONNX 路径约 40–60 分钟；Sophon 转换路径通常需要额外 30–60 分钟 |
-| 是否需要设备 | x86 路径需要 ONNX Runtime 版 CosmoEdge；Sophon 路径需要 BM1688/CV186X 设备及匹配转换工具链 |
+| 预计时间 | x86 ONNX 路径约 40–60 分钟；Sophon 或 Rockchip 转换路径通常需要额外 30–60 分钟 |
+| 是否需要设备 | x86 路径需要 ONNX Runtime 版 CosmoEdge；Sophon 与 Rockchip 路径需要目标芯片设备及匹配转换工具链 |
 | 最终验收结果 | 模型可加载、推理输出可解析、图片与视频结果正确，并在目标设备上持续运行无资源错误 |
 
 第三方模型接入按以下顺序完成：
 
 1. 确认支持条件和模型契约。
-2. 导出 ONNX；Sophon 设备再转换为目标芯片的 `bmodel`。
+2. 导出 ONNX；Sophon 设备转换为目标芯片的 `bmodel`，Rockchip 设备转换为目标芯片的 `rknn`。
 3. 在转换主机上检查产物。
 4. 上传并配置模型。
 5. 先做正负图片验证。
@@ -39,12 +39,14 @@ next: false
 | --- | --- | --- | --- | --- |
 | x86 CPU | `.onnx` | `model.onnx` | ONNX Runtime CPU | x86_64 主机和对应 CosmoEdge 构建 |
 | Sophon | `.bmodel` | `model.nn` | Sophon BMRT | BM1688 或 CV186X，转换产物必须匹配芯片 |
+| Rockchip RKNN | `.rknn` | `model.rknn` | RKNN Runtime | RK3576 或 RV1126B，转换产物必须匹配实际芯片 |
 
 `model.nn` 是 CosmoEdge 模型包中的内部文件名，封装的是设备侧模型；通过页面单独添加
 Sophon 模型时应选择 `.bmodel`，不要把文件扩展名手工改成 `.nn`。
 
 PyTorch `.pt`、TensorFlow SavedModel 或其他训练框架产物不能直接上传。它们必须先导出
-为 ONNX；Sophon 还要使用匹配工具链把 ONNX 转为目标芯片的 `.bmodel`。
+为 ONNX；Sophon 还要使用匹配工具链把 ONNX 转为目标芯片的 `.bmodel`，Rockchip 则转换
+为目标芯片的 `.rknn`。RK3576 与 RV1126B 的 `.rknn` 不是可互换模型。
 
 ### 1.2 格式之外还要匹配的契约
 
@@ -65,7 +67,7 @@ CosmoEdge 当前已有 `YOLOV8_DET` 等解析路径，但“任意 ONNX”并不
 ### 1.3 已验证能力与条件性兼容
 
 - **由当前代码直接支持**：x86 添加 `.onnx`、Sophon 添加 `.bmodel`，以及模型包中的
-  `model.onnx` / `model.nn`。
+  `model.onnx` / `model.nn`；RKNN 构建添加 `.rknn`，模型包中使用 `model.rknn`。
 - **仓库中已有参考证据**：YOLOv8 检测模型在 x86 ONNX 路径完成过模型导入、实时叠加
   和事件输出。
 - **仍需在目标候选版本上验证**：你的具体模型、Sophon 转换产物、性能、资源占用、
@@ -366,6 +368,29 @@ model_tool --info yolov8n_bm1688_f16.bmodel
 
 Sophon 添加模型页面会要求 `.bmodel` 文件，实际页面见下一节的添加模型表单。
 
+## Rockchip RKNN 路径：共享后端、目标专用产物
+
+RK3576 与 RV1126B 共用同一套 CosmoEdge RKNN 推理实现、Rockchip 媒体接口和模型契约；
+芯片差异由 `config/rknn/platforms/<chip>.json` 平台 profile 提供。模型 spec 不写死芯片，
+但每次转换必须绑定一个 profile，因此输出的 `.rknn` 仍是目标专用产物，不能跨芯片复制使用。
+
+智能体辅助流程统一使用 `scripts/agent/convert_model.sh` 与 `verify.sh`。执行器按任务合同选择
+RKNN Toolkit2，冻结 Python、wheel、平台 profile、模型 spec、校准集和产物哈希。RK3576 与
+RV1126B 不各自维护一套转换脚本。手工排障时可参考
+[RK3576 RKNN 开发说明](/guide/rk3576-rknn-development)，并把平台参数换成实际目标：
+
+```bash
+python tools/rknn/convert_model.py \
+  --spec config/rknn/models/yolov8.json \
+  --platform-profile config/rknn/platforms/rv1126b.json \
+  --model yolov8-heads.onnx \
+  --output yolov8-rv1126b-int8.rknn \
+  --quantize --dataset calibration/dataset.txt
+```
+
+转换主机通过不等于设备验收。必须在对应设备上继续验证 Runtime/驱动、数值输出、图片与视频
+后处理、OSD、规则、告警、5 FPS 目标以及稳定性；这些结果应绑定目标芯片和产物 SHA-256。
+
 ## 4. 上传并配置模型
 
 ### 4.1 进入模型仓库
@@ -567,9 +592,8 @@ YOLOv8n 必须保留 COCO 80 类原始顺序，视频 Pipeline 中再只启用 `
 
 ![为验证任务绘制并保存检测区域](images/img_40.webp)
 
-在 **运行策略** 中确保当前时间位于有效时段。当前表单允许填写 `0–100`：`0` 表示无限循环，
-正数表示总播放次数。资源说明中“负值无限、0 播放一次”的文字与表单校验和运行时代码不一致；
-本版本需要循环时按旧截图填写 `0`，不要填写会被表单拒绝的负数。
+在 **运行策略** 中确保当前时间位于有效时段。离线视频播放次数允许填写 `0–100`：
+`0` 表示无限循环，`1–100` 表示总播放次数。
 
 ![配置离线视频运行策略和播放次数](images/img_41.webp)
 

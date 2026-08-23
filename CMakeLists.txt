@@ -36,6 +36,24 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Keep the existing numeric version formats while deriving a unique patch
+# number from the nearest vX.Y.Z tag and the number of commits after it.
+# Source archives without Git metadata retain the historical fallback version.
+include("${CMAKE_SOURCE_DIR}/cmake/CosmoVersion.cmake")
+cosmo_resolve_version("${CMAKE_SOURCE_DIR}" 1 1 0 0)
+set(VER_MAJOR "${COSMO_VERSION_MAJOR}")
+set(VER_MINOR "${COSMO_VERSION_MINOR}")
+set(VER_PATCH "${COSMO_VERSION_PATCH}")
+add_compile_definitions(
+    COSMO_VERSION_MAJOR=${COSMO_VERSION_MAJOR}
+    COSMO_VERSION_MINOR=${COSMO_VERSION_MINOR}
+    COSMO_VERSION_PATCH=${COSMO_VERSION_PATCH}
+    COSMO_VERSION_BUILD=${COSMO_VERSION_BUILD}
+)
+message(STATUS
+    "Cosmo version: V${COSMO_VERSION_MAJOR}.${COSMO_VERSION_MINOR}."
+    "${COSMO_VERSION_PATCH}.${COSMO_VERSION_BUILD} (${COSMO_VERSION_SOURCE})")
+
 #Generate compile_commands.json for static analysis tools(clang - tidy, IDE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -84,12 +102,72 @@ endif()
 #-- Backend selection(mutually exclusive) --
 option(COSMO_NN_USE_SOPHON_BACKEND "Enable Sophon TPU backend" ON)
 option(COSMO_NN_USE_CPU_BACKEND "Enable CPU inference backend (ONNX Runtime)" OFF)
+option(COSMO_NN_USE_RKNN_BACKEND "Enable Rockchip RKNN backend" OFF)
 
-if(COSMO_NN_USE_SOPHON_BACKEND AND COSMO_NN_USE_CPU_BACKEND)
-    message(FATAL_ERROR "COSMO_NN_USE_SOPHON_BACKEND and COSMO_NN_USE_CPU_BACKEND are mutually exclusive")
+set(_cosmo_nn_backend_count 0)
+foreach(_nn_backend_option
+        COSMO_NN_USE_SOPHON_BACKEND
+        COSMO_NN_USE_CPU_BACKEND
+        COSMO_NN_USE_RKNN_BACKEND)
+    if(${_nn_backend_option})
+        math(EXPR _cosmo_nn_backend_count "${_cosmo_nn_backend_count} + 1")
+    endif()
+endforeach()
+if(NOT _cosmo_nn_backend_count EQUAL 1)
+    message(FATAL_ERROR "Exactly one NN backend must be enabled: Sophon, CPU, or RKNN")
 endif()
-if(NOT COSMO_NN_USE_SOPHON_BACKEND AND NOT COSMO_NN_USE_CPU_BACKEND)
-    message(FATAL_ERROR "At least one NN backend must be enabled")
+
+# The selected inference backend is a build-wide compile contract. Business,
+# API, and utility OBJECT libraries include the same backend-aware headers as
+# the inference layer, so every project target must observe one consistent set
+# of feature macros. Chip identity remains separate build data below.
+if(COSMO_NN_USE_SOPHON_BACKEND)
+    add_compile_definitions(COSMO_NN_USE_SOPHON_BACKEND)
+elseif(COSMO_NN_USE_CPU_BACKEND)
+    add_compile_definitions(
+        COSMO_NN_USE_CPU_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_ONNX_BACKEND)
+elseif(COSMO_NN_USE_RKNN_BACKEND)
+    add_compile_definitions(
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+endif()
+
+# A target package is always chip-specific even when several chips share one
+# inference/media implementation. Keep the chip identity as build data instead
+# of spreading per-chip preprocessor branches through the RKNN backend.
+set(COSMO_TARGET_CHIP "" CACHE STRING "Target accelerator chip recorded in release packages")
+if(COSMO_TARGET_CHIP)
+    string(TOLOWER "${COSMO_TARGET_CHIP}" COSMO_TARGET_CHIP_NORMALIZED)
+    if(NOT COSMO_TARGET_CHIP_NORMALIZED MATCHES "^(bm1688|cv186x|rk3576|rv1126b|unspecified)$")
+        message(FATAL_ERROR "Unsupported COSMO_TARGET_CHIP: ${COSMO_TARGET_CHIP}")
+    endif()
+endif()
+
+include(cmake/CosmoRuntimePaths.cmake)
+cosmo_configure_runtime_paths(
+    "${COSMO_TARGET_CHIP_NORMALIZED}"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/runtime-paths")
+message(STATUS "Cosmo mutable data root: ${COSMO_DEFAULT_DATA_DIR}")
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    if(NOT COSMO_TARGET_CHIP_NORMALIZED MATCHES "^(rk3576|rv1126b)$")
+        message(FATAL_ERROR
+            "RKNN builds require COSMO_TARGET_CHIP=rk3576 or rv1126b")
+    endif()
+    string(TOUPPER "${COSMO_TARGET_CHIP_NORMALIZED}" COSMO_TARGET_CHIP_LABEL)
+    set(COSMO_PLATFORM_PROFILE
+        "${CMAKE_SOURCE_DIR}/config/rknn/platforms/${COSMO_TARGET_CHIP_NORMALIZED}.json")
+    if(NOT EXISTS "${COSMO_PLATFORM_PROFILE}")
+        message(FATAL_ERROR "RKNN platform profile not found: ${COSMO_PLATFORM_PROFILE}")
+    endif()
+    add_compile_definitions(
+        COSMO_RKNN_TARGET_CHIP="${COSMO_TARGET_CHIP_NORMALIZED}"
+        COSMO_RKNN_TARGET_CHIP_LABEL="${COSMO_TARGET_CHIP_LABEL}")
+    message(STATUS
+        "RKNN platform profile: ${COSMO_TARGET_CHIP_NORMALIZED} (${COSMO_PLATFORM_PROFILE})")
 endif()
 
 # Media acceleration is selected independently from inference. Defaults keep
@@ -97,8 +175,12 @@ endif()
 # paired with another inference backend.
 set(_cosmo_media_sophon_default OFF)
 set(_cosmo_media_cpu_default OFF)
+set(_cosmo_media_rockchip_default OFF)
 if(COSMO_NN_USE_SOPHON_BACKEND)
     set(_cosmo_media_sophon_default ON)
+elseif(COSMO_NN_USE_RKNN_BACKEND AND
+       (COSMO_ROCKCHIP_MEDIA_ROOT OR DEFINED ENV{ROCKCHIP_MEDIA_ROOT}))
+    set(_cosmo_media_rockchip_default ON)
 else()
     set(_cosmo_media_cpu_default ON)
 endif()
@@ -107,35 +189,42 @@ option(COSMO_MEDIA_USE_SOPHON_BACKEND "Enable Sophon hardware media backend"
        ${_cosmo_media_sophon_default})
 option(COSMO_MEDIA_USE_CPU_BACKEND "Enable FFmpeg software media backend"
        ${_cosmo_media_cpu_default})
+option(COSMO_MEDIA_USE_ROCKCHIP_BACKEND "Enable Rockchip MPP/RGA hardware media backend"
+       ${_cosmo_media_rockchip_default})
 
 set(_cosmo_media_backend_count 0)
 foreach(_media_backend_option
         COSMO_MEDIA_USE_SOPHON_BACKEND
-        COSMO_MEDIA_USE_CPU_BACKEND)
+        COSMO_MEDIA_USE_CPU_BACKEND
+        COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
     if(${_media_backend_option})
         math(EXPR _cosmo_media_backend_count "${_cosmo_media_backend_count} + 1")
     endif()
 endforeach()
 if(NOT _cosmo_media_backend_count EQUAL 1)
-    message(FATAL_ERROR "Exactly one media backend must be enabled: Sophon or CPU")
+    message(FATAL_ERROR "Exactly one media backend must be enabled: Sophon, CPU, or Rockchip")
 endif()
 if(COSMO_MEDIA_USE_SOPHON_BACKEND AND NOT COSMO_NN_USE_SOPHON_BACKEND)
     message(FATAL_ERROR "Sophon media requires the Sophon device runtime")
 endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND AND NOT COSMO_TARGET_ARCH STREQUAL "aarch64")
+    message(FATAL_ERROR "Rockchip media requires an aarch64 target")
+endif()
 
 if(COSMO_MEDIA_USE_SOPHON_BACKEND)
     add_compile_definitions(COSMO_MEDIA_USE_SOPHON_BACKEND)
+elseif(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    add_compile_definitions(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
 else()
     add_compile_definitions(COSMO_MEDIA_USE_CPU_BACKEND)
 endif()
 
-if(COSMO_MEDIA_USE_CPU_BACKEND)
-    set(COSMO_ENABLE_OPENH264 ON)
-    set(COSMO_OPENH264_USE_ASM OFF)
-else()
-    set(COSMO_ENABLE_OPENH264 OFF)
-    set(COSMO_OPENH264_USE_ASM OFF)
+set(_cosmo_openh264_default OFF)
+if(COSMO_MEDIA_USE_CPU_BACKEND AND COSMO_TARGET_ARCH STREQUAL "x86_64")
+    set(_cosmo_openh264_default ON)
 endif()
+option(COSMO_ENABLE_OPENH264 "Require the bundled OpenH264 encoder" ${_cosmo_openh264_default})
+set(COSMO_OPENH264_USE_ASM OFF)
 
 if(COSMO_NN_USE_SOPHON_BACKEND)
     set(COSMO_MODEL_GUARD ON)
@@ -143,16 +232,127 @@ else()
     set(COSMO_MODEL_GUARD OFF)
 endif()
 
+set(COSMO_MODEL_GUARD_BUILD_PROFILE "public-runtime" CACHE STRING
+    "Model Guard build profile: public-runtime or production-release")
+set_property(CACHE COSMO_MODEL_GUARD_BUILD_PROFILE PROPERTY STRINGS
+    public-runtime production-release)
+set(COSMO_PACKAGE_MODELS "include" CACHE STRING
+    "Package preset models: include or preserve the installed model directory")
+set_property(CACHE COSMO_PACKAGE_MODELS PROPERTY STRINGS include preserve)
+if(NOT COSMO_PACKAGE_MODELS STREQUAL "include" AND
+   NOT COSMO_PACKAGE_MODELS STREQUAL "preserve")
+    message(FATAL_ERROR "COSMO_PACKAGE_MODELS must be include or preserve")
+endif()
+set(COSMO_MODEL_GUARD_BUILD_PROFILES public-runtime production-release)
+if(NOT COSMO_MODEL_GUARD_BUILD_PROFILE IN_LIST
+       COSMO_MODEL_GUARD_BUILD_PROFILES)
+    message(FATAL_ERROR
+        "Unsupported COSMO_MODEL_GUARD_BUILD_PROFILE="
+        "${COSMO_MODEL_GUARD_BUILD_PROFILE}. Expected public-runtime or "
+        "production-release.")
+endif()
+
 if(COSMO_MODEL_GUARD)
-    # .so is pre-installed in system image at /usr/lib/ or provided in prebuild/
-    find_library(MODEL_GUARD_LIB cosmo_model_guard
-                 PATHS /usr/lib ${CMAKE_SOURCE_DIR}/prebuild
-                 NO_DEFAULT_PATH)
-    if(MODEL_GUARD_LIB)
-        message(STATUS "Model guard enabled: ${MODEL_GUARD_LIB}")
-    else()
-        message(WARNING "COSMO_MODEL_GUARD=ON but libcosmo_model_guard.so not found — "
-                        "encrypted models will fail at runtime")
+    set(COSMO_MODEL_GUARD_SDK_ROOT
+        "${CMAKE_SOURCE_DIR}/prebuild/model-guard-v2"
+        CACHE PATH "Verified Cosmo Model Guard v2 SDK root")
+    get_filename_component(COSMO_MODEL_GUARD_SDK_ROOT
+        "${COSMO_MODEL_GUARD_SDK_ROOT}" ABSOLUTE)
+    set(MODEL_GUARD_V2_HEADER
+        "${COSMO_MODEL_GUARD_SDK_ROOT}/include/cosmo_model_guard_v2.h")
+    set(MODEL_GUARD_V2_LIBRARY
+        "${COSMO_MODEL_GUARD_SDK_ROOT}/lib/libcosmo_model_guard.so.2.0.0")
+    if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
+        set(MODEL_GUARD_V2_PROVISION_TOOL
+            "${COSMO_MODEL_GUARD_SDK_ROOT}/bin/cosmo-model-provision")
+    endif()
+    set(MODEL_GUARD_V2_TEST_FIXTURE_MARKER
+        "${COSMO_MODEL_GUARD_SDK_ROOT}/share/cosmo-model-guard/TEST_FIXTURE_DO_NOT_DEPLOY")
+
+    set(COSMO_PYTHON3_EXECUTABLE "/usr/bin/python3")
+    if(NOT EXISTS "${COSMO_PYTHON3_EXECUTABLE}" OR
+       IS_DIRECTORY "${COSMO_PYTHON3_EXECUTABLE}" OR
+       NOT CMAKE_READELF OR NOT EXISTS "${CMAKE_READELF}" OR
+       NOT CMAKE_NM OR NOT EXISTS "${CMAKE_NM}")
+        message(FATAL_ERROR
+            "The protected Sophon build requires Python 3 and the target "
+            "readelf/nm tools to verify the Model Guard v2 SDK")
+    endif()
+
+    set(MODEL_GUARD_V2_VERIFY_ARGUMENTS
+        --admission-profile "${COSMO_MODEL_GUARD_BUILD_PROFILE}"
+        --sdk-root "${COSMO_MODEL_GUARD_SDK_ROOT}"
+        --readelf "${CMAKE_READELF}"
+        --nm "${CMAKE_NM}")
+    if(EXISTS "${MODEL_GUARD_V2_TEST_FIXTURE_MARKER}")
+        message(FATAL_ERROR
+            "A marked Model Guard test fixture cannot satisfy either public-runtime "
+            "or production-release SDK admission")
+    endif()
+
+    set(MODEL_GUARD_V2_ADMISSION_INPUTS
+        "${MODEL_GUARD_V2_HEADER}"
+        "${MODEL_GUARD_V2_LIBRARY}"
+        "${CMAKE_SOURCE_DIR}/scripts/verify_model_guard_v2_sdk.py")
+    if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
+        list(APPEND MODEL_GUARD_V2_ADMISSION_INPUTS
+            "${MODEL_GUARD_V2_PROVISION_TOOL}")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        ${MODEL_GUARD_V2_ADMISSION_INPUTS})
+
+    execute_process(
+        COMMAND "${COSMO_PYTHON3_EXECUTABLE}" -I -B
+                "${CMAKE_SOURCE_DIR}/scripts/verify_model_guard_v2_sdk.py"
+                ${MODEL_GUARD_V2_VERIFY_ARGUMENTS}
+        RESULT_VARIABLE MODEL_GUARD_V2_VERIFY_RESULT
+        OUTPUT_VARIABLE MODEL_GUARD_V2_VERIFY_OUTPUT
+        ERROR_VARIABLE MODEL_GUARD_V2_VERIFY_ERROR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT MODEL_GUARD_V2_VERIFY_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "COSMO_MODEL_GUARD requires a usable v2 SDK.\n"
+            "${MODEL_GUARD_V2_VERIFY_ERROR}")
+    endif()
+
+    string(REGEX MATCH "(^|\n)verified_sdk_root=([^\n]+)"
+        MODEL_GUARD_V2_VERIFIED_ROOT_LINE "${MODEL_GUARD_V2_VERIFY_OUTPUT}")
+    set(MODEL_GUARD_V2_VERIFIED_SDK_ROOT "${CMAKE_MATCH_2}")
+    if(NOT IS_ABSOLUTE "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}" OR
+       NOT EXISTS "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}")
+        message(FATAL_ERROR "Model Guard verifier did not return a valid SDK root")
+    endif()
+    set(MODEL_GUARD_V2_HEADER
+        "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/include/cosmo_model_guard_v2.h")
+    set(MODEL_GUARD_V2_LIBRARY
+        "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/lib/libcosmo_model_guard.so.2.0.0")
+    if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
+        set(MODEL_GUARD_V2_PROVISION_TOOL
+            "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/bin/cosmo-model-provision")
+    endif()
+    add_library(cosmo_model_guard_v2 SHARED IMPORTED GLOBAL)
+    set_target_properties(cosmo_model_guard_v2 PROPERTIES
+        IMPORTED_LOCATION "${MODEL_GUARD_V2_LIBRARY}"
+        IMPORTED_SONAME "libcosmo_model_guard.so.2"
+        INTERFACE_INCLUDE_DIRECTORIES "${MODEL_GUARD_V2_VERIFIED_SDK_ROOT}/include"
+    )
+    message(STATUS "Verified Model Guard v2 SDK:\n${MODEL_GUARD_V2_VERIFY_OUTPUT}")
+    message(STATUS
+        "Model Guard build profile: ${COSMO_MODEL_GUARD_BUILD_PROFILE}")
+endif()
+
+if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
+    if(NOT COSMO_MODEL_GUARD)
+        message(FATAL_ERROR
+            "COSMO_MODEL_GUARD_BUILD_PROFILE=production-release requires the "
+            "protected Sophon build")
+    endif()
+    if(NOT COSMO_TARGET_ARCH STREQUAL "aarch64" OR
+       NOT COSMO_NN_USE_SOPHON_BACKEND)
+        message(FATAL_ERROR
+            "The protected build is valid only for Sophon/AArch64")
     endif()
 endif()
 
@@ -169,6 +369,13 @@ message(STATUS "\tTarget:    ${COSMO_TARGET_ARCH}")
 ##########################################################
 set(THIRDPARTY_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/thirdparty_install CACHE PATH "thirdparty install dir")
 add_custom_target(third_build)
+
+# Third-party projects must not inherit wall-clock or ephemeral container
+# identity in release artifacts.
+set(COSMO_REPRODUCIBLE_BUILD_EPOCH 1784776233)
+set(COSMO_REPRODUCIBLE_BUILD_UTC "2026-07-23 03:10:33")
+set(COSMO_REPRODUCIBLE_BUILD_UNAME
+    "Linux cosmo-build 0.0.0 #1 SMP ${COSMO_TARGET_ARCH} GNU/Linux")
 
 # Pre-create include directories for all ExternalProject-managed libraries.
 # CMake validates INTERFACE_INCLUDE_DIRECTORIES paths at configure time, but
@@ -190,11 +397,11 @@ include(cmake/uuid.cmake)
 include(cmake/uSockets.cmake)
 include(cmake/mp4v2.cmake)
 include(cmake/openssl.cmake)
+include(cmake/cryptopp.cmake)
 include(cmake/curl.cmake)
 include(cmake/mqtt.cmake)
 include(cmake/event.cmake)
 include(cmake/ffmpeg.cmake)
-include(cmake/cryptopp.cmake)
 include(cmake/uWebSockets.cmake)
 include(cmake/tokenizers.cmake)
 if(COSMO_NN_USE_SOPHON_BACKEND)
@@ -203,9 +410,15 @@ endif()
 if(COSMO_NN_USE_CPU_BACKEND)
     include(cmake/onnxruntime.cmake)
 endif()
+if(COSMO_NN_USE_RKNN_BACKEND)
+    include(cmake/rknn.cmake)
+    include(cmake/rkllm.cmake)
+endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    include(cmake/rockchip_media.cmake)
+endif()
 include(cmake/pcap.cmake)
 include(cmake/srs.cmake)
-
 #Header - only third - party libraries
 add_library(nlohmann INTERFACE)
 target_include_directories(nlohmann SYSTEM INTERFACE ${CMAKE_SOURCE_DIR}/3rd/include)
@@ -315,6 +528,15 @@ endif()
 if(COSMO_NN_USE_CPU_BACKEND)
     list(APPEND COMMON_LIBS onnxruntime)
 endif()
+if(COSMO_NN_USE_RKNN_BACKEND)
+    list(APPEND COMMON_LIBS rknnrt)
+endif()
+if(COSMO_NN_USE_RKLLM_BACKEND)
+    list(APPEND COMMON_LIBS rkllmrt)
+endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    list(APPEND COMMON_LIBS rockchip_mpp rockchip_rga)
+endif()
 
 ##########################################################
 #Main Executable
@@ -323,7 +545,8 @@ set(EXECUTABLE_NAME "cosmo-engine")
 
 add_executable(${EXECUTABLE_NAME} ${APP_SRC} ${ALL_OBJECTS})
 target_include_directories(${EXECUTABLE_NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/src)
+    ${CMAKE_SOURCE_DIR}/src
+    ${COSMO_RUNTIME_PATHS_INCLUDE_DIR})
 # Third-party headers come from IMPORTED targets via COMMON_LIBS + header-only libs
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE nlohmann stb uWebSockets)
 if(COSMO_NN_USE_SOPHON_BACKEND)
@@ -332,9 +555,7 @@ if(COSMO_NN_USE_SOPHON_BACKEND)
 endif()
 if(COSMO_MODEL_GUARD)
     target_compile_definitions(${EXECUTABLE_NAME} PRIVATE COSMO_HAS_MODEL_GUARD=1)
-    if(MODEL_GUARD_LIB)
-        target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${MODEL_GUARD_LIB})
-    endif()
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE cosmo_model_guard_v2)
 endif()
 if(COSMO_NN_USE_CPU_BACKEND)
     target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
@@ -342,14 +563,63 @@ if(COSMO_NN_USE_CPU_BACKEND)
         COSMO_NN_USE_HOST_BACKEND
         COSMO_NN_USE_ONNX_BACKEND)
 endif()
+if(COSMO_NN_USE_RKNN_BACKEND)
+    target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+        BUILD_RPATH "${COSMO_RKNN_ROOT}/lib"
+        INSTALL_RPATH "$ORIGIN/../lib")
+endif()
+if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+    set_property(TARGET ${EXECUTABLE_NAME} APPEND PROPERTY
+        BUILD_RPATH "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib")
+endif()
 #Build order: OBJECT libs → third_build (explicit, see foreach above)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${COMMON_LIBS})
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    add_executable(cosmo-rknn-backend-smoke
+        tools/rknn/cosmo_rknn_backend_smoke.cc
+        ${ALL_OBJECTS})
+    target_include_directories(cosmo-rknn-backend-smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(cosmo-rknn-backend-smoke PRIVATE
+        COSMO_NN_USE_RKNN_BACKEND
+        COSMO_NN_USE_HOST_BACKEND
+        COSMO_NN_USE_RAW_MODEL_BACKEND)
+    target_link_libraries(cosmo-rknn-backend-smoke PRIVATE
+        nlohmann stb uWebSockets ${COMMON_LIBS})
+    set_target_properties(cosmo-rknn-backend-smoke PROPERTIES
+        BUILD_RPATH "${COSMO_RKNN_ROOT}/lib")
+    if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+        set_property(TARGET cosmo-rknn-backend-smoke APPEND PROPERTY
+            BUILD_RPATH "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
+
+        add_executable(cosmo-rknn-fastpath-qualify
+            tools/rknn/cosmo_rknn_fastpath_qualify.cc
+            ${ALL_OBJECTS})
+        target_include_directories(cosmo-rknn-fastpath-qualify PRIVATE ${CMAKE_SOURCE_DIR}/src)
+        target_compile_definitions(cosmo-rknn-fastpath-qualify PRIVATE
+            COSMO_NN_USE_RKNN_BACKEND
+            COSMO_NN_USE_HOST_BACKEND
+            COSMO_NN_USE_RAW_MODEL_BACKEND)
+        target_link_libraries(cosmo-rknn-fastpath-qualify PRIVATE
+            nlohmann stb uWebSockets ${COMMON_LIBS})
+        set_target_properties(cosmo-rknn-fastpath-qualify PROPERTIES
+            BUILD_RPATH "${COSMO_RKNN_ROOT}/lib;${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
+    endif()
+endif()
 
 ##########################################################
 #Unit Tests(optional, cmake - DBUILD_TESTS = ON)
 ##########################################################
 if(BUILD_TESTS)
     file(GLOB TEST_SRC "test/*.cc" "test/*.cpp" "test/mock/*.cc")
+    list(FILTER TEST_SRC EXCLUDE REGEX
+        ".*ReleaseBootstrapVerifierStandaloneTest\\.cc$")
 
     #App sources without main.cc
     set(APP_SRC_NO_MAIN ${APP_SRC})
@@ -358,7 +628,9 @@ if(BUILD_TESTS)
     add_executable(cosmo-tests ${APP_SRC_NO_MAIN} ${ALL_OBJECTS} ${TEST_SRC})
     add_dependencies(cosmo-tests third_build)
     target_include_directories(cosmo-tests PRIVATE
-        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/test)
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/test
+        ${COSMO_RUNTIME_PATHS_INCLUDE_DIR})
     target_precompile_headers(cosmo-tests PRIVATE
         ${CMAKE_SOURCE_DIR}/test/catch_amalgamated.hpp
         ${CMAKE_SOURCE_DIR}/test/catch2/trompeloeil.hpp
@@ -370,15 +642,25 @@ if(BUILD_TESTS)
     endif()
     if(COSMO_MODEL_GUARD)
         target_compile_definitions(cosmo-tests PRIVATE COSMO_HAS_MODEL_GUARD=1)
-        if(MODEL_GUARD_LIB)
-            target_link_libraries(cosmo-tests PRIVATE ${MODEL_GUARD_LIB})
-        endif()
+        target_link_libraries(cosmo-tests PRIVATE cosmo_model_guard_v2)
     endif()
     if(COSMO_NN_USE_CPU_BACKEND)
         target_compile_definitions(cosmo-tests PRIVATE
             COSMO_NN_USE_CPU_BACKEND
             COSMO_NN_USE_HOST_BACKEND
             COSMO_NN_USE_ONNX_BACKEND)
+    endif()
+    if(COSMO_NN_USE_RKNN_BACKEND)
+        target_compile_definitions(cosmo-tests PRIVATE
+            COSMO_NN_USE_RKNN_BACKEND
+            COSMO_NN_USE_HOST_BACKEND
+            COSMO_NN_USE_RAW_MODEL_BACKEND)
+        set_target_properties(cosmo-tests PROPERTIES
+            BUILD_RPATH "${COSMO_RKNN_ROOT}/lib")
+    endif()
+    if(COSMO_MEDIA_USE_ROCKCHIP_BACKEND)
+        set_property(TARGET cosmo-tests APPEND PROPERTY
+            BUILD_RPATH "${COSMO_ROCKCHIP_MEDIA_ROOT}/lib")
     endif()
     target_link_libraries(cosmo-tests PRIVATE ${COMMON_LIBS})
     if(COSMO_ENABLE_COVERAGE)
@@ -434,6 +716,16 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/
     PATTERN "netplan" EXCLUDE
     PATTERN "resource" EXCLUDE
     PATTERN "test-video" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+    PATTERN "*.pyo" EXCLUDE
+)
+
+# Package-specific runtime roots. Launchers treat these as defaults and retain
+# explicit COSMO_DATA_DIR/COSMO_APP_DATA_DIR overrides.
+install(FILES "${COSMO_RUNTIME_PATHS_ENV}"
+    DESTINATION share/cosmo
+    PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 # Font
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/SOURCEHANSANSCN-REGULAR.OTF
@@ -448,9 +740,58 @@ if(DEFINED RESOURCE_DIR AND IS_DIRECTORY "${RESOURCE_DIR}")
         DESTINATION resource
         FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
         PATTERN ".git" EXCLUDE
+        PATTERN "models" EXCLUDE
+        PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyo" EXCLUDE
     )
+    if(DEFINED RESOURCE_OVERLAY_DIR AND IS_DIRECTORY "${RESOURCE_OVERLAY_DIR}")
+        message(STATUS "Resource overlay directory: ${RESOURCE_OVERLAY_DIR}")
+        install(DIRECTORY ${RESOURCE_OVERLAY_DIR}/
+            DESTINATION resource
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE
+            PATTERN "models" EXCLUDE
+            PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyo" EXCLUDE
+        )
+    endif()
+    if(COSMO_PACKAGE_MODELS STREQUAL "include" AND
+       DEFINED RESOURCE_MODELS_DIR AND IS_DIRECTORY "${RESOURCE_MODELS_DIR}")
+        message(STATUS "Resource model directory: ${RESOURCE_MODELS_DIR}")
+        install(DIRECTORY ${RESOURCE_MODELS_DIR}/
+            DESTINATION resource/models
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE
+            PATTERN "model.nn" PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+            PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyo" EXCLUDE
+        )
+    elseif(COSMO_PACKAGE_MODELS STREQUAL "include" AND IS_DIRECTORY "${RESOURCE_DIR}/models")
+        install(DIRECTORY ${RESOURCE_DIR}/models/
+            DESTINATION resource/models
+            FILE_PERMISSIONS OWNER_WRITE OWNER_READ GROUP_WRITE GROUP_READ
+            PATTERN ".git" EXCLUDE
+            PATTERN "model.nn" PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+            PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.pyo" EXCLUDE
+        )
+    endif()
 else()
     message(STATUS "No resource directory specified — package will not contain models")
+endif()
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    install(FILES "${RKNN_RUNTIME_LIBRARY}"
+        DESTINATION lib
+        PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+    )
+    if(COSMO_NN_USE_RKLLM_BACKEND)
+        install(FILES "${RKLLM_RUNTIME_LIBRARY}"
+            DESTINATION lib
+            PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+        )
+        install(FILES "${RKLLM_RUNTIME_LICENSE}"
+            DESTINATION share/licenses/rkllm
+            RENAME LICENSE
+            PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+        )
+    endif()
 endif()
 
 # Scripts (exclude dev-only tools from device deployment)
@@ -462,9 +803,32 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/scripts/
         PATTERN "static_analysis*" EXCLUDE
         PATTERN "install-hooks*" EXCLUDE
         PATTERN "pre-commit" EXCLUDE
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+        PATTERN "*.pyo" EXCLUDE
+        PATTERN "package_md5_rename.sh" EXCLUDE
+        PATTERN "restore-symlinks.sh" EXCLUDE
+        PATTERN "sync-source-volume.sh" EXCLUDE
+        PATTERN "legacy_migration_install.sh" EXCLUDE
+        PATTERN "install.sh" EXCLUDE
+        PATTERN "start.sh" EXCLUDE
+        PATTERN "inte_run_start.sh" EXCLUDE
         PATTERN "*.sh"
             PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_READ GROUP_EXECUTE
 )
+
+# Open and Protected editions deliberately share one permanent MD5 upgrade
+# lifecycle. The Protected edition differs only in its guarded model runtime
+# and provisioning tool; application archives are not signed.
+install(PROGRAMS
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/legacy_migration_install.sh
+    DESTINATION scripts RENAME install.sh
+    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_READ GROUP_EXECUTE)
+install(PROGRAMS
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/start.sh
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/inte_run_start.sh
+    DESTINATION scripts
+    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_READ GROUP_EXECUTE)
 
 # Netplan failsafe config (deployed to scripts/ to keep device-side path unchanged)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/netplan/
@@ -477,16 +841,47 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/netplan/
 ##########################################################
 # Packaging
 ##########################################################
-file(STRINGS "${CMAKE_SOURCE_DIR}/src/util/Version.h" _ver_major REGEX "kVersionMajor")
-file(STRINGS "${CMAKE_SOURCE_DIR}/src/util/Version.h" _ver_minor REGEX "kVersionMinor")
-file(STRINGS "${CMAKE_SOURCE_DIR}/src/util/Version.h" _ver_patch REGEX "kVersionPatch")
-string(REGEX REPLACE ".*kVersionMajor = ([0-9]+).*" "\\1" VER_MAJOR "${_ver_major}")
-string(REGEX REPLACE ".*kVersionMinor = ([0-9]+).*" "\\1" VER_MINOR "${_ver_minor}")
-string(REGEX REPLACE ".*kVersionPatch = ([0-9]+).*" "\\1" VER_PATCH "${_ver_patch}")
+if(COSMO_NN_USE_RKNN_BACKEND AND COSMO_PACKAGE_MODELS STREQUAL "include")
+    if(NOT DEFINED RESOURCE_OVERLAY_DIR OR NOT RESOURCE_OVERLAY_DIR)
+        message(FATAL_ERROR
+            "RKNN packages that include models require RESOURCE_OVERLAY_DIR")
+    endif()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_custom_target(verify_rknn_packaging_resources ALL
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/rknn/stage_platform_resources.py"
+            --platform-profile "${COSMO_PLATFORM_PROFILE}"
+            --output-dir "${RESOURCE_OVERLAY_DIR}"
+            --verify
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Verifying target-specific RKNN resource identity and freshness"
+        VERBATIM
+    )
+endif()
 
 set(PACKAGE_PREFIX  "cosmo")
 set(PACKAGE_VERSION "V${VER_MAJOR}.${VER_MINOR}.${VER_PATCH}")
 set(PACKAGE_NAME    "${PACKAGE_PREFIX}-${PACKAGE_VERSION}")
+
+# Record the intended accelerator inside the archive. The exported sidecar is
+# convenient for automation, but it can be separated from the package during a
+# manual copy. This marker keeps such mistakes observable and prevents packages
+# for different chips from being byte-identical.
+if(COSMO_TARGET_CHIP)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/target-chip.txt"
+        "${COSMO_TARGET_CHIP_NORMALIZED}\n")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/target-chip.txt"
+        DESTINATION share/cosmo
+        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
+    message(STATUS "Package target chip: ${COSMO_TARGET_CHIP_NORMALIZED}")
+endif()
+
+if(COSMO_NN_USE_RKNN_BACKEND)
+    install(FILES "${COSMO_PLATFORM_PROFILE}"
+        DESTINATION share/cosmo
+        RENAME platform-profile.json
+        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
+endif()
 
 # Generate and install version.txt
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/version.txt" "${PACKAGE_VERSION}\n")
@@ -495,14 +890,45 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/version.txt"
     PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-# Install model guard shared library to lib/ (used at runtime via dlopen or direct link)
-if(COSMO_MODEL_GUARD AND MODEL_GUARD_LIB)
-    install(FILES ${MODEL_GUARD_LIB}
+# Install the exact verified compatibility member. The linker aliases are
+# recreated inside the package; no unversioned host/system library is copied.
+if(COSMO_MODEL_GUARD)
+    install(FILES "${MODEL_GUARD_V2_LIBRARY}"
         DESTINATION lib
         PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
     )
+    if(COSMO_MODEL_GUARD_BUILD_PROFILE STREQUAL "production-release")
+        install(PROGRAMS "${MODEL_GUARD_V2_PROVISION_TOOL}"
+            DESTINATION bin
+            RENAME cosmo-model-provision
+            PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE
+                        WORLD_READ WORLD_EXECUTE
+        )
+    endif()
+    install(FILES "${MODEL_GUARD_V2_HEADER}"
+        DESTINATION share/cosmo-model-guard
+        PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+    )
+    install(CODE [[
+        set(model_guard_lib_dir "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/lib")
+        file(CREATE_LINK libcosmo_model_guard.so.2.0.0
+             "${model_guard_lib_dir}/libcosmo_model_guard.so.2"
+             SYMBOLIC RESULT model_guard_soname_link_result)
+        if(NOT model_guard_soname_link_result STREQUAL "0")
+            message(FATAL_ERROR
+                "Cannot create Model Guard SONAME link: ${model_guard_soname_link_result}")
+        endif()
+        file(CREATE_LINK libcosmo_model_guard.so.2
+             "${model_guard_lib_dir}/libcosmo_model_guard.so"
+             SYMBOLIC RESULT model_guard_link_link_result)
+        if(NOT model_guard_link_link_result STREQUAL "0")
+            message(FATAL_ERROR
+                "Cannot create Model Guard linker alias: ${model_guard_link_link_result}")
+        endif()
+    ]])
 else()
-    # Create empty lib directory to satisfy legacy upgrade checks on target device
+    # CPU-only development packages retain the historical empty directory.
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib")
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
         DESTINATION .
@@ -524,10 +950,22 @@ set(CPACK_OUTPUT_FILE_PREFIX        "${CMAKE_BINARY_DIR}/packages")
 
 include(CPack)
 
+set(COSMO_PACKAGE_TARGETS ${EXECUTABLE_NAME} web_frontend)
+if(TARGET verify_rknn_packaging_resources)
+    list(APPEND COSMO_PACKAGE_TARGETS verify_rknn_packaging_resources)
+endif()
 add_custom_target(package_all
+    # CPack names are content-addressed only after generation. Clear artifacts
+    # from an earlier profile before creating and exporting this build's output.
+    COMMAND "${CMAKE_COMMAND}" -E remove_directory
+            "${CMAKE_BINARY_DIR}/packages"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "${CMAKE_BINARY_DIR}/packages"
     COMMAND cpack
-    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/package_md5_rename.sh
-        ${CMAKE_BINARY_DIR}/packages ${PACKAGE_NAME}
-    DEPENDS ${EXECUTABLE_NAME} web_frontend
-    COMMENT "Creating package with MD5 in filename"
+    COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/package_md5_rename.sh"
+        "${CMAKE_BINARY_DIR}/packages" "${PACKAGE_NAME}"
+        "${COSMO_MODEL_GUARD_BUILD_PROFILE}"
+        "${COSMO_REPRODUCIBLE_BUILD_EPOCH}"
+    DEPENDS ${COSMO_PACKAGE_TARGETS}
+    COMMENT "Creating MD5-compatible upgrade package"
 )

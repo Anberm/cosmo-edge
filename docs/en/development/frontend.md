@@ -23,7 +23,7 @@ src/web/
 └── src/
     ├── main.js               # App entry point
     ├── App.vue               # Root component
-    ├── api/                  # API modules (7 files)
+    ├── api/                  # API modules
     │   └── index.js          # Merges all modules → global $API
     ├── assets/               # Images, icons, audio
     ├── components/           # Shared components
@@ -31,7 +31,7 @@ src/web/
     ├── micro/
     │   └── state.js          # Minimal global state
     ├── router/
-    │   └── index.js          # Hash-based router (~25 routes)
+    │   └── index.js          # Hash-based router
     ├── styles/
     │   └── global.scss       # Global SCSS
     ├── utils/                # Axios wrapper, message, image preview, i18n loader, WebRTC player
@@ -102,7 +102,7 @@ npm run build
 | `npm run preview`         | Preview the production build locally                     |
 | `npm run i18n:check`      | Run all 5 i18n validation scripts                        |
 | `npm run resource-i18n:check` | Check resource i18n sync status                      |
-| `npm run resource-i18n:sync`  | Sync resource i18n keys from the backend (review diff before committing) |
+| `npm run resource-i18n:sync`  | Sync resource i18n keys from the aiboxResource source (review diff before committing) |
 
 The i18n validators cover: short-scope correctness, locale key consistency, glossary synchronization, dialog action button labels, and unused-key detection.
 
@@ -110,7 +110,7 @@ The i18n validators cover: short-scope correctness, locale key consistency, glos
 
 ### Step 1: Create the View Component
 
-Create a new `.vue` file under `src/web/views/` in the appropriate subdirectory (`box/` for device-related views, `gam/` for AI-management views).
+Create a new `.vue` file under `src/web/src/views/` in the appropriate subdirectory (`box/` for device-related views, `gam/` for AI-management views).
 
 ### Step 2: Register a Route
 
@@ -153,7 +153,8 @@ Menu labels go under `nav`; create a new top-level key for page-specific strings
 
 ### Pattern
 
-API modules live under `src/web/src/api/`. Each module exports functions that wrap `axios` calls. `api/index.js` merges all modules into a single object via object spread, and `main.js` injects it as the global `$API`.
+API modules live under `src/web/src/api/`. Each module default-exports an object of request functions.
+`api/index.js` flattens those objects with object spread, and `main.js` injects the result as global `$API`.
 
 Usage in components: `this.$API.dologin(params)` or `proxy.$API.dologin(params)` (Composition API).
 
@@ -167,18 +168,41 @@ Usage in components: `this.$API.dologin(params)` or `proxy.$API.dologin(params)`
 | Algorithm Admin | `countManage.js` | Algorithm CRUD, licenses, hardware info         |
 | Base Libraries  | `basePic.js`   | Face library, body library, item library, file imports |
 | Live Stream     | `screen.js`    | Camera list, live stream lifecycle, WebSocket     |
+| Onboarding      | `onboarding.js`| Guide status, completion, and reset                |
 
 ### Adding a New Endpoint
 
-Add a function to the relevant module file (or create a new file) and re-export it through `api/index.js`:
+Add a function to the relevant module object. When creating a module file, spread its default export into `api/index.js`:
 
 ```js
 // api/myModule.js
-export const queryMyData = (params) => request.post('/gtw/cwai/MyModule/Query', params);
+import { request } from '@/utils/request'
+
+export default {
+  queryMyData: data => request({
+    url: '/gtw/cwai/MyModule/Query',
+    method: 'post',
+    data
+  })
+}
 
 // api/index.js
-export * as myModule from './myModule.js';
+import myModule from './myModule'
+
+export default {
+  ...login,
+  ...box,
+  ...screen,
+  ...basePic,
+  ...gam,
+  ...countManage,
+  ...onboarding,
+  ...myModule
+}
 ```
+
+After flattening, components call `proxy.$API.queryMyData(data)`. The current API layer does not use a
+`proxy.$API.myModule.queryMyData(data)` namespace.
 
 All API calls share the Axios instance in `utils/request.js`, which automatically attaches the `mtk`, `token`, `fileMode`, and `lang` request headers and handles the auth-failure redirect.
 
@@ -194,8 +218,8 @@ Translations are managed across three tiers:
 
 | Tier               | Source                                          | Purpose                               |
 | ------------------ | --------------------------------------------- | ---------------------------------- |
-| Static locale files   | `i18n/locales/{zh-CN,en-US}.js` (~1420 lines each) | All built-in UI strings, navigation, validation, status, etc. |
-| Short-form glossary      | `i18n/glossary.js` (76 entries)                     | Compact labels for constrained layouts               |
+| Static locale files   | `i18n/locales/{zh-CN,en-US}.js`                  | All built-in UI strings, navigation, validation, status, etc. |
+| Short-form glossary      | `i18n/glossary.js`                              | Compact labels for constrained layouts               |
 | Dynamic resource i18n      | `public/resource-i18n/resource.{locale}.json`    | Backend config items such as algorithm names, parameters, options |
 
 ### Translation API

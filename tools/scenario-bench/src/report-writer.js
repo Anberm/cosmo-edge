@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { summarizeStep } from './step-evaluator.js';
 import {
+  resolveTaskThresholds,
   strategyForTask,
   strategyForTaskType,
   thresholdLabel,
@@ -65,7 +66,8 @@ export class ReportWriter {
 
   _buildSummary(r, stepSummaries) {
     const ran = stepSummaries.filter((s) => !s.skipped);
-    const firstFailed = ran.find((s) => s.pass === false) ?? null;
+    const qualifiedRan = ran.filter((s) => s.qualified !== false);
+    const firstFailed = qualifiedRan.find((s) => s.pass === false) ?? null;
     const bottleneck = normalizeBottleneck(r.bottleneck ?? (firstFailed
       ? {
           stepIndex: firstFailed.step.index,
@@ -75,16 +77,24 @@ export class ReportWriter {
         }
       : null), stepSummaries);
     const hasBottleneck = Boolean(bottleneck);
-    const verifiedPassed = ran.filter((s) =>
+    const verifiedPassed = qualifiedRan.filter((s) =>
       s.pass && (!hasBottleneck || s.step.index < bottleneck.stepIndex),
     );
     const maxVerifiedPassedChannels = verifiedPassed.length
       ? Math.max(...verifiedPassed.map((s) => s.channels))
       : null;
-    const continuousProfile = r.profileMode === 'capacity' || isContinuousChannelProfile(stepSummaries);
-    const maxStableChannels = continuousProfile ? maxVerifiedPassedChannels : null;
-    const allRanStepsPass = ran.length > 0 && ran.every((s) => s.pass);
+    const continuousProfile = r.profileMode === 'capacity'
+      || isContinuousChannelProfile(qualifiedRan);
+    const vlmThroughputGateDisabled = (r.tasks ?? []).some((task) => {
+      if (strategyForTask(task).id !== 'vlm') return false;
+      const rules = resolveTaskThresholds(r.thresholds ?? {}, task);
+      return rules.minFpsRatio == null && rules.minThroughputFps == null;
+    });
+    const capacityEligible = !vlmThroughputGateDisabled;
+    const maxStableChannels = continuousProfile && capacityEligible ? maxVerifiedPassedChannels : null;
+    const allRanStepsPass = qualifiedRan.length > 0 && qualifiedRan.every((s) => s.pass);
     const capacityMeasured = r.status !== 'aborted'
+      && capacityEligible
       && continuousProfile
       && maxVerifiedPassedChannels != null
       && (hasBottleneck || allRanStepsPass);
@@ -93,6 +103,11 @@ export class ReportWriter {
     let conclusion;
     if (r.status === 'aborted') {
       conclusion = `压测中断：运行到 ${r.error?.atChannels ?? '?'} 路时停止，原因：${r.error?.message ?? '未知错误'}`;
+    } else if (vlmThroughputGateDisabled) {
+      const stopText = bottleneck
+        ? `；第 ${bottleneck.stepNumber} 阶段（${bottleneck.channels} 路）停止，原因：${bottleneck.reason}`
+        : '';
+      conclusion = `VLM FPS 门禁未启用；已完成至 ${maxVerifiedPassedChannels ?? 0} 路的非 FPS 短时观测，不形成容量结论${stopText}`;
     } else if (bottleneck) {
       if (continuousProfile) {
         conclusion = `容量上限：${maxStableChannels ?? 0} 路；第 ${bottleneck.stepNumber} 阶段（${bottleneck.channels} 路）触发失败/停止，原因：${bottleneck.reason}`;
@@ -122,9 +137,10 @@ export class ReportWriter {
       allRanStepsPass,
       hasBottleneck,
       capacityMeasured,
+      capacityExclusionReason: vlmThroughputGateDisabled ? 'vlm-throughput-gate-disabled' : null,
       conclusion,
       maxStableChannels,
-      maxStableChannelsExact: continuousProfile,
+      maxStableChannelsExact: continuousProfile && capacityEligible,
       maxVerifiedPassedChannels,
       firstFailedStep: firstFailed ? {
         stepIndex: firstFailed.step.index,
@@ -132,7 +148,7 @@ export class ReportWriter {
         channels: firstFailed.channels,
         reasons: firstFailed.reasons,
       } : null,
-      capacityBound: !continuousProfile && bottleneck ? {
+      capacityBound: capacityEligible && !continuousProfile && bottleneck ? {
         lowerInclusive: maxVerifiedPassedChannels,
         upperExclusive: bottleneck.channels,
       } : null,
@@ -143,20 +159,25 @@ export class ReportWriter {
       startedAt: r.startedAt,
       endedAt: r.endedAt,
       sampleCount: (r.samples ?? []).length,
+      rampProbeChannels: ran.filter((s) => s.qualified === false).map((s) => s.channels),
       mediaStages: stepSummaries.map((step) => ({ channels: step.channels, ...step.mediaStages })),
     };
   }
 
   _renderHtml(r, stepSummaries, summary) {
+    const isVlmReport = (r.tasks ?? []).some((task) => strategyForTask(task).id === 'vlm');
+    const throughputHeader = isVlmReport ? '当前新增路处理FPS' : '处理FPS(参考)';
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const pass = r.thresholds?.pass ?? {};
     const sampleInterval = estimateSampleIntervalSec(r.samples ?? []);
     const samplingText = Number.isFinite(sampleInterval)
       ? `约每 ${Math.round(sampleInterval)}s 采样一次；阶梯汇总使用该阶梯后半段采样点作为稳定窗口。`
       : '阶梯汇总使用该阶梯后半段采样点作为稳定窗口。';
-    const profileText = summary.maxStableChannelsExact
-      ? '当前按连续路数扫描，可直接给出容量上限。容量上限是最后一个完整执行且通过报告阈值的路数。'
-      : `当前阶梯不是连续通道数，只能给出已验证通过阶梯；连续最大稳定路数需在相邻区间内补测。${summary.capacityBound ? `本次已知 >= ${summary.capacityBound.lowerInclusive ?? 0} 路且 < ${summary.capacityBound.upperExclusive} 路。` : ''}`;
+    const profileText = summary.capacityExclusionReason === 'vlm-throughput-gate-disabled'
+      ? 'VLM 吞吐门禁未启用；本报告只保留非 FPS 短时观测和实测 FPS，不给出容量上限。'
+      : summary.maxStableChannelsExact
+        ? '当前按连续路数扫描，可直接给出容量上限。容量上限是最后一个完整执行且通过报告阈值的路数。'
+        : `当前阶梯不是连续通道数，只能给出已验证通过阶梯；连续最大稳定路数需在相邻区间内补测。爬坡瞬时采样只标记为 PROBE，不计入稳定容量。${summary.capacityBound ? `本次已知 >= ${summary.capacityBound.lowerInclusive ?? 0} 路且 < ${summary.capacityBound.upperExclusive} 路。` : ''}`;
     const interpretationRows = [
       ['容量结论', profileText],
       ['路数 PASS/FAIL', `每个任务按 task type 选择判定策略。CV 默认使用关键链路、检测节点和丢弃率；VLM 默认使用分析 FPS 达标率和采样缺失率，并可配置端到端延时。全局平均丢弃率阈值为 ${pass.avgDiscardRate ?? pass.maxDiscardRate ?? '-'}。`],
@@ -196,18 +217,20 @@ export class ReportWriter {
           && (summary.bottleneck.channels == null || summary.bottleneck.channels === s.channels)) {
         return { className: 'warn', label: 'STOPPED' };
       }
+      if (s.qualified === false) return { className: 'na', label: 'PROBE' };
       return s.pass ? { className: 'pass', label: 'PASS' } : { className: 'fail', label: 'FAIL' };
     };
 
     const stepRows = stepSummaries.map((s, rowIndex) => {
       const status = stepStatus(s);
+      const displayedFps = isVlmReport ? (s.currentRouteFps ?? s.minFpsAcross) : s.minFpsAcross;
       return `
       <tr>
         <td>${rowIndex + 1}</td>
         <td>${s.channels}</td>
         <td>${s.holdSec}s</td>
         <td>${s.targetFps ?? '-'}</td>
-        <td>${s.minFpsAcross ?? '-'}</td>
+        <td>${displayedFps ?? '-'}</td>
         <td>${s.criticalPathLatencyMs ?? '-'}</td>
         <td>${s.detectorLatencyMs ?? '-'}</td>
         <td>${s.avgDiscard != null ? s.avgDiscard : '-'}</td>
@@ -216,6 +239,8 @@ export class ReportWriter {
         <td class="${s.maxAcceleratorMem >= 90 ? 'fail' : ''}">${s.maxAcceleratorMem != null ? s.maxAcceleratorMem + '%' : '-'}</td>
         <td class="${s.maxCpu >= 90 ? 'fail' : ''}">${s.maxCpu != null ? s.maxCpu + '%' : '-'}</td>
         <td class="${s.maxMem >= 90 ? 'fail' : ''}">${s.maxMem != null ? s.maxMem + '%' : '-'}</td>
+        <td class="${s.maxDiskUsedPercent >= 90 ? 'fail' : ''}">${s.maxDiskUsedPercent != null ? s.maxDiskUsedPercent + '%' : '-'}</td>
+        <td>${formatMib(s.maxPoolInUseBytes)}/${formatMib(s.maxPoolAllocatedBytes)}/${s.maxPoolUtilizationPercent != null ? s.maxPoolUtilizationPercent + '%' : '-'}</td>
         <td class="${status.className}">${status.label}</td>
         <td>${esc((s.reasons ?? []).join('; '))}</td>
       </tr>`;
@@ -258,6 +283,25 @@ export class ReportWriter {
         <td>${metric(m.preprocessAvgMs)}</td>
         <td>${metric(m.inferAvgMs)}</td>
         <td>${metric(m.postprocessAvgMs)}</td>
+        <td>${metric(m.colorConvertAvgMs)}/${metric(m.blobConvertAvgMs)}</td>
+        <td>${metric(m.graphForwardAvgMs)}/${metric(m.resultParseAvgMs)}</td>
+        <td>${metric(m.rknnPrepareAvgMs)}/${metric(m.rknnInputsSetAvgMs)}</td>
+        <td>${metric(m.rknnRunAvgMs)}/${metric(m.rknnOutputsGetAvgMs)}/${metric(m.rknnOutputsReleaseAvgMs)}/${metric(m.rknnOutputTransformAvgMs)}</td>
+        <td>${metric(m.rknnForwardAvgMs)}/${m.rknnForwardFailures ?? '-'}</td>
+        <td>${metric(m.rknnDetectorForwardAvgMs)}/${metric(m.rknnDetectorMutexWaitAvgMs)}/${m.rknnDetectorForwardFailures ?? '-'}</td>
+        <td>${metric(m.rknnRgaFillAvgMs)}/${metric(m.rknnRgaResizeColorAvgMs)}/${metric(m.rknnRgaCropResizeAvgMs)}/${m.rknnRgaCropResizeCalls ?? '-'}/${m.rknnRgaCropDmaBufFrames ?? '-'}/${m.rknnRgaCropHostFallbacks ?? '-'}/${metric(m.rknnNativeInputMapAvgMs)}/${m.rknnPreprocessFastHits ?? '-'}/${m.rknnRgaFailures ?? '-'}/${m.rknnRgaCropResizeFailures ?? '-'}</td>
+        <td>${m.rknnCpuResizeFallbacks ?? '-'}/${m.rknnCpuCropResizeFallbacks ?? '-'}/${m.rknnCpuNormalizeFallbacks ?? '-'}/${m.rknnInputCompatibilityFallbacks ?? '-'}</td>
+        <td>${m.rknnBoundInputBindAttempts ?? '-'}/${m.rknnBoundInputBindFailures ?? '-'}/${m.rknnBoundInputFrames ?? '-'}/${metric(m.rknnBoundInputCopyAvgMs)}/${metric(m.rknnBoundInputSyncAvgMs)}/${formatMib(m.rknnBoundInputCopyAvgBytes)}/${m.rknnBoundInputCopyFailures ?? '-'}/${m.rknnBoundInputSyncFailures ?? '-'}</td>
+        <td>${m.rknnRgaBoundInputBindAttempts ?? '-'}/${m.rknnRgaBoundInputBindFailures ?? '-'}/${m.rknnRgaBoundInputImportCalls ?? '-'}/${metric(m.rknnRgaBoundInputImportAvgMs)}/${m.rknnRgaBoundInputImportFailures ?? '-'}/${m.rknnRgaBoundInputFrames ?? '-'}/${m.rknnRgaBoundUint8Frames ?? '-'}/${m.rknnRgaBoundNativeInt8Frames ?? '-'}/${m.rknnRgaBoundRequantizeCalls ?? '-'}/${metric(m.rknnRgaBoundRequantizeAvgMs)}/${m.rknnRgaBoundRequantizeFailures ?? '-'}/${m.rknnRgaBoundInputNormalizeBypasses ?? '-'}</td>
+        <td>${m.rknnMppDmaBufImportCalls ?? '-'}/${metric(m.rknnMppDmaBufImportAvgMs)}/${m.rknnMppDmaBufImportFailures ?? '-'}/${m.rknnMppDmaBufFrames ?? '-'}/${m.rknnMppDmaBufFallbacks ?? '-'}/${formatMib(m.rknnMppDmaBufSourceAvgBytes)}</td>
+        <td>${m.rknnNativeInt8Outputs ?? '-'}/${m.rknnFloatOutputs ?? '-'}/${m.rknnOutputCompatibilityFallbacks ?? '-'}/${formatMib(m.rknnNativeOutputAvgBytes)}/${formatMib(m.rknnFloatOutputAvgBytes)}</td>
+        <td>${metric(m.rknnYolov8DflAvgMs)}/${metric(m.rknnYolov8ClassAvgMs)}</td>
+        <td>${m.rknnYolov8DirectCandidateCalls ?? '-'}/${m.rknnYolov8DirectCandidateFailures ?? '-'}/${metric(m.rknnYolov8DirectAvgPointsScanned)}/${metric(m.rknnYolov8DirectAvgPointsDecoded)}/${metric(m.rknnYolov8ScoreSumAvgPointsRejected)}/${formatMib(m.rknnYolov8LogicalFloatBytesAvoided)}</td>
+        <td>${metric(m.yolov8PostprocessAvgMs)}/${metric(m.yolov8NmsAvgMs)}</td>
+        <td>${metric(m.rgaAvgMs)}/${m.rgaFailures ?? '-'}</td>
+        <td>${metric(m.mppEncodeAvgMs)}/${m.mppEncodeFailures ?? '-'}/${m.mppRgaCopyInFrames ?? '-'}/${m.mppRgaCopyInFailures ?? '-'}/${m.mppCpuCopyInFallbacks ?? '-'}</td>
+        <td>${metric(m.mppDecodeAvgMs)}/${m.mppDecodeFailures ?? '-'}/${m.mppDecodeFallbacks ?? '-'}</td>
+        <td>${metric(m.mppCopyOutAvgMs)}/${m.mppDecodedFrames ?? '-'}/${m.mppCopyOutFrames ?? '-'}/${m.mppRgaCopyOutFrames ?? '-'}/${m.mppCpuCopyOutFallbacks ?? '-'}/${m.mppEarlyDroppedFrames ?? '-'}/${m.mppCopyOutFailures ?? '-'}</td>
         <td>${metric(m.osdAvgMs)}</td>
         <td>${metric(m.publishAvgMs)}</td>
         <td>${metric(m.firstFrameAvgMs)}/${metric(m.firstFrameMaxMs)}</td>
@@ -296,12 +340,12 @@ ${bottleneckBanner}
 <table>${baseRows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>路数结果</h2>
 <table>
-  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>处理FPS(参考)</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>结果</th><th>失败原因</th></tr>
+  <tr><th>序号</th><th>路数</th><th>保持</th><th>目标FPS(参考)</th><th>${throughputHeader}</th><th>关键/端到端延时ms</th><th>主节点延时ms</th><th>平均丢弃率</th><th>最差通道丢弃率</th><th>加速器峰值</th><th>加速器内存峰值</th><th>CPU峰值</th><th>内存峰值</th><th>磁盘峰值</th><th>内存池在用/分配MiB/占用率</th><th>结果</th><th>失败原因</th></tr>
   ${stepRows}
 </table>
 <h2>媒体与预览分阶段指标</h2>
 <table>
-  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
+  <tr><th>路数</th><th>Preprocess ms</th><th>Infer ms</th><th>Postprocess ms</th><th>颜色/Blob ms</th><th>Graph/Parse ms</th><th>RKNN准备/送入 ms</th><th>RKNN执行/取回/释放/转换 ms</th><th>RKNN总计/失败</th><th>Detector总计/等待/失败</th><th>Fast Fill/Resize/Crop次数/CropDMA/CropHost/Map/命中/失败</th><th>Fallback Resize/Crop/Normalize/Compat</th><th>绑定输入 Bind/失败/帧/Copy ms/Sync ms/CopyMiB/Copy失败/Sync失败</th><th>RGA直绑 Bind/失败/Import次数/ms/失败/帧/UINT8融合帧/INT8回退帧/Requant次数/ms/失败/Normalize绕过</th><th>MPP DMA-BUF Import/ms/失败/帧/回退/源MiB</th><th>输出 Native/Float/Compat/NativeMiB/FloatMiB</th><th>量化 DFL/Class ms</th><th>直接候选 调用/失败/扫描/解码/Sum早筛/省略MiB</th><th>YOLO Post/NMS</th><th>RGA/失败</th><th>MPP编码 ms/失败/RGA帧/RGA失败/CPU回退</th><th>MPP解码/失败/回退</th><th>Copy-out ms/解码/复制/RGA帧/CPU回退/早丢/失败</th><th>OSD ms</th><th>Publish ms</th><th>首帧平均/进程最大ms</th><th>预览流/发布器峰值</th><th>原始/算法预览峰值</th><th>SRS流/客户端峰值</th><th>启动/停止/失败增量</th></tr>
   ${mediaRows}
 </table>
 <h2>分任务汇总</h2>
@@ -369,9 +413,8 @@ function buildReportSteps(runResult) {
   const seenChannels = new Set();
 
   for (const step of steps) {
-    const observedChannels = uniqueObservedChannels(
-      samples.filter((sample) => sample.stepIndex === step.index),
-    );
+    const stepSamples = samples.filter((sample) => sample.stepIndex === step.index);
+    const observedChannels = uniqueObservedChannels(stepSamples);
 
     const shouldExpand = observedChannels.length > 1
       && observedChannels.some((channels) => channels < step.channels);
@@ -380,6 +423,8 @@ function buildReportSteps(runResult) {
     for (const channels of channelsToReport) {
       if (seenChannels.has(channels)) continue;
       seenChannels.add(channels);
+      const qualified = stepSamples.some((sample) =>
+        Number(sample.activeChannels) === channels && sample.phase !== 'ramp');
       reportSteps.push({
         ...step,
         index: channels - 1,
@@ -388,6 +433,7 @@ function buildReportSteps(runResult) {
         targetChannels: step.channels,
         sampleStepIndex: step.index,
         sampleChannels: channels,
+        qualified,
       });
     }
   }
@@ -442,6 +488,10 @@ function reportBaselineFps(runResult, stepSummaries) {
 
 function formatPercent(v) {
   return `${round(Number(v) * 100, 2)}%`;
+}
+
+function formatMib(bytes) {
+  return typeof bytes === 'number' ? round(bytes / (1024 * 1024), 1) : '-';
 }
 
 function round(v, digits) {

@@ -10,6 +10,10 @@ namespace cosmo {
 AiLandmarkerUnify::AiLandmarkerUnify(const std::string& jsonPath, const std::string& modelPath)
     : cfg_path_(jsonPath), model_path_(modelPath) {}
 
+AiLandmarkerUnify::AiLandmarkerUnify(const std::string&, const std::string& jsonPath,
+                                     const std::string& modelPath)
+    : cfg_path_(jsonPath), model_path_(modelPath) {}
+
 AiLandmarkerUnify::~AiLandmarkerUnify() {
     LOG_INFO("{}", "AiLandmarkerUnify Delete");
 }
@@ -20,8 +24,10 @@ util::ErrorEnum AiLandmarkerUnify::Init() {
         return util::ErrorEnum::Created;
     }
 
+    cosmo::nn::DefaultComponent::Options options;
+    options.profiler = &profiler_;
     landmarker_ =
-        std::make_unique<cosmo::nn::DefaultComponent>(cfg_path_, model_path_, GetDeviceType(), &profiler_);
+        std::make_unique<cosmo::nn::DefaultComponent>(options, cfg_path_, model_path_, GetDeviceType());
     LOG_DEBUG("Landmarker {} Init", model_path_);
 
     max_batch_size_ = static_cast<size_t>(landmarker_->GetMaxBatchSize());

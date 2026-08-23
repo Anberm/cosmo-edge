@@ -1,0 +1,736 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = path.resolve(here, '..');
+const defaultSourceRoot = path.join(repositoryRoot, 'docs', 'benchmarks', 'scenario-bench', 'v1.1');
+const defaultOutputRoot = path.join(repositoryRoot, 'docs', '.vitepress', 'dist', 'benchmarks', 'scenario-bench', 'v1.1');
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.writeSourceChecksums) {
+    const sourceRoot = path.resolve(options.sourceRoot ?? defaultSourceRoot);
+    writeChecksums(sourceRoot);
+    console.log(`Updated canonical source checksums in ${path.relative(repositoryRoot, sourceRoot)}.`);
+    process.exit(0);
+  }
+  const result = generateBenchmarkPages(options);
+  console.log(
+    `Generated ${result.reportCount} benchmark reports for ${result.platformCount} platforms and ` +
+    `${result.caseCount} canonical cases in ${path.relative(repositoryRoot, result.outputRoot) || '.'}.`,
+  );
+}
+
+export function generateBenchmarkPages({ sourceRoot = defaultSourceRoot, outputRoot = defaultOutputRoot } = {}) {
+  sourceRoot = path.resolve(sourceRoot);
+  outputRoot = path.resolve(outputRoot);
+  if (sourceRoot === outputRoot) throw new Error('benchmark pages must be generated outside the canonical source directory');
+  if (!fs.existsSync(sourceRoot)) throw new Error(`canonical benchmark source is missing: ${sourceRoot}`);
+
+  const manifest = readJson(path.join(sourceRoot, 'release-manifest.json'));
+  const platformDefs = Array.isArray(manifest.platforms) ? manifest.platforms : [];
+  const platformIds = platformDefs.map((definition) => definition.id);
+  fs.mkdirSync(outputRoot, { recursive: true });
+  copyCanonicalAssets(sourceRoot, outputRoot, platformIds);
+
+  const platforms = platformDefs.map((definition) => loadPlatform(sourceRoot, definition));
+  const vlm = readJson(path.join(sourceRoot, 'results', 'vlm-observations.json'));
+  const vlmByPlatform = new Map(vlm.observations.map((item) => [item.platformId, item]));
+  const caseCount = platforms.reduce((count, item) => count + item.cases.length, 0);
+  let reportCount = 0;
+
+  removeGeneratedPages(outputRoot, platforms.map((item) => item.id));
+  writeDerivedIndexes(outputRoot, manifest, platforms, vlm);
+
+  for (const locale of ['en', 'zh-CN']) {
+    const suffix = locale === 'zh-CN' ? '.zh-CN.html' : '.html';
+    writeReport(outputRoot, `report${suffix}`, renderRootReport(locale, manifest, platforms, vlmByPlatform));
+    reportCount += 1;
+
+    for (const platform of platforms) {
+      writeReport(outputRoot, `results/${platform.id}/report${suffix}`, renderPlatformReport(locale, manifest, platform, vlmByPlatform.get(platform.id)));
+      writeReport(outputRoot, `results/${platform.id}/cases/report${suffix}`, renderCaseIndex(locale, platform));
+      writeReport(outputRoot, `results/${platform.id}/single-workload/report${suffix}`, renderSingleWorkloadReport(locale, manifest, platform));
+      writeReport(outputRoot, `results/${platform.id}/concurrent-mixed/report${suffix}`, renderConcurrentMixedReport(locale, platform));
+      reportCount += 4;
+
+      const observation = vlmByPlatform.get(platform.id);
+      if (observation) {
+        writeReport(
+          outputRoot,
+          `results/${platform.id}/vlm-observation/report${suffix}`,
+          renderVlmReport(locale, platform, observation, vlm.publicationEvaluation),
+        );
+        reportCount += 1;
+      }
+
+      for (const benchmarkCase of platform.cases) {
+        writeReport(
+          outputRoot,
+          `results/${platform.id}/cases/${benchmarkCase.caseId}/report${suffix}`,
+          renderCaseReport(locale, platform, benchmarkCase),
+        );
+        reportCount += 1;
+      }
+    }
+  }
+
+  writeChecksums(outputRoot);
+  return { outputRoot, reportCount, platformCount: platforms.length, caseCount };
+}
+
+function loadPlatform(sourceRoot, definition) {
+  const id = definition.id;
+  const canonical = readJson(path.join(sourceRoot, 'results', id, 'cases.json'));
+  const environment = readJson(path.join(sourceRoot, 'environments', `${id}.json`));
+  return {
+    id,
+    name: canonical.platform,
+    scope: canonical.scope,
+    cases: canonical.cases,
+    gates: canonical.gates,
+    environment,
+  };
+}
+
+function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
+  const resultsRoot = path.join(outputRoot, 'results');
+  const vlmPlatformIds = new Set(vlm.observations.map((item) => item.platformId));
+  writeJson(path.join(resultsRoot, 'index.json'), {
+    schemaVersion: 3,
+    benchmark: 'CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark',
+    publicationStatus: manifest.release.publicationState,
+    manifest: '../release-manifest.json',
+    generatedAt: manifest.release.frozenAt,
+    primaryClaim: 'observed short-run local-loop capacity boundary',
+    caseCount: platforms.reduce((count, platform) => count + platform.cases.length, 0),
+    platforms: platforms.map((platform) => ({
+      platformId: platform.id,
+      platform: platform.name,
+      scope: platform.scope,
+      environment: `../environments/${platform.id}.json`,
+      models: `../models/${platform.id}.json`,
+      cases: `${platform.id}/cases.json`,
+      report: `${platform.id}/report.html`,
+      reportZhCn: `${platform.id}/report.zh-CN.html`,
+      vlmObservation: vlmPlatformIds.has(platform.id) ? 'vlm-observations.json' : null,
+    })),
+  });
+
+  const globalCases = [];
+  for (const platform of platforms) {
+    const cases = platform.cases.map((item) => ({
+      platformId: platform.id,
+      platform: platform.name,
+      caseId: item.caseId,
+      sourceCaseId: item.sourceCaseId,
+      workload: item.workload,
+      targetFps: item.targetFps,
+      configuredChannels: item.configuredChannels,
+      outcome: item.outcome,
+      boundaryKind: item.boundaryKind,
+      lastPassingChannels: item.lastPassingChannels,
+      canonical: `${platform.id}/cases.json`,
+      report: `${platform.id}/cases/${item.caseId}/report.html`,
+      reportZhCn: `${platform.id}/cases/${item.caseId}/report.zh-CN.html`,
+    }));
+    globalCases.push(...cases);
+    writeJson(path.join(resultsRoot, platform.id, 'cases', 'index.json'), {
+      schemaVersion: 3,
+      platformId: platform.id,
+      caseCount: cases.length,
+      canonical: '../cases.json',
+      cases: cases.map(({
+        platformId: unusedId,
+        platform: unusedName,
+        canonical: unusedCanonical,
+        report: unusedReport,
+        reportZhCn: unusedReportZhCn,
+        ...item
+      }) => ({
+        ...item,
+        report: `${item.caseId}/report.html`,
+        reportZhCn: `${item.caseId}/report.zh-CN.html`,
+      })),
+    });
+  }
+  writeJson(path.join(resultsRoot, 'cases.json'), {
+    schemaVersion: 3,
+    benchmark: 'CosmoEdge 1.1 small-model capacity benchmark',
+    caseCount: globalCases.length,
+    cases: globalCases,
+  });
+
+  writeJson(path.join(resultsRoot, 'workload-matrix.json'), {
+    schemaVersion: 3,
+    publicationStatus: manifest.release.publicationState,
+    interpretation: {
+      singleWorkload: 'last passing short-run channel count under enabled CV gates',
+      concurrentMixed: 'highest configured short-run point passed; observed lower bound only',
+      vlm: 'raw FPS remained observational; publication display boundaries are conservative post-evaluations of contiguous complete steps',
+      bindingBlocked: 'the next configured channel was blocked during task binding before measurement',
+      storageBlocked: 'the expansion run was blocked before measurement by its storage precondition',
+    },
+    platforms: platforms.map((platform) => ({
+      platformId: platform.id,
+      platform: platform.name,
+      scope: platform.scope,
+      singleWorkload: platform.cases.filter((item) => item.workload !== 'concurrent-mixed').map(matrixEntry),
+      concurrentMixed: platform.cases.filter((item) => item.workload === 'concurrent-mixed').map(matrixEntry),
+    })),
+    vlmEvidenceStatus: vlm.evidenceStatus,
+    vlmPublicationEvaluation: {
+      policy: vlm.publicationEvaluation,
+      platforms: platforms.map((platform) => {
+        const observation = vlm.observations.find((item) => item.platformId === platform.id);
+        return {
+          platformId: platform.id,
+          publicationBoundary: observation?.publicationBoundary ?? null,
+        };
+      }),
+    },
+  });
+}
+
+function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
+  const zh = locale === 'zh-CN';
+  const targetFpsValues = manifest.controls.smallModelTargetFps;
+  const mixedRows = platforms.map((platform) => {
+    const item = findWorkloadCase(platform, 'concurrent-mixed');
+    const passingTaskBindings = item.lastPassingChannels * 2;
+    return [
+      platformLabel(platform, locale),
+      zh ? '人员检测 + 未佩戴安全帽分析' : 'Person detection + no-safety-helmet analysis',
+      3,
+      item.targetFps,
+      displayBoundary(item),
+      `${passingTaskBindings}/${passingTaskBindings}`,
+    ];
+  });
+  const singleRows = platforms.flatMap((platform) => ['person-detector', 'no-safety-helmet-analysis'].map((workload) => [
+    platform.name,
+    workloadLabel(workload, locale),
+    ...targetFpsValues.map((fps) => displayBoundary(findCase(platform, workload, fps))),
+  ]));
+  const publicationPolicy = manifest.evidence?.vlmPublicationEvaluation;
+  const vlmRows = platforms.map((platform) => {
+    const item = vlmByPlatform.get(platform.id);
+    if (!item) {
+      return [platform.name, '—', '—', '—', zh ? '本轮无 VLM 观测' : 'No VLM observation in this refresh'];
+    }
+    return [
+      platform.name,
+      value(publicationPolicy?.targetFpsPerChannel),
+      percent(publicationPolicy?.minimumActiveRouteFpsRatio),
+      value(item.publicationBoundary?.displayChannels),
+      publicationBoundaryReason(item, locale),
+    ];
+  });
+  const environmentRows = platforms.map((platform) => [
+    platform.name,
+    platform.environment.deviceDescription,
+    platform.environment.os,
+    `${platform.environment.runtime.inference}; ${platform.environment.runtime.media}`,
+    platform.environment.cosmoEdgeInstalledVersion,
+  ]);
+  const linksRows = platforms.map((platform) => [
+    platformLabel(platform, locale),
+    link(`results/${platform.id}/report${zh ? '.zh-CN' : ''}.html`, zh ? '平台汇总' : 'Platform overview'),
+    link(`results/${platform.id}/cases/report${zh ? '.zh-CN' : ''}.html`, `${platform.cases.length} ${zh ? '个用例' : 'cases'}`),
+    link(`results/${platform.id}/single-workload/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务' : 'Single-task'),
+    link(`results/${platform.id}/concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务' : 'Mixed workload'),
+    vlmByPlatform.has(platform.id) ? link(`results/${platform.id}/vlm-observation/report${zh ? '.zh-CN' : ''}.html`, 'VLM') : '—',
+  ]);
+
+  const body = [
+    `<h1>${zh ? 'CosmoEdge 1.1 多平台视频分析容量基准' : 'CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark'}</h1>`,
+    `<p class="lead">${platforms.map((platform) => platformLabel(platform, locale)).join(' · ')}</p>`,
+    notice(zh
+      ? '本报告记录30秒本地循环输入下的短时容量边界，不是长稳、RTSP 韧性或生产推荐配置结论。'
+      : 'This report records 30-second local-loop capacity boundaries. It is not long-run, RTSP-resilience, or recommended production-profile qualification.'),
+    `<h2>${zh ? '并发混合任务矩阵' : 'Concurrent mixed-workload matrix'}</h2>`,
+    `<p>${zh ? '每路包含两个业务任务和三个模型阶段：人员检测为单检测阶段，未佩戴安全帽分析为检测加分类两阶段。' : 'Each channel contains two business tasks across three model stages: one person-detector stage plus detector and classifier stages for no-safety-helmet analysis.'}</p>`,
+    table(
+      zh
+        ? ['平台', '每路任务组成', '模型阶段/路', '目标 FPS/任务', '通过路数', '业务任务绑定']
+        : ['Platform', 'Workload per channel', 'Model stages/ch', 'Target FPS/task', 'Passing channels', 'Business-task bindings'],
+      mixedRows,
+    ),
+    `<h2>${zh ? '单任务容量矩阵' : 'Single-task capacity matrix'}</h2>`,
+    `<p>${boundaryLegend(locale)}</p>`,
+    table(
+      [zh ? '平台' : 'Platform', zh ? '任务' : 'Workload', ...targetFpsValues.map((fps) => `${fps} FPS`)],
+      singleRows,
+    ),
+  ];
+
+  body.push(
+    `<h2>${zh ? 'VLM 性能展示边界' : 'VLM performance display boundaries'}</h2>`,
+    notice(zh
+      ? '原始运行未启用 FPS PASS/FAIL。本表按全路最低 FPS 达到目标值 80% 且非 FPS 窗口完整的连续阶梯进行保守回算；启动敏感步骤不作为性能失败，也不增加展示路数。这不是精确硬件极限或长稳结论。'
+      : 'The raw runs did not enable FPS PASS/FAIL. This table conservatively post-evaluates the contiguous steps where every active route reached 80% of target and the non-FPS window was complete. Startup-sensitive steps are not performance failures and do not increase the displayed boundary. This is not an exact hardware limit or long-running claim.', 'experimental'),
+    table(zh ? ['平台', '目标 FPS/路', '发布参考', '性能展示边界', '边界依据'] : ['Platform', 'Target FPS/ch', 'Publication reference', 'Performance display boundary', 'Boundary basis'], vlmRows),
+    `<h2>${zh ? '证据入口' : 'Evidence entry points'}</h2>`,
+    table(zh ? ['平台', '平台报告', '用例', '单任务', '混合任务', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Mixed workload', 'VLM'], linksRows),
+    `<h2>${zh ? '测试环境' : 'Test environment'}</h2>`,
+    table(zh ? ['平台', '设备', '操作系统', '运行时 / 媒体', 'CosmoEdge'] : ['Platform', 'Device', 'OS', 'Runtime / media', 'CosmoEdge'], environmentRows),
+    `<h2>${zh ? '方法与复现' : 'Method and reproduction'}</h2>`,
+    `<ul><li>${zh ? '小模型测试源码' : 'Small-model source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></li>` +
+      `<li>${zh ? 'VLM 测试源码' : 'VLM source'}: <code>${escapeHtml(manifest.evidence?.vlmRefresh?.sourceCommit ?? '—')}</code> · ${anchor('results/vlm-observations.json', zh ? 'VLM canonical 数据' : 'VLM canonical data')}</li>` +
+      `<li>${zh ? '受控输入 SHA-256' : 'Controlled input SHA-256'}: <code>${escapeHtml(manifest.dataset.sha256)}</code></li>` +
+      `<li>${zh ? '四份小模型 canonical case 数据和一份 VLM canonical 数据是机器可读事实源；HTML、索引和矩阵由构建生成。' : 'Four small-model canonical case datasets plus one VLM canonical dataset are the machine-readable sources of truth; HTML, indexes, and matrices are generated at build time.'}</li></ul>`,
+  );
+
+  return page(locale, zh ? 'CosmoEdge 1.1 多平台容量基准' : 'CosmoEdge 1.1 Multi-Platform Benchmark', rootNav(locale), body.join(''));
+}
+
+function renderPlatformReport(locale, manifest, platform, observation) {
+  const zh = locale === 'zh-CN';
+  const targetFpsValues = manifest.controls.smallModelTargetFps;
+  const singleRows = ['person-detector', 'no-safety-helmet-analysis'].map((workload) => [
+    workloadLabel(workload, locale),
+    ...targetFpsValues.map((fps) => displayBoundary(findCase(platform, workload, fps))),
+  ]);
+  const mixed = findWorkloadCase(platform, 'concurrent-mixed');
+  const body = [
+    `<h1>${escapeHtml(platform.name)} · ${zh ? '短时容量概览' : 'Short-run capacity overview'}</h1>`,
+    notice(zh
+      ? '所有数值均绑定本报告的受控本地循环输入、30秒单级窗口和禁用预览条件。'
+      : 'All values are bound to the controlled local-loop input, 30-second step window, and preview-disabled conditions in this report.'),
+    `<h2>${zh ? '并发混合任务' : 'Concurrent mixed workload'}</h2>`,
+    table(
+      zh ? ['工作负载', '模型阶段/路', '目标 FPS/任务', '通过边界', '设定上限'] : ['Workload', 'Model stages/ch', 'Target FPS/task', 'Observed boundary', 'Configured maximum'],
+      [[workloadLabel(mixed.workload, locale), 3, mixed.targetFps, displayBoundary(mixed), mixed.configuredChannels]],
+    ),
+    `<h2>${zh ? '单任务' : 'Single-task workloads'}</h2>`,
+    `<p>${boundaryLegend(locale)}</p>`,
+    table([zh ? '任务' : 'Workload', ...targetFpsValues.map((fps) => `${fps} FPS`)], singleRows),
+    `<h2>${zh ? '环境' : 'Environment'}</h2>`,
+    table(zh ? ['设备', '架构', '操作系统', '推理运行时', '媒体链路', 'CosmoEdge'] : ['Device', 'Architecture', 'OS', 'Inference runtime', 'Media path', 'CosmoEdge'], [[
+      platform.environment.deviceDescription,
+      platform.environment.architecture,
+      platform.environment.os,
+      platform.environment.runtime.inference,
+      platform.environment.runtime.media,
+      platform.environment.cosmoEdgeInstalledVersion,
+    ]]),
+    `<h2>${zh ? '详细结果' : 'Detailed results'}</h2>`,
+    `<ul><li>${anchor(`cases/report${zh ? '.zh-CN' : ''}.html`, `${platform.cases.length} ${zh ? '个用例' : 'cases'}`)}</li>` +
+      `<li>${anchor(`single-workload/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务汇总' : 'Single-task summary')}</li>` +
+      `<li>${anchor(`concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务汇总' : 'Mixed-workload summary')}</li>` +
+      (observation ? `<li>${anchor(`vlm-observation/report${zh ? '.zh-CN' : ''}.html`, zh ? 'VLM 性能观测' : 'VLM performance observation')}</li>` : '') +
+      `</ul>`,
+    `<p>${zh ? '小模型测试源码' : 'Small-model test source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></p>`,
+  ];
+  return page(locale, `${platform.name} ${zh ? '容量概览' : 'capacity overview'}`, platformNav(locale), body.join(''));
+}
+
+function renderCaseIndex(locale, platform) {
+  const zh = locale === 'zh-CN';
+  const rows = platform.cases.map((item) => [
+    link(`${item.caseId}/report${zh ? '.zh-CN' : ''}.html`, caseLabel(item, locale)),
+    workloadLabel(item.workload, locale),
+    item.targetFps,
+    item.configuredChannels,
+    displayBoundary(item),
+    boundaryKindLabel(item.boundaryKind, locale),
+  ]);
+  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? '受控用例' : 'Controlled cases'}</h1>` +
+    notice(zh
+      ? '这些页面由单一 canonical JSON 确定性生成，不是额外的数据副本。'
+      : 'These pages are generated deterministically from one canonical JSON file; they are not additional data copies.') +
+    table(zh ? ['用例', '任务', '目标 FPS', '设定路数', '观测边界', '边界类型'] : ['Case', 'Workload', 'Target FPS', 'Configured channels', 'Observed boundary', 'Boundary type'], rows);
+  return page(locale, `${platform.name} ${zh ? '用例' : 'cases'}`, caseIndexNav(locale), body);
+}
+
+function renderSingleWorkloadReport(locale, manifest, platform) {
+  const zh = locale === 'zh-CN';
+  const sections = [];
+  for (const workload of ['person-detector', 'no-safety-helmet-analysis']) {
+    sections.push(`<h2>${escapeHtml(workloadLabel(workload, locale))}</h2>`);
+    for (const fps of manifest.controls.smallModelTargetFps) {
+      const item = findCase(platform, workload, fps);
+      if (!item) continue;
+      sections.push(`<h3>${fps} FPS · ${escapeHtml(displayBoundary(item))}</h3>`, renderStepTable(locale, item));
+    }
+  }
+  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? '单任务短时容量' : 'Single-task short-run capacity'}</h1>` +
+    notice(zh ? '结果是短时容量边界，不是生产推荐路数。' : 'Results are short-run capacity boundaries, not recommended production channel counts.') +
+    sections.join('');
+  return page(locale, `${platform.name} ${zh ? '单任务容量' : 'single-task capacity'}`, workloadNav(locale), body);
+}
+
+function renderConcurrentMixedReport(locale, platform) {
+  const zh = locale === 'zh-CN';
+  const item = findWorkloadCase(platform, 'concurrent-mixed');
+  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? '并发混合任务观测' : 'Concurrent mixed-workload observation'}</h1>` +
+    notice(zh
+      ? `每路同时运行人员检测与未佩戴安全帽分析，共两个业务任务、三个模型阶段；每个业务任务 ${item.targetFps} FPS。`
+      : `Each channel runs person detection and two-stage no-safety-helmet analysis concurrently: two business tasks across three model stages, at ${item.targetFps} FPS per business task.`) +
+    renderStepTable(locale, item);
+  return page(locale, `${platform.name} ${zh ? '并发混合任务' : 'concurrent mixed workload'}`, workloadNav(locale), body);
+}
+
+function renderCaseReport(locale, platform, item) {
+  const zh = locale === 'zh-CN';
+  const body = `<h1>${escapeHtml(platform.name)} · ${escapeHtml(caseLabel(item, locale))}</h1>` +
+    `<p class="lead">${item.configuredChannels} ${zh ? '路设定' : 'configured channels'} · ${item.targetFps} FPS · 30 s/${zh ? '级' : 'step'}</p>` +
+    notice(caseNotice(item, locale), item.boundaryKind === 'lower-bound' ? '' : 'experimental') +
+    renderStepTable(locale, item) +
+    `<p>${anchor('../../cases.json', zh ? '查看 canonical JSON' : 'Open canonical JSON')}</p>`;
+  return page(locale, `${platform.name} ${caseLabel(item, locale)}`, individualCaseNav(locale), body);
+}
+
+function renderVlmReport(locale, platform, observation, publicationPolicy) {
+  const zh = locale === 'zh-CN';
+  const rows = observation.steps.map((step) => [
+    step.channels,
+    `${step.holdSeconds} s`,
+    step.targetFpsPerChannel,
+    step.currentRouteFps,
+    `${value(step.minimumActiveRouteFps)} / ${percent(step.minimumActiveRouteFpsRatioObserved)}`,
+    percent(step.averageDiscardRate),
+    percentWhole(step.acceleratorPeakPercent),
+    percentWhole(step.cpuPeakPercent),
+    percentWhole(step.memoryPeakPercent),
+    publicationStepStatus(step, observation, publicationPolicy, locale),
+    status(step.nonFpsGateResult),
+    value(step.stopReason),
+  ]);
+  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? 'VLM 性能观测' : 'VLM performance observation'}</h1>` +
+    notice(zh
+      ? `原始运行未启用 FPS PASS/FAIL。按全路最低 FPS 达到目标值的 ${percent(publicationPolicy?.minimumActiveRouteFpsRatio)} 且非 FPS 窗口完整的连续阶梯保守回算，本发布材料展示 ${observation.publicationBoundary?.displayChannels ?? '—'} 路；启动敏感步骤不作为性能失败。这不是精确容量或长稳结论。`
+      : `The raw run did not enable FPS PASS/FAIL. Conservatively post-evaluating the contiguous steps with every active route at ≥ ${percent(publicationPolicy?.minimumActiveRouteFpsRatio)} of target and a complete non-FPS window gives a ${observation.publicationBoundary?.displayChannels ?? '—'}-channel publication display boundary. Startup-sensitive steps are not performance failures. This is not an exact capacity or long-running claim.`, 'experimental') +
+    table(zh ? ['路数', '时长', '目标 FPS/路', '当前新增路 FPS', '全路最低 FPS / 目标比例', '平均丢弃', '加速器', 'CPU', '内存', '80% 发布参考', '原始非 FPS 门禁', '停止原因'] : ['Channels', 'Hold', 'Target FPS/ch', 'Current new-route FPS', 'Minimum active-route FPS / target ratio', 'Avg discard', 'Accelerator', 'CPU', 'Memory', '80% publication reference', 'Raw non-FPS gate', 'Stop reason'], rows) +
+    `<p>${zh ? '测试源码' : 'Test source'}: <code>${escapeHtml(observation.source?.commit ?? '—')}</code> · ` +
+    `${zh ? '工具补丁' : 'tool patch'}: <code>${escapeHtml(observation.source?.toolPatchSha256 ?? '—')}</code> · ` +
+    `${anchor('../../vlm-observations.json', zh ? 'canonical 数据' : 'canonical data')} · ` +
+    `${anchor('../../../methodology.md', zh ? '方法说明' : 'methodology')}</p>`;
+  return page(locale, `${platform.name} VLM`, workloadNav(locale), body);
+}
+
+function publicationStepStatus(step, observation, publicationPolicy, locale) {
+  const zh = locale === 'zh-CN';
+  const ratio = step?.minimumActiveRouteFpsRatioObserved;
+  if (ratio == null || ratio < publicationPolicy?.minimumActiveRouteFpsRatio) {
+    return zh ? '低于参考线' : 'BELOW';
+  }
+  if (step?.nonFpsGateResult !== 'PASS') {
+    return observation?.source?.protocolClass === 'pre-readiness-startup-sensitive'
+      ? (zh ? '启动数据排除' : 'STARTUP EXCLUDED')
+      : (zh ? '窗口不完整' : 'INCOMPLETE');
+  }
+  return zh ? '达到参考线' : 'MEETS';
+}
+
+function renderStepTable(locale, item) {
+  const zh = locale === 'zh-CN';
+  const mixed = item.workload === 'concurrent-mixed';
+  const rows = item.steps.map((step) => {
+    const base = [step.channels, `${step.holdSeconds} s`];
+    if (mixed) {
+      base.push(value(step.tasks.find((task) => task.name === 'person-detector')?.minimumProcessingFps));
+      base.push(value(step.tasks.find((task) => task.name === 'no-safety-helmet-analysis')?.minimumProcessingFps));
+    } else {
+      base.push(value(step.minimumProcessingFps));
+    }
+    base.push(
+      value(step.maximumCriticalPathLatencyMs),
+      percent(step.averageDiscardRate),
+      percentWhole(step.acceleratorPeakPercent),
+      percentWhole(step.cpuPeakPercent),
+      percentWhole(step.memoryPeakPercent),
+      status(step.result),
+      value(step.failureReason),
+    );
+    return base;
+  });
+  const headers = mixed
+    ? (zh ? ['路数', '时长', '人员检测最低 FPS', '安全帽分析最低 FPS', '关键路径 ms', '平均丢弃', '加速器', 'CPU', '内存', '结果', '原因'] : ['Channels', 'Hold', 'Person min FPS', 'Helmet-analysis min FPS', 'Critical path ms', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Result', 'Reason'])
+    : (zh ? ['路数', '时长', '最低 FPS', '关键路径 ms', '平均丢弃', '加速器', 'CPU', '内存', '结果', '原因'] : ['Channels', 'Hold', 'Minimum FPS', 'Critical path ms', 'Avg discard', 'Accelerator', 'CPU', 'Memory', 'Result', 'Reason']);
+  return table(headers, rows);
+}
+
+function page(locale, title, nav, body) {
+  return `<!doctype html>
+<html lang="${locale}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${escapeHtml(title)}</title>
+  <style>${styles()}</style>
+</head>
+<body><main>${nav}${body}</main></body>
+</html>
+`;
+}
+
+function rootNav(locale) {
+  return `<nav class="report-nav" aria-label="Report navigation"><span>CosmoEdge 1.1</span>${anchor(locale === 'zh-CN' ? 'report.html' : 'report.zh-CN.html', locale === 'zh-CN' ? 'English' : '中文')}</nav>`;
+}
+
+function platformNav(locale) {
+  const zh = locale === 'zh-CN';
+  return `<nav class="report-nav" aria-label="Report navigation">${anchor(`../../report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告' : 'Multi-platform report')}${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</nav>`;
+}
+
+function caseIndexNav(locale) {
+  const zh = locale === 'zh-CN';
+  return `<nav class="report-nav" aria-label="Report navigation">${anchor(`../../../report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告' : 'Multi-platform report')}${anchor(`../report${zh ? '.zh-CN' : ''}.html`, zh ? '平台概览' : 'Platform overview')}${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</nav>`;
+}
+
+function workloadNav(locale) {
+  const zh = locale === 'zh-CN';
+  return `<nav class="report-nav" aria-label="Report navigation">${anchor(`../../../report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告' : 'Multi-platform report')}${anchor(`../report${zh ? '.zh-CN' : ''}.html`, zh ? '平台概览' : 'Platform overview')}${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</nav>`;
+}
+
+function individualCaseNav(locale) {
+  const zh = locale === 'zh-CN';
+  return `<nav class="report-nav" aria-label="Report navigation">${anchor(`../../../../report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告' : 'Multi-platform report')}${anchor(`../../report${zh ? '.zh-CN' : ''}.html`, zh ? '平台概览' : 'Platform overview')}${anchor(`../report${zh ? '.zh-CN' : ''}.html`, zh ? '用例索引' : 'Case index')}${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</nav>`;
+}
+
+function table(headers, rows) {
+  return `<div class="table" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr>${headers.map((item) => `<th>${escapeHtml(item)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((item) => `<td${statusAttribute(item)}>${renderCell(item)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function statusAttribute(item) {
+  return item === 'PASS' || item === '通过' ? ' data-status="PASS"' : item === 'STOP' || item === 'FAIL' || item === '停止' || item === '失败' ? ' data-status="FAIL"' : '';
+}
+
+function renderCell(item) {
+  if (item && typeof item === 'object' && item.__html) return item.__html;
+  return escapeHtml(value(item));
+}
+
+function link(href, text) {
+  return { __html: anchor(href, text) };
+}
+
+function anchor(href, text) {
+  return `<a href="${escapeHtml(href)}">${escapeHtml(text)}</a>`;
+}
+
+function notice(text, extraClass = '') {
+  return `<p class="notice${extraClass ? ` ${extraClass}` : ''}">${escapeHtml(text)}</p>`;
+}
+
+function findCase(platform, workload, fps) {
+  return selectPreferredCase(platform.cases.filter((item) => item.workload === workload && item.targetFps === fps));
+}
+
+function findWorkloadCase(platform, workload) {
+  return selectPreferredCase(platform.cases.filter((item) => item.workload === workload));
+}
+
+function selectPreferredCase(cases) {
+  return cases.reduce((selected, item) => (
+      !selected || item.configuredChannels > selected.configuredChannels ? item : selected
+  ), null);
+}
+
+function matrixEntry(value) {
+  return {
+    caseId: value.caseId,
+    workload: value.workload,
+    targetFps: value.targetFps,
+    configuredChannels: value.configuredChannels,
+    outcome: value.outcome,
+    boundaryKind: value.boundaryKind,
+    lastPassingChannels: value.lastPassingChannels,
+    firstBlockedChannels: value.firstBlockedChannels,
+    display: displayBoundary(value),
+    blockedReason: value.blockedReason,
+  };
+}
+
+function displayBoundary(item) {
+  if (!item) return '—';
+  if (item.boundaryKind === 'lower-bound') return `≥${item.lastPassingChannels}`;
+  if (item.boundaryKind === 'binding-blocked') return `≥${item.lastPassingChannels}*`;
+  if (item.boundaryKind === 'storage-blocked') return `≥${item.lastPassingChannels}†`;
+  return String(item.lastPassingChannels);
+}
+
+function boundaryLegend(locale) {
+  return locale === 'zh-CN'
+    ? '数字是最后通过路数；≥ 表示设定上限仍通过，* 表示下一路绑定阻断，† 表示扩容在测量前被存储前置条件阻断。'
+    : 'Values are last-passing channels; ≥ means the configured maximum still passed, * means the next binding was blocked, and † means expansion was blocked before measurement by storage preconditions.';
+}
+
+function platformLabel(platform, locale) {
+  return platform.scope === 'release-platform' ? platform.name : `${platform.name} (${locale === 'zh-CN' ? '实验' : 'experimental'})`;
+}
+
+function workloadLabel(workload, locale) {
+  const zh = locale === 'zh-CN';
+  if (workload === 'person-detector') return zh ? '人员检测' : 'Person detector';
+  if (workload === 'no-safety-helmet-analysis') return zh ? '未佩戴安全帽分析' : 'No-safety-helmet analysis';
+  if (workload === 'concurrent-mixed') return zh ? '并发混合任务' : 'Concurrent mixed workload';
+  return workload;
+}
+
+function publicationBoundaryReason(observation, locale) {
+  const zh = locale === 'zh-CN';
+  const boundary = observation?.publicationBoundary;
+  const step = observation?.steps?.find((item) => item.channels === boundary?.firstExcludedChannels);
+  if (boundary?.firstExcludedReason === 'below-fps-reference') {
+    return zh
+      ? `${step?.channels ?? '下一'} 路全路最低 ${value(step?.minimumActiveRouteFps)} FPS（${percent(step?.minimumActiveRouteFpsRatioObserved)}）`
+      : `${step?.channels ?? 'Next'} channels: ${value(step?.minimumActiveRouteFps)} FPS minimum across active routes (${percent(step?.minimumActiveRouteFpsRatioObserved)})`;
+  }
+  if (boundary?.firstExcludedReason === 'startup-sensitive-incomplete') {
+    return zh
+      ? `${step?.channels ?? '下一'} 路启动敏感窗口不纳入性能判定`
+      : `${step?.channels ?? 'Next'}-channel startup-sensitive window excluded from performance judgment`;
+  }
+  return zh ? '没有可解释的下一阶梯' : 'No interpretable next step';
+}
+
+function caseLabel(item, locale) {
+  return `${workloadLabel(item.workload, locale)} ${item.targetFps} FPS × ${item.configuredChannels}`;
+}
+
+function boundaryKindLabel(kind, locale) {
+  const zh = locale === 'zh-CN';
+  const labels = {
+    'lower-bound': zh ? '下界' : 'lower bound',
+    'binding-blocked': zh ? '绑定阻断' : 'binding blocked',
+    'storage-blocked': zh ? '存储前置阻断' : 'storage blocked',
+    'performance-stop': zh ? '性能停止' : 'performance stop',
+  };
+  return labels[kind] ?? kind;
+}
+
+function caseNotice(item, locale) {
+  const zh = locale === 'zh-CN';
+  if (item.boundaryKind === 'lower-bound') return zh ? `设定的 ${item.configuredChannels} 路全部通过；这是实测下界，不是极限或推荐值。` : `All ${item.configuredChannels} configured channels passed; this is an observed lower bound, not a maximum or recommendation.`;
+  if (item.boundaryKind === 'binding-blocked') return zh ? `${item.lastPassingChannels} 路完成测量；第 ${item.firstBlockedChannels} 路在绑定时被阻断。` : `${item.lastPassingChannels} channels completed measurement; channel ${item.firstBlockedChannels} was blocked during binding.`;
+  if (item.boundaryKind === 'storage-blocked') return zh ? `${item.lastPassingChannels} 路完成测量；后续扩容在测量前被存储前置条件阻断。` : `${item.lastPassingChannels} channels completed measurement; further expansion was blocked before measurement by storage preconditions.`;
+  return zh ? `最后通过 ${item.lastPassingChannels} 路；${item.blockedReason ?? '后续步骤触发性能停止'}。` : `Last passing point: ${item.lastPassingChannels} channels; ${item.blockedReason ?? 'the following step triggered a performance stop'}.`;
+}
+
+function value(input) {
+  return input === null || input === undefined || input === '' ? '—' : String(input);
+}
+
+function percent(input) {
+  return input === null || input === undefined ? '—' : `${Number((input * 100).toFixed(2))}%`;
+}
+
+function percentWhole(input) {
+  return input === null || input === undefined ? '—' : `${input}%`;
+}
+
+function status(input) {
+  if (input === null || input === undefined) return '—';
+  return String(input);
+}
+
+function escapeHtml(input) {
+  return value(input).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+}
+
+function styles() {
+  return ':root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#f7f9fc;color:#172033;font:15px/1.65,Inter,"Segoe UI",Arial,sans-serif}main{max-width:1120px;margin:auto;padding:42px 24px 70px;min-width:0}h1{font-size:32px;line-height:1.25;margin:0 0 8px;letter-spacing:-.02em}h2{margin-top:38px;line-height:1.35}h3{margin-top:28px}.lead{color:#526071}.notice{background:#eef4ff;border-left:4px solid #2563eb;padding:14px 16px;border-radius:0 8px 8px 0}.experimental{background:#fff7e8;border-left-color:#d97706}.report-nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 22px}.report-nav a,.report-nav span{display:inline-flex;align-items:center;min-height:34px;padding:5px 11px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#1d4ed8;text-decoration:none}.report-nav span{color:#475569;background:#f8fafc}.table{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;border:1px solid #dce3ed;border-radius:8px;margin:12px 0 24px;background:#fff}.table:focus{outline:2px solid #93c5fd;outline-offset:2px}table{border-collapse:collapse;width:100%;background:#fff}th,td{padding:10px 12px;border-bottom:1px solid #dce3ed;text-align:left;vertical-align:top}th{background:#f1f5f9;white-space:nowrap}tr:last-child td{border-bottom:0}td[data-status="PASS"]{color:#047857;font-weight:700}td[data-status="FAIL"]{color:#b91c1c;font-weight:700}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;border:1px solid #e2e8f0;border-radius:10px}code{background:#eef2f7;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere;word-break:break-word}a{color:#1d4ed8}@media(max-width:600px){main{padding:26px 15px 52px}h1{font-size:27px}h2{font-size:22px;margin-top:32px}.table{margin-right:0}.table table{width:max-content;min-width:100%;max-width:none}th,td{padding:9px 11px;min-width:76px}img{margin:18px auto}.report-nav{gap:7px}.report-nav a,.report-nav span{font-size:13px;min-height:32px;padding:4px 9px}}';
+}
+
+function copyCanonicalAssets(sourceRoot, outputRoot, platformIds) {
+  const canonicalCaseFiles = new Set(platformIds.map((id) => `results/${id}/cases.json`));
+  for (const file of walk(sourceRoot)) {
+    const relative = path.relative(sourceRoot, file).replaceAll('\\', '/');
+    if (!canonicalStaticAsset(relative, canonicalCaseFiles)) continue;
+    const target = path.join(outputRoot, ...relative.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(file, target);
+  }
+}
+
+function canonicalStaticAsset(relative, canonicalCaseFiles) {
+  if (relative === 'SHA256SUMS' || /^report(?:\.zh-CN)?\.html$/.test(relative)) return false;
+  if (!relative.startsWith('results/')) return true;
+  return canonicalCaseFiles.has(relative) || relative === 'results/cases.schema.json' || relative === 'results/vlm-observations.json';
+}
+
+function removeGeneratedPages(outputRoot, platformIds) {
+  for (const relative of ['report.html', 'report.zh-CN.html', 'results/cases.json', 'results/index.json', 'results/workload-matrix.json']) {
+    removePath(path.join(outputRoot, ...relative.split('/')));
+  }
+  for (const platform of platformIds) {
+    for (const relative of [
+      `results/${platform}/report.html`,
+      `results/${platform}/report.zh-CN.html`,
+      `results/${platform}/command.txt`,
+      `results/${platform}/environment.json`,
+      `results/${platform}/metrics.json`,
+      `results/${platform}/summary.json`,
+      `results/${platform}/test.log`,
+      `results/${platform}/cases`,
+      `results/${platform}/single-detector`,
+      `results/${platform}/dual-detector`,
+      `results/${platform}/single-workload`,
+      `results/${platform}/concurrent-mixed`,
+      `results/${platform}/vlm-observation`,
+    ]) removePath(path.join(outputRoot, ...relative.split('/')));
+  }
+  removePath(path.join(outputRoot, 'SHA256SUMS'));
+}
+
+function removePath(target) {
+  if (!fs.existsSync(target)) return;
+  fs.rmSync(target, { recursive: true, force: false });
+}
+
+function writeReport(outputRoot, relative, html) {
+  const file = path.join(outputRoot, ...relative.split('/'));
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, html, 'utf8');
+}
+
+export function writeChecksums(outputRoot) {
+  const checksumPath = path.join(outputRoot, 'SHA256SUMS');
+  const lines = walk(outputRoot)
+    .filter((file) => path.resolve(file) !== path.resolve(checksumPath))
+    .map((file) => {
+      const relative = path.relative(outputRoot, file).replaceAll('\\', '/');
+      const digest = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      return `${digest}  ${relative}`;
+    })
+    .sort();
+  fs.writeFileSync(checksumPath, `${lines.join('\n')}\n`, 'utf8');
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function walk(directory) {
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(directory, entry.name);
+    return entry.isDirectory() ? walk(full) : [full];
+  });
+}
+
+function parseArgs(args) {
+  const options = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--source') options.sourceRoot = requireValue(args, ++index, argument);
+    else if (argument === '--output') options.outputRoot = requireValue(args, ++index, argument);
+    else if (argument === '--write-source-checksums') options.writeSourceChecksums = true;
+    else throw new Error(`unknown argument: ${argument}`);
+  }
+  return options;
+}
+
+function requireValue(args, index, option) {
+  if (!args[index]) throw new Error(`${option} requires a value`);
+  return args[index];
+}
