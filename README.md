@@ -197,7 +197,7 @@ The short-run capacity refresh uses source commit `89c73a7464a81ef378686447d7c1e
 | RK3576 | 8 | 16 | 4316 / 4320 | 5.00 / 5.098 | PASS |
 | RV1126B | 4 | 8 | 4316 / 4320 | 4.85 / 5.230 | PASS |
 
-The 72-hour result verifies only these configured channel counts under controlled local-loop input. It is not a maximum-capacity, RTSP-resilience, production-profile, or product-release claim.
+The 72-hour result verifies only these configured channel counts under controlled local-loop input. Disk was observational rather than an executed integrity gate; the public projection uses 99%, while the later 90% safeguard applies only to future runs. Scheduled restart was already disabled and held disabled, so no restart-resilience claim is made. This is not a maximum-capacity, RTSP-resilience, production-profile, or product-release claim.
 
 Each channel concurrently runs two business tasks across three model stages: person detection has one detector stage, while no-safety-helmet analysis has a detector followed by a classifier.
 

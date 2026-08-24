@@ -8,7 +8,7 @@ The HTML reports and aggregate indexes linked from this page are generated durin
 
 ## 72-hour dual-CV configured workload
 
-All four platforms completed the same controlled local-loop observation from the 24-hour checkpoint through 48 and 72 hours. Each channel ran person detection plus no-safety-helmet analysis at 5 FPS per business task. The result qualifies only the configured channel count shown here; it is not a maximum-capacity, RTSP-resilience, or production-profile claim.
+All four platforms completed one continuous 72-hour controlled local-loop observation. Each channel ran person detection plus no-safety-helmet analysis at 5 FPS per business task. The 72-hour endpoint contains the full observation, so 24- and 48-hour intermediate milestones are not published as separate results. The result qualifies only the configured channel count shown here; it is not a maximum-capacity, RTSP-resilience, or production-profile claim.
 
 | Platform | Configured channels | Task bindings | Samples | Min / avg / max FPS | Max discard | Peak CPU / memory / disk | Result |
 | --- | ---: | ---: | ---: | --- | ---: | --- | --- |
@@ -17,9 +17,13 @@ All four platforms completed the same controlled local-loop observation from the
 | RK3576 | 8 | 16 | 4316 / 4320 | 5.00 / 5.098 / 5.17 | 0 | 46% / 30% / 15% | PASS |
 | RV1126B | 4 | 8 | 4316 / 4320 | 4.85 / 5.230 / 5.37 | 0 | 41% / 41% / 47% | PASS |
 
-Every platform retained 4316 of 4320 expected one-minute samples (99.91%). The largest sampling gap was 60.067 seconds, below the 180-second integrity limit; collector errors, incomplete or missing binding samples, open critical incidents, and observed discard were all zero. The evidence therefore shows no mid-run collection interruption under the defined checks. Scheduled restart remained disabled across 80 checks per platform, with no correction required.
+Every platform retained 4316 of 4320 expected one-minute samples (99.91%). The largest sampling gap was 60.067 seconds, below the 180-second integrity limit; collector errors, incomplete or missing binding samples, open critical incidents, and observed discard were all zero. The evidence therefore shows no mid-run collection interruption under the defined checks.
 
-The private monitor record reports completed cleanup, zero remaining owned channels, restored layouts, and no cleanup errors. The historical monitor did not emit a separate final-state artifact, so cleanup is reported with that explicit limitation. See the generated [72-hour report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/dual-cv-72h/report.html) and the [sanitized canonical observation](results/dual-cv-72h.json).
+Disk utilization was observational during execution and was not an integrity gate. BM1688 and CV186X stayed at 96% for all 4316 samples; RK3576 moved from 14% to 15%, and RV1126B from 46% to 47%. The deterministic public projection uses a 99% threshold. The later 90% safeguard applies only to future runs and does not retroactively reclassify this completed observation.
+
+Scheduled restart was already disabled on every platform before the observation and remained disabled across 80 checks per platform, with no failures or corrective writes. No setting restoration was required, and this evidence does not support a restart-resilience claim. The ScenarioBench source snapshot is frozen, but the private controller files changed after the long-running process started and no launch-time controller digest was emitted; launch-time controller bytes are therefore not claimed as frozen.
+
+The private run manifest, suite state, suite summary, per-platform metrics, summaries, reports, restart-guard records, and cleanup records were verified read-only by exact SHA-256. The public canonical result is a deterministic post-run projection from the complete private metrics and final state; raw evidence remains private. The monitor record reports completed cleanup, zero remaining owned channels, restored layouts, and no cleanup errors. It did not emit a separate final-state artifact, so cleanup is reported with that explicit limitation. See the generated [72-hour report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/dual-cv-72h/report.html) and the [sanitized canonical observation](results/dual-cv-72h.json).
 
 ## Concurrent mixed-workload matrix
 

@@ -77,7 +77,6 @@
     },
     "dualCv72Hour": {
       "durationHours": 72,
-      "checkpointsHours": [24, 48, 72],
       "sampleIntervalSeconds": 60,
       "expectedSamples": 4320,
       "minimumCoverageRatio": 0.95,
@@ -87,7 +86,20 @@
       "minimumFpsRatio": 0.8,
       "maximumDiscardRate": 0,
       "businessTasksPerChannel": 2,
-      "modelStagesPerChannel": 3
+      "modelStagesPerChannel": 3,
+      "diskPolicy": {
+        "executedIntegrityGateEnabled": false,
+        "projectionReportThresholdPercent": 99,
+        "futureSafeguardThresholdPercent": 90,
+        "futureSafeguardEffectiveAfterObservation": true,
+        "futureSafeguardAppliedRetroactively": false
+      },
+      "scheduledRestartPolicy": {
+        "initialStateDisabledOnAllPlatforms": true,
+        "controlledState": "disabled",
+        "restorationRequired": false,
+        "restartResilienceClaimAllowed": false
+      }
     }
   },
   "platforms": [
@@ -143,9 +155,12 @@
       "status": "2026-08-24 completed controlled observation",
       "sourceCommit": "44209759f450e96cda265acfa8bc6d17a1138888",
       "sourceTree": "5cbdefeaefaf642407356c22c271ccc7d57935b0",
+      "runManifestSha256": "faaa6fd15c03843d44068b6da9ae7aee30f40f79442d694b7fe9c0a65de6afdb",
+      "suiteStateSha256": "9becf4cb17064ba515646d309b082136f9882f2d85d0449d651317116c21ccd7",
       "suiteSummarySha256": "d28144149aeee9d693e7537b578c736d65daaecdf8d8c81be2047d7767167fb8",
-      "verifiedBundleSha256": "d1ddd726d2934951f91f72fee1d90ff482300124cda9818b79c56ea772a73ea1",
-      "finalReportSidecarSha256": "7305f6811b53f70eb0e2fd52ce14c194da0345205df306fc63e39ca783bf4448",
+      "projectionToolSha256": "7305f6811b53f70eb0e2fd52ce14c194da0345205df306fc63e39ca783bf4448",
+      "projectionKind": "post-run deterministic projection",
+      "monitorLaunchBytesFrozen": false,
       "rawEvidence": "private source artifacts referenced by hashes; not included in the repository",
       "claimClass": "controlled-72h-local-loop-stability-observation",
       "capacityClaimAllowed": false,

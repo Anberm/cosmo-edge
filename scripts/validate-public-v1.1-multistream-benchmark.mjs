@@ -511,9 +511,9 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
   const label = 'canonical dual-CV 72-hour evidence';
   expectObjectKeys(value, [
     'schemaVersion', 'evidenceStatus', 'title', 'claim', 'window', 'source', 'input', 'workload',
-    'integrityPolicy', 'checkpoints', 'observations', 'privateEvidence',
+    'executionPolicy', 'integrityPolicy', 'observations', 'privateEvidence',
   ], label);
-  if (value.schemaVersion !== 1) fail(`${label} schemaVersion must be 1`);
+  if (value.schemaVersion !== 2) fail(`${label} schemaVersion must be 2`);
   if (value.evidenceStatus !== 'completed-private-source') fail(`${label} evidenceStatus is inconsistent`);
   if (value.title !== 'CosmoEdge 1.1 dual-CV 72-hour controlled long-run observation') {
     fail(`${label} title is inconsistent`);
@@ -537,13 +537,13 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
 
   const controls = manifestValue?.controls?.dualCv72Hour;
   expectObjectKeys(controls, [
-    'durationHours', 'checkpointsHours', 'sampleIntervalSeconds', 'expectedSamples', 'minimumCoverageRatio',
+    'durationHours', 'sampleIntervalSeconds', 'expectedSamples', 'minimumCoverageRatio',
     'boundaryGraceSeconds', 'maximumGapSeconds', 'targetFpsPerTask', 'minimumFpsRatio',
-    'maximumDiscardRate', 'businessTasksPerChannel', 'modelStagesPerChannel',
+    'maximumDiscardRate', 'businessTasksPerChannel', 'modelStagesPerChannel', 'diskPolicy',
+    'scheduledRestartPolicy',
   ], 'manifest controls.dualCv72Hour');
   const expectedControls = {
     durationHours: 72,
-    checkpointsHours: [24, 48, 72],
     sampleIntervalSeconds: 60,
     expectedSamples: 4320,
     minimumCoverageRatio: 0.95,
@@ -554,15 +554,28 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
     maximumDiscardRate: 0,
     businessTasksPerChannel: 2,
     modelStagesPerChannel: 3,
+    diskPolicy: {
+      executedIntegrityGateEnabled: false,
+      projectionReportThresholdPercent: 99,
+      futureSafeguardThresholdPercent: 90,
+      futureSafeguardEffectiveAfterObservation: true,
+      futureSafeguardAppliedRetroactively: false,
+    },
+    scheduledRestartPolicy: {
+      initialStateDisabledOnAllPlatforms: true,
+      controlledState: 'disabled',
+      restorationRequired: false,
+      restartResilienceClaimAllowed: false,
+    },
   };
   if (!deepEqual(controls, expectedControls)) fail('manifest controls.dualCv72Hour differ from the frozen observation contract');
 
   expectObjectKeys(value.window, [
-    'startedAt', 'endedAt', 'durationHours', 'checkpointsHours', 'sampleIntervalSeconds', 'expectedSamples',
+    'startedAt', 'endedAt', 'durationHours', 'sampleIntervalSeconds', 'expectedSamples',
     'minimumCoverageRatio', 'boundaryGraceSeconds', 'maximumGapSeconds',
   ], `${label} window`);
   for (const key of [
-    'durationHours', 'checkpointsHours', 'sampleIntervalSeconds', 'expectedSamples', 'minimumCoverageRatio',
+    'durationHours', 'sampleIntervalSeconds', 'expectedSamples', 'minimumCoverageRatio',
     'boundaryGraceSeconds', 'maximumGapSeconds',
   ]) {
     if (!deepEqual(value.window?.[key], controls?.[key])) fail(`${label} window.${key} differs from the manifest controls`);
@@ -584,9 +597,10 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
 
   const refresh = manifestValue?.evidence?.dualCv72HourRefresh;
   expectObjectKeys(refresh, [
-    'status', 'sourceCommit', 'sourceTree', 'suiteSummarySha256', 'verifiedBundleSha256',
-    'finalReportSidecarSha256', 'rawEvidence', 'claimClass', 'capacityClaimAllowed',
-    'rtspResilienceClaimAllowed', 'productReleaseQualified',
+    'status', 'sourceCommit', 'sourceTree', 'runManifestSha256', 'suiteStateSha256',
+    'suiteSummarySha256', 'projectionToolSha256', 'projectionKind', 'monitorLaunchBytesFrozen',
+    'rawEvidence', 'claimClass', 'capacityClaimAllowed', 'rtspResilienceClaimAllowed',
+    'productReleaseQualified',
   ], 'manifest evidence.dualCv72HourRefresh');
   if (manifestValue?.evidence?.dualCv72HourObservation !== 'results/dual-cv-72h.json') {
     fail('manifest evidence.dualCv72HourObservation must point to the canonical 72-hour file');
@@ -596,6 +610,8 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
       || refresh?.capacityClaimAllowed !== false
       || refresh?.rtspResilienceClaimAllowed !== false
       || refresh?.productReleaseQualified !== false
+      || refresh?.projectionKind !== 'post-run deterministic projection'
+      || refresh?.monitorLaunchBytesFrozen !== false
       || typeof refresh?.rawEvidence !== 'string'
       || !refresh.rawEvidence.includes('not included in the repository')) {
     fail('manifest dual-CV 72-hour evidence classification is inconsistent');
@@ -603,15 +619,16 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
   for (const key of ['sourceCommit', 'sourceTree']) {
     if (!sha1(refresh?.[key])) fail(`manifest dualCv72HourRefresh.${key} is invalid`);
   }
-  for (const key of ['suiteSummarySha256', 'verifiedBundleSha256', 'finalReportSidecarSha256']) {
+  for (const key of ['runManifestSha256', 'suiteStateSha256', 'suiteSummarySha256', 'projectionToolSha256']) {
     if (!sha256(refresh?.[key])) fail(`manifest dualCv72HourRefresh.${key} is invalid`);
   }
   const expectedRefresh = {
     sourceCommit: '44209759f450e96cda265acfa8bc6d17a1138888',
     sourceTree: '5cbdefeaefaf642407356c22c271ccc7d57935b0',
+    runManifestSha256: 'faaa6fd15c03843d44068b6da9ae7aee30f40f79442d694b7fe9c0a65de6afdb',
+    suiteStateSha256: '9becf4cb17064ba515646d309b082136f9882f2d85d0449d651317116c21ccd7',
     suiteSummarySha256: 'd28144149aeee9d693e7537b578c736d65daaecdf8d8c81be2047d7767167fb8',
-    verifiedBundleSha256: 'd1ddd726d2934951f91f72fee1d90ff482300124cda9818b79c56ea772a73ea1',
-    finalReportSidecarSha256: '7305f6811b53f70eb0e2fd52ce14c194da0345205df306fc63e39ca783bf4448',
+    projectionToolSha256: '7305f6811b53f70eb0e2fd52ce14c194da0345205df306fc63e39ca783bf4448',
   };
   for (const [key, expected] of Object.entries(expectedRefresh)) {
     if (refresh?.[key] !== expected) fail(`manifest dualCv72HourRefresh.${key} differs from the frozen private evidence`);
@@ -656,6 +673,28 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
     fail(`${label} workload differs from the frozen dual-CV contract`);
   }
 
+  const expectedExecutionPolicy = {
+    monitor: {
+      kind: 'private multi-platform controller',
+      standardScenarioBenchCliUsed: false,
+      launchBytesFrozen: false,
+      identityLimitation: 'The ScenarioBench source snapshot is frozen, but the private controller files were updated after the long-running process started and no launch-time controller digest was emitted.',
+    },
+    disk: {
+      ...controls.diskPolicy,
+      interpretation: 'Disk utilization was observational during this run. The later 90% safeguard applies to future executions and does not retroactively reclassify this observation.',
+    },
+    scheduledRestart: controls.scheduledRestartPolicy,
+    projection: {
+      kind: 'post-run deterministic projection',
+      source: 'complete private metrics.jsonl and final private state',
+      publicArtifactHashesReferToProjection: true,
+    },
+  };
+  if (!deepEqual(value.executionPolicy, expectedExecutionPolicy)) {
+    fail(`${label} execution and post-observation policy boundary is inconsistent`);
+  }
+
   expectObjectKeys(value.integrityPolicy, [
     'minimumFpsRatio', 'maximumDiscardRate', 'minimumSampleCoverageRatio',
     'maximumBoundaryLagSeconds', 'maximumSamplingGapSeconds',
@@ -675,48 +714,62 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
   };
   if (!deepEqual(value.integrityPolicy, expectedIntegrityPolicy)) fail(`${label} integrity policy is inconsistent`);
 
-  if (!Array.isArray(value.checkpoints)
-      || !sameArray(value.checkpoints.map((checkpoint) => checkpoint?.hours), controls?.checkpointsHours ?? [])) {
-    fail(`${label} checkpoint inventory differs from the frozen window`);
-  }
-  const checkpoints = Array.isArray(value.checkpoints) ? value.checkpoints : [];
-  for (const [index, checkpoint] of checkpoints.entries()) {
-    expectObjectKeys(checkpoint, ['hours', 'allPlatformsPass'], `${label} checkpoint ${index + 1}`);
-    if (checkpoint?.allPlatformsPass !== true) fail(`${label} checkpoint ${checkpoint?.hours ?? index + 1} must pass on every platform`);
-  }
-
   const expectedObservations = {
     bm1688: {
       platform: 'BM1688', configuredChannels: 8, businessTaskBindings: 16,
       samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.988, finalSampleLagSeconds: 59.868, maximumGapSeconds: 60.058 },
       fps: { minimum: 4.68, average: 5.086, maximum: 5.49 },
       observedResourcePeaksPercent: { cpu: 30, memory: 44, disk: 96 },
-      summarySha256: '67f2f30e9cfdfaab05e1d7476eab177686875317a1dbc0f1db52b376de81bbb7',
-      reportSha256: 'bca4122862edfc872a25008089942e3f1b901b41c778547e1834f733564fea7f',
+      diskTrendPercent: { first: 96, last: 96, minimum: 96, maximum: 96, changes: 0 },
+      sourceArtifacts: {
+        metricsJsonlSha256: 'bb72a12f3dda0972df5d11f6ad04647fe9c35ba345019ae36a31c7c1cb030fea',
+        summarySha256: '67f2f30e9cfdfaab05e1d7476eab177686875317a1dbc0f1db52b376de81bbb7',
+        reportSha256: 'bca4122862edfc872a25008089942e3f1b901b41c778547e1834f733564fea7f',
+        restartGuardSha256: '7f31ef8cc504eb9636a0f6a10d42f32166638c455dd8fe2897438730e4e96995',
+        cleanupSha256: '6e273e4c0c3feda89c085ff0c62593d024e12ca9eef2527df5f2382ae3562b22',
+      },
     },
     cv186x: {
       platform: 'CV186X', configuredChannels: 8, businessTaskBindings: 16,
       samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.993, finalSampleLagSeconds: 59.868, maximumGapSeconds: 60.061 },
       fps: { minimum: 4.54, average: 5.085, maximum: 5.29 },
       observedResourcePeaksPercent: { cpu: 43, memory: 44, disk: 96 },
-      summarySha256: 'bf14f42fa981f9bb023ca69d7e4881cbcaf04ea85e478e153ed26204182db8f2',
-      reportSha256: '95b387f880957a99e3b1fcf846995de41bca3f4e1c542ceae5a5a28fa1fc537c',
+      diskTrendPercent: { first: 96, last: 96, minimum: 96, maximum: 96, changes: 0 },
+      sourceArtifacts: {
+        metricsJsonlSha256: '940e2ad4333f9fff7d3f60a2009981231d677e76872494d60b9b01bf68ded989',
+        summarySha256: 'bf14f42fa981f9bb023ca69d7e4881cbcaf04ea85e478e153ed26204182db8f2',
+        reportSha256: '95b387f880957a99e3b1fcf846995de41bca3f4e1c542ceae5a5a28fa1fc537c',
+        restartGuardSha256: '669928a6f158b8b45a074eedf277275ebe0ce16f467f95d16ab0d261c3565694',
+        cleanupSha256: '785af78ee73edace6bd85ea4f6b0d2d899c0862b8775a27b0a57148f4490ef0b',
+      },
     },
     rk3576: {
       platform: 'RK3576', configuredChannels: 8, businessTaskBindings: 16,
       samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.99, finalSampleLagSeconds: 59.867, maximumGapSeconds: 60.058 },
       fps: { minimum: 5, average: 5.098, maximum: 5.17 },
       observedResourcePeaksPercent: { cpu: 46, memory: 30, disk: 15 },
-      summarySha256: 'e44698bb3dd6eee21fa6f7fa765f398957cacb697196e6eb037d5946bc1d6fb5',
-      reportSha256: 'fa79c8c08f505881b5bc4f237d01e430d630c2596d17419dda24d93fa354e8ef',
+      diskTrendPercent: { first: 14, last: 15, minimum: 14, maximum: 15, changes: 5 },
+      sourceArtifacts: {
+        metricsJsonlSha256: '7095b3a119bfebe508fb5d4d38306287c928e0467ae6087df434aba499ca7c5b',
+        summarySha256: 'e44698bb3dd6eee21fa6f7fa765f398957cacb697196e6eb037d5946bc1d6fb5',
+        reportSha256: 'fa79c8c08f505881b5bc4f237d01e430d630c2596d17419dda24d93fa354e8ef',
+        restartGuardSha256: '3d9401895a5946583194b5fd41054c40d47a704315412fbe65c0650fee7fbb84',
+        cleanupSha256: '763eaa2e869d3950619d7408092cd59bef8d9d60fdfeb448d808e4052b271dd6',
+      },
     },
     rv1126b: {
       platform: 'RV1126B', configuredChannels: 4, businessTaskBindings: 8,
       samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.995, finalSampleLagSeconds: 59.866, maximumGapSeconds: 60.067 },
       fps: { minimum: 4.85, average: 5.23, maximum: 5.37 },
       observedResourcePeaksPercent: { cpu: 41, memory: 41, disk: 47 },
-      summarySha256: '59517e9b3f609cae55f122f2f3bfe44f33d1497faf3fe536135149c4033218ab',
-      reportSha256: 'e4afff34a773414e009642d8201e2a1148e4f09d9c453901776753e666194734',
+      diskTrendPercent: { first: 46, last: 47, minimum: 46, maximum: 47, changes: 7 },
+      sourceArtifacts: {
+        metricsJsonlSha256: '613675df48c840486b495c7e897742332229c1ff8f2a6b81fa9029bff7516052',
+        summarySha256: '59517e9b3f609cae55f122f2f3bfe44f33d1497faf3fe536135149c4033218ab',
+        reportSha256: 'e4afff34a773414e009642d8201e2a1148e4f09d9c453901776753e666194734',
+        restartGuardSha256: '80aa5e31f8e07adfd595c2b2aa09f2c66d899d06d960ce548bda6109b71bcf6b',
+        cleanupSha256: 'b84a2b820666981fbc72b1175ad14391e873d454ce472115e61c5b6eb75bbeeb',
+      },
     },
   };
   const expectedPlatformIds = definitions.map((definition) => definition.id);
@@ -734,7 +787,8 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
     const expected = expectedObservations[observation?.platformId];
     expectObjectKeys(observation, [
       'platformId', 'platform', 'status', 'configuredChannels', 'businessTaskBindings', 'samples', 'fps',
-      'observedResourcePeaksPercent', 'telemetry', 'integrity', 'timedRestart', 'cleanupRecord', 'sourceArtifacts',
+      'observedResourcePeaksPercent', 'diskTrendPercent', 'telemetry', 'integrity', 'timedRestart',
+      'cleanupRecord', 'sourceArtifacts',
     ], observationLabel);
     if (!expected) {
       fail(`${observationLabel} is not a declared release platform`);
@@ -779,6 +833,24 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
       fail(`${observationLabel} resource peaks must be the frozen percentages in [0, 100]`);
     }
 
+    expectObjectKeys(observation.diskTrendPercent, [
+      'first', 'last', 'minimum', 'maximum', 'changes',
+    ], `${observationLabel} disk trend`);
+    if (!deepEqual(observation.diskTrendPercent, expected.diskTrendPercent)
+        || ['first', 'last', 'minimum', 'maximum']
+          .some((key) => !Number.isFinite(observation.diskTrendPercent?.[key])
+            || observation.diskTrendPercent[key] < 0
+            || observation.diskTrendPercent[key] > 100)
+        || !Number.isInteger(observation.diskTrendPercent?.changes)
+        || observation.diskTrendPercent.changes < 0
+        || observation.diskTrendPercent.minimum > observation.diskTrendPercent.first
+        || observation.diskTrendPercent.minimum > observation.diskTrendPercent.last
+        || observation.diskTrendPercent.maximum < observation.diskTrendPercent.first
+        || observation.diskTrendPercent.maximum < observation.diskTrendPercent.last
+        || observation.diskTrendPercent.maximum !== observation.observedResourcePeaksPercent.disk) {
+      fail(`${observationLabel} frozen disk trend is inconsistent with the observed peak`);
+    }
+
     expectObjectKeys(observation.telemetry, [
       'maximumDiscardRate', 'collectorErrorSamples', 'incompleteBindingSamples', 'missingBindingSamples',
       'openCriticalIncidents',
@@ -791,20 +863,27 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
       fail(`${observationLabel} PASS must retain zero discard, collector, binding, and incident errors`);
     }
 
-    expectObjectKeys(observation.integrity, ['pass', 'checksPassed', 'checksTotal'], `${observationLabel} integrity`);
-    if (observation.integrity?.pass !== true
-        || observation.integrity?.checksPassed !== 8
-        || observation.integrity?.checksTotal !== 8) {
-      fail(`${observationLabel} must pass all eight integrity checks`);
+    expectObjectKeys(observation.integrity, [
+      'monitorPass', 'monitorChecksPassed', 'monitorChecksTotal', 'publicationPass',
+    ], `${observationLabel} integrity`);
+    if (observation.integrity?.monitorPass !== true
+        || observation.integrity?.monitorChecksPassed !== 8
+        || observation.integrity?.monitorChecksTotal !== 8
+        || observation.integrity?.publicationPass !== true) {
+      fail(`${observationLabel} must pass all eight executed monitor checks and the publication projection`);
     }
 
     expectObjectKeys(observation.timedRestart, [
-      'checks', 'failures', 'corrections', 'remainsDisabledByPolicy',
+      'initialState', 'checks', 'failures', 'corrections', 'finalState', 'restorationRequired',
+      'restartResilienceClaimAllowed',
     ], `${observationLabel} timed restart`);
-    if (observation.timedRestart?.checks !== 80
+    if (observation.timedRestart?.initialState !== 'disabled'
+        || observation.timedRestart?.checks !== 80
         || observation.timedRestart?.failures !== 0
         || observation.timedRestart?.corrections !== 0
-        || observation.timedRestart?.remainsDisabledByPolicy !== true) {
+        || observation.timedRestart?.finalState !== 'disabled'
+        || observation.timedRestart?.restorationRequired !== false
+        || observation.timedRestart?.restartResilienceClaimAllowed !== false) {
       fail(`${observationLabel} timed-restart policy evidence is inconsistent`);
     }
 
@@ -822,11 +901,11 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
       fail(`${observationLabel} cleanup result or independent-final-state limitation changed`);
     }
 
-    expectObjectKeys(observation.sourceArtifacts, ['summarySha256', 'reportSha256'], `${observationLabel} source artifacts`);
-    if (observation.sourceArtifacts?.summarySha256 !== expected.summarySha256
-        || observation.sourceArtifacts?.reportSha256 !== expected.reportSha256
-        || !sha256(observation.sourceArtifacts?.summarySha256)
-        || !sha256(observation.sourceArtifacts?.reportSha256)) {
+    expectObjectKeys(observation.sourceArtifacts, [
+      'metricsJsonlSha256', 'summarySha256', 'reportSha256', 'restartGuardSha256', 'cleanupSha256',
+    ], `${observationLabel} source artifacts`);
+    if (!deepEqual(observation.sourceArtifacts, expected.sourceArtifacts)
+        || Object.values(observation.sourceArtifacts ?? {}).some((hash) => !sha256(hash))) {
       fail(`${observationLabel} private source-artifact hashes changed`);
     }
     for (const hash of Object.values(observation.sourceArtifacts ?? {})) {
@@ -836,19 +915,23 @@ function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatf
   }
 
   expectObjectKeys(value.privateEvidence, [
-    'publicationState', 'rawArtifactsIncludedInRepository', 'suiteSummarySha256', 'verifiedBundleSha256',
-    'finalReportSidecarSha256', 'cleanupEvidence', 'cleanupLimitation',
+    'publicationState', 'rawArtifactsIncludedInRepository', 'runManifestSha256', 'suiteStateSha256',
+    'suiteSummarySha256', 'projectionToolSha256', 'verification', 'monitorLaunchBytesFrozen',
+    'cleanupEvidence', 'cleanupLimitation',
   ], `${label} private evidence`);
-  if (value.privateEvidence?.publicationState !== 'prepared-private-not-published'
+  if (value.privateEvidence?.publicationState !== 'verified-private-not-published'
       || value.privateEvidence?.rawArtifactsIncludedInRepository !== false
+      || value.privateEvidence?.runManifestSha256 !== refresh?.runManifestSha256
+      || value.privateEvidence?.suiteStateSha256 !== refresh?.suiteStateSha256
       || value.privateEvidence?.suiteSummarySha256 !== refresh?.suiteSummarySha256
-      || value.privateEvidence?.verifiedBundleSha256 !== refresh?.verifiedBundleSha256
-      || value.privateEvidence?.finalReportSidecarSha256 !== refresh?.finalReportSidecarSha256
+      || value.privateEvidence?.projectionToolSha256 !== refresh?.projectionToolSha256
+      || value.privateEvidence?.verification !== 'The suite files and every platform metrics, summary, report, restart-guard, and cleanup artifact were verified read-only by exact SHA-256 against the private run directory.'
+      || value.privateEvidence?.monitorLaunchBytesFrozen !== false
       || value.privateEvidence?.cleanupEvidence !== 'private monitor record'
       || value.privateEvidence?.cleanupLimitation !== 'The completed monitor recorded cleanup with zero remaining owned channels and no errors, but did not emit an independent final-state artifact.') {
     fail(`${label} private-evidence publication state, hashes, or cleanup limitation is inconsistent`);
   }
-  for (const key of ['suiteSummarySha256', 'verifiedBundleSha256', 'finalReportSidecarSha256']) {
+  for (const key of ['runManifestSha256', 'suiteStateSha256', 'suiteSummarySha256', 'projectionToolSha256']) {
     if (!sha256(value.privateEvidence?.[key])) fail(`${label} privateEvidence.${key} is invalid`);
   }
   return value;
@@ -1106,6 +1189,7 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, d
     claim: dualCv72HourValue?.claim,
     window: dualCv72HourValue?.window,
     workload: dualCv72HourValue?.workload,
+    executionPolicy: dualCv72HourValue?.executionPolicy,
     platforms: platforms.map((platform) => {
       const observation = dualCv72HourByPlatform.get(platform.platformId);
       return {
@@ -1115,7 +1199,9 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, d
         observedSamples: observation?.samples?.observed ?? null,
         minimumFps: observation?.fps?.minimum ?? null,
         averageFps: observation?.fps?.average ?? null,
-        integrityPass: observation?.integrity?.pass ?? null,
+        diskTrendPercent: observation?.diskTrendPercent ?? null,
+        monitorIntegrityPass: observation?.integrity?.monitorPass ?? null,
+        publicationPass: observation?.integrity?.publicationPass ?? null,
         status: observation?.status ?? null,
         report: observation ? `${platform.platformId}/dual-cv-72h/report.html` : null,
         reportZhCn: observation ? `${platform.platformId}/dual-cv-72h/report.zh-CN.html` : null,
