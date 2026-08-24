@@ -64,6 +64,10 @@ RKNN_LICENSE_FILES = {
     "share/licenses/third-party/rockchip-librga/COPYING",
 }
 MODEL_GUARD_TERMS_FILE = "share/licenses/cosmo-model-guard/ARTIFACT-TERMS.md"
+MODEL_GUARD_RUNTIME_FILE = "lib/libcosmo_model_guard.so.2.0.0"
+APPROVED_MODEL_GUARD_RUNTIME_SHA256 = (
+    "74ff8b456548e615882e5c9ee6dd18a51a2caf8124d761d7243dad014310042c"
+)
 REQUIRED_FILES = {
     "bin/version.txt",
     "scripts/common.sh",
@@ -155,7 +159,7 @@ def verify_runtime_license_bundle(
     required = set(REQUIRED_LICENSE_FILES)
     if target_chip in ("rk3576", "rv1126b"):
         required.update(RKNN_LICENSE_FILES)
-    if "lib/libcosmo_model_guard.so.2.0.0" in contents:
+    if MODEL_GUARD_RUNTIME_FILE in contents:
         required.add(MODEL_GUARD_TERMS_FILE)
 
     for filename in required:
@@ -203,11 +207,28 @@ def verify_runtime_license_bundle(
         )
         if any(marker not in rknn_terms for marker in required_rknn_terms):
             raise PackageAuditError("packaged RKNN runtime terms are invalid")
-    if "lib/libcosmo_model_guard.so.2.0.0" in contents and (
-        b"does not grant or alter artifact licensing or redistribution rights"
-        not in contents[MODEL_GUARD_TERMS_FILE]
-    ):
-        raise PackageAuditError("packaged Model Guard artifact terms are invalid")
+    if MODEL_GUARD_RUNTIME_FILE in contents:
+        model_guard_terms = contents[MODEL_GUARD_TERMS_FILE]
+        required_model_guard_terms = (
+            b"does not grant or alter artifact licensing or redistribution rights",
+            b"cosmo-wander-ai/cosmo-edge/issues/59",
+            b"cosmo-wander-ai/cosmo-edge/pull/101",
+            APPROVED_MODEL_GUARD_RUNTIME_SHA256.encode("ascii"),
+        )
+        if any(
+            marker not in model_guard_terms
+            for marker in required_model_guard_terms
+        ):
+            raise PackageAuditError(
+                "packaged Model Guard artifact terms are invalid"
+            )
+        if (
+            content_sha256(contents[MODEL_GUARD_RUNTIME_FILE])
+            != APPROVED_MODEL_GUARD_RUNTIME_SHA256
+        ):
+            raise PackageAuditError(
+                "packaged Model Guard runtime is not the approved artifact"
+            )
 
 
 def verify_model_bundle(

@@ -198,6 +198,9 @@ Separately approved binary artifacts
 
 - Cosmo Model Guard v2 runtime
       Package terms record: share/licenses/cosmo-model-guard/ARTIFACT-TERMS.md
+      Distribution approval: https://github.com/cosmo-wander-ai/cosmo-edge/issues/59
+      Approved integration: https://github.com/cosmo-wander-ai/cosmo-edge/pull/101
+      Runtime SHA-256: 74ff8b456548e615882e5c9ee6dd18a51a2caf8124d761d7243dad014310042c
       Note: Repository Apache-2.0 terms do not replace the artifact owner's
             separately approved redistribution terms.
 

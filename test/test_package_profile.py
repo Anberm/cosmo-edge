@@ -87,6 +87,7 @@ class PackageProfileTests(unittest.TestCase):
         omit_required_file: str | None = None,
         include_model_guard: bool = False,
         rknn_terms: bytes | None = None,
+        model_guard_runtime: bytes | None = None,
     ) -> pathlib.Path:
         root = "cosmo-V1.5.0"
         directory = pathlib.Path(tempfile.mkdtemp())
@@ -146,8 +147,17 @@ class PackageProfileTests(unittest.TestCase):
                     )
                 elif name == verifier.MODEL_GUARD_TERMS_FILE:
                     data = (
-                        b"does not grant or alter artifact licensing or "
-                        b"redistribution rights\n"
+                        REPOSITORY / "prebuild/model-guard-v2/README.md"
+                    ).read_bytes()
+                elif name == verifier.MODEL_GUARD_RUNTIME_FILE:
+                    data = (
+                        model_guard_runtime
+                        if model_guard_runtime is not None
+                        else (
+                            REPOSITORY
+                            / "prebuild/model-guard-v2/lib/"
+                            "libcosmo_model_guard.so.2.0.0"
+                        ).read_bytes()
                     )
                 elif name in verifier.REQUIRED_LICENSE_FILES:
                     data = b"fixture runtime license\n"
@@ -304,6 +314,29 @@ class PackageProfileTests(unittest.TestCase):
         ):
             verifier.verify_package(
                 package, "public-runtime", target_chip="rk3576"
+            )
+
+    def test_model_guard_requires_approved_runtime_identity(self) -> None:
+        approved = self.make_package(
+            "public-runtime",
+            target_chip="bm1688",
+            include_model_guard=True,
+        )
+        verifier.verify_package(
+            approved, "public-runtime", target_chip="bm1688"
+        )
+
+        unapproved = self.make_package(
+            "public-runtime",
+            target_chip="bm1688",
+            include_model_guard=True,
+            model_guard_runtime=b"unapproved-runtime\n",
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "not the approved artifact"
+        ):
+            verifier.verify_package(
+                unapproved, "public-runtime", target_chip="bm1688"
             )
 
     def test_rv1126b_accepts_identified_community_example_bundle(self) -> None:
