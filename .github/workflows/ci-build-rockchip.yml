@@ -15,7 +15,14 @@ on:
       - 'config/rockchip-media/**'
       - 'cmake/**'
       - 'data/resource/aiboxresource_rknn/**'
-      - 'scripts/**'
+      # Shell scripts are packaged or participate in Rockchip build/package
+      # validation. Documentation generators and checks under scripts/*.mjs do
+      # not affect the target artifacts and must not start this two-chip build.
+      - 'scripts/*.sh'
+      - 'scripts/**/*.sh'
+      - 'scripts/install_rkllm_sdk.py'
+      - 'scripts/verify_model_guard_v2_sdk.py'
+      - 'scripts/verify_package_contents.py'
       - 'src/**'
       - 'test/**'
       - 'tools/rknn/**'
