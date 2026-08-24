@@ -215,8 +215,10 @@ COSMO_TARGET_CHIP=rk3576 docker compose -f docker-compose.rockchip.yml \
 5. RK3576 包必须包含 RKLLM 运行库与许可证；RV1126B 包必须不包含它们。
 6. 上传每个芯片的包、身份文件、校验和及三个验证程序，保留 7 天。
 
-RV1126B 矩阵使用 `COSMO_PACKAGE_MODELS=preserve` 验证公开源码和工具链，因为目标模型
-overlay 不进入 Git；可部署候选仍必须在已授权环境中用真实模型重新构建并上板。
+RV1126B 矩阵使用 `COSMO_PACKAGE_MODELS=include`，从已归档的 AGPL-3.0 社区示例
+artifact manifest 生成 overlay，并校验两个模型、bundle 清单和许可证是否随包交付。
+该矩阵只证明公开示例包可构建，不把示例模型描述为商业交付或自研模型。商业/专有模型仍需
+使用独立清单，在已授权环境中构建并上板验证。
 普通构建任务只有 `contents: read`；仅默认分支发布或手动发布任务获得
 `packages: write`，将通过矩阵的共享镜像推送到 GHCR。同一分支的重叠运行会取消旧任务。
 GitHub 托管的 x86 runner 只交叉编译和审计，不执行 aarch64 程序。

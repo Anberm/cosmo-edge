@@ -67,7 +67,7 @@ jobs:
           - chip: rk3576
             models: include
           - chip: rv1126b
-            models: preserve
+            models: include
 
     steps:
       - name: Checkout code

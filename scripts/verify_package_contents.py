@@ -58,6 +58,10 @@ def archive_md5(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def content_sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def verify_archive_name(path: pathlib.Path) -> None:
     match = re.fullmatch(
         r"cosmo-[Vv]\d+\.\d+\.\d+-([0-9a-fA-F]{32})\.tar\.gz", path.name
@@ -103,6 +107,92 @@ def parse_runtime_paths(data: bytes) -> dict[str, str]:
             f"runtime path declaration is missing: {', '.join(sorted(missing))}"
         )
     return values
+
+
+def verify_model_bundle(
+    entries: dict[str, tarfile.TarInfo],
+    contents: dict[str, bytes],
+    target_chip: str | None,
+) -> None:
+    bundle_name = "resource/model-bundle.json"
+    package_rknn_models = {
+        name: data
+        for name, data in contents.items()
+        if name.startswith("resource/models/") and name.endswith("/model.rknn")
+    }
+    if bundle_name not in contents:
+        if target_chip == "rv1126b" and package_rknn_models:
+            raise PackageAuditError(
+                "RV1126B models require a packaged model-bundle manifest"
+            )
+        return
+
+    try:
+        bundle = json.loads(contents[bundle_name].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PackageAuditError("model bundle is not valid UTF-8 JSON") from error
+    if not isinstance(bundle, dict) or bundle.get("schema_version") != 1:
+        raise PackageAuditError("model bundle schema is unsupported")
+    bundle_chip = bundle.get("chip")
+    if target_chip is not None and bundle_chip != target_chip:
+        raise PackageAuditError("model bundle chip does not match the package")
+    usage_scope = bundle.get("usage_scope")
+    if usage_scope not in ("community-example", "external"):
+        raise PackageAuditError("model bundle usage scope is unsupported")
+    if usage_scope == "community-example" and bundle.get("commercial_delivery") is not False:
+        raise PackageAuditError(
+            "community example model bundle must reject commercial delivery"
+        )
+
+    license_record = bundle.get("license")
+    if not isinstance(license_record, dict):
+        raise PackageAuditError("model bundle license record is missing")
+    license_source = license_record.get("path")
+    license_sha = license_record.get("sha256")
+    license_spdx = license_record.get("spdx")
+    if not all(
+        isinstance(value, str) and value
+        for value in (license_source, license_sha, license_spdx)
+    ):
+        raise PackageAuditError("model bundle license record is incomplete")
+    license_basename = pathlib.PurePosixPath(license_source).name
+    packaged_license = f"resource/licenses/model-assets/{license_basename}"
+    if packaged_license not in contents:
+        raise PackageAuditError("packaged model license is missing")
+    if content_sha256(contents[packaged_license]) != license_sha:
+        raise PackageAuditError("packaged model license hash mismatch")
+
+    model_records = bundle.get("models")
+    if not isinstance(model_records, list) or not model_records:
+        raise PackageAuditError("model bundle has no model records")
+    expected_models: set[str] = set()
+    seen_names: set[str] = set()
+    for index, record in enumerate(model_records):
+        if not isinstance(record, dict):
+            raise PackageAuditError(f"model bundle record {index} is invalid")
+        model_name = record.get("model")
+        package_directory = record.get("package_directory")
+        artifact = record.get("artifact")
+        if (
+            not isinstance(model_name, str)
+            or not model_name
+            or model_name in seen_names
+            or not isinstance(package_directory, str)
+            or not re.fullmatch(r"[A-Za-z0-9._-]+", package_directory)
+            or not isinstance(artifact, dict)
+        ):
+            raise PackageAuditError(f"model bundle record {index} is incomplete")
+        seen_names.add(model_name)
+        package_model = f"resource/models/{package_directory}/model.rknn"
+        expected_models.add(package_model)
+        if package_model not in contents:
+            raise PackageAuditError(f"packaged model is missing: {model_name}")
+        if artifact.get("size_bytes") != len(contents[package_model]):
+            raise PackageAuditError(f"packaged model size mismatch: {model_name}")
+        if artifact.get("sha256") != content_sha256(contents[package_model]):
+            raise PackageAuditError(f"packaged model hash mismatch: {model_name}")
+    if expected_models != set(package_rknn_models):
+        raise PackageAuditError("packaged RKNN model inventory differs from its bundle")
 
 
 def verify_package(
@@ -216,6 +306,8 @@ def verify_package(
             )
     elif runtime_paths["COSMO_PACKAGE_DATA_DIR"] not in RUNTIME_DATA_DIRS.values():
         raise PackageAuditError("runtime data directory is unsupported")
+
+    verify_model_bundle(entries, contents, effective_chip)
 
     if target_chip is not None:
         if target_chip in ("rk3576", "rv1126b"):

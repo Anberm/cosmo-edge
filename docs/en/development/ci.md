@@ -222,9 +222,13 @@ The workflow applies these checks:
 6. Uploads each package, identity files, checksum, and validation programs for
    7 days.
 
-The RV1126B matrix uses `COSMO_PACKAGE_MODELS=preserve` because its target model
-overlay is not committed. A deployable candidate must still be rebuilt with
-real models in an authorized environment and run on the board. Normal jobs have
+The RV1126B matrix uses `COSMO_PACKAGE_MODELS=include` and generates its overlay
+from the archived AGPL-3.0 community example artifact manifest. It verifies
+that both models, the bundle manifest, and the license reach the package. This
+proves only that the public example package is buildable; it does not describe
+those examples as commercial deliverables or proprietary models. Commercial or
+proprietary models still require an independent manifest, an authorized build,
+and board validation. Normal jobs have
 only `contents: read`; only a default-branch or manually dispatched publication
 job receives `packages: write` and pushes a matrix-qualified shared image to
 GHCR. The hosted x86 runner does not execute aarch64 programs.
