@@ -38,23 +38,40 @@ export function generateBenchmarkPages({ sourceRoot = defaultSourceRoot, outputR
   const platforms = platformDefs.map((definition) => loadPlatform(sourceRoot, definition));
   const vlm = readJson(path.join(sourceRoot, 'results', 'vlm-observations.json'));
   const vlmByPlatform = new Map(vlm.observations.map((item) => [item.platformId, item]));
+  const longRun = readJson(path.join(sourceRoot, 'results', 'dual-cv-72h.json'));
+  const longRunByPlatform = new Map(longRun.observations.map((item) => [item.platformId, item]));
   const caseCount = platforms.reduce((count, item) => count + item.cases.length, 0);
   let reportCount = 0;
 
   removeGeneratedPages(outputRoot, platforms.map((item) => item.id));
-  writeDerivedIndexes(outputRoot, manifest, platforms, vlm);
+  writeDerivedIndexes(outputRoot, manifest, platforms, vlm, longRun);
 
   for (const locale of ['en', 'zh-CN']) {
     const suffix = locale === 'zh-CN' ? '.zh-CN.html' : '.html';
-    writeReport(outputRoot, `report${suffix}`, renderRootReport(locale, manifest, platforms, vlmByPlatform));
-    reportCount += 1;
+    writeReport(outputRoot, `report${suffix}`, renderRootReport(locale, manifest, platforms, vlmByPlatform, longRun));
+    writeReport(outputRoot, `results/dual-cv-72h/report${suffix}`, renderLongRunReport(locale, longRun, platforms));
+    reportCount += 2;
 
     for (const platform of platforms) {
-      writeReport(outputRoot, `results/${platform.id}/report${suffix}`, renderPlatformReport(locale, manifest, platform, vlmByPlatform.get(platform.id)));
+      const longRunObservation = longRunByPlatform.get(platform.id);
+      writeReport(
+        outputRoot,
+        `results/${platform.id}/report${suffix}`,
+        renderPlatformReport(locale, manifest, platform, vlmByPlatform.get(platform.id), longRunObservation),
+      );
       writeReport(outputRoot, `results/${platform.id}/cases/report${suffix}`, renderCaseIndex(locale, platform));
       writeReport(outputRoot, `results/${platform.id}/single-workload/report${suffix}`, renderSingleWorkloadReport(locale, manifest, platform));
       writeReport(outputRoot, `results/${platform.id}/concurrent-mixed/report${suffix}`, renderConcurrentMixedReport(locale, platform));
       reportCount += 4;
+
+      if (longRunObservation) {
+        writeReport(
+          outputRoot,
+          `results/${platform.id}/dual-cv-72h/report${suffix}`,
+          renderPlatformLongRunReport(locale, longRun, platform, longRunObservation),
+        );
+        reportCount += 1;
+      }
 
       const observation = vlmByPlatform.get(platform.id);
       if (observation) {
@@ -95,9 +112,10 @@ function loadPlatform(sourceRoot, definition) {
   };
 }
 
-function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
+function writeDerivedIndexes(outputRoot, manifest, platforms, vlm, longRun) {
   const resultsRoot = path.join(outputRoot, 'results');
   const vlmPlatformIds = new Set(vlm.observations.map((item) => item.platformId));
+  const longRunByPlatform = new Map(longRun.observations.map((item) => [item.platformId, item]));
   writeJson(path.join(resultsRoot, 'index.json'), {
     schemaVersion: 3,
     benchmark: 'CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark',
@@ -106,6 +124,12 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
     generatedAt: manifest.release.frozenAt,
     primaryClaim: 'observed short-run local-loop capacity boundary',
     caseCount: platforms.reduce((count, platform) => count + platform.cases.length, 0),
+    longRun: {
+      canonical: 'dual-cv-72h.json',
+      report: 'dual-cv-72h/report.html',
+      reportZhCn: 'dual-cv-72h/report.zh-CN.html',
+      claimClass: longRun.claim.class,
+    },
     platforms: platforms.map((platform) => ({
       platformId: platform.id,
       platform: platform.name,
@@ -116,6 +140,9 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
       report: `${platform.id}/report.html`,
       reportZhCn: `${platform.id}/report.zh-CN.html`,
       vlmObservation: vlmPlatformIds.has(platform.id) ? 'vlm-observations.json' : null,
+      longRunObservation: longRunByPlatform.has(platform.id) ? 'dual-cv-72h.json' : null,
+      longRunReport: longRunByPlatform.has(platform.id) ? `${platform.id}/dual-cv-72h/report.html` : null,
+      longRunReportZhCn: longRunByPlatform.has(platform.id) ? `${platform.id}/dual-cv-72h/report.zh-CN.html` : null,
     })),
   });
 
@@ -170,6 +197,7 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
       singleWorkload: 'last passing short-run channel count under enabled CV gates',
       concurrentMixed: 'highest configured short-run point passed; observed lower bound only',
       vlm: 'raw FPS remained observational; publication display boundaries are conservative post-evaluations of contiguous complete steps',
+      longRun: 'configured dual-CV workload completed a controlled 72-hour local-loop observation; this is not a capacity, RTSP-resilience, production-profile, or product-release claim',
       bindingBlocked: 'the next configured channel was blocked during task binding before measurement',
       storageBlocked: 'the expansion run was blocked before measurement by its storage precondition',
     },
@@ -191,12 +219,35 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm) {
         };
       }),
     },
+    longRunObservation: {
+      canonical: 'dual-cv-72h.json',
+      evidenceStatus: longRun.evidenceStatus,
+      claim: longRun.claim,
+      window: longRun.window,
+      workload: longRun.workload,
+      platforms: platforms.map((platform) => {
+        const observation = longRunByPlatform.get(platform.id);
+        return {
+          platformId: platform.id,
+          configuredChannels: observation?.configuredChannels ?? null,
+          businessTaskBindings: observation?.businessTaskBindings ?? null,
+          observedSamples: observation?.samples?.observed ?? null,
+          minimumFps: observation?.fps?.minimum ?? null,
+          averageFps: observation?.fps?.average ?? null,
+          integrityPass: observation?.integrity?.pass ?? null,
+          status: observation?.status ?? null,
+          report: observation ? `${platform.id}/dual-cv-72h/report.html` : null,
+          reportZhCn: observation ? `${platform.id}/dual-cv-72h/report.zh-CN.html` : null,
+        };
+      }),
+    },
   });
 }
 
-function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
+function renderRootReport(locale, manifest, platforms, vlmByPlatform, longRun) {
   const zh = locale === 'zh-CN';
   const targetFpsValues = manifest.controls.smallModelTargetFps;
+  const longRunByPlatform = new Map(longRun.observations.map((item) => [item.platformId, item]));
   const mixedRows = platforms.map((platform) => {
     const item = findWorkloadCase(platform, 'concurrent-mixed');
     const passingTaskBindings = item.lastPassingChannels * 2;
@@ -241,6 +292,9 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
     link(`results/${platform.id}/cases/report${zh ? '.zh-CN' : ''}.html`, `${platform.cases.length} ${zh ? '个用例' : 'cases'}`),
     link(`results/${platform.id}/single-workload/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务' : 'Single-task'),
     link(`results/${platform.id}/concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务' : 'Mixed workload'),
+    longRunByPlatform.has(platform.id)
+      ? link(`results/${platform.id}/dual-cv-72h/report${zh ? '.zh-CN' : ''}.html`, zh ? '72 小时长稳' : '72-hour long run')
+      : '—',
     vlmByPlatform.has(platform.id) ? link(`results/${platform.id}/vlm-observation/report${zh ? '.zh-CN' : ''}.html`, 'VLM') : '—',
   ]);
 
@@ -248,8 +302,8 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
     `<h1>${zh ? 'CosmoEdge 1.1 多平台视频分析容量基准' : 'CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark'}</h1>`,
     `<p class="lead">${platforms.map((platform) => platformLabel(platform, locale)).join(' · ')}</p>`,
     notice(zh
-      ? '本报告记录30秒本地循环输入下的短时容量边界，不是长稳、RTSP 韧性或生产推荐配置结论。'
-      : 'This report records 30-second local-loop capacity boundaries. It is not long-run, RTSP-resilience, or recommended production-profile qualification.'),
+      ? '短时章节记录30秒本地循环输入下的容量边界；另有独立的72小时受控本地循环长稳观测。两者都不是 RTSP 韧性、生产推荐配置或产品发布资格结论。'
+      : 'The short-run sections record 30-second local-loop capacity boundaries; a separate section records the controlled 72-hour local-loop observation. Neither qualifies RTSP resilience, a recommended production profile, or product release.'),
     `<h2>${zh ? '并发混合任务矩阵' : 'Concurrent mixed-workload matrix'}</h2>`,
     `<p>${zh ? '每路包含两个业务任务和三个模型阶段：人员检测为单检测阶段，未佩戴安全帽分析为检测加分类两阶段。' : 'Each channel contains two business tasks across three model stages: one person-detector stage plus detector and classifier stages for no-safety-helmet analysis.'}</p>`,
     table(
@@ -264,6 +318,15 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
       [zh ? '平台' : 'Platform', zh ? '任务' : 'Workload', ...targetFpsValues.map((fps) => `${fps} FPS`)],
       singleRows,
     ),
+    `<h2>${zh ? '72 小时受控长稳观测' : '72-hour controlled long-run observation'}</h2>`,
+    notice(zh
+      ? '四个平台均在设定路数下完成72小时、5 FPS/任务的双 CV 本地循环观测。PASS 只说明该设定负载和完整性门禁通过，不表示容量上限、RTSP 韧性、生产配置或产品发布资格。'
+      : 'All four platforms completed the configured dual-CV local-loop workload for 72 hours at 5 FPS per task. PASS applies only to this configured workload and its integrity gates; it is not a capacity limit, RTSP-resilience, production-profile, or product-release claim.'),
+    table(
+      longRunMatrixHeaders(locale),
+      longRunMatrixRows(locale, platforms, longRunByPlatform, 'results/', longRun.workload.targetFpsPerTask),
+    ),
+    `<p>${anchor(`results/dual-cv-72h/report${zh ? '.zh-CN' : ''}.html`, zh ? '打开 72 小时多平台报告' : 'Open the 72-hour multi-platform report')} · ${anchor('results/dual-cv-72h.json', zh ? 'canonical 数据' : 'canonical data')}</p>`,
   ];
 
   body.push(
@@ -273,20 +336,21 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform) {
       : 'The raw runs did not enable FPS PASS/FAIL. This table conservatively post-evaluates the contiguous steps where every active route reached 80% of target and the non-FPS window was complete. Startup-sensitive steps are not performance failures and do not increase the displayed boundary. This is not an exact hardware limit or long-running claim.', 'experimental'),
     table(zh ? ['平台', '目标 FPS/路', '发布参考', '性能展示边界', '边界依据'] : ['Platform', 'Target FPS/ch', 'Publication reference', 'Performance display boundary', 'Boundary basis'], vlmRows),
     `<h2>${zh ? '证据入口' : 'Evidence entry points'}</h2>`,
-    table(zh ? ['平台', '平台报告', '用例', '单任务', '混合任务', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Mixed workload', 'VLM'], linksRows),
+    table(zh ? ['平台', '平台报告', '用例', '单任务', '混合任务', '72 小时', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Mixed workload', '72-hour', 'VLM'], linksRows),
     `<h2>${zh ? '测试环境' : 'Test environment'}</h2>`,
     table(zh ? ['平台', '设备', '操作系统', '运行时 / 媒体', 'CosmoEdge'] : ['Platform', 'Device', 'OS', 'Runtime / media', 'CosmoEdge'], environmentRows),
     `<h2>${zh ? '方法与复现' : 'Method and reproduction'}</h2>`,
     `<ul><li>${zh ? '小模型测试源码' : 'Small-model source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></li>` +
       `<li>${zh ? 'VLM 测试源码' : 'VLM source'}: <code>${escapeHtml(manifest.evidence?.vlmRefresh?.sourceCommit ?? '—')}</code> · ${anchor('results/vlm-observations.json', zh ? 'VLM canonical 数据' : 'VLM canonical data')}</li>` +
+      `<li>${zh ? '72 小时测试源码' : '72-hour source'}: <code>${escapeHtml(longRun.source.commit)}</code> · ${anchor('results/dual-cv-72h.json', zh ? '长稳 canonical 数据' : 'long-run canonical data')}</li>` +
       `<li>${zh ? '受控输入 SHA-256' : 'Controlled input SHA-256'}: <code>${escapeHtml(manifest.dataset.sha256)}</code></li>` +
-      `<li>${zh ? '四份小模型 canonical case 数据和一份 VLM canonical 数据是机器可读事实源；HTML、索引和矩阵由构建生成。' : 'Four small-model canonical case datasets plus one VLM canonical dataset are the machine-readable sources of truth; HTML, indexes, and matrices are generated at build time.'}</li></ul>`,
+      `<li>${zh ? '四份小模型 canonical case 数据、一份 VLM canonical 数据和一份72小时长稳 canonical 数据是机器可读事实源；HTML、索引和矩阵由构建生成。' : 'Four small-model canonical case datasets, one VLM canonical dataset, and one 72-hour long-run canonical dataset are the machine-readable sources of truth; HTML, indexes, and matrices are generated at build time.'}</li></ul>`,
   );
 
   return page(locale, zh ? 'CosmoEdge 1.1 多平台容量基准' : 'CosmoEdge 1.1 Multi-Platform Benchmark', rootNav(locale), body.join(''));
 }
 
-function renderPlatformReport(locale, manifest, platform, observation) {
+function renderPlatformReport(locale, manifest, platform, observation, longRunObservation) {
   const zh = locale === 'zh-CN';
   const targetFpsValues = manifest.controls.smallModelTargetFps;
   const singleRows = ['person-detector', 'no-safety-helmet-analysis'].map((workload) => [
@@ -320,6 +384,7 @@ function renderPlatformReport(locale, manifest, platform, observation) {
     `<ul><li>${anchor(`cases/report${zh ? '.zh-CN' : ''}.html`, `${platform.cases.length} ${zh ? '个用例' : 'cases'}`)}</li>` +
       `<li>${anchor(`single-workload/report${zh ? '.zh-CN' : ''}.html`, zh ? '单任务汇总' : 'Single-task summary')}</li>` +
       `<li>${anchor(`concurrent-mixed/report${zh ? '.zh-CN' : ''}.html`, zh ? '混合任务汇总' : 'Mixed-workload summary')}</li>` +
+      (longRunObservation ? `<li>${anchor(`dual-cv-72h/report${zh ? '.zh-CN' : ''}.html`, zh ? '72 小时双 CV 长稳观测' : '72-hour dual-CV long-run observation')}</li>` : '') +
       (observation ? `<li>${anchor(`vlm-observation/report${zh ? '.zh-CN' : ''}.html`, zh ? 'VLM 性能观测' : 'VLM performance observation')}</li>` : '') +
       `</ul>`,
     `<p>${zh ? '小模型测试源码' : 'Small-model test source'}: <code>${escapeHtml(manifest.sourceBaseline.commit)}</code></p>`,
@@ -371,6 +436,147 @@ function renderConcurrentMixedReport(locale, platform) {
       : `Each channel runs person detection and two-stage no-safety-helmet analysis concurrently: two business tasks across three model stages, at ${item.targetFps} FPS per business task.`) +
     renderStepTable(locale, item);
   return page(locale, `${platform.name} ${zh ? '并发混合任务' : 'concurrent mixed workload'}`, workloadNav(locale), body);
+}
+
+function renderLongRunReport(locale, longRun, platforms) {
+  const zh = locale === 'zh-CN';
+  const suffix = zh ? '.zh-CN' : '';
+  const observations = new Map(longRun.observations.map((item) => [item.platformId, item]));
+  const policy = longRun.integrityPolicy;
+  const body = `<h1>${zh ? 'CosmoEdge 1.1 · 72 小时受控长稳观测' : 'CosmoEdge 1.1 · 72-hour controlled long-run observation'}</h1>` +
+    `<p class="lead">${zh ? '人员检测 + 未佩戴安全帽分析 · 本地循环输入 · 5 FPS/任务' : 'Person detection + no-safety-helmet analysis · local-loop input · 5 FPS/task'}</p>` +
+    notice(longRunClaimNotice(locale)) +
+    `<h2>${zh ? '多平台结果' : 'Multi-platform results'}</h2>` +
+    table(
+      longRunMatrixHeaders(locale),
+      longRunMatrixRows(locale, platforms, observations, '../', longRun.workload.targetFpsPerTask),
+    ) +
+    `<h2>${zh ? '固定协议' : 'Fixed protocol'}</h2>` +
+    table(
+      zh ? ['项目', '设定'] : ['Item', 'Setting'],
+      [
+        [zh ? '观测窗口' : 'Observation window', `${longRun.window.startedAt} — ${longRun.window.endedAt} (${longRun.window.durationHours} h)`],
+        [zh ? '检查点' : 'Checkpoints', longRun.window.checkpointsHours.map((hours) => `${hours} h`).join(' · ')],
+        [zh ? '采样' : 'Sampling', `${longRun.window.sampleIntervalSeconds} s · ${longRun.window.expectedSamples} ${zh ? '个理论样本' : 'expected samples'}`],
+        [zh ? '完整性门禁' : 'Integrity gates', `${zh ? '覆盖率' : 'coverage'} ≥ ${percent(policy.minimumSampleCoverageRatio)} · ${zh ? '首尾延迟和最大间隔' : 'boundary lag and maximum gap'} ≤ ${policy.maximumSamplingGapSeconds} s`],
+        [zh ? '工作负载' : 'Workload', `${longRun.workload.businessTasksPerChannel} ${zh ? '个业务任务/路' : 'business tasks/ch'} · ${longRun.workload.modelStagesPerChannel} ${zh ? '个模型阶段/路' : 'model stages/ch'} · ${longRun.workload.targetFpsPerTask} FPS/${zh ? '任务' : 'task'}`],
+        [zh ? '输入' : 'Input', `${longRun.input.codec} ${longRun.input.width}×${longRun.input.height} @ ${longRun.input.sourceFps} FPS · SHA-256 ${longRun.input.sha256}`],
+        [zh ? '预览负载' : 'Preview load', longRun.input.previewLoad ? (zh ? '开启' : 'enabled') : (zh ? '关闭' : 'disabled')],
+      ],
+    ) +
+    `<h2>${zh ? '解释边界' : 'Interpretation boundaries'}</h2>` +
+    notice(zh
+      ? '观测窗口内最大采样间隔保持在正常60秒采样周期附近，未发现中途采集断档。该事实不评价测量窗口外的管理连接，也不替代 RTSP、准确率或生产环境验收。'
+      : 'The maximum in-window sampling gap stayed near the normal 60-second cadence, so no mid-window collection outage was observed. This does not evaluate management connectivity outside the measured window or replace RTSP, accuracy, or production acceptance.') +
+    notice(zh
+      ? '清理记录显示已无本次测试拥有的通道且没有清理错误，但未生成独立 final-state 侧车；因此报告不把该缺失文件表述为额外的终态证明。'
+      : 'The cleanup record reports no remaining run-owned channels and no cleanup errors, but no independent final-state sidecar was emitted; the report therefore does not present that missing artifact as additional final-state proof.', 'experimental') +
+    `<p>${anchor(`../dual-cv-72h.json`, zh ? '打开 canonical 数据' : 'Open canonical data')} · ${anchor(`../../methodology.md`, zh ? '方法说明' : 'methodology')} · ${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</p>` +
+    `<h2>${zh ? '平台详情' : 'Platform details'}</h2><ul>` +
+    platforms.map((platform) => `<li>${anchor(`../${platform.id}/dual-cv-72h/report${suffix}.html`, `${platform.name} · ${zh ? '72 小时报告' : '72-hour report'}`)}</li>`).join('') +
+    `</ul>`;
+  return page(locale, zh ? 'CosmoEdge 1.1 72 小时长稳观测' : 'CosmoEdge 1.1 72-hour long-run observation', longRunNav(locale), body);
+}
+
+function renderPlatformLongRunReport(locale, longRun, platform, observation) {
+  const zh = locale === 'zh-CN';
+  const samples = observation.samples;
+  const telemetry = observation.telemetry;
+  const resources = observation.observedResourcePeaksPercent;
+  const cleanup = observation.cleanupRecord;
+  const restart = observation.timedRestart;
+  const body = `<h1>${escapeHtml(platform.name)} · ${zh ? '72 小时双 CV 长稳观测' : '72-hour dual-CV long-run observation'}</h1>` +
+    `<p class="lead">${observation.configuredChannels} ${zh ? '路' : 'channels'} · ${observation.businessTaskBindings} ${zh ? '个业务任务绑定' : 'business-task bindings'} · ${longRun.workload.targetFpsPerTask} FPS/${zh ? '任务' : 'task'}</p>` +
+    notice(longRunClaimNotice(locale)) +
+    `<h2>${zh ? '观测结果' : 'Observation result'}</h2>` +
+    table(
+      zh ? ['设定路数', '任务绑定', '时长', '目标 FPS/任务', '最低 / 平均 / 最高 FPS', '结果'] : ['Configured channels', 'Task bindings', 'Duration', 'Target FPS/task', 'Minimum / average / maximum FPS', 'Result'],
+      [[observation.configuredChannels, observation.businessTaskBindings, `${longRun.window.durationHours} h`, longRun.workload.targetFpsPerTask, `${observation.fps.minimum} / ${observation.fps.average} / ${observation.fps.maximum}`, observation.status]],
+    ) +
+    `<h2>${zh ? '采样连续性与完整性' : 'Sampling continuity and integrity'}</h2>` +
+    table(
+      zh ? ['观测 / 理论样本', '覆盖率', '首样本延迟', '尾样本延迟', '最大间隔', '采集错误', '绑定不完整', '绑定遥测缺失', '未关闭严重事故', '完整性'] : ['Observed / expected samples', 'Coverage', 'First-sample lag', 'Final-sample lag', 'Maximum gap', 'Collector errors', 'Incomplete bindings', 'Missing binding telemetry', 'Open critical incidents', 'Integrity'],
+      [[
+        `${samples.observed} / ${samples.expected}`,
+        percent(samples.coverageRatio),
+        `${samples.firstSampleLagSeconds} s`,
+        `${samples.finalSampleLagSeconds} s`,
+        `${samples.maximumGapSeconds} s`,
+        telemetry.collectorErrorSamples,
+        telemetry.incompleteBindingSamples,
+        telemetry.missingBindingSamples,
+        telemetry.openCriticalIncidents,
+        observation.integrity.pass ? `PASS (${observation.integrity.checksPassed}/${observation.integrity.checksTotal})` : 'FAIL',
+      ]],
+    ) +
+    `<h2>${zh ? '负载与资源' : 'Workload and resources'}</h2>` +
+    table(
+      zh ? ['最大丢弃率', 'CPU 峰值', '内存峰值', '磁盘峰值', '定时重启检查 / 失败 / 修正'] : ['Maximum discard rate', 'Peak CPU', 'Peak memory', 'Peak disk', 'Timed-restart checks / failures / corrections'],
+      [[percent(telemetry.maximumDiscardRate), percentWhole(resources.cpu), percentWhole(resources.memory), percentWhole(resources.disk), `${restart.checks} / ${restart.failures} / ${restart.corrections}`]],
+    ) +
+    `<h2>${zh ? '清理记录' : 'Cleanup record'}</h2>` +
+    table(
+      zh ? ['状态', '错误', '停用任务绑定', '请求删除通道', '剩余本次通道', '布局恢复', '独立终态侧车'] : ['Status', 'Errors', 'Disabled task bindings', 'Requested channel deletions', 'Remaining run-owned channels', 'Layouts restored', 'Independent final-state sidecar'],
+      [[
+        cleanup.status,
+        cleanup.errors,
+        cleanup.disabledTaskBindings,
+        cleanup.requestedChannelDeletions,
+        cleanup.remainingOwnedChannels,
+        yesNo(cleanup.layoutsRestored, locale),
+        yesNo(cleanup.independentFinalStateArtifactEmitted, locale),
+      ]],
+    ) +
+    notice(zh
+      ? '清理记录通过，但未生成独立 final-state 侧车；这一缺失不影响72小时窗口完整性判定，也不作为额外终态证明。'
+      : 'The cleanup record passed, but no independent final-state sidecar was emitted. That missing artifact does not affect the 72-hour window-integrity verdict and is not presented as additional final-state proof.', 'experimental') +
+    `<h2>${zh ? '来源' : 'Provenance'}</h2>` +
+    `<ul><li>${zh ? '源码' : 'Source'}: <code>${escapeHtml(longRun.source.commit)}</code> · tree <code>${escapeHtml(longRun.source.tree)}</code></li>` +
+    `<li>${zh ? '原始 summary SHA-256' : 'Source summary SHA-256'}: <code>${escapeHtml(observation.sourceArtifacts.summarySha256)}</code></li>` +
+    `<li>${zh ? '原始 report SHA-256' : 'Source report SHA-256'}: <code>${escapeHtml(observation.sourceArtifacts.reportSha256)}</code></li></ul>` +
+    `<p>${anchor(`../../dual-cv-72h.json`, zh ? 'canonical 数据' : 'canonical data')} · ${anchor(`../../../methodology.md`, zh ? '方法说明' : 'methodology')}</p>`;
+  return page(locale, `${platform.name} ${zh ? '72 小时长稳观测' : '72-hour long-run observation'}`, platformLongRunNav(locale), body);
+}
+
+function longRunClaimNotice(locale) {
+  return locale === 'zh-CN'
+    ? 'PASS 只表示设定的双 CV 本地循环负载完成72小时并通过已列出的完整性门禁；不是最大容量、RTSP 韧性、生产推荐配置或产品发布资格结论。'
+    : 'PASS means only that the configured dual-CV local-loop workload completed 72 hours and passed the listed integrity gates; it is not a maximum-capacity, RTSP-resilience, recommended production-profile, or product-release claim.';
+}
+
+function longRunMatrixHeaders(locale) {
+  return locale === 'zh-CN'
+    ? ['平台', '设定路数', '任务绑定', '目标 FPS/任务', '时长', '观测 / 理论样本', '覆盖率', '最低 / 平均 / 最高 FPS', '最大采样间隔', '结果']
+    : ['Platform', 'Configured channels', 'Task bindings', 'Target FPS/task', 'Duration', 'Observed / expected samples', 'Coverage', 'Minimum / average / maximum FPS', 'Maximum sampling gap', 'Result'];
+}
+
+function longRunMatrixRows(locale, platforms, observations, reportPrefix = null, targetFpsPerTask = 5) {
+  const zh = locale === 'zh-CN';
+  return platforms.map((platform) => {
+    const observation = observations.get(platform.id);
+    if (!observation) return [platform.name, '—', '—', '—', '—', '—', '—', '—', '—', '—'];
+    const label = reportPrefix
+      ? link(`${reportPrefix}${platform.id}/dual-cv-72h/report${zh ? '.zh-CN' : ''}.html`, platform.name)
+      : platform.name;
+    return [
+      label,
+      observation.configuredChannels,
+      observation.businessTaskBindings,
+      targetFpsPerTask,
+      '72 h',
+      `${observation.samples.observed} / ${observation.samples.expected}`,
+      percent(observation.samples.coverageRatio),
+      `${observation.fps.minimum} / ${observation.fps.average} / ${observation.fps.maximum}`,
+      `${observation.samples.maximumGapSeconds} s`,
+      observation.status,
+    ];
+  });
+}
+
+function yesNo(input, locale) {
+  if (input === true) return locale === 'zh-CN' ? '是' : 'yes';
+  if (input === false) return locale === 'zh-CN' ? '否' : 'no';
+  return '—';
 }
 
 function renderCaseReport(locale, platform, item) {
@@ -474,6 +680,16 @@ function rootNav(locale) {
 function platformNav(locale) {
   const zh = locale === 'zh-CN';
   return `<nav class="report-nav" aria-label="Report navigation">${anchor(`../../report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告' : 'Multi-platform report')}${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</nav>`;
+}
+
+function longRunNav(locale) {
+  const zh = locale === 'zh-CN';
+  return `<nav class="report-nav" aria-label="Report navigation">${anchor(`../../report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告' : 'Multi-platform report')}${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</nav>`;
+}
+
+function platformLongRunNav(locale) {
+  const zh = locale === 'zh-CN';
+  return `<nav class="report-nav" aria-label="Report navigation">${anchor(`../../../report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告' : 'Multi-platform report')}${anchor(`../report${zh ? '.zh-CN' : ''}.html`, zh ? '平台概览' : 'Platform overview')}${anchor(`../../dual-cv-72h/report${zh ? '.zh-CN' : ''}.html`, zh ? '72 小时多平台报告' : '72-hour multi-platform report')}${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</nav>`;
 }
 
 function caseIndexNav(locale) {
@@ -650,11 +866,21 @@ function copyCanonicalAssets(sourceRoot, outputRoot, platformIds) {
 function canonicalStaticAsset(relative, canonicalCaseFiles) {
   if (relative === 'SHA256SUMS' || /^report(?:\.zh-CN)?\.html$/.test(relative)) return false;
   if (!relative.startsWith('results/')) return true;
-  return canonicalCaseFiles.has(relative) || relative === 'results/cases.schema.json' || relative === 'results/vlm-observations.json';
+  return canonicalCaseFiles.has(relative)
+    || relative === 'results/cases.schema.json'
+    || relative === 'results/vlm-observations.json'
+    || relative === 'results/dual-cv-72h.json';
 }
 
 function removeGeneratedPages(outputRoot, platformIds) {
-  for (const relative of ['report.html', 'report.zh-CN.html', 'results/cases.json', 'results/index.json', 'results/workload-matrix.json']) {
+  for (const relative of [
+    'report.html',
+    'report.zh-CN.html',
+    'results/cases.json',
+    'results/index.json',
+    'results/workload-matrix.json',
+    'results/dual-cv-72h',
+  ]) {
     removePath(path.join(outputRoot, ...relative.split('/')));
   }
   for (const platform of platformIds) {
@@ -671,6 +897,7 @@ function removeGeneratedPages(outputRoot, platformIds) {
       `results/${platform}/dual-detector`,
       `results/${platform}/single-workload`,
       `results/${platform}/concurrent-mixed`,
+      `results/${platform}/dual-cv-72h`,
       `results/${platform}/vlm-observation`,
     ]) removePath(path.join(outputRoot, ...relative.split('/')));
   }

@@ -10,12 +10,19 @@ const failures = [];
 const manifest = readJson('release-manifest.json');
 const vlm = readJson('results/vlm-observations.json');
 const vlmPlatformIds = new Set((vlm?.observations ?? []).map((item) => item.platformId));
+const longRun = readJson('results/dual-cv-72h.json');
+const longRunPlatformIds = new Set((longRun?.observations ?? []).map((item) => item.platformId));
 const platforms = (manifest?.platforms ?? []).map((definition) => ({
   ...definition,
   canonical: readJson(`results/${definition.id}/cases.json`),
 }));
 
-const expectedReports = ['report.html', 'report.zh-CN.html'];
+const expectedReports = [
+  'report.html',
+  'report.zh-CN.html',
+  'results/dual-cv-72h/report.html',
+  'results/dual-cv-72h/report.zh-CN.html',
+];
 for (const platform of platforms) {
   const cases = platform.canonical?.cases ?? [];
   for (const suffix of ['', '.zh-CN']) {
@@ -27,6 +34,9 @@ for (const platform of platforms) {
     );
     if (vlmPlatformIds.has(platform.id)) {
       expectedReports.push(`results/${platform.id}/vlm-observation/report${suffix}.html`);
+    }
+    if (longRunPlatformIds.has(platform.id)) {
+      expectedReports.push(`results/${platform.id}/dual-cv-72h/report${suffix}.html`);
     }
     for (const benchmarkCase of cases) {
       expectedReports.push(`results/${platform.id}/cases/${benchmarkCase.caseId}/report${suffix}.html`);
@@ -70,11 +80,61 @@ for (const reportName of ['report.html', 'report.zh-CN.html']) {
       `results/${platform.id}/single-workload/${reportName}`,
       `results/${platform.id}/concurrent-mixed/${reportName}`,
       `results/${platform.id}/cases/${reportName}`,
+      ...(longRunPlatformIds.has(platform.id) ? [`results/${platform.id}/dual-cv-72h/${reportName}`] : []),
       ...(vlmPlatformIds.has(platform.id) ? [`results/${platform.id}/vlm-observation/${reportName}`] : []),
     ]) {
       if (!html.includes(`href="${target}"`)) failures.push(`${reportName}: missing report link ${target}`);
     }
   }
+  if (!html.includes(`href="results/dual-cv-72h/${reportName}"`)) {
+    failures.push(`${reportName}: missing multi-platform 72-hour report link`);
+  }
+}
+
+for (const suffix of ['', '.zh-CN']) {
+  const reportName = `report${suffix}.html`;
+  const longRunReport = path.join(benchmarkRoot, 'results', 'dual-cv-72h', reportName);
+  if (fs.existsSync(longRunReport)) {
+    const html = fs.readFileSync(longRunReport, 'utf8');
+    for (const platform of platforms.filter((item) => longRunPlatformIds.has(item.id))) {
+      const target = `../${platform.id}/dual-cv-72h/${reportName}`;
+      if (!html.includes(`href="${target}"`)) failures.push(`results/dual-cv-72h/${reportName}: missing platform link ${target}`);
+    }
+    if (!html.includes('href="../dual-cv-72h.json"')) {
+      failures.push(`results/dual-cv-72h/${reportName}: missing canonical long-run link`);
+    }
+  }
+
+  for (const platform of platforms.filter((item) => longRunPlatformIds.has(item.id))) {
+    const platformOverview = path.join(benchmarkRoot, 'results', platform.id, reportName);
+    if (!fs.existsSync(platformOverview)) continue;
+    const html = fs.readFileSync(platformOverview, 'utf8');
+    if (!html.includes(`href="dual-cv-72h/${reportName}"`)) {
+      failures.push(`results/${platform.id}/${reportName}: missing 72-hour detail link`);
+    }
+  }
+}
+
+const resultsIndex = readJson('results/index.json');
+const workloadMatrix = readJson('results/workload-matrix.json');
+if (resultsIndex?.longRun?.canonical !== 'dual-cv-72h.json'
+    || resultsIndex?.longRun?.report !== 'dual-cv-72h/report.html'
+    || resultsIndex?.longRun?.reportZhCn !== 'dual-cv-72h/report.zh-CN.html') {
+  failures.push('results/index.json: long-run canonical/report references are incomplete');
+}
+for (const platform of platforms) {
+  const entry = resultsIndex?.platforms?.find((item) => item.platformId === platform.id);
+  const expected = longRunPlatformIds.has(platform.id);
+  if (expected && (entry?.longRunObservation !== 'dual-cv-72h.json'
+      || entry?.longRunReport !== `${platform.id}/dual-cv-72h/report.html`
+      || entry?.longRunReportZhCn !== `${platform.id}/dual-cv-72h/report.zh-CN.html`)) {
+    failures.push(`results/index.json: incomplete long-run entry for ${platform.id}`);
+  }
+}
+const matrixLongRunIds = new Set((workloadMatrix?.longRunObservation?.platforms ?? []).map((item) => item.platformId));
+compareSets('workload-matrix long-run platforms', matrixLongRunIds, new Set(platforms.map((item) => item.id)));
+if (workloadMatrix?.longRunObservation?.canonical !== 'dual-cv-72h.json') {
+  failures.push('results/workload-matrix.json: missing canonical long-run reference');
 }
 
 const expectedCaseCount = manifest?.evidence?.smallModelCaseCount;
@@ -93,7 +153,7 @@ if (failures.length) {
 console.log(
   `Benchmark page smoke test passed: ${expectedReports.length} generated bilingual reports across ` +
   `${platforms.length} manifest-defined platforms, ${actualCaseCount} canonical cases, and ` +
-  `${canonicalPublicReportLinks} canonical website report links.`,
+  `${longRunPlatformIds.size} long-run observations, with ${canonicalPublicReportLinks} canonical website report links.`,
 );
 
 function readJson(relativePath) {

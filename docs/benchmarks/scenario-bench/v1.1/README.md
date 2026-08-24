@@ -2,9 +2,24 @@
 
 > Person detection, no-safety-helmet analysis, and concurrent mixed-workload results on BM1688, CV186X, RK3576, and RV1126B.
 
-Entry points: [English report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.html) · [中文报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html) · [methodology](methodology.md) · [canonical case schema](results/cases.schema.json)
+Entry points: [English report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.html) · [中文报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html) · [72-hour report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/dual-cv-72h/report.html) · [methodology](methodology.md) · [canonical case schema](results/cases.schema.json)
 
 The HTML reports and aggregate indexes linked from this page are generated during the documentation build. The repository keeps the canonical measurements, not duplicate report payloads.
+
+## 72-hour dual-CV configured workload
+
+All four platforms completed the same controlled local-loop observation from the 24-hour checkpoint through 48 and 72 hours. Each channel ran person detection plus no-safety-helmet analysis at 5 FPS per business task. The result qualifies only the configured channel count shown here; it is not a maximum-capacity, RTSP-resilience, or production-profile claim.
+
+| Platform | Configured channels | Task bindings | Samples | Min / avg / max FPS | Max discard | Peak CPU / memory / disk | Result |
+| --- | ---: | ---: | ---: | --- | ---: | --- | --- |
+| BM1688 | 8 | 16 | 4316 / 4320 | 4.68 / 5.086 / 5.49 | 0 | 30% / 44% / 96% | PASS |
+| CV186X | 8 | 16 | 4316 / 4320 | 4.54 / 5.085 / 5.29 | 0 | 43% / 44% / 96% | PASS |
+| RK3576 | 8 | 16 | 4316 / 4320 | 5.00 / 5.098 / 5.17 | 0 | 46% / 30% / 15% | PASS |
+| RV1126B | 4 | 8 | 4316 / 4320 | 4.85 / 5.230 / 5.37 | 0 | 41% / 41% / 47% | PASS |
+
+Every platform retained 4316 of 4320 expected one-minute samples (99.91%). The largest sampling gap was 60.067 seconds, below the 180-second integrity limit; collector errors, incomplete or missing binding samples, open critical incidents, and observed discard were all zero. The evidence therefore shows no mid-run collection interruption under the defined checks. Scheduled restart remained disabled across 80 checks per platform, with no correction required.
+
+The private monitor record reports completed cleanup, zero remaining owned channels, restored layouts, and no cleanup errors. The historical monitor did not emit a separate final-state artifact, so cleanup is reported with that explicit limitation. See the generated [72-hour report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/dual-cv-72h/report.html) and the [sanitized canonical observation](results/dual-cv-72h.json).
 
 ## Concurrent mixed-workload matrix
 
@@ -44,14 +59,14 @@ BM1688 and CV186X use byte-identical detector/classifier artifacts. RK3576 and R
 
 ## Canonical data and generated reports
 
-The 49 small-model cases are stored once in four platform-level canonical JSON files. Each entry retains the complete measured staircase and the SHA-256 of its original frozen `summary.json`. Bilingual case pages, platform/workload summaries, indexes, and matrices are generated from these files; they are not additional evidence copies.
+The 49 small-model cases are stored once in four platform-level canonical JSON files. The 72-hour observation and VLM observations each have one additional sanitized canonical file. Each source retains hashes that trace back to its private frozen evidence. Bilingual case pages, platform/workload/long-run summaries, indexes, and matrices are generated from these files; they are not additional evidence copies.
 
-| Platform | Canonical cases | Generated overview | Generated case pages | Generated workload reports | Refreshed VLM |
-| --- | --- | --- | --- | --- | --- |
-| BM1688 | [JSON](results/bm1688/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/concurrent-mixed/report.html">mixed</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html">open</a> |
-| CV186X | [JSON](results/cv186x/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/concurrent-mixed/report.html">mixed</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html">open</a> |
-| RK3576 | [JSON](results/rk3576/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/concurrent-mixed/report.html">mixed</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html">open</a> |
-| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/concurrent-mixed/report.html">mixed</a> | — |
+| Platform | Canonical cases | Generated overview | Generated case pages | Generated workload reports | 72-hour dual-CV | Refreshed VLM |
+| --- | --- | --- | --- | --- | --- | --- |
+| BM1688 | [JSON](results/bm1688/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/concurrent-mixed/report.html">mixed</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/dual-cv-72h/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.html">open</a> |
+| CV186X | [JSON](results/cv186x/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/concurrent-mixed/report.html">mixed</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/dual-cv-72h/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.html">open</a> |
+| RK3576 | [JSON](results/rk3576/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/concurrent-mixed/report.html">mixed</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/dual-cv-72h/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.html">open</a> |
+| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/cases/report.html">open</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/single-workload/report.html">single</a> · <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/concurrent-mixed/report.html">mixed</a> | <a href="https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/dual-cv-72h/report.html">open</a> | — |
 
 ## VLM performance display boundaries
 
@@ -64,7 +79,7 @@ The VLM observations were refreshed on 2026-08-20 with the same controlled 1080p
 | RK3576 | 0.1 | ≥80% | 4 channels | 5-channel minimum across active routes: 0.07 FPS (70%) |
 | RV1126B | — | — | — | No VLM observation in this refresh |
 
-Per-route readiness is a precondition outside formal hold sampling, and its probes do not enter FPS statistics. The CV186X and RK3576 runs predate the final per-route readiness protocol, so their startup-sensitive stops neither count as performance failures nor increase the displayed boundary. These values are conservative publication display boundaries, not exact hardware limits, formal capacity, or long-running qualification. CV186X and RK3576 will be re-measured with the unified readiness probe once the ongoing long-duration qualification releases the devices. The canonical raw measurements are consolidated in [one canonical file](results/vlm-observations.json).
+Per-route readiness is a precondition outside formal hold sampling, and its probes do not enter FPS statistics. The CV186X and RK3576 runs predate the final per-route readiness protocol, so their startup-sensitive stops neither count as performance failures nor increase the displayed boundary. These values are conservative publication display boundaries, not exact hardware limits, formal capacity, or long-running qualification. A unified-readiness VLM re-measurement remains a separate follow-up. The canonical raw measurements are consolidated in [one canonical file](results/vlm-observations.json).
 
 The VLM execution source is `f0a26546c60c57e70166f18d556f712a273a866d`, tree `a9ebe3921771d8aaa0d29244074e7bfe3d098cf3`; each platform observation records its source-summary, source-metrics, and tool-patch hashes.
 
@@ -73,6 +88,7 @@ The full pre-simplification archive recorded in the manifest covers the 49 small
 ## Reproduction files
 
 - [release-manifest.json](release-manifest.json): source, tool, input, and platform identities.
+- [dual-cv-72h.json](results/dual-cv-72h.json): sanitized 72-hour configured-workload observations and private-source hashes.
 - [methodology.md](methodology.md): procedure and result interpretation.
 - [scenarios](scenarios/README.md): sanitized public workload descriptors.
 - <a href="./SHA256SUMS">SHA256SUMS</a>: hashes for the canonical repository source; the generated public output receives its own complete checksum inventory at build time.

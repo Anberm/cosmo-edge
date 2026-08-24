@@ -2,9 +2,24 @@
 
 > BM1688、CV186X、RK3576 与 RV1126B 的人员检测、未佩戴安全帽分析和并发混合任务结果。
 
-入口：[中文主报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html) · [English report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.html) · [测试方法](methodology.md) · [canonical 用例 Schema](results/cases.schema.json)
+入口：[中文主报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html) · [English report](https://www.cosmowander.ai/docs/benchmarks/scenario-bench/v1.1/report.html) · [72 小时报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/dual-cv-72h/report.zh-CN.html) · [测试方法](methodology.md) · [canonical 用例 Schema](results/cases.schema.json)
 
 本页链接的 HTML 报告和聚合索引均在文档构建时生成。仓库只保留 canonical 测量数据，不重复提交报告载荷。
+
+## 72 小时双 CV 固定配置长稳观测
+
+四个平台使用同一受控本地循环输入，依次通过 24、48 和 72 小时检查点。每路同时运行人员检测与未佩戴安全帽分析，两个业务任务均设为 5 FPS。这里验证的是表中固定路数，不代表最大容量、RTSP 韧性或生产推荐配置。
+
+| 平台 | 固定路数 | 任务绑定 | 样本 | 最低 / 平均 / 最高 FPS | 最大丢弃率 | CPU / 内存 / 磁盘峰值 | 结果 |
+| --- | ---: | ---: | ---: | --- | ---: | --- | --- |
+| BM1688 | 8 | 16 | 4316 / 4320 | 4.68 / 5.086 / 5.49 | 0 | 30% / 44% / 96% | PASS |
+| CV186X | 8 | 16 | 4316 / 4320 | 4.54 / 5.085 / 5.29 | 0 | 43% / 44% / 96% | PASS |
+| RK3576 | 8 | 16 | 4316 / 4320 | 5.00 / 5.098 / 5.17 | 0 | 46% / 30% / 15% | PASS |
+| RV1126B | 4 | 8 | 4316 / 4320 | 4.85 / 5.230 / 5.37 | 0 | 41% / 41% / 47% | PASS |
+
+每个平台保留 4320 个理论分钟样本中的 4316 个，覆盖率 99.91%。最大采样间隔为 60.067 秒，低于 180 秒完整性上限；采集错误、不完整或缺失绑定样本、未关闭严重事件和观测到的丢弃均为 0。因此，在既定完整性检查范围内，没有发现运行中途断联证据。每个平台完成 80 次定时重启禁用状态检查，无失败、无需纠正，结束时仍保持关闭。
+
+私有监控记录显示清理完成：自有通道剩余 0、布局已恢复且清理错误为 0。历史监控器没有另行产出独立 `final-state` 文件，报告保留这一限制。详见构建生成的[中文 72 小时报告](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/dual-cv-72h/report.zh-CN.html)与[脱敏 canonical 数据](results/dual-cv-72h.json)。
 
 ## 并发混合任务矩阵
 
@@ -44,14 +59,14 @@ BM1688 与 CV186X 使用字节一致的检测和分类模型；RK3576、RV1126B 
 
 ## Canonical 数据与构建生成报告
 
-49 个小模型用例只在 4 份平台级 canonical JSON 中保存一次。每条记录保留完整实测阶梯，以及冻结分支中原始 `summary.json` 的 SHA-256。双语用例页、平台/工作负载汇总、索引与矩阵都从这些文件生成，不再作为额外证据副本提交。
+49 个小模型用例只在 4 份平台级 canonical JSON 中保存一次；72 小时观测与 VLM 观测各有一份额外的脱敏 canonical 文件。每份事实源都保留回溯私有冻结证据的哈希。双语用例页、平台/工作负载/长稳汇总、索引与矩阵都从这些文件生成，不再作为额外证据副本提交。
 
-| 平台 | Canonical 用例 | 构建生成概览 | 构建生成用例页 | 构建生成工作负载报告 | 最新 VLM |
-| --- | --- | --- | --- | --- | --- |
-| BM1688 | [JSON](results/bm1688/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.zh-CN.html">打开</a> |
-| CV186X | [JSON](results/cv186x/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.zh-CN.html">打开</a> |
-| RK3576 | [JSON](results/rk3576/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.zh-CN.html">打开</a> |
-| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/concurrent-mixed/report.zh-CN.html">混合任务</a> | — |
+| 平台 | Canonical 用例 | 构建生成概览 | 构建生成用例页 | 构建生成工作负载报告 | 72 小时双 CV | 最新 VLM |
+| --- | --- | --- | --- | --- | --- | --- |
+| BM1688 | [JSON](results/bm1688/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/dual-cv-72h/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/bm1688/vlm-observation/report.zh-CN.html">打开</a> |
+| CV186X | [JSON](results/cv186x/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/dual-cv-72h/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/cv186x/vlm-observation/report.zh-CN.html">打开</a> |
+| RK3576 | [JSON](results/rk3576/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/dual-cv-72h/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rk3576/vlm-observation/report.zh-CN.html">打开</a> |
+| RV1126B | [JSON](results/rv1126b/cases.json) | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/cases/report.zh-CN.html">打开</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/single-workload/report.zh-CN.html">单任务</a> · <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/concurrent-mixed/report.zh-CN.html">混合任务</a> | <a href="https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/rv1126b/dual-cv-72h/report.zh-CN.html">打开</a> | — |
 
 ## VLM 性能展示边界
 
@@ -64,7 +79,7 @@ VLM 观测已于 2026-08-20 使用相同的 1080p24 受控输入刷新，每级�
 | RK3576 | 0.1 | ≥80% | 4 路 | 5 路全路最低 0.07 FPS（70%） |
 | RV1126B | — | — | — | 本轮无 VLM 观测 |
 
-逐路就绪探测属于正式采样前置条件，其探测样本不进入 FPS 统计。CV186X 与 RK3576 的历史运行早于最终逐路就绪协议，因此启动敏感停止既不作为性能失败，也不增加展示路数。上述数值是本次发布的保守性能展示边界，不是精确硬件极限、正式容量或长稳资格结论。待当前长稳验证释放设备后，将以统一就绪协议复测 CV186X 与 RK3576（方法细节见英文[方法说明](methodology.md)）。Canonical 原始测量统一收录在[一份文件](results/vlm-observations.json)中。
+逐路就绪探测属于正式采样前置条件，其探测样本不进入 FPS 统计。CV186X 与 RK3576 的历史运行早于最终逐路就绪协议，因此启动敏感停止既不作为性能失败，也不增加展示路数。上述数值是本次发布的保守性能展示边界，不是精确硬件极限、正式容量或长稳资格结论。统一就绪协议的 VLM 复测仍作为独立后续事项。Canonical 原始测量统一收录在[一份文件](results/vlm-observations.json)中。
 
 VLM 执行源码为 `f0a26546c60c57e70166f18d556f712a273a866d`，tree 为 `a9ebe3921771d8aaa0d29244074e7bfe3d098cf3`；每个平台观测都记录了源 summary、源 metrics 和工具补丁哈希。
 
@@ -73,6 +88,7 @@ manifest 中的精简前完整归档仅覆盖 49 个小模型用例，包含逐�
 ## 复现文件
 
 - [release-manifest.json](release-manifest.json)：源码、工具、视频和平台身份。
+- [dual-cv-72h.json](results/dual-cv-72h.json)：脱敏后的 72 小时固定配置观测与私有源证据哈希。
 - [methodology.md](methodology.md)：测试步骤与结果判定。
 - [scenarios](scenarios/README.md)：脱敏后的公开场景描述。
 - <a href="./SHA256SUMS">SHA256SUMS</a>：canonical 仓库源文件哈希；构建生成的公开输出会另行生成完整校验清单。

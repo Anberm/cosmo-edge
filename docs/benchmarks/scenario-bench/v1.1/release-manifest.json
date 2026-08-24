@@ -5,7 +5,7 @@
     "version": "1.1.0",
     "tag": "v1.1.0",
     "publicationState": "prepared-not-published",
-    "frozenAt": "2026-08-20T19:54:01+08:00"
+    "frozenAt": "2026-08-24T11:25:37+08:00"
   },
   "sourceBaseline": {
     "repository": "https://github.com/cosmo-wander-ai/cosmo-edge",
@@ -17,7 +17,7 @@
   },
   "repositoryIntegration": {
     "targetBranch": "main",
-    "documentationBaseCommit": "44209759f450e96cda265acfa8bc6d17a1138888"
+    "documentationBaseCommit": "2f63ed254fe82d4e9903af9c5080fe5424143c35"
   },
   "benchmarkTool": {
     "name": "ScenarioBench",
@@ -74,6 +74,20 @@
       "maxAverageDiscardRate": 0.05,
       "maxCriticalPathLatencyMs": 200,
       "maxDetectorLatencyMs": 150
+    },
+    "dualCv72Hour": {
+      "durationHours": 72,
+      "checkpointsHours": [24, 48, 72],
+      "sampleIntervalSeconds": 60,
+      "expectedSamples": 4320,
+      "minimumCoverageRatio": 0.95,
+      "boundaryGraceSeconds": 180,
+      "maximumGapSeconds": 180,
+      "targetFpsPerTask": 5,
+      "minimumFpsRatio": 0.8,
+      "maximumDiscardRate": 0,
+      "businessTasksPerChannel": 2,
+      "modelStagesPerChannel": 3
     }
   },
   "platforms": [
@@ -124,6 +138,20 @@
     ],
     "vlm": "2026-08-20 controlled raw observations with conservative 80% publication boundaries; mixed readiness protocols are not cross-platform comparable",
     "vlmObservations": "results/vlm-observations.json",
+    "dualCv72HourObservation": "results/dual-cv-72h.json",
+    "dualCv72HourRefresh": {
+      "status": "2026-08-24 completed controlled observation",
+      "sourceCommit": "44209759f450e96cda265acfa8bc6d17a1138888",
+      "sourceTree": "5cbdefeaefaf642407356c22c271ccc7d57935b0",
+      "suiteSummarySha256": "d28144149aeee9d693e7537b578c736d65daaecdf8d8c81be2047d7767167fb8",
+      "verifiedBundleSha256": "d1ddd726d2934951f91f72fee1d90ff482300124cda9818b79c56ea772a73ea1",
+      "finalReportSidecarSha256": "7305f6811b53f70eb0e2fd52ce14c194da0345205df306fc63e39ca783bf4448",
+      "rawEvidence": "private source artifacts referenced by hashes; not included in the repository",
+      "claimClass": "controlled-72h-local-loop-stability-observation",
+      "capacityClaimAllowed": false,
+      "rtspResilienceClaimAllowed": false,
+      "productReleaseQualified": false
+    },
     "vlmPublicationEvaluation": {
       "classification": "conservative-post-evaluation",
       "targetFpsPerChannel": 0.1,
@@ -155,6 +183,7 @@
   "qualification": {
     "canonicalBenchmarkDatasetComplete": true,
     "generatedReportContractVerified": true,
+    "controlledLongRunConfiguredWorkloadVerified": true,
     "publicAssetRedistributionSafe": true,
     "readyForRepositoryReview": true,
     "productReleaseQualified": false

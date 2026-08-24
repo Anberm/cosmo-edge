@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "evidenceStatus": "completed-private-source",
+  "title": "CosmoEdge 1.1 dual-CV 72-hour controlled long-run observation",
+  "claim": {
+    "class": "controlled-72h-local-loop-stability-observation",
+    "configuredWorkloadPass": true,
+    "capacityClaimAllowed": false,
+    "rtspResilienceClaimAllowed": false,
+    "productReleaseQualified": false,
+    "interpretation": "The configured channel count completed the controlled 72-hour observation; this is not a maximum-capacity, RTSP-resilience, or production-profile claim."
+  },
+  "window": {
+    "startedAt": "2026-08-20T17:44:30.341Z",
+    "endedAt": "2026-08-23T17:44:30.341Z",
+    "durationHours": 72,
+    "checkpointsHours": [24, 48, 72],
+    "sampleIntervalSeconds": 60,
+    "expectedSamples": 4320,
+    "minimumCoverageRatio": 0.95,
+    "boundaryGraceSeconds": 180,
+    "maximumGapSeconds": 180
+  },
+  "source": {
+    "repository": "https://github.com/cosmo-wander-ai/cosmo-edge",
+    "branch": "main",
+    "commit": "44209759f450e96cda265acfa8bc6d17a1138888",
+    "tree": "5cbdefeaefaf642407356c22c271ccc7d57935b0"
+  },
+  "input": {
+    "datasetId": "cosmoedge-controlled-1080p24-v1",
+    "sha256": "3e1c5b97cd5bcc081e47ec631f84c36e72f075c8b9da6a19de3d9705fb887f92",
+    "codec": "H.264 High",
+    "width": 1920,
+    "height": 1080,
+    "sourceFps": 24,
+    "mode": "local infinite loop",
+    "previewLoad": false
+  },
+  "workload": {
+    "businessTasksPerChannel": 2,
+    "modelStagesPerChannel": 3,
+    "targetFpsPerTask": 5,
+    "businessTasks": [
+      "person detection",
+      "no-safety-helmet analysis"
+    ]
+  },
+  "integrityPolicy": {
+    "minimumFpsRatio": 0.8,
+    "maximumDiscardRate": 0,
+    "minimumSampleCoverageRatio": 0.95,
+    "maximumBoundaryLagSeconds": 180,
+    "maximumSamplingGapSeconds": 180,
+    "maximumCollectorErrorSamples": 0,
+    "maximumIncompleteBindingSamples": 0,
+    "maximumMissingBindingSamples": 0,
+    "maximumOpenCriticalIncidents": 0
+  },
+  "checkpoints": [
+    {
+      "hours": 24,
+      "allPlatformsPass": true
+    },
+    {
+      "hours": 48,
+      "allPlatformsPass": true
+    },
+    {
+      "hours": 72,
+      "allPlatformsPass": true
+    }
+  ],
+  "observations": [
+    {
+      "platformId": "bm1688",
+      "platform": "BM1688",
+      "status": "PASS",
+      "configuredChannels": 8,
+      "businessTaskBindings": 16,
+      "samples": {
+        "expected": 4320,
+        "observed": 4316,
+        "coverageRatio": 0.999074,
+        "firstSampleLagSeconds": 111.988,
+        "finalSampleLagSeconds": 59.868,
+        "maximumGapSeconds": 60.058
+      },
+      "fps": {
+        "minimum": 4.68,
+        "average": 5.086,
+        "maximum": 5.49
+      },
+      "observedResourcePeaksPercent": {
+        "cpu": 30,
+        "memory": 44,
+        "disk": 96
+      },
+      "telemetry": {
+        "maximumDiscardRate": 0,
+        "collectorErrorSamples": 0,
+        "incompleteBindingSamples": 0,
+        "missingBindingSamples": 0,
+        "openCriticalIncidents": 0
+      },
+      "integrity": {
+        "pass": true,
+        "checksPassed": 8,
+        "checksTotal": 8
+      },
+      "timedRestart": {
+        "checks": 80,
+        "failures": 0,
+        "corrections": 0,
+        "remainsDisabledByPolicy": true
+      },
+      "cleanupRecord": {
+        "status": "completed",
+        "errors": 0,
+        "disabledTaskBindings": 16,
+        "requestedChannelDeletions": 8,
+        "remainingOwnedChannels": 0,
+        "layoutsRestored": true,
+        "independentFinalStateArtifactEmitted": false
+      },
+      "sourceArtifacts": {
+        "summarySha256": "67f2f30e9cfdfaab05e1d7476eab177686875317a1dbc0f1db52b376de81bbb7",
+        "reportSha256": "bca4122862edfc872a25008089942e3f1b901b41c778547e1834f733564fea7f"
+      }
+    },
+    {
+      "platformId": "cv186x",
+      "platform": "CV186X",
+      "status": "PASS",
+      "configuredChannels": 8,
+      "businessTaskBindings": 16,
+      "samples": {
+        "expected": 4320,
+        "observed": 4316,
+        "coverageRatio": 0.999074,
+        "firstSampleLagSeconds": 111.993,
+        "finalSampleLagSeconds": 59.868,
+        "maximumGapSeconds": 60.061
+      },
+      "fps": {
+        "minimum": 4.54,
+        "average": 5.085,
+        "maximum": 5.29
+      },
+      "observedResourcePeaksPercent": {
+        "cpu": 43,
+        "memory": 44,
+        "disk": 96
+      },
+      "telemetry": {
+        "maximumDiscardRate": 0,
+        "collectorErrorSamples": 0,
+        "incompleteBindingSamples": 0,
+        "missingBindingSamples": 0,
+        "openCriticalIncidents": 0
+      },
+      "integrity": {
+        "pass": true,
+        "checksPassed": 8,
+        "checksTotal": 8
+      },
+      "timedRestart": {
+        "checks": 80,
+        "failures": 0,
+        "corrections": 0,
+        "remainsDisabledByPolicy": true
+      },
+      "cleanupRecord": {
+        "status": "completed",
+        "errors": 0,
+        "disabledTaskBindings": 16,
+        "requestedChannelDeletions": 8,
+        "remainingOwnedChannels": 0,
+        "layoutsRestored": true,
+        "independentFinalStateArtifactEmitted": false
+      },
+      "sourceArtifacts": {
+        "summarySha256": "bf14f42fa981f9bb023ca69d7e4881cbcaf04ea85e478e153ed26204182db8f2",
+        "reportSha256": "95b387f880957a99e3b1fcf846995de41bca3f4e1c542ceae5a5a28fa1fc537c"
+      }
+    },
+    {
+      "platformId": "rk3576",
+      "platform": "RK3576",
+      "status": "PASS",
+      "configuredChannels": 8,
+      "businessTaskBindings": 16,
+      "samples": {
+        "expected": 4320,
+        "observed": 4316,
+        "coverageRatio": 0.999074,
+        "firstSampleLagSeconds": 111.99,
+        "finalSampleLagSeconds": 59.867,
+        "maximumGapSeconds": 60.058
+      },
+      "fps": {
+        "minimum": 5,
+        "average": 5.098,
+        "maximum": 5.17
+      },
+      "observedResourcePeaksPercent": {
+        "cpu": 46,
+        "memory": 30,
+        "disk": 15
+      },
+      "telemetry": {
+        "maximumDiscardRate": 0,
+        "collectorErrorSamples": 0,
+        "incompleteBindingSamples": 0,
+        "missingBindingSamples": 0,
+        "openCriticalIncidents": 0
+      },
+      "integrity": {
+        "pass": true,
+        "checksPassed": 8,
+        "checksTotal": 8
+      },
+      "timedRestart": {
+        "checks": 80,
+        "failures": 0,
+        "corrections": 0,
+        "remainsDisabledByPolicy": true
+      },
+      "cleanupRecord": {
+        "status": "completed",
+        "errors": 0,
+        "disabledTaskBindings": 16,
+        "requestedChannelDeletions": 8,
+        "remainingOwnedChannels": 0,
+        "layoutsRestored": true,
+        "independentFinalStateArtifactEmitted": false
+      },
+      "sourceArtifacts": {
+        "summarySha256": "e44698bb3dd6eee21fa6f7fa765f398957cacb697196e6eb037d5946bc1d6fb5",
+        "reportSha256": "fa79c8c08f505881b5bc4f237d01e430d630c2596d17419dda24d93fa354e8ef"
+      }
+    },
+    {
+      "platformId": "rv1126b",
+      "platform": "RV1126B",
+      "status": "PASS",
+      "configuredChannels": 4,
+      "businessTaskBindings": 8,
+      "samples": {
+        "expected": 4320,
+        "observed": 4316,
+        "coverageRatio": 0.999074,
+        "firstSampleLagSeconds": 111.995,
+        "finalSampleLagSeconds": 59.866,
+        "maximumGapSeconds": 60.067
+      },
+      "fps": {
+        "minimum": 4.85,
+        "average": 5.23,
+        "maximum": 5.37
+      },
+      "observedResourcePeaksPercent": {
+        "cpu": 41,
+        "memory": 41,
+        "disk": 47
+      },
+      "telemetry": {
+        "maximumDiscardRate": 0,
+        "collectorErrorSamples": 0,
+        "incompleteBindingSamples": 0,
+        "missingBindingSamples": 0,
+        "openCriticalIncidents": 0
+      },
+      "integrity": {
+        "pass": true,
+        "checksPassed": 8,
+        "checksTotal": 8
+      },
+      "timedRestart": {
+        "checks": 80,
+        "failures": 0,
+        "corrections": 0,
+        "remainsDisabledByPolicy": true
+      },
+      "cleanupRecord": {
+        "status": "completed",
+        "errors": 0,
+        "disabledTaskBindings": 8,
+        "requestedChannelDeletions": 4,
+        "remainingOwnedChannels": 0,
+        "layoutsRestored": true,
+        "independentFinalStateArtifactEmitted": false
+      },
+      "sourceArtifacts": {
+        "summarySha256": "59517e9b3f609cae55f122f2f3bfe44f33d1497faf3fe536135149c4033218ab",
+        "reportSha256": "e4afff34a773414e009642d8201e2a1148e4f09d9c453901776753e666194734"
+      }
+    }
+  ],
+  "privateEvidence": {
+    "publicationState": "prepared-private-not-published",
+    "rawArtifactsIncludedInRepository": false,
+    "suiteSummarySha256": "d28144149aeee9d693e7537b578c736d65daaecdf8d8c81be2047d7767167fb8",
+    "verifiedBundleSha256": "d1ddd726d2934951f91f72fee1d90ff482300124cda9818b79c56ea772a73ea1",
+    "finalReportSidecarSha256": "7305f6811b53f70eb0e2fd52ce14c194da0345205df306fc63e39ca783bf4448",
+    "cleanupEvidence": "private monitor record",
+    "cleanupLimitation": "The completed monitor recorded cleanup with zero remaining owned channels and no errors, but did not emit an independent final-state artifact."
+  }
+}

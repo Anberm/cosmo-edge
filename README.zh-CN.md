@@ -34,14 +34,14 @@ CosmoEdge 不只是模型推理服务：它提供从模型导入、可视化编�
 ## CosmoEdge 1.1
 
 - **多平台发布**：BM1688、CV186X、RK3576 与 RV1126B 共享同一套视频接入、任务编排、事件和可观测流程，并分别使用目标平台模型产物。
-- **公开 benchmark 包**：[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单任务、并发混合任务与保守 VLM 性能展示边界，提供脱敏后的可复现附件。
+- **公开 benchmark 包**：[CosmoEdge 1.1 多平台报告](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)覆盖单任务、并发混合任务、受控 72 小时双 CV 固定配置与保守 VLM 性能展示边界，提供脱敏后的可复现附件。
 - **Rockchip 发布平台**：RK3576 与 RV1126B 均已集成交叉构建、板端运行、RKNN 推理和 MPP/RGA 媒体路径，并纳入同一档 v1.1 发布范围；各自 benchmark 与长稳证据继续分开追溯，但不改变发布档位。
 - **Sophon 模型处理**：芯片感知校验支持 BM1688 与 CV186X 的目标 `.nn` 产物；benchmark 已记录两台参考设备的 Open 安装包和运行引擎精确绑定。
 - **RKNN 数据路径**：包含 DMA-BUF 到 RGA 输入、持久绑定输入、原生量化输出和 YOLOv8 张量直接解码路径，并保留明确 fallback。
 - **智能体辅助二开**：提供仓库级入口，把模型适配、系统集成和界面改造任务交给常用编码智能体，并获得可核验交付物。
 - **Model Guard 2.3**：为 Sophon Protected 包中的商业预置模型提供分发保护；Open 与 Protected 的应用软件能力一致，不以 SKU 解锁软件功能，区别在于模型是否加密以及是否包含设备授权工具。
 - **macOS Docker Preview**：为 Apple Silicon 提供隔离的 `linux/amd64` 单路本地视频体验路径，已完成多轮线下端到端验证。由于它不启用 Model Guard、不提供原生 macOS/NPU 路径、不覆盖多路部署，也不代表生产性能，因此仍保持 Preview 定位。
-- **验证边界**：VLM 原始运行仍是短时观测，公开矩阵在不改写实际门禁的前提下统一采用 80% 保守性能参考；长稳验证独立进行，不能由容量阶梯替代。
+- **验证边界**：VLM 原始运行仍是短时观测，公开矩阵在不改写实际门禁的前提下统一采用 80% 保守性能参考；独立的 72 小时结果只验证本地循环输入下的固定配置，不能由容量阶梯替代。
 
 ## 选择平台
 
@@ -162,14 +162,24 @@ CV186X 请按照 [CV186X 快速开始](docs/guide/cv186x-quick-start.md)完成�
 
 ### CosmoEdge 1.1 多平台性能报告
 
-v1.1 报告覆盖 BM1688、CV186X、RK3576 与 RV1126B。报告包含人员检测、未佩戴安全帽分析和 5 FPS 并发混合任务的 49 份独立小模型用例，并增加保守 VLM 性能展示矩阵。
+v1.1 报告覆盖 BM1688、CV186X、RK3576 与 RV1126B。报告包含人员检测、未佩戴安全帽分析和 5 FPS 并发混合任务的 49 份独立小模型用例、受控 72 小时双 CV 固定配置，以及保守 VLM 性能展示矩阵。
 
 - [中文 benchmark 索引](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)
 - [English benchmark index](docs/benchmarks/scenario-bench/v1.1/README.md)
 - [中文主报告（官网渲染版）](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/report.zh-CN.html)
+- [72 小时双 CV 报告（官网渲染版）](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.1/results/dual-cv-72h/report.zh-CN.html)
 - [方法与复现](docs/benchmarks/scenario-bench/v1.1/methodology.md)
 
-本轮受控测试使用源码 commit `89c73a7464a81ef378686447d7c1eeb88b988455`、tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`，统一固定 1080p24 视频、30 秒单级时长和 [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json) 中记录的门禁。
+短时容量刷新使用源码 commit `89c73a7464a81ef378686447d7c1eeb88b988455`、tree `6857fbcce72c7af64e6cb23a27e66a405e9df9af`，采用固定 1080p24 视频、30 秒单级时长和 [release manifest](docs/benchmarks/scenario-bench/v1.1/release-manifest.json) 中记录的门禁。72 小时观测使用源码 commit `44209759f450e96cda265acfa8bc6d17a1138888`、tree `5cbdefeaefaf642407356c22c271ccc7d57935b0`，并复用同一受控输入。
+
+| 平台 | 72 小时固定路数 | 任务绑定 | 样本覆盖 | 最低 / 平均 FPS | 结果 |
+| --- | ---: | ---: | ---: | --- | --- |
+| BM1688 | 8 | 16 | 4316 / 4320 | 4.68 / 5.086 | PASS |
+| CV186X | 8 | 16 | 4316 / 4320 | 4.54 / 5.085 | PASS |
+| RK3576 | 8 | 16 | 4316 / 4320 | 5.00 / 5.098 | PASS |
+| RV1126B | 4 | 8 | 4316 / 4320 | 4.85 / 5.230 | PASS |
+
+72 小时结果只验证这些固定路数与受控本地循环输入，不代表最大容量、RTSP 韧性、生产推荐配置或产品发布资格。
 
 每路并发运行两个业务任务、三个模型阶段：人员检测包含一个检测阶段，未佩戴安全帽分析包含检测与分类两个阶段。
 
@@ -189,7 +199,7 @@ VLM 原始运行没有启用 FPS PASS/FAIL。统一按“全路最低 FPS 达到
 | RK3576 | 0.1 | 4 路 | 5 路全路最低 0.07 FPS |
 | RV1126B | — | — | 本轮无 VLM 观测 |
 
-这些是当前记录条件下的短时展示边界，不是精确硬件极限、生产推荐路数或长稳结论。完整矩阵见 [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)；此前公开的数据只保留一个 [v1.0 历史归档](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/)入口。
+容量与 VLM 数值仍是当前记录条件下的短时展示边界，不是精确硬件极限或生产推荐路数；独立的 72 小时表格只验证对应固定配置。完整矩阵见 [v1.1 benchmark](docs/benchmarks/scenario-bench/v1.1/README.zh-CN.md)；此前公开的数据只保留一个 [v1.0 历史归档](https://www.cosmowander.ai/zh/docs/benchmarks/scenario-bench/v1.0/)入口。
 
 ## 架构
 
