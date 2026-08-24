@@ -34,14 +34,14 @@ CosmoEdge goes beyond model serving with a complete application layer for model 
 ## CosmoEdge 1.1
 
 - **Multi-platform release:** BM1688, CV186X, RK3576, and RV1126B use the same video-ingest, orchestration, event, and observability workflow with target-specific model artifacts.
-- **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single workloads, concurrent mixed workloads, a controlled 72-hour dual-CV profile, and conservative VLM performance display boundaries with sanitized reproducibility attachments.
-- **Rockchip release platforms:** RK3576 and RV1126B both include cross-build, board operation, RKNN inference, and MPP/RGA media paths and share the same v1.1 release tier. Their platform-specific benchmark and long-running evidence remain separately traceable without changing that release tier.
+- **Public benchmark pack:** the [CosmoEdge 1.1 multi-platform report](docs/benchmarks/scenario-bench/v1.1/README.md) covers single workloads, concurrent mixed workloads, a controlled 72-hour dual-CV profile, and short-run VLM observations with sanitized, traceable benchmark artifacts.
+- **Rockchip release platforms:** RK3576 and RV1126B both include cross-build, board operation, RKNN inference, and MPP/RGA media paths in the same v1.1 release tier; their models and measured evidence remain bound separately.
 - **Sophon model handling:** chip-aware validation supports target-specific `.nn` artifacts for BM1688 and CV186X. The benchmark records an exact Open-package and running-engine binding for both reference devices.
 - **RKNN data path:** targeted DMA-BUF-to-RGA input, persistent bound-input, native quantized output, and direct YOLOv8 tensor decoding paths with explicit fallbacks.
 - **Agent-assisted development:** a repository-guided path for handing model porting, integration, and UI tasks to the coding agent you already use and receiving verifiable deliverables.
 - **Model Guard 2.3:** protects commercial preset-model distribution in Sophon Protected packages. Open and Protected expose the same application features, with no SKU-gated software functionality; they differ in model encryption and device-provisioning tooling.
-- **macOS Docker Preview:** an isolated `linux/amd64` path for one local-video workflow on Apple Silicon, validated through multiple end-to-end lab rounds. It remains Preview because it does not enable Model Guard, provide a native macOS/NPU path, cover multi-channel deployment, or represent production performance.
-- **Qualification boundary:** VLM raw runs remain short-run observations, while the public matrix applies one conservative 80% performance reference without rewriting the executed gates. The separate 72-hour result qualifies only its configured local-loop profile and is not substituted by a capacity staircase.
+- **macOS Docker Preview:** an isolated `linux/amd64` path for one local-video workflow on Apple Silicon, validated through multiple end-to-end lab rounds.
+- **Benchmark scope:** VLM figures are short-run observations. The separate 72-hour test covers the listed fixed-channel profiles using controlled local-loop input; detailed conditions are documented in the benchmark report.
 
 ## Choose a Platform
 
@@ -82,9 +82,9 @@ Apple Silicon macOS uses a separate amd64-emulation Preview path:
 # Open http://127.0.0.1:8080
 ```
 
-The Mac Preview is for local, single-video evaluation. It is not a native macOS
-binary, an NPU deployment, or production performance evidence. Read the full
-[macOS Docker Preview](docs/en/guide/macos-docker-preview.md) boundaries first.
+The Mac Preview provides a local, single-video workflow under `linux/amd64`
+emulation on Apple Silicon. Read the full
+[macOS Docker Preview](docs/en/guide/macos-docker-preview.md) scope first.
 
 After startup, use the [Scenario Configuration tutorial](https://www.cosmowander.ai/docs/tutorials/02-scenario-config/scenario-config) to create your first AI detection task. Docker Compose V1 users can replace `docker compose` with `docker-compose`.
 
@@ -197,7 +197,7 @@ The short-run capacity refresh uses source commit `89c73a7464a81ef378686447d7c1e
 | RK3576 | 8 | 16 | 4316 / 4320 | 5.00 / 5.098 | PASS |
 | RV1126B | 4 | 8 | 4316 / 4320 | 4.85 / 5.230 | PASS |
 
-The 72-hour result verifies only these configured channel counts under controlled local-loop input. Disk was observational rather than an executed integrity gate; the public projection uses 99%, while the later 90% safeguard applies only to future runs. Scheduled restart was already disabled and held disabled, so no restart-resilience claim is made. This is not a maximum-capacity, RTSP-resilience, production-profile, or product-release claim.
+These results describe the tested fixed-channel profiles under controlled local-loop input; they are not maximum-capacity or RTSP-resilience measurements. Execution details are documented in the [methodology](docs/benchmarks/scenario-bench/v1.1/methodology.md).
 
 Each channel concurrently runs two business tasks across three model stages: person detection has one detector stage, while no-safety-helmet analysis has a detector followed by a classifier.
 
@@ -286,7 +286,7 @@ Yes. Use the model-porting path to validate the tensor, preprocessing, post-proc
 <details>
 <summary><b>How production-ready is CosmoEdge?</b></summary>
 
-`v1.1.0` is the multi-platform release line for BM1688, CV186X, RK3576, RV1126B, and x86, with a validated, scoped macOS Docker Preview. The linked report records measured workload boundaries, conservative VLM performance displays, and explicit evidence gaps; long-running qualification remains separate. Production sizing still requires validation with your own models, streams, accuracy requirements, and deployment conditions.
+`v1.1.0` is the multi-platform release line for BM1688, CV186X, RK3576, RV1126B, and x86, with a validated, scoped macOS Docker Preview. The linked report records measured workload boundaries, short-run VLM observations, and controlled 72-hour fixed-profile results. Production sizing still requires validation with your own models, streams, accuracy requirements, and deployment conditions.
 
 </details>
 

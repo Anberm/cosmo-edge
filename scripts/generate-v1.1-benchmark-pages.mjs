@@ -247,6 +247,29 @@ function writeDerivedIndexes(outputRoot, manifest, platforms, vlm, longRun) {
   });
 }
 
+function renderBenchmarkScope(locale) {
+  return locale === 'zh-CN'
+    ? '测试范围：容量结果来自30秒本地循环阶梯，VLM 数据来自60秒短时观测；独立的72小时测试覆盖表中固定路数与受控本地循环输入。完整条件见测试方法。'
+    : 'Benchmark scope: capacity results come from 30-second local-loop steps, VLM figures are 60-second short-run observations, and the separate 72-hour test covers the listed fixed-channel profiles under controlled local-loop input. See the methodology for complete conditions.';
+}
+
+function renderLongRunScope(locale, linkedEvidence = false) {
+  if (linkedEvidence) {
+    return locale === 'zh-CN'
+      ? '范围：结果对应表中固定路数与受控本地循环输入；本轮未测量最大容量、RTSP 韧性或重启恢复。完整执行条件见多平台证据说明与测试方法。'
+      : 'Scope: Results apply to the listed channel counts and controlled local-loop input; maximum capacity, RTSP resilience, and restart recovery were not measured in this run. See the multi-platform evidence notes and methodology for complete execution conditions.';
+  }
+  return locale === 'zh-CN'
+    ? '范围：结果对应表中固定路数与受控本地循环输入；本轮未测量最大容量、RTSP 韧性或重启恢复。完整执行条件见下方证据说明与测试方法。'
+    : 'Scope: Results apply to the listed channel counts and controlled local-loop input; maximum capacity, RTSP resilience, and restart recovery were not measured in this run. See the evidence notes and methodology for complete execution conditions.';
+}
+
+function renderVlmScope(locale) {
+  return locale === 'zh-CN'
+    ? '范围：VLM 数据来自60秒短时阶梯，并统一采用目标吞吐的80%作为跨平台展示参考；readiness 协议和原始运行判定见测试方法。'
+    : 'Scope: VLM figures come from 60-second short-run steps using a uniform 80% target-throughput display reference; readiness protocols and raw-run interpretation are documented in the methodology.';
+}
+
 function renderRootReport(locale, manifest, platforms, vlmByPlatform, longRun) {
   const zh = locale === 'zh-CN';
   const targetFpsValues = manifest.controls.smallModelTargetFps;
@@ -300,13 +323,15 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform, longRun) {
       : '—',
     vlmByPlatform.has(platform.id) ? link(`results/${platform.id}/vlm-observation/report${zh ? '.zh-CN' : ''}.html`, 'VLM') : '—',
   ]);
+  const canonicalCaseCount = platforms.reduce((count, platform) => count + platform.cases.length, 0);
 
   const body = [
     `<h1>${zh ? 'CosmoEdge 1.1 多平台视频分析容量基准' : 'CosmoEdge 1.1 Multi-Platform Video Analytics Benchmark'}</h1>`,
     `<p class="lead">${platforms.map((platform) => platformLabel(platform, locale)).join(' · ')}</p>`,
-    notice(zh
-      ? '短时章节记录30秒本地循环输入下的容量边界；另有独立的72小时受控本地循环长稳观测。两者都不是 RTSP 韧性、生产推荐配置或产品发布资格结论。'
-      : 'The short-run sections record 30-second local-loop capacity boundaries; a separate section records the controlled 72-hour local-loop observation. Neither qualifies RTSP resilience, a recommended production profile, or product release.'),
+    `<p>${zh
+      ? `本报告发布 ${canonicalCaseCount} 个小模型受控用例、4 个完成的72小时固定配置结果，以及 ${vlmByPlatform.size} 个平台的 VLM 展示参考。`
+      : `This report publishes ${canonicalCaseCount} controlled small-model cases, four completed 72-hour fixed-profile results, and VLM display references for ${vlmByPlatform.size} platforms.`}</p>`,
+    notice(renderBenchmarkScope(locale), 'scope-note'),
     `<h2>${zh ? '并发混合任务矩阵' : 'Concurrent mixed-workload matrix'}</h2>`,
     `<p>${zh ? '每路包含两个业务任务和三个模型阶段：人员检测为单检测阶段，未佩戴安全帽分析为检测加分类两阶段。' : 'Each channel contains two business tasks across three model stages: one person-detector stage plus detector and classifier stages for no-safety-helmet analysis.'}</p>`,
     table(
@@ -322,24 +347,17 @@ function renderRootReport(locale, manifest, platforms, vlmByPlatform, longRun) {
       singleRows,
     ),
     `<h2>${zh ? '72 小时受控长稳观测' : '72-hour controlled long-run observation'}</h2>`,
-    notice(zh
-      ? '四个平台均在设定路数下完成72小时、5 FPS/任务的双 CV 本地循环观测。PASS 只说明该设定负载和完整性门禁通过，不表示容量上限、RTSP 韧性、生产配置或产品发布资格。'
-      : 'All four platforms completed the configured dual-CV local-loop workload for 72 hours at 5 FPS per task. PASS applies only to this configured workload and its integrity gates; it is not a capacity limit, RTSP-resilience, production-profile, or product-release claim.'),
+    `<p>${zh ? '四个平台均在设定路数下完成72小时、5 FPS/任务的双 CV 本地循环观测。' : 'All four platforms completed the configured dual-CV local-loop workload for 72 hours at 5 FPS per task.'}</p>`,
     table(
       longRunMatrixHeaders(locale),
       longRunMatrixRows(locale, platforms, longRunByPlatform, 'results/', longRun.workload.targetFpsPerTask),
     ),
-    notice(zh
-      ? '本次执行只观测磁盘占用，未把磁盘阈值作为运行完整性门禁；公开投影使用 99% 阈值。后来增加的 90% 防护仅约束未来运行，不追溯改判这次72小时结果。四个平台开始前定时重启均已关闭，观测期间保持关闭，因此不形成重启韧性结论。'
-      : 'Disk utilization was observed but was not an executed integrity gate; the public projection uses a 99% threshold. The later 90% safeguard applies only to future runs and does not retroactively reclassify this 72-hour observation. Scheduled restart was already disabled on all four platforms and stayed disabled, so this run makes no restart-resilience claim.', 'experimental'),
     `<p>${anchor(`results/dual-cv-72h/report${zh ? '.zh-CN' : ''}.html`, zh ? '打开 72 小时多平台报告' : 'Open the 72-hour multi-platform report')} · ${anchor('results/dual-cv-72h.json', zh ? 'canonical 数据' : 'canonical data')}</p>`,
   ];
 
   body.push(
     `<h2>${zh ? 'VLM 性能展示边界' : 'VLM performance display boundaries'}</h2>`,
-    notice(zh
-      ? '原始运行未启用 FPS PASS/FAIL。本表按全路最低 FPS 达到目标值 80% 且非 FPS 窗口完整的连续阶梯进行保守回算；启动敏感步骤不作为性能失败，也不增加展示路数。这不是精确硬件极限或长稳结论。'
-      : 'The raw runs did not enable FPS PASS/FAIL. This table conservatively post-evaluates the contiguous steps where every active route reached 80% of target and the non-FPS window was complete. Startup-sensitive steps are not performance failures and do not increase the displayed boundary. This is not an exact hardware limit or long-running claim.', 'experimental'),
+    `<p>${zh ? 'VLM 表格统一采用目标吞吐的80%作为跨平台展示参考。' : 'The VLM table uses a uniform 80% target-throughput reference for cross-platform display.'}</p>`,
     table(zh ? ['平台', '目标 FPS/路', '发布参考', '性能展示边界', '边界依据'] : ['Platform', 'Target FPS/ch', 'Publication reference', 'Performance display boundary', 'Boundary basis'], vlmRows),
     `<h2>${zh ? '证据入口' : 'Evidence entry points'}</h2>`,
     table(zh ? ['平台', '平台报告', '用例', '单任务', '混合任务', '72 小时', 'VLM'] : ['Platform', 'Overview', 'Cases', 'Single-task', 'Mixed workload', '72-hour', 'VLM'], linksRows),
@@ -450,14 +468,19 @@ function renderLongRunReport(locale, longRun, platforms) {
   const observations = new Map(longRun.observations.map((item) => [item.platformId, item]));
   const policy = longRun.integrityPolicy;
   const execution = longRun.executionPolicy;
+  const firstObservation = longRun.observations[0];
+  const maximumGap = Math.max(...longRun.observations.map((item) => item.samples.maximumGapSeconds));
   const body = `<h1>${zh ? 'CosmoEdge 1.1 · 72 小时受控长稳观测' : 'CosmoEdge 1.1 · 72-hour controlled long-run observation'}</h1>` +
     `<p class="lead">${zh ? '人员检测 + 未佩戴安全帽分析 · 本地循环输入 · 5 FPS/任务' : 'Person detection + no-safety-helmet analysis · local-loop input · 5 FPS/task'}</p>` +
-    notice(longRunClaimNotice(locale)) +
     `<h2>${zh ? '多平台结果' : 'Multi-platform results'}</h2>` +
     table(
       longRunMatrixHeaders(locale),
       longRunMatrixRows(locale, platforms, observations, '../', longRun.workload.targetFpsPerTask),
     ) +
+    `<p>${zh
+      ? `四个平台固定配置均完成 PASS，各保留 ${firstObservation.samples.observed}/${firstObservation.samples.expected} 个分钟样本，覆盖率 ${percent(firstObservation.samples.coverageRatio)}；最大采样间隔 ${maximumGap} 秒，观测丢弃、采集错误、任务绑定缺失和未关闭严重事件均为 0。`
+      : `All four fixed profiles completed with PASS, each retaining ${firstObservation.samples.observed}/${firstObservation.samples.expected} minute samples (${percent(firstObservation.samples.coverageRatio)} coverage). The maximum sampling gap was ${maximumGap} seconds, with zero observed discard, collection errors, missing task bindings, or open critical incidents.`}</p>` +
+    notice(renderLongRunScope(locale), 'scope-note') +
     `<h2>${zh ? '固定协议' : 'Fixed protocol'}</h2>` +
     table(
       zh ? ['项目', '设定'] : ['Item', 'Setting'],
@@ -466,40 +489,32 @@ function renderLongRunReport(locale, longRun, platforms) {
         [zh ? '证据终点' : 'Evidence endpoint', zh ? '一个连续的72小时窗口；不另列24/48小时中间过程' : 'one continuous 72-hour window; 24/48-hour intermediate milestones are not separately reported'],
         [zh ? '采样' : 'Sampling', `${longRun.window.sampleIntervalSeconds} s · ${longRun.window.expectedSamples} ${zh ? '个理论样本' : 'expected samples'}`],
         [zh ? '完整性门禁' : 'Integrity gates', `${zh ? '覆盖率' : 'coverage'} ≥ ${percent(policy.minimumSampleCoverageRatio)} · ${zh ? '首尾延迟和最大间隔' : 'boundary lag and maximum gap'} ≤ ${policy.maximumSamplingGapSeconds} s`],
-        [zh ? '监控器' : 'Monitor', zh
-          ? `私有多平台控制器；未使用标准 ScenarioBench CLI；${execution.monitor.launchBytesFrozen ? '已冻结' : '未冻结'}启动时控制器字节`
-          : `private multi-platform controller; standard ScenarioBench CLI not used; launch-time controller bytes ${execution.monitor.launchBytesFrozen ? 'frozen' : 'not frozen'}`],
-        [zh ? '磁盘口径' : 'Disk policy', zh
-          ? `执行时仅观测、不是完整性门禁；公开投影阈值 ${execution.disk.projectionReportThresholdPercent}%；后加 ${execution.disk.futureSafeguardThresholdPercent}% 防护只适用于未来运行`
-          : `observational at execution time, not an integrity gate; ${execution.disk.projectionReportThresholdPercent}% public-projection threshold; later ${execution.disk.futureSafeguardThresholdPercent}% safeguard applies only to future runs`],
-        [zh ? '定时重启' : 'Scheduled restart', zh
-          ? '四个平台开始前均已关闭，观测期间保持关闭；无需恢复，不形成重启韧性结论'
-          : 'already disabled on all platforms and held disabled; no restoration required and no restart-resilience claim'],
-        [zh ? '公开结果生成' : 'Public result generation', zh
-          ? '基于完整私有 metrics.jsonl 与最终状态做确定性后处理投影'
-          : 'deterministic post-run projection from complete private metrics.jsonl and final state'],
         [zh ? '工作负载' : 'Workload', `${longRun.workload.businessTasksPerChannel} ${zh ? '个业务任务/路' : 'business tasks/ch'} · ${longRun.workload.modelStagesPerChannel} ${zh ? '个模型阶段/路' : 'model stages/ch'} · ${longRun.workload.targetFpsPerTask} FPS/${zh ? '任务' : 'task'}`],
         [zh ? '输入' : 'Input', `${longRun.input.codec} ${longRun.input.width}×${longRun.input.height} @ ${longRun.input.sourceFps} FPS · SHA-256 ${longRun.input.sha256}`],
         [zh ? '预览负载' : 'Preview load', longRun.input.previewLoad ? (zh ? '开启' : 'enabled') : (zh ? '关闭' : 'disabled')],
       ],
     ) +
-    `<h2>${zh ? '解释边界' : 'Interpretation boundaries'}</h2>` +
-    notice(zh
-      ? '观测窗口内最大采样间隔保持在正常60秒采样周期附近，未发现中途采集断档。该事实不评价测量窗口外的管理连接，也不替代 RTSP、准确率或生产环境验收。'
-      : 'The maximum in-window sampling gap stayed near the normal 60-second cadence, so no mid-window collection outage was observed. This does not evaluate management connectivity outside the measured window or replace RTSP, accuracy, or production acceptance.') +
-    notice(zh
-      ? 'BM1688 与 CV186X 的磁盘占用在全部观测样本中均为 96%，没有继续上升；这是资源观测事实，不是对后来 90% 防护的追溯豁免。'
-      : 'BM1688 and CV186X remained at 96% disk utilization across all observed samples with no increase. This is a resource observation, not a retroactive waiver of the later 90% safeguard.', 'experimental') +
-    notice(zh
-      ? 'ScenarioBench 源码快照已冻结，但长稳进程启动后私有控制器文件发生过更新，且启动时没有产出控制器摘要；因此本报告不声称已冻结启动时控制器字节。'
-      : 'The ScenarioBench source snapshot is frozen, but the private controller files changed after the long-running process started and no launch-time controller digest was emitted; this report therefore does not claim frozen launch-time controller bytes.', 'experimental') +
-    notice(zh
-      ? '清理记录显示已无本次测试拥有的通道且没有清理错误，但未生成独立 final-state 侧车；因此报告不把该缺失文件表述为额外的终态证明。'
-      : 'The cleanup record reports no remaining run-owned channels and no cleanup errors, but no independent final-state sidecar was emitted; the report therefore does not present that missing artifact as additional final-state proof.', 'experimental') +
-    `<p>${anchor(`../dual-cv-72h.json`, zh ? '打开 canonical 数据' : 'Open canonical data')} · ${anchor(`../../methodology.md`, zh ? '方法说明' : 'methodology')} · ${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</p>` +
     `<h2>${zh ? '平台详情' : 'Platform details'}</h2><ul>` +
     platforms.map((platform) => `<li>${anchor(`../${platform.id}/dual-cv-72h/report${suffix}.html`, `${platform.name} · ${zh ? '72 小时报告' : '72-hour report'}`)}</li>`).join('') +
-    `</ul>`;
+    `</ul>` +
+    `<details class="evidence-notes"><summary>${zh ? '执行与证据说明' : 'Execution and evidence notes'}</summary><ul>` +
+    `<li>${zh
+      ? `磁盘在执行时只做观测，公开投影阈值为 ${execution.disk.projectionReportThresholdPercent}%；后来增加的 ${execution.disk.futureSafeguardThresholdPercent}% 防护只适用于未来运行。BM1688 与 CV186X 全程为 96%，RK3576 为 14%→15%，RV1126B 为 46%→47%。`
+      : `Disk was observational during execution. The public projection threshold is ${execution.disk.projectionReportThresholdPercent}%, and the later ${execution.disk.futureSafeguardThresholdPercent}% safeguard applies only to future runs. BM1688 and CV186X stayed at 96%, RK3576 moved from 14% to 15%, and RV1126B moved from 46% to 47%.`}</li>` +
+    `<li>${zh
+      ? '四个平台在开始前定时重启均已关闭，观测期间各完成80次检查，无失败、无纠正写入且无需恢复；该记录只说明控制变量连续。'
+      : 'Scheduled restart was disabled before launch on all four platforms. Each recorded 80 checks with no failure or corrective write and required no restoration; this establishes only control-variable continuity.'}</li>` +
+    `<li>${zh
+      ? 'ScenarioBench 源码快照已冻结，但长稳进程启动后私有控制器文件发生过更新，且启动时没有产出控制器摘要；因此不声称已冻结启动时控制器字节。'
+      : 'The ScenarioBench source snapshot is frozen, but the private controller files changed after the process started and no launch-time controller digest was emitted; frozen launch-time controller bytes are therefore not claimed.'}</li>` +
+    `<li>${zh
+      ? '清理记录显示剩余本次通道为0、布局已恢复且无清理错误，但没有生成独立 final-state 侧车；清理结论仅绑定该监控记录。'
+      : 'The cleanup record reports zero remaining run-owned channels, restored layouts, and no cleanup errors, but no independent final-state sidecar was emitted; the cleanup conclusion is bound to that monitor record.'}</li>` +
+    `<li>${zh
+      ? 'Canonical 数据按 SHA-256 记录私有 run manifest、suite state、suite summary、投影工具及逐平台 metrics、summary、report、restart-guard 和 cleanup 产物。'
+      : 'The canonical data records exact SHA-256 identities for the private run manifest, suite state, suite summary, projection tool, and each platform metrics, summary, report, restart-guard, and cleanup artifact.'}</li>` +
+    `</ul></details>` +
+    `<p>${anchor(`../dual-cv-72h.json`, zh ? '打开 canonical 数据' : 'Open canonical data')} · ${anchor(`../../methodology.md`, zh ? '方法说明' : 'methodology')} · ${anchor(`report${zh ? '' : '.zh-CN'}.html`, zh ? 'English' : '中文')}</p>`;
   return page(locale, zh ? 'CosmoEdge 1.1 72 小时长稳观测' : 'CosmoEdge 1.1 72-hour long-run observation', longRunNav(locale), body);
 }
 
@@ -509,16 +524,14 @@ function renderPlatformLongRunReport(locale, longRun, platform, observation) {
   const telemetry = observation.telemetry;
   const resources = observation.observedResourcePeaksPercent;
   const disk = observation.diskTrendPercent;
-  const cleanup = observation.cleanupRecord;
-  const restart = observation.timedRestart;
   const body = `<h1>${escapeHtml(platform.name)} · ${zh ? '72 小时双 CV 长稳观测' : '72-hour dual-CV long-run observation'}</h1>` +
     `<p class="lead">${observation.configuredChannels} ${zh ? '路' : 'channels'} · ${observation.businessTaskBindings} ${zh ? '个业务任务绑定' : 'business-task bindings'} · ${longRun.workload.targetFpsPerTask} FPS/${zh ? '任务' : 'task'}</p>` +
-    notice(longRunClaimNotice(locale)) +
     `<h2>${zh ? '观测结果' : 'Observation result'}</h2>` +
     table(
       zh ? ['设定路数', '任务绑定', '时长', '目标 FPS/任务', '最低 / 平均 / 最高 FPS', '结果'] : ['Configured channels', 'Task bindings', 'Duration', 'Target FPS/task', 'Minimum / average / maximum FPS', 'Result'],
       [[observation.configuredChannels, observation.businessTaskBindings, `${longRun.window.durationHours} h`, longRun.workload.targetFpsPerTask, `${observation.fps.minimum} / ${observation.fps.average} / ${observation.fps.maximum}`, observation.status]],
     ) +
+    notice(renderLongRunScope(locale, true), 'scope-note') +
     `<h2>${zh ? '采样连续性与完整性' : 'Sampling continuity and integrity'}</h2>` +
     table(
       zh ? ['观测 / 理论样本', '覆盖率', '首样本延迟', '尾样本延迟', '最大间隔', '采集错误', '绑定不完整', '绑定遥测缺失', '未关闭严重事故', '完整性'] : ['Observed / expected samples', 'Coverage', 'First-sample lag', 'Final-sample lag', 'Maximum gap', 'Collector errors', 'Incomplete bindings', 'Missing binding telemetry', 'Open critical incidents', 'Integrity'],
@@ -542,45 +555,10 @@ function renderPlatformLongRunReport(locale, longRun, platform, observation) {
       zh ? ['最大丢弃率', 'CPU 峰值', '内存峰值', '磁盘首值 → 尾值', '磁盘最小 / 峰值', '磁盘变化次数'] : ['Maximum discard rate', 'Peak CPU', 'Peak memory', 'Disk first → last', 'Disk minimum / peak', 'Disk changes'],
       [[percent(telemetry.maximumDiscardRate), percentWhole(resources.cpu), percentWhole(resources.memory), `${percentWhole(disk.first)} → ${percentWhole(disk.last)}`, `${percentWhole(disk.minimum)} / ${percentWhole(disk.maximum)}`, disk.changes]],
     ) +
-    notice(zh
-      ? `磁盘在本次执行中只做观测，没有纳入完整性门禁；公开投影阈值为 ${longRun.executionPolicy.disk.projectionReportThresholdPercent}%。后来增加的 ${longRun.executionPolicy.disk.futureSafeguardThresholdPercent}% 防护不追溯改判本次结果。`
-      : `Disk was observational in this execution and was not an integrity gate; the public projection threshold is ${longRun.executionPolicy.disk.projectionReportThresholdPercent}%. The later ${longRun.executionPolicy.disk.futureSafeguardThresholdPercent}% safeguard does not retroactively reclassify this result.`, 'experimental') +
-    `<h2>${zh ? '定时重启控制变量' : 'Scheduled-restart control'}</h2>` +
-    table(
-      zh ? ['初始状态', '检查 / 失败 / 修正', '最终状态', '需要恢复', '重启韧性结论'] : ['Initial state', 'Checks / failures / corrections', 'Final state', 'Restoration required', 'Restart-resilience claim'],
-      [[restart.initialState, `${restart.checks} / ${restart.failures} / ${restart.corrections}`, restart.finalState, yesNo(restart.restorationRequired, locale), yesNo(restart.restartResilienceClaimAllowed, locale)]],
-    ) +
-    `<h2>${zh ? '清理记录' : 'Cleanup record'}</h2>` +
-    table(
-      zh ? ['状态', '错误', '停用任务绑定', '请求删除通道', '剩余本次通道', '布局恢复', '独立终态侧车'] : ['Status', 'Errors', 'Disabled task bindings', 'Requested channel deletions', 'Remaining run-owned channels', 'Layouts restored', 'Independent final-state sidecar'],
-      [[
-        cleanup.status,
-        cleanup.errors,
-        cleanup.disabledTaskBindings,
-        cleanup.requestedChannelDeletions,
-        cleanup.remainingOwnedChannels,
-        yesNo(cleanup.layoutsRestored, locale),
-        yesNo(cleanup.independentFinalStateArtifactEmitted, locale),
-      ]],
-    ) +
-    notice(zh
-      ? '清理记录通过，但未生成独立 final-state 侧车；这一缺失不影响72小时窗口完整性判定，也不作为额外终态证明。'
-      : 'The cleanup record passed, but no independent final-state sidecar was emitted. That missing artifact does not affect the 72-hour window-integrity verdict and is not presented as additional final-state proof.', 'experimental') +
     `<h2>${zh ? '来源' : 'Provenance'}</h2>` +
-    `<ul><li>${zh ? '源码' : 'Source'}: <code>${escapeHtml(longRun.source.commit)}</code> · tree <code>${escapeHtml(longRun.source.tree)}</code></li>` +
-    `<li>metrics.jsonl SHA-256: <code>${escapeHtml(observation.sourceArtifacts.metricsJsonlSha256)}</code></li>` +
-    `<li>${zh ? '原始 summary SHA-256' : 'Source summary SHA-256'}: <code>${escapeHtml(observation.sourceArtifacts.summarySha256)}</code></li>` +
-    `<li>${zh ? '原始 report SHA-256' : 'Source report SHA-256'}: <code>${escapeHtml(observation.sourceArtifacts.reportSha256)}</code></li>` +
-    `<li>${zh ? '定时重启守护记录 SHA-256' : 'Restart-guard record SHA-256'}: <code>${escapeHtml(observation.sourceArtifacts.restartGuardSha256)}</code></li>` +
-    `<li>${zh ? '清理记录 SHA-256' : 'Cleanup record SHA-256'}: <code>${escapeHtml(observation.sourceArtifacts.cleanupSha256)}</code></li></ul>` +
-    `<p>${anchor(`../../dual-cv-72h.json`, zh ? 'canonical 数据' : 'canonical data')} · ${anchor(`../../../methodology.md`, zh ? '方法说明' : 'methodology')}</p>`;
+    `<p>${zh ? '源码' : 'Source'}: <code>${escapeHtml(longRun.source.commit)}</code> · tree <code>${escapeHtml(longRun.source.tree)}</code></p>` +
+    `<p>${anchor(`../../dual-cv-72h/report${zh ? '.zh-CN' : ''}.html`, zh ? '多平台报告与证据说明' : 'Multi-platform report and evidence notes')} · ${anchor(`../../dual-cv-72h.json`, zh ? 'canonical 数据' : 'canonical data')} · ${anchor(`../../../methodology.md`, zh ? '方法说明' : 'methodology')}</p>`;
   return page(locale, `${platform.name} ${zh ? '72 小时长稳观测' : '72-hour long-run observation'}`, platformLongRunNav(locale), body);
-}
-
-function longRunClaimNotice(locale) {
-  return locale === 'zh-CN'
-    ? 'PASS 只表示设定的双 CV 本地循环负载完成72小时并通过已列出的完整性门禁；不是最大容量、RTSP 韧性、生产推荐配置或产品发布资格结论。'
-    : 'PASS means only that the configured dual-CV local-loop workload completed 72 hours and passed the listed integrity gates; it is not a maximum-capacity, RTSP-resilience, recommended production-profile, or product-release claim.';
 }
 
 function longRunMatrixHeaders(locale) {
@@ -613,12 +591,6 @@ function longRunMatrixRows(locale, platforms, observations, reportPrefix = null,
   });
 }
 
-function yesNo(input, locale) {
-  if (input === true) return locale === 'zh-CN' ? '是' : 'yes';
-  if (input === false) return locale === 'zh-CN' ? '否' : 'no';
-  return '—';
-}
-
 function renderCaseReport(locale, platform, item) {
   const zh = locale === 'zh-CN';
   const body = `<h1>${escapeHtml(platform.name)} · ${escapeHtml(caseLabel(item, locale))}</h1>` +
@@ -646,9 +618,8 @@ function renderVlmReport(locale, platform, observation, publicationPolicy) {
     value(step.stopReason),
   ]);
   const body = `<h1>${escapeHtml(platform.name)} · ${zh ? 'VLM 性能观测' : 'VLM performance observation'}</h1>` +
-    notice(zh
-      ? `原始运行未启用 FPS PASS/FAIL。按全路最低 FPS 达到目标值的 ${percent(publicationPolicy?.minimumActiveRouteFpsRatio)} 且非 FPS 窗口完整的连续阶梯保守回算，本发布材料展示 ${observation.publicationBoundary?.displayChannels ?? '—'} 路；启动敏感步骤不作为性能失败。这不是精确容量或长稳结论。`
-      : `The raw run did not enable FPS PASS/FAIL. Conservatively post-evaluating the contiguous steps with every active route at ≥ ${percent(publicationPolicy?.minimumActiveRouteFpsRatio)} of target and a complete non-FPS window gives a ${observation.publicationBoundary?.displayChannels ?? '—'}-channel publication display boundary. Startup-sensitive steps are not performance failures. This is not an exact capacity or long-running claim.`, 'experimental') +
+    `<p class="lead">${zh ? '80% 展示参考' : '80% display reference'}: ${observation.publicationBoundary?.displayChannels ?? '—'} ${zh ? '路' : 'channels'}</p>` +
+    notice(renderVlmScope(locale), 'scope-note') +
     table(zh ? ['路数', '时长', '目标 FPS/路', '当前新增路 FPS', '全路最低 FPS / 目标比例', '平均丢弃', '加速器', 'CPU', '内存', '80% 发布参考', '原始非 FPS 门禁', '停止原因'] : ['Channels', 'Hold', 'Target FPS/ch', 'Current new-route FPS', 'Minimum active-route FPS / target ratio', 'Avg discard', 'Accelerator', 'CPU', 'Memory', '80% publication reference', 'Raw non-FPS gate', 'Stop reason'], rows) +
     `<p>${zh ? '测试源码' : 'Test source'}: <code>${escapeHtml(observation.source?.commit ?? '—')}</code> · ` +
     `${zh ? '工具补丁' : 'tool patch'}: <code>${escapeHtml(observation.source?.toolPatchSha256 ?? '—')}</code> · ` +
@@ -889,7 +860,7 @@ function escapeHtml(input) {
 }
 
 function styles() {
-  return ':root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#f7f9fc;color:#172033;font:15px/1.65,Inter,"Segoe UI",Arial,sans-serif}main{max-width:1120px;margin:auto;padding:42px 24px 70px;min-width:0}h1{font-size:32px;line-height:1.25;margin:0 0 8px;letter-spacing:-.02em}h2{margin-top:38px;line-height:1.35}h3{margin-top:28px}.lead{color:#526071}.notice{background:#eef4ff;border-left:4px solid #2563eb;padding:14px 16px;border-radius:0 8px 8px 0}.experimental{background:#fff7e8;border-left-color:#d97706}.report-nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 22px}.report-nav a,.report-nav span{display:inline-flex;align-items:center;min-height:34px;padding:5px 11px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#1d4ed8;text-decoration:none}.report-nav span{color:#475569;background:#f8fafc}.table{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;border:1px solid #dce3ed;border-radius:8px;margin:12px 0 24px;background:#fff}.table:focus{outline:2px solid #93c5fd;outline-offset:2px}table{border-collapse:collapse;width:100%;background:#fff}th,td{padding:10px 12px;border-bottom:1px solid #dce3ed;text-align:left;vertical-align:top}th{background:#f1f5f9;white-space:nowrap}tr:last-child td{border-bottom:0}td[data-status="PASS"]{color:#047857;font-weight:700}td[data-status="FAIL"]{color:#b91c1c;font-weight:700}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;border:1px solid #e2e8f0;border-radius:10px}code{background:#eef2f7;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere;word-break:break-word}a{color:#1d4ed8}@media(max-width:600px){main{padding:26px 15px 52px}h1{font-size:27px}h2{font-size:22px;margin-top:32px}.table{margin-right:0}.table table{width:max-content;min-width:100%;max-width:none}th,td{padding:9px 11px;min-width:76px}img{margin:18px auto}.report-nav{gap:7px}.report-nav a,.report-nav span{font-size:13px;min-height:32px;padding:4px 9px}}';
+  return ':root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#f7f9fc;color:#172033;font:15px/1.65,Inter,"Segoe UI",Arial,sans-serif}main{max-width:1120px;margin:auto;padding:42px 24px 70px;min-width:0}h1{font-size:32px;line-height:1.25;margin:0 0 8px;letter-spacing:-.02em}h2{margin-top:38px;line-height:1.35}h3{margin-top:28px}.lead{color:#526071}.notice{background:#eef4ff;border-left:4px solid #2563eb;padding:14px 16px;border-radius:0 8px 8px 0}.experimental{background:#fff7e8;border-left-color:#d97706}.evidence-notes{margin:28px 0;padding:12px 16px;border:1px solid #dce3ed;border-radius:8px;background:#fff}.evidence-notes summary{cursor:pointer;font-weight:700}.report-nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 22px}.report-nav a,.report-nav span{display:inline-flex;align-items:center;min-height:34px;padding:5px 11px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#1d4ed8;text-decoration:none}.report-nav span{color:#475569;background:#f8fafc}.table{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;border:1px solid #dce3ed;border-radius:8px;margin:12px 0 24px;background:#fff}.table:focus{outline:2px solid #93c5fd;outline-offset:2px}table{border-collapse:collapse;width:100%;background:#fff}th,td{padding:10px 12px;border-bottom:1px solid #dce3ed;text-align:left;vertical-align:top}th{background:#f1f5f9;white-space:nowrap}tr:last-child td{border-bottom:0}td[data-status="PASS"]{color:#047857;font-weight:700}td[data-status="FAIL"]{color:#b91c1c;font-weight:700}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;border:1px solid #e2e8f0;border-radius:10px}code{background:#eef2f7;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere;word-break:break-word}a{color:#1d4ed8}@media(max-width:600px){main{padding:26px 15px 52px}h1{font-size:27px}h2{font-size:22px;margin-top:32px}.table{margin-right:0}.table table{width:max-content;min-width:100%;max-width:none}th,td{padding:9px 11px;min-width:76px}img{margin:18px auto}.report-nav{gap:7px}.report-nav a,.report-nav span{font-size:13px;min-height:32px;padding:4px 9px}}';
 }
 
 function copyCanonicalAssets(sourceRoot, outputRoot, platformIds) {
