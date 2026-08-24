@@ -6,7 +6,7 @@ This project follows a release-note style inspired by Keep a Changelog.
 
 ## [Unreleased]
 
-### 1.1.0 release candidate
+## [1.1.0] - 2026-08-24
 
 CosmoEdge 1.1 adds CV186X, RK3576, and RV1126B release-platform support, expands the BMRT/RKNN
 media and inference paths, and publishes multi-platform short-run capacity, validated VLM performance, and
