@@ -28,7 +28,51 @@ REQUIRED_EXECUTABLES = {
     "scripts/stop.sh",
 }
 RUNTIME_PATHS_FILE = "share/cosmo/runtime-paths.env"
-REQUIRED_FILES = {"bin/version.txt", "scripts/common.sh", RUNTIME_PATHS_FILE}
+REQUIRED_LICENSE_FILES = {
+    "LICENSE",
+    "NOTICE",
+    "share/licenses/cosmo-edge/LICENSE",
+    "share/licenses/cosmo-edge/NOTICE",
+    "share/licenses/third-party/cryptopp/License.txt",
+    "share/licenses/third-party/cryptopp-cmake/LICENSE",
+    "share/licenses/third-party/curl/COPYING",
+    "share/licenses/third-party/eigen/LICENSE.MPL2.0",
+    "share/licenses/third-party/ffmpeg/COPYING.LGPLv2.1",
+    "share/licenses/third-party/ffmpeg/LICENSE.md",
+    "share/licenses/third-party/fmt/LICENSE.rst",
+    "share/licenses/third-party/glog/COPYING",
+    "share/licenses/third-party/libevent/LICENSE",
+    "share/licenses/third-party/libsophon/LICENSE",
+    "share/licenses/third-party/libuuid/COPYING",
+    "share/licenses/third-party/mp4v2/COPYING",
+    "share/licenses/third-party/onnxruntime/LICENSE",
+    "share/licenses/third-party/onnxruntime/ThirdPartyNotices.txt",
+    "share/licenses/third-party/openssl/LICENSE.txt",
+    "share/licenses/third-party/paho-mqtt-c/LICENSE",
+    "share/licenses/third-party/paho-mqtt-c/NOTICE",
+    "share/licenses/third-party/srs/LICENSE",
+    "share/licenses/third-party/sqlitecpp/LICENSE.txt",
+    "share/licenses/third-party/tokenizers-cpp/LICENSE",
+    "share/licenses/third-party/usockets/LICENSE",
+    "share/licenses/third-party/uwebsockets/LICENSE",
+    "share/licenses/third-party/zlib/LICENSE",
+}
+RKNN_LICENSE_FILES = {
+    "share/licenses/third-party/rknn-runtime/LICENSE",
+    "share/licenses/third-party/rockchip-mpp/Apache-2.0",
+    "share/licenses/third-party/rockchip-mpp/MIT",
+    "share/licenses/third-party/rockchip-librga/COPYING",
+}
+MODEL_GUARD_TERMS_FILE = "share/licenses/cosmo-model-guard/ARTIFACT-TERMS.md"
+MODEL_GUARD_RUNTIME_FILE = "lib/libcosmo_model_guard.so.2.0.0"
+APPROVED_MODEL_GUARD_RUNTIME_SHA256 = (
+    "74ff8b456548e615882e5c9ee6dd18a51a2caf8124d761d7243dad014310042c"
+)
+REQUIRED_FILES = {
+    "bin/version.txt",
+    "scripts/common.sh",
+    RUNTIME_PATHS_FILE,
+} | REQUIRED_LICENSE_FILES
 RUNTIME_DATA_DIRS = {
     "default": "/data/cwaiuserdata",
     "rockchip": "/userdata/cwaiuserdata",
@@ -107,6 +151,84 @@ def parse_runtime_paths(data: bytes) -> dict[str, str]:
             f"runtime path declaration is missing: {', '.join(sorted(missing))}"
         )
     return values
+
+
+def verify_runtime_license_bundle(
+    contents: dict[str, bytes], target_chip: str | None
+) -> None:
+    required = set(REQUIRED_LICENSE_FILES)
+    if target_chip in ("rk3576", "rv1126b"):
+        required.update(RKNN_LICENSE_FILES)
+    if MODEL_GUARD_RUNTIME_FILE in contents:
+        required.add(MODEL_GUARD_TERMS_FILE)
+
+    for filename in required:
+        if not contents.get(filename, b"").strip():
+            raise PackageAuditError(f"runtime license is empty: {filename}")
+
+    if b"Apache License\nVersion 2.0" not in contents["LICENSE"]:
+        raise PackageAuditError("package root LICENSE is not Apache-2.0")
+    if (
+        b"CosmoEdge" not in contents["NOTICE"]
+        or b"Third-party software" not in contents["NOTICE"]
+    ):
+        raise PackageAuditError("package root NOTICE is incomplete")
+    if (
+        b"GNU LESSER GENERAL PUBLIC LICENSE"
+        not in contents["share/licenses/third-party/ffmpeg/COPYING.LGPLv2.1"]
+    ):
+        raise PackageAuditError("packaged FFmpeg LGPL text is invalid")
+    if contents["LICENSE"] != contents["share/licenses/cosmo-edge/LICENSE"]:
+        raise PackageAuditError("package root and shared LICENSE copies differ")
+    if contents["NOTICE"] != contents["share/licenses/cosmo-edge/NOTICE"]:
+        raise PackageAuditError("package root and shared NOTICE copies differ")
+
+    ffmpeg_license_identity = b"libavcodec license: LGPL version 2.1 or later"
+    ffmpeg_libraries = [
+        data
+        for name, data in contents.items()
+        if name.startswith("lib/libavcodec.so.")
+    ]
+    if not ffmpeg_libraries or not any(
+        ffmpeg_license_identity in data for data in ffmpeg_libraries
+    ):
+        raise PackageAuditError(
+            "packaged FFmpeg runtime is not identified as LGPL-2.1-or-later"
+        )
+    if target_chip in ("rk3576", "rv1126b"):
+        rknn_terms = contents[
+            "share/licenses/third-party/rknn-runtime/LICENSE"
+        ]
+        required_rknn_terms = (
+            b"RKNN SDK License",
+            b"1. License Grant",
+            b"redistribute its modifications or derivative works",
+            b"compatible with Products",
+        )
+        if any(marker not in rknn_terms for marker in required_rknn_terms):
+            raise PackageAuditError("packaged RKNN runtime terms are invalid")
+    if MODEL_GUARD_RUNTIME_FILE in contents:
+        model_guard_terms = contents[MODEL_GUARD_TERMS_FILE]
+        required_model_guard_terms = (
+            b"does not grant or alter artifact licensing or redistribution rights",
+            b"cosmo-wander-ai/cosmo-edge/issues/59",
+            b"cosmo-wander-ai/cosmo-edge/pull/101",
+            APPROVED_MODEL_GUARD_RUNTIME_SHA256.encode("ascii"),
+        )
+        if any(
+            marker not in model_guard_terms
+            for marker in required_model_guard_terms
+        ):
+            raise PackageAuditError(
+                "packaged Model Guard artifact terms are invalid"
+            )
+        if (
+            content_sha256(contents[MODEL_GUARD_RUNTIME_FILE])
+            != APPROVED_MODEL_GUARD_RUNTIME_SHA256
+        ):
+            raise PackageAuditError(
+                "packaged Model Guard runtime is not the approved artifact"
+            )
 
 
 def verify_model_bundle(
@@ -306,6 +428,8 @@ def verify_package(
             )
     elif runtime_paths["COSMO_PACKAGE_DATA_DIR"] not in RUNTIME_DATA_DIRS.values():
         raise PackageAuditError("runtime data directory is unsupported")
+
+    verify_runtime_license_bundle(contents, effective_chip)
 
     verify_model_bundle(entries, contents, effective_chip)
 

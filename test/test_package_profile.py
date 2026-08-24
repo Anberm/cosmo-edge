@@ -84,6 +84,10 @@ class PackageProfileTests(unittest.TestCase):
         runtime_app_data_dir: str = "/appfs/cosmo_wander/cwai_data",
         model_bundle_scope: str | None = None,
         include_bundle_license: bool = True,
+        omit_required_file: str | None = None,
+        include_model_guard: bool = False,
+        rknn_terms: bytes | None = None,
+        model_guard_runtime: bytes | None = None,
     ) -> pathlib.Path:
         root = "cosmo-V1.5.0"
         directory = pathlib.Path(tempfile.mkdtemp())
@@ -101,9 +105,21 @@ class PackageProfileTests(unittest.TestCase):
                 info.mode = 0o755
                 archive.addfile(info)
             files = set(executable_files) | set(regular_files)
+            files.add("lib/libavcodec.so.58.134.100")
+            if target_chip in ("rk3576", "rv1126b"):
+                files.update(verifier.RKNN_LICENSE_FILES)
+            if include_model_guard:
+                files.update(
+                    {
+                        "lib/libcosmo_model_guard.so.2.0.0",
+                        verifier.MODEL_GUARD_TERMS_FILE,
+                    }
+                )
             if profile == "production-release":
                 files.add("bin/cosmo-model-provision")
             for name in sorted(files):
+                if name == omit_required_file:
+                    continue
                 if name == "share/cosmo/runtime-paths.env":
                     selected_data_dir = runtime_data_dir or (
                         "/userdata/cwaiuserdata"
@@ -114,6 +130,37 @@ class PackageProfileTests(unittest.TestCase):
                         f"COSMO_PACKAGE_DATA_DIR={selected_data_dir}\n"
                         f"COSMO_PACKAGE_APP_DATA_DIR={runtime_app_data_dir}\n"
                     ).encode()
+                elif name in ("LICENSE", "share/licenses/cosmo-edge/LICENSE"):
+                    data = b"Apache License\nVersion 2.0\nfixture\n"
+                elif name in ("NOTICE", "share/licenses/cosmo-edge/NOTICE"):
+                    data = b"CosmoEdge\nThird-party software\nfixture\n"
+                elif name.endswith("ffmpeg/COPYING.LGPLv2.1"):
+                    data = b"GNU LESSER GENERAL PUBLIC LICENSE\nfixture\n"
+                elif name == "lib/libavcodec.so.58.134.100":
+                    data = b"libavcodec license: LGPL version 2.1 or later\n"
+                elif name.endswith("rknn-runtime/LICENSE"):
+                    data = rknn_terms or (
+                        b"RKNN SDK License\n"
+                        b"1. License Grant\n"
+                        b"redistribute its modifications or derivative works\n"
+                        b"compatible with Products\n"
+                    )
+                elif name == verifier.MODEL_GUARD_TERMS_FILE:
+                    data = (
+                        REPOSITORY / "prebuild/model-guard-v2/README.md"
+                    ).read_bytes()
+                elif name == verifier.MODEL_GUARD_RUNTIME_FILE:
+                    data = (
+                        model_guard_runtime
+                        if model_guard_runtime is not None
+                        else (
+                            REPOSITORY
+                            / "prebuild/model-guard-v2/lib/"
+                            "libcosmo_model_guard.so.2.0.0"
+                        ).read_bytes()
+                    )
+                elif name in verifier.REQUIRED_LICENSE_FILES:
+                    data = b"fixture runtime license\n"
                 else:
                     data = (
                         b"#!/bin/sh\n"
@@ -206,6 +253,91 @@ class PackageProfileTests(unittest.TestCase):
 
     def test_open_accepts_plain_model(self) -> None:
         verifier.verify_package(self.make_package("public-runtime"), "public-runtime")
+
+    def test_distribution_license_bundle_is_mandatory(self) -> None:
+        for required in (
+            "LICENSE",
+            "NOTICE",
+            "share/licenses/third-party/ffmpeg/COPYING.LGPLv2.1",
+        ):
+            with self.subTest(required=required):
+                package = self.make_package(
+                    "public-runtime", omit_required_file=required
+                )
+                with self.assertRaisesRegex(
+                    verifier.PackageAuditError, "required file is missing"
+                ):
+                    verifier.verify_package(package, "public-runtime")
+
+        cmake = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("cosmo_install_runtime_license", cmake)
+        self.assertIn("COPYING.LGPLv2.1", cmake)
+        self.assertIn("DESTINATION share/licenses/cosmo-edge", cmake)
+
+        rockchip_license = next(iter(verifier.RKNN_LICENSE_FILES))
+        package = self.make_package(
+            "public-runtime",
+            target_chip="rv1126b",
+            platform_chip="rv1126b",
+            omit_required_file=rockchip_license,
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "runtime license is empty"
+        ):
+            verifier.verify_package(
+                package, "public-runtime", target_chip="rv1126b"
+            )
+
+        model_guard = self.make_package(
+            "public-runtime",
+            target_chip="bm1688",
+            include_model_guard=True,
+            omit_required_file=verifier.MODEL_GUARD_TERMS_FILE,
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "runtime license is empty"
+        ):
+            verifier.verify_package(
+                model_guard, "public-runtime", target_chip="bm1688"
+            )
+
+    def test_rockchip_rejects_incomplete_rknn_sdk_terms(self) -> None:
+        package = self.make_package(
+            "public-runtime",
+            target_chip="rk3576",
+            platform_chip="rk3576",
+            platform_runtime="rk3576-mpp-rga",
+            rknn_terms=b"Copyright Statement\nfixture\n",
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "RKNN runtime terms are invalid"
+        ):
+            verifier.verify_package(
+                package, "public-runtime", target_chip="rk3576"
+            )
+
+    def test_model_guard_requires_approved_runtime_identity(self) -> None:
+        approved = self.make_package(
+            "public-runtime",
+            target_chip="bm1688",
+            include_model_guard=True,
+        )
+        verifier.verify_package(
+            approved, "public-runtime", target_chip="bm1688"
+        )
+
+        unapproved = self.make_package(
+            "public-runtime",
+            target_chip="bm1688",
+            include_model_guard=True,
+            model_guard_runtime=b"unapproved-runtime\n",
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "not the approved artifact"
+        ):
+            verifier.verify_package(
+                unapproved, "public-runtime", target_chip="bm1688"
+            )
 
     def test_rv1126b_accepts_identified_community_example_bundle(self) -> None:
         package = self.make_package(
