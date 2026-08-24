@@ -21,6 +21,7 @@ const requiredSourceFiles = [
   'release-manifest.json',
   'SHA256SUMS',
   'results/cases.schema.json',
+  'results/dual-cv-72h.json',
   'results/vlm-observations.json',
 ];
 
@@ -34,6 +35,7 @@ const manifest = readJsonIfPresent(root, 'release-manifest.json');
 const platformDefinitions = validateManifest(manifest);
 const canonicalPlatforms = validateCanonicalCases(manifest, platformDefinitions);
 const vlm = validateVlmEvidence(manifest, platformDefinitions);
+const dualCv72Hour = validateDualCv72HourEvidence(manifest, platformDefinitions, canonicalPlatforms);
 if (archivePath) validateArchivedEvidence(archivePath, manifest, canonicalPlatforms);
 validateCanonicalSourceLayout(platformDefinitions);
 validateSchemaDocument();
@@ -49,7 +51,7 @@ let generation = null;
 try {
   generatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cosmoedge-v1.1-validate-'));
   generation = generateBenchmarkPages({ sourceRoot: root, outputRoot: generatedRoot });
-  validateGeneratedPack(generatedRoot, manifest, canonicalPlatforms, vlm, generation);
+  validateGeneratedPack(generatedRoot, manifest, canonicalPlatforms, vlm, dualCv72Hour, generation);
 } catch (error) {
   fail(`deterministic report generation failed: ${error.message}`);
 }
@@ -79,7 +81,8 @@ if (errors.length) {
 const totalCases = canonicalPlatforms.reduce((count, item) => count + item.cases.length, 0);
 console.log(
   `Validation passed: ${platformDefinitions.length} manifest-defined platforms, ${totalCases} canonical cases, ` +
-  `${generation.reportCount} generated bilingual reports, refreshed VLM observations, relative links, public scrub, and source/generated checksums verified.`,
+  `${generation.reportCount} generated bilingual reports, refreshed VLM observations, controlled dual-CV 72-hour evidence, ` +
+  'relative links, public scrub, and source/generated checksums verified.',
 );
 
 function validateManifest(value) {
@@ -501,6 +504,439 @@ function validateVlmEvidence(manifestValue, definitions) {
   return value;
 }
 
+function validateDualCv72HourEvidence(manifestValue, definitions, canonicalPlatforms) {
+  const value = readJsonIfPresent(root, 'results/dual-cv-72h.json');
+  if (!value) return { observations: [] };
+
+  const label = 'canonical dual-CV 72-hour evidence';
+  expectObjectKeys(value, [
+    'schemaVersion', 'evidenceStatus', 'title', 'claim', 'window', 'source', 'input', 'workload',
+    'executionPolicy', 'integrityPolicy', 'observations', 'privateEvidence',
+  ], label);
+  if (value.schemaVersion !== 2) fail(`${label} schemaVersion must be 2`);
+  if (value.evidenceStatus !== 'completed-private-source') fail(`${label} evidenceStatus is inconsistent`);
+  if (value.title !== 'CosmoEdge 1.1 dual-CV 72-hour controlled long-run observation') {
+    fail(`${label} title is inconsistent`);
+  }
+
+  expectObjectKeys(value.claim, [
+    'class', 'configuredWorkloadPass', 'capacityClaimAllowed', 'rtspResilienceClaimAllowed',
+    'productReleaseQualified', 'interpretation',
+  ], `${label} claim`);
+  if (value.claim?.class !== 'controlled-72h-local-loop-stability-observation'
+      || value.claim?.configuredWorkloadPass !== true
+      || value.claim?.capacityClaimAllowed !== false
+      || value.claim?.rtspResilienceClaimAllowed !== false
+      || value.claim?.productReleaseQualified !== false
+      || typeof value.claim?.interpretation !== 'string'
+      || !value.claim.interpretation.includes('not a maximum-capacity')
+      || !value.claim.interpretation.includes('RTSP-resilience')
+      || !value.claim.interpretation.includes('production-profile')) {
+    fail(`${label} must remain a configured-workload stability observation without capacity, RTSP, or production claims`);
+  }
+
+  const controls = manifestValue?.controls?.dualCv72Hour;
+  expectObjectKeys(controls, [
+    'durationHours', 'sampleIntervalSeconds', 'expectedSamples', 'minimumCoverageRatio',
+    'boundaryGraceSeconds', 'maximumGapSeconds', 'targetFpsPerTask', 'minimumFpsRatio',
+    'maximumDiscardRate', 'businessTasksPerChannel', 'modelStagesPerChannel', 'diskPolicy',
+    'scheduledRestartPolicy',
+  ], 'manifest controls.dualCv72Hour');
+  const expectedControls = {
+    durationHours: 72,
+    sampleIntervalSeconds: 60,
+    expectedSamples: 4320,
+    minimumCoverageRatio: 0.95,
+    boundaryGraceSeconds: 180,
+    maximumGapSeconds: 180,
+    targetFpsPerTask: 5,
+    minimumFpsRatio: 0.8,
+    maximumDiscardRate: 0,
+    businessTasksPerChannel: 2,
+    modelStagesPerChannel: 3,
+    diskPolicy: {
+      executedIntegrityGateEnabled: false,
+      projectionReportThresholdPercent: 99,
+      futureSafeguardThresholdPercent: 90,
+      futureSafeguardEffectiveAfterObservation: true,
+      futureSafeguardAppliedRetroactively: false,
+    },
+    scheduledRestartPolicy: {
+      initialStateDisabledOnAllPlatforms: true,
+      controlledState: 'disabled',
+      restorationRequired: false,
+      restartResilienceClaimAllowed: false,
+    },
+  };
+  if (!deepEqual(controls, expectedControls)) fail('manifest controls.dualCv72Hour differ from the frozen observation contract');
+
+  expectObjectKeys(value.window, [
+    'startedAt', 'endedAt', 'durationHours', 'sampleIntervalSeconds', 'expectedSamples',
+    'minimumCoverageRatio', 'boundaryGraceSeconds', 'maximumGapSeconds',
+  ], `${label} window`);
+  for (const key of [
+    'durationHours', 'sampleIntervalSeconds', 'expectedSamples', 'minimumCoverageRatio',
+    'boundaryGraceSeconds', 'maximumGapSeconds',
+  ]) {
+    if (!deepEqual(value.window?.[key], controls?.[key])) fail(`${label} window.${key} differs from the manifest controls`);
+  }
+  const startedAt = Date.parse(value.window?.startedAt);
+  const endedAt = Date.parse(value.window?.endedAt);
+  if (value.window?.startedAt !== '2026-08-20T17:44:30.341Z'
+      || value.window?.endedAt !== '2026-08-23T17:44:30.341Z') {
+    fail(`${label} frozen observation timestamps changed`);
+  }
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) {
+    fail(`${label} window timestamps must be valid ISO-8601 values`);
+  } else if (endedAt - startedAt !== expectedControls.durationHours * 60 * 60 * 1000) {
+    fail(`${label} window timestamps do not span exactly 72 hours`);
+  }
+  if (value.window?.expectedSamples !== value.window?.durationHours * 3600 / value.window?.sampleIntervalSeconds) {
+    fail(`${label} expectedSamples is inconsistent with its duration and sample interval`);
+  }
+
+  const refresh = manifestValue?.evidence?.dualCv72HourRefresh;
+  expectObjectKeys(refresh, [
+    'status', 'sourceCommit', 'sourceTree', 'runManifestSha256', 'suiteStateSha256',
+    'suiteSummarySha256', 'projectionToolSha256', 'projectionKind', 'monitorLaunchBytesFrozen',
+    'rawEvidence', 'claimClass', 'capacityClaimAllowed', 'rtspResilienceClaimAllowed',
+    'productReleaseQualified',
+  ], 'manifest evidence.dualCv72HourRefresh');
+  if (manifestValue?.evidence?.dualCv72HourObservation !== 'results/dual-cv-72h.json') {
+    fail('manifest evidence.dualCv72HourObservation must point to the canonical 72-hour file');
+  }
+  if (refresh?.status !== '2026-08-24 completed controlled observation'
+      || refresh?.claimClass !== value.claim?.class
+      || refresh?.capacityClaimAllowed !== false
+      || refresh?.rtspResilienceClaimAllowed !== false
+      || refresh?.productReleaseQualified !== false
+      || refresh?.projectionKind !== 'post-run deterministic projection'
+      || refresh?.monitorLaunchBytesFrozen !== false
+      || typeof refresh?.rawEvidence !== 'string'
+      || !refresh.rawEvidence.includes('not included in the repository')) {
+    fail('manifest dual-CV 72-hour evidence classification is inconsistent');
+  }
+  for (const key of ['sourceCommit', 'sourceTree']) {
+    if (!sha1(refresh?.[key])) fail(`manifest dualCv72HourRefresh.${key} is invalid`);
+  }
+  for (const key of ['runManifestSha256', 'suiteStateSha256', 'suiteSummarySha256', 'projectionToolSha256']) {
+    if (!sha256(refresh?.[key])) fail(`manifest dualCv72HourRefresh.${key} is invalid`);
+  }
+  const expectedRefresh = {
+    sourceCommit: '44209759f450e96cda265acfa8bc6d17a1138888',
+    sourceTree: '5cbdefeaefaf642407356c22c271ccc7d57935b0',
+    runManifestSha256: 'faaa6fd15c03843d44068b6da9ae7aee30f40f79442d694b7fe9c0a65de6afdb',
+    suiteStateSha256: '9becf4cb17064ba515646d309b082136f9882f2d85d0449d651317116c21ccd7',
+    suiteSummarySha256: 'd28144149aeee9d693e7537b578c736d65daaecdf8d8c81be2047d7767167fb8',
+    projectionToolSha256: '7305f6811b53f70eb0e2fd52ce14c194da0345205df306fc63e39ca783bf4448',
+  };
+  for (const [key, expected] of Object.entries(expectedRefresh)) {
+    if (refresh?.[key] !== expected) fail(`manifest dualCv72HourRefresh.${key} differs from the frozen private evidence`);
+  }
+  if (manifestValue?.qualification?.controlledLongRunConfiguredWorkloadVerified !== true) {
+    fail('manifest qualification must record the controlled long-run configured workload as verified');
+  }
+
+  expectObjectKeys(value.source, ['repository', 'branch', 'commit', 'tree'], `${label} source`);
+  if (value.source?.repository !== manifestValue?.sourceBaseline?.repository
+      || value.source?.branch !== manifestValue?.sourceBaseline?.branch
+      || value.source?.commit !== refresh?.sourceCommit
+      || value.source?.tree !== refresh?.sourceTree
+      || !sha1(value.source?.commit)
+      || !sha1(value.source?.tree)) {
+    fail(`${label} source provenance differs from the manifest`);
+  }
+
+  expectObjectKeys(value.input, [
+    'datasetId', 'sha256', 'codec', 'width', 'height', 'sourceFps', 'mode', 'previewLoad',
+  ], `${label} input`);
+  if (value.input?.datasetId !== manifestValue?.dataset?.id
+      || value.input?.sha256 !== manifestValue?.dataset?.sha256
+      || value.input?.codec !== manifestValue?.dataset?.video?.codec
+      || value.input?.width !== manifestValue?.dataset?.video?.width
+      || value.input?.height !== manifestValue?.dataset?.video?.height
+      || value.input?.sourceFps !== manifestValue?.dataset?.video?.sourceFps
+      || value.input?.mode !== 'local infinite loop'
+      || value.input?.previewLoad !== false
+      || value.input?.sha256 !== '3e1c5b97cd5bcc081e47ec631f84c36e72f075c8b9da6a19de3d9705fb887f92'
+      || !sha256(value.input?.sha256)) {
+    fail(`${label} controlled input identity is inconsistent`);
+  }
+
+  expectObjectKeys(value.workload, [
+    'businessTasksPerChannel', 'modelStagesPerChannel', 'targetFpsPerTask', 'businessTasks',
+  ], `${label} workload`);
+  if (value.workload?.businessTasksPerChannel !== controls?.businessTasksPerChannel
+      || value.workload?.modelStagesPerChannel !== controls?.modelStagesPerChannel
+      || value.workload?.targetFpsPerTask !== controls?.targetFpsPerTask
+      || !sameArray(value.workload?.businessTasks ?? [], ['person detection', 'no-safety-helmet analysis'])) {
+    fail(`${label} workload differs from the frozen dual-CV contract`);
+  }
+
+  const expectedExecutionPolicy = {
+    monitor: {
+      kind: 'private multi-platform controller',
+      standardScenarioBenchCliUsed: false,
+      launchBytesFrozen: false,
+      identityLimitation: 'The ScenarioBench source snapshot is frozen, but the private controller files were updated after the long-running process started and no launch-time controller digest was emitted.',
+    },
+    disk: {
+      ...controls.diskPolicy,
+      interpretation: 'Disk utilization was observational during this run. The later 90% safeguard applies to future executions and does not retroactively reclassify this observation.',
+    },
+    scheduledRestart: controls.scheduledRestartPolicy,
+    projection: {
+      kind: 'post-run deterministic projection',
+      source: 'complete private metrics.jsonl and final private state',
+      publicArtifactHashesReferToProjection: true,
+    },
+  };
+  if (!deepEqual(value.executionPolicy, expectedExecutionPolicy)) {
+    fail(`${label} execution and post-observation policy boundary is inconsistent`);
+  }
+
+  expectObjectKeys(value.integrityPolicy, [
+    'minimumFpsRatio', 'maximumDiscardRate', 'minimumSampleCoverageRatio',
+    'maximumBoundaryLagSeconds', 'maximumSamplingGapSeconds',
+    'maximumCollectorErrorSamples', 'maximumIncompleteBindingSamples', 'maximumMissingBindingSamples',
+    'maximumOpenCriticalIncidents',
+  ], `${label} integrity policy`);
+  const expectedIntegrityPolicy = {
+    minimumFpsRatio: controls?.minimumFpsRatio,
+    maximumDiscardRate: controls?.maximumDiscardRate,
+    minimumSampleCoverageRatio: controls?.minimumCoverageRatio,
+    maximumBoundaryLagSeconds: controls?.boundaryGraceSeconds,
+    maximumSamplingGapSeconds: controls?.maximumGapSeconds,
+    maximumCollectorErrorSamples: 0,
+    maximumIncompleteBindingSamples: 0,
+    maximumMissingBindingSamples: 0,
+    maximumOpenCriticalIncidents: 0,
+  };
+  if (!deepEqual(value.integrityPolicy, expectedIntegrityPolicy)) fail(`${label} integrity policy is inconsistent`);
+
+  const expectedObservations = {
+    bm1688: {
+      platform: 'BM1688', configuredChannels: 8, businessTaskBindings: 16,
+      samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.988, finalSampleLagSeconds: 59.868, maximumGapSeconds: 60.058 },
+      fps: { minimum: 4.68, average: 5.086, maximum: 5.49 },
+      observedResourcePeaksPercent: { cpu: 30, memory: 44, disk: 96 },
+      diskTrendPercent: { first: 96, last: 96, minimum: 96, maximum: 96, changes: 0 },
+      sourceArtifacts: {
+        metricsJsonlSha256: 'bb72a12f3dda0972df5d11f6ad04647fe9c35ba345019ae36a31c7c1cb030fea',
+        summarySha256: '67f2f30e9cfdfaab05e1d7476eab177686875317a1dbc0f1db52b376de81bbb7',
+        reportSha256: 'bca4122862edfc872a25008089942e3f1b901b41c778547e1834f733564fea7f',
+        restartGuardSha256: '7f31ef8cc504eb9636a0f6a10d42f32166638c455dd8fe2897438730e4e96995',
+        cleanupSha256: '6e273e4c0c3feda89c085ff0c62593d024e12ca9eef2527df5f2382ae3562b22',
+      },
+    },
+    cv186x: {
+      platform: 'CV186X', configuredChannels: 8, businessTaskBindings: 16,
+      samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.993, finalSampleLagSeconds: 59.868, maximumGapSeconds: 60.061 },
+      fps: { minimum: 4.54, average: 5.085, maximum: 5.29 },
+      observedResourcePeaksPercent: { cpu: 43, memory: 44, disk: 96 },
+      diskTrendPercent: { first: 96, last: 96, minimum: 96, maximum: 96, changes: 0 },
+      sourceArtifacts: {
+        metricsJsonlSha256: '940e2ad4333f9fff7d3f60a2009981231d677e76872494d60b9b01bf68ded989',
+        summarySha256: 'bf14f42fa981f9bb023ca69d7e4881cbcaf04ea85e478e153ed26204182db8f2',
+        reportSha256: '95b387f880957a99e3b1fcf846995de41bca3f4e1c542ceae5a5a28fa1fc537c',
+        restartGuardSha256: '669928a6f158b8b45a074eedf277275ebe0ce16f467f95d16ab0d261c3565694',
+        cleanupSha256: '785af78ee73edace6bd85ea4f6b0d2d899c0862b8775a27b0a57148f4490ef0b',
+      },
+    },
+    rk3576: {
+      platform: 'RK3576', configuredChannels: 8, businessTaskBindings: 16,
+      samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.99, finalSampleLagSeconds: 59.867, maximumGapSeconds: 60.058 },
+      fps: { minimum: 5, average: 5.098, maximum: 5.17 },
+      observedResourcePeaksPercent: { cpu: 46, memory: 30, disk: 15 },
+      diskTrendPercent: { first: 14, last: 15, minimum: 14, maximum: 15, changes: 5 },
+      sourceArtifacts: {
+        metricsJsonlSha256: '7095b3a119bfebe508fb5d4d38306287c928e0467ae6087df434aba499ca7c5b',
+        summarySha256: 'e44698bb3dd6eee21fa6f7fa765f398957cacb697196e6eb037d5946bc1d6fb5',
+        reportSha256: 'fa79c8c08f505881b5bc4f237d01e430d630c2596d17419dda24d93fa354e8ef',
+        restartGuardSha256: '3d9401895a5946583194b5fd41054c40d47a704315412fbe65c0650fee7fbb84',
+        cleanupSha256: '763eaa2e869d3950619d7408092cd59bef8d9d60fdfeb448d808e4052b271dd6',
+      },
+    },
+    rv1126b: {
+      platform: 'RV1126B', configuredChannels: 4, businessTaskBindings: 8,
+      samples: { expected: 4320, observed: 4316, coverageRatio: 0.999074, firstSampleLagSeconds: 111.995, finalSampleLagSeconds: 59.866, maximumGapSeconds: 60.067 },
+      fps: { minimum: 4.85, average: 5.23, maximum: 5.37 },
+      observedResourcePeaksPercent: { cpu: 41, memory: 41, disk: 47 },
+      diskTrendPercent: { first: 46, last: 47, minimum: 46, maximum: 47, changes: 7 },
+      sourceArtifacts: {
+        metricsJsonlSha256: '613675df48c840486b495c7e897742332229c1ff8f2a6b81fa9029bff7516052',
+        summarySha256: '59517e9b3f609cae55f122f2f3bfe44f33d1497faf3fe536135149c4033218ab',
+        reportSha256: 'e4afff34a773414e009642d8201e2a1148e4f09d9c453901776753e666194734',
+        restartGuardSha256: '80aa5e31f8e07adfd595c2b2aa09f2c66d899d06d960ce548bda6109b71bcf6b',
+        cleanupSha256: 'b84a2b820666981fbc72b1175ad14391e873d454ce472115e61c5b6eb75bbeeb',
+      },
+    },
+  };
+  const expectedPlatformIds = definitions.map((definition) => definition.id);
+  if (!sameArray(Object.keys(expectedObservations), expectedPlatformIds)) {
+    fail('dual-CV 72-hour validator platform contract differs from the release manifest');
+  }
+  const observations = Array.isArray(value.observations) ? value.observations : [];
+  const observationIds = observations.map((observation) => observation?.platformId);
+  if (!sameArray(observationIds, expectedPlatformIds)) fail(`${label} platform inventory/order differs from the manifest`);
+  if (new Set(observationIds).size !== observationIds.length) fail(`${label} contains duplicate platforms`);
+  const canonicalNames = new Map(canonicalPlatforms.map((platform) => [platform.platformId, platform.platform]));
+  const artifactHashes = new Set();
+  for (const observation of observations) {
+    const observationLabel = `${observation?.platformId ?? '<missing>'} dual-CV 72-hour observation`;
+    const expected = expectedObservations[observation?.platformId];
+    expectObjectKeys(observation, [
+      'platformId', 'platform', 'status', 'configuredChannels', 'businessTaskBindings', 'samples', 'fps',
+      'observedResourcePeaksPercent', 'diskTrendPercent', 'telemetry', 'integrity', 'timedRestart',
+      'cleanupRecord', 'sourceArtifacts',
+    ], observationLabel);
+    if (!expected) {
+      fail(`${observationLabel} is not a declared release platform`);
+      continue;
+    }
+    if (observation.platform !== expected.platform || observation.platform !== canonicalNames.get(observation.platformId)) {
+      fail(`${observationLabel} platform label differs from its canonical small-model dataset`);
+    }
+    if (observation.status !== 'PASS'
+        || observation.configuredChannels !== expected.configuredChannels
+        || observation.businessTaskBindings !== expected.businessTaskBindings
+        || observation.businessTaskBindings !== observation.configuredChannels * value.workload?.businessTasksPerChannel) {
+      fail(`${observationLabel} configured workload identity is inconsistent`);
+    }
+
+    expectObjectKeys(observation.samples, [
+      'expected', 'observed', 'coverageRatio', 'firstSampleLagSeconds', 'finalSampleLagSeconds', 'maximumGapSeconds',
+    ], `${observationLabel} samples`);
+    if (!deepEqual(observation.samples, expected.samples)) fail(`${observationLabel} frozen sampling facts changed`);
+    const calculatedCoverage = observation.samples?.observed / observation.samples?.expected;
+    if (!Number.isFinite(calculatedCoverage)
+        || Math.abs(observation.samples?.coverageRatio - calculatedCoverage) > 0.000001
+        || observation.samples?.expected !== value.window?.expectedSamples
+        || !(observation.samples?.observed >= value.window?.expectedSamples * value.window?.minimumCoverageRatio)
+        || observation.samples?.firstSampleLagSeconds > value.integrityPolicy?.maximumBoundaryLagSeconds
+        || observation.samples?.finalSampleLagSeconds > value.integrityPolicy?.maximumBoundaryLagSeconds
+        || observation.samples?.maximumGapSeconds > value.integrityPolicy?.maximumSamplingGapSeconds) {
+      fail(`${observationLabel} violates the sampling coverage, boundary, or gap contract`);
+    }
+
+    expectObjectKeys(observation.fps, ['minimum', 'average', 'maximum'], `${observationLabel} FPS`);
+    if (!deepEqual(observation.fps, expected.fps)
+        || !positiveNumber(observation.fps?.minimum)
+        || !(observation.fps.minimum <= observation.fps.average && observation.fps.average <= observation.fps.maximum)
+        || observation.fps.minimum / value.workload?.targetFpsPerTask < controls?.minimumFpsRatio) {
+      fail(`${observationLabel} frozen FPS facts or PASS ratio are inconsistent`);
+    }
+
+    expectObjectKeys(observation.observedResourcePeaksPercent, ['cpu', 'memory', 'disk'], `${observationLabel} resource peaks`);
+    if (!deepEqual(observation.observedResourcePeaksPercent, expected.observedResourcePeaksPercent)
+        || Object.values(observation.observedResourcePeaksPercent ?? {}).some((peak) => !Number.isFinite(peak) || peak < 0 || peak > 100)) {
+      fail(`${observationLabel} resource peaks must be the frozen percentages in [0, 100]`);
+    }
+
+    expectObjectKeys(observation.diskTrendPercent, [
+      'first', 'last', 'minimum', 'maximum', 'changes',
+    ], `${observationLabel} disk trend`);
+    if (!deepEqual(observation.diskTrendPercent, expected.diskTrendPercent)
+        || ['first', 'last', 'minimum', 'maximum']
+          .some((key) => !Number.isFinite(observation.diskTrendPercent?.[key])
+            || observation.diskTrendPercent[key] < 0
+            || observation.diskTrendPercent[key] > 100)
+        || !Number.isInteger(observation.diskTrendPercent?.changes)
+        || observation.diskTrendPercent.changes < 0
+        || observation.diskTrendPercent.minimum > observation.diskTrendPercent.first
+        || observation.diskTrendPercent.minimum > observation.diskTrendPercent.last
+        || observation.diskTrendPercent.maximum < observation.diskTrendPercent.first
+        || observation.diskTrendPercent.maximum < observation.diskTrendPercent.last
+        || observation.diskTrendPercent.maximum !== observation.observedResourcePeaksPercent.disk) {
+      fail(`${observationLabel} frozen disk trend is inconsistent with the observed peak`);
+    }
+
+    expectObjectKeys(observation.telemetry, [
+      'maximumDiscardRate', 'collectorErrorSamples', 'incompleteBindingSamples', 'missingBindingSamples',
+      'openCriticalIncidents',
+    ], `${observationLabel} telemetry`);
+    if (observation.telemetry?.maximumDiscardRate !== controls?.maximumDiscardRate
+        || observation.telemetry?.collectorErrorSamples !== value.integrityPolicy?.maximumCollectorErrorSamples
+        || observation.telemetry?.incompleteBindingSamples !== value.integrityPolicy?.maximumIncompleteBindingSamples
+        || observation.telemetry?.missingBindingSamples !== value.integrityPolicy?.maximumMissingBindingSamples
+        || observation.telemetry?.openCriticalIncidents !== value.integrityPolicy?.maximumOpenCriticalIncidents) {
+      fail(`${observationLabel} PASS must retain zero discard, collector, binding, and incident errors`);
+    }
+
+    expectObjectKeys(observation.integrity, [
+      'monitorPass', 'monitorChecksPassed', 'monitorChecksTotal', 'publicationPass',
+    ], `${observationLabel} integrity`);
+    if (observation.integrity?.monitorPass !== true
+        || observation.integrity?.monitorChecksPassed !== 8
+        || observation.integrity?.monitorChecksTotal !== 8
+        || observation.integrity?.publicationPass !== true) {
+      fail(`${observationLabel} must pass all eight executed monitor checks and the publication projection`);
+    }
+
+    expectObjectKeys(observation.timedRestart, [
+      'initialState', 'checks', 'failures', 'corrections', 'finalState', 'restorationRequired',
+      'restartResilienceClaimAllowed',
+    ], `${observationLabel} timed restart`);
+    if (observation.timedRestart?.initialState !== 'disabled'
+        || observation.timedRestart?.checks !== 80
+        || observation.timedRestart?.failures !== 0
+        || observation.timedRestart?.corrections !== 0
+        || observation.timedRestart?.finalState !== 'disabled'
+        || observation.timedRestart?.restorationRequired !== false
+        || observation.timedRestart?.restartResilienceClaimAllowed !== false) {
+      fail(`${observationLabel} timed-restart policy evidence is inconsistent`);
+    }
+
+    expectObjectKeys(observation.cleanupRecord, [
+      'status', 'errors', 'disabledTaskBindings', 'requestedChannelDeletions', 'remainingOwnedChannels',
+      'layoutsRestored', 'independentFinalStateArtifactEmitted',
+    ], `${observationLabel} cleanup record`);
+    if (observation.cleanupRecord?.status !== 'completed'
+        || observation.cleanupRecord?.errors !== 0
+        || observation.cleanupRecord?.disabledTaskBindings !== observation.businessTaskBindings
+        || observation.cleanupRecord?.requestedChannelDeletions !== observation.configuredChannels
+        || observation.cleanupRecord?.remainingOwnedChannels !== 0
+        || observation.cleanupRecord?.layoutsRestored !== true
+        || observation.cleanupRecord?.independentFinalStateArtifactEmitted !== false) {
+      fail(`${observationLabel} cleanup result or independent-final-state limitation changed`);
+    }
+
+    expectObjectKeys(observation.sourceArtifacts, [
+      'metricsJsonlSha256', 'summarySha256', 'reportSha256', 'restartGuardSha256', 'cleanupSha256',
+    ], `${observationLabel} source artifacts`);
+    if (!deepEqual(observation.sourceArtifacts, expected.sourceArtifacts)
+        || Object.values(observation.sourceArtifacts ?? {}).some((hash) => !sha256(hash))) {
+      fail(`${observationLabel} private source-artifact hashes changed`);
+    }
+    for (const hash of Object.values(observation.sourceArtifacts ?? {})) {
+      if (artifactHashes.has(hash)) fail(`${label} reuses a private source-artifact hash across platforms`);
+      artifactHashes.add(hash);
+    }
+  }
+
+  expectObjectKeys(value.privateEvidence, [
+    'publicationState', 'rawArtifactsIncludedInRepository', 'runManifestSha256', 'suiteStateSha256',
+    'suiteSummarySha256', 'projectionToolSha256', 'verification', 'monitorLaunchBytesFrozen',
+    'cleanupEvidence', 'cleanupLimitation',
+  ], `${label} private evidence`);
+  if (value.privateEvidence?.publicationState !== 'verified-private-not-published'
+      || value.privateEvidence?.rawArtifactsIncludedInRepository !== false
+      || value.privateEvidence?.runManifestSha256 !== refresh?.runManifestSha256
+      || value.privateEvidence?.suiteStateSha256 !== refresh?.suiteStateSha256
+      || value.privateEvidence?.suiteSummarySha256 !== refresh?.suiteSummarySha256
+      || value.privateEvidence?.projectionToolSha256 !== refresh?.projectionToolSha256
+      || value.privateEvidence?.verification !== 'The suite files and every platform metrics, summary, report, restart-guard, and cleanup artifact were verified read-only by exact SHA-256 against the private run directory.'
+      || value.privateEvidence?.monitorLaunchBytesFrozen !== false
+      || value.privateEvidence?.cleanupEvidence !== 'private monitor record'
+      || value.privateEvidence?.cleanupLimitation !== 'The completed monitor recorded cleanup with zero remaining owned channels and no errors, but did not emit an independent final-state artifact.') {
+    fail(`${label} private-evidence publication state, hashes, or cleanup limitation is inconsistent`);
+  }
+  for (const key of ['runManifestSha256', 'suiteStateSha256', 'suiteSummarySha256', 'projectionToolSha256']) {
+    if (!sha256(value.privateEvidence?.[key])) fail(`${label} privateEvidence.${key} is invalid`);
+  }
+  return value;
+}
+
 function validateArchivedEvidence(file, manifestValue, platforms) {
   const resolved = path.resolve(file);
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
@@ -572,7 +1008,9 @@ function validateCanonicalSourceLayout(definitions) {
   }
   const resultsRoot = path.join(root, 'results');
   if (!fs.existsSync(resultsRoot)) return;
-  const allowedRootEntries = new Set(['cases.schema.json', 'vlm-observations.json', ...definitions.map((item) => item.id)]);
+  const allowedRootEntries = new Set([
+    'cases.schema.json', 'dual-cv-72h.json', 'vlm-observations.json', ...definitions.map((item) => item.id),
+  ]);
   for (const entry of fs.readdirSync(resultsRoot, { withFileTypes: true })) {
     if (!allowedRootEntries.has(entry.name)) fail(`derived or undeclared result is tracked in canonical source: results/${entry.name}`);
   }
@@ -598,10 +1036,18 @@ function validateSchemaDocument() {
   if (!schema.$defs?.case?.required?.includes('sourceCaseId')) fail('case schema must require sourceCaseId provenance');
 }
 
-function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, generationResult) {
+function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, dualCv72HourValue, generationResult) {
   const caseCount = platforms.reduce((count, item) => count + item.cases.length, 0);
   const vlmIds = new Set((vlmValue?.observations ?? []).map((item) => item.platformId));
-  const expectedReports = ['report.html', 'report.zh-CN.html'];
+  const dualCv72HourByPlatform = new Map(
+    (dualCv72HourValue?.observations ?? []).map((item) => [item.platformId, item]),
+  );
+  const expectedReports = [
+    'report.html',
+    'report.zh-CN.html',
+    'results/dual-cv-72h/report.html',
+    'results/dual-cv-72h/report.zh-CN.html',
+  ];
   for (const platform of platforms) {
     for (const localeSuffix of ['', '.zh-CN']) {
       expectedReports.push(
@@ -610,6 +1056,9 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
         `results/${platform.platformId}/single-workload/report${localeSuffix}.html`,
         `results/${platform.platformId}/concurrent-mixed/report${localeSuffix}.html`,
       );
+      if (dualCv72HourByPlatform.has(platform.platformId)) {
+        expectedReports.push(`results/${platform.platformId}/dual-cv-72h/report${localeSuffix}.html`);
+      }
       if (vlmIds.has(platform.platformId)) {
         expectedReports.push(`results/${platform.platformId}/vlm-observation/report${localeSuffix}.html`);
       }
@@ -625,6 +1074,7 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
   const sortedExpected = [...expectedReports].sort();
   if (!sameArray(actualReports, sortedExpected)) compareSets('generated report inventory', new Set(actualReports), new Set(sortedExpected));
   if (generationResult.reportCount !== expectedReports.length) fail('generator reportCount does not match the manifest-derived inventory');
+  if (generationResult.reportCount !== 148) fail('generator must emit the frozen inventory of 148 bilingual v1.1 reports');
   if (generationResult.platformCount !== platforms.length || generationResult.caseCount !== caseCount) fail('generator platform/case counts are inconsistent');
 
   for (const report of expectedReports) {
@@ -655,6 +1105,40 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
     if (!html.includes(rootReport.endsWith('.zh-CN.html') ? 'VLM 性能展示边界' : 'VLM performance display boundaries')) {
       fail(`${rootReport} is missing the VLM performance display matrix`);
     }
+    if (!html.includes(rootReport.endsWith('.zh-CN.html') ? '72 小时受控长稳观测' : '72-hour controlled long-run observation')) {
+      fail(`${rootReport} is missing the dual-CV 72-hour observation matrix`);
+    }
+  }
+
+  for (const relative of ['results/dual-cv-72h/report.html', 'results/dual-cv-72h/report.zh-CN.html']) {
+    const html = fs.readFileSync(path.join(outputRoot, ...relative.split('/')), 'utf8');
+    for (const platform of platforms) {
+      if (!html.includes(platform.platform)) fail(`${relative} is missing long-run platform ${platform.platform}`);
+    }
+    const zh = relative.endsWith('.zh-CN.html');
+    const scopeNote = html.match(/<p\b[^>]*class=["'][^"']*\bscope-note\b[^"']*["'][^>]*>[\s\S]*?<\/p>/iu)?.[0] ?? '';
+    const evidenceNotes = html.match(/<details\b[^>]*class=["'][^"']*\bevidence-notes\b[^"']*["'][^>]*>[\s\S]*?<\/details>/iu)?.[0] ?? '';
+    if (!scopeNote.includes(zh ? '未测量最大容量' : 'maximum capacity')
+        || !scopeNote.includes(zh ? 'RTSP 韧性' : 'RTSP resilience')
+        || !evidenceNotes.includes(zh ? '没有生成独立 final-state 侧车' : 'no independent final-state sidecar was emitted')) {
+      fail(`${relative} is missing the capacity and independent-final-state limitations`);
+    }
+  }
+
+  for (const platform of platforms) {
+    const observation = dualCv72HourByPlatform.get(platform.platformId);
+    if (!observation) continue;
+    for (const localeSuffix of ['', '.zh-CN']) {
+      const relative = `results/${platform.platformId}/dual-cv-72h/report${localeSuffix}.html`;
+      const html = fs.readFileSync(path.join(outputRoot, ...relative.split('/')), 'utf8');
+      if (!html.includes(platform.platform)
+          || !html.includes(String(observation.configuredChannels))
+          || !html.includes(String(observation.samples.observed))
+          || !html.includes(String(observation.fps.minimum))
+          || !html.includes(observation.status)) {
+        fail(`${relative} does not project the canonical platform observation`);
+      }
+    }
   }
 
   const index = readJsonIfPresent(outputRoot, 'results/index.json');
@@ -673,6 +1157,62 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, g
   }));
   if (!deepEqual(matrix?.vlmPublicationEvaluation?.platforms, expectedPublicationBoundaries)) {
     fail('generated VLM publication boundaries differ from the canonical evidence');
+  }
+
+  const generatedDualCv72Hour = readJsonIfPresent(outputRoot, 'results/dual-cv-72h.json');
+  if (!deepEqual(generatedDualCv72Hour, dualCv72HourValue)) {
+    fail('generated dual-CV 72-hour canonical copy differs from the source evidence');
+  }
+  const expectedLongRunIndex = {
+    canonical: 'dual-cv-72h.json',
+    report: 'dual-cv-72h/report.html',
+    reportZhCn: 'dual-cv-72h/report.zh-CN.html',
+    claimClass: dualCv72HourValue?.claim?.class,
+  };
+  if (!deepEqual(index?.longRun, expectedLongRunIndex)) {
+    fail('generated index dual-CV 72-hour entry differs from the canonical evidence');
+  }
+  const indexPlatforms = Array.isArray(index?.platforms) ? index.platforms : [];
+  if (!sameArray(indexPlatforms.map((item) => item?.platformId), platforms.map((item) => item.platformId))) {
+    fail('generated index platform inventory differs from the canonical platform order');
+  }
+  for (const platform of platforms) {
+    const item = indexPlatforms.find((entry) => entry?.platformId === platform.platformId);
+    const hasObservation = dualCv72HourByPlatform.has(platform.platformId);
+    if (item?.longRunObservation !== (hasObservation ? 'dual-cv-72h.json' : null)
+        || item?.longRunReport !== (hasObservation ? `${platform.platformId}/dual-cv-72h/report.html` : null)
+        || item?.longRunReportZhCn !== (hasObservation ? `${platform.platformId}/dual-cv-72h/report.zh-CN.html` : null)) {
+      fail(`generated index long-run links differ for ${platform.platformId}`);
+    }
+  }
+
+  const expectedLongRunMatrix = {
+    canonical: 'dual-cv-72h.json',
+    evidenceStatus: dualCv72HourValue?.evidenceStatus,
+    claim: dualCv72HourValue?.claim,
+    window: dualCv72HourValue?.window,
+    workload: dualCv72HourValue?.workload,
+    executionPolicy: dualCv72HourValue?.executionPolicy,
+    platforms: platforms.map((platform) => {
+      const observation = dualCv72HourByPlatform.get(platform.platformId);
+      return {
+        platformId: platform.platformId,
+        configuredChannels: observation?.configuredChannels ?? null,
+        businessTaskBindings: observation?.businessTaskBindings ?? null,
+        observedSamples: observation?.samples?.observed ?? null,
+        minimumFps: observation?.fps?.minimum ?? null,
+        averageFps: observation?.fps?.average ?? null,
+        diskTrendPercent: observation?.diskTrendPercent ?? null,
+        monitorIntegrityPass: observation?.integrity?.monitorPass ?? null,
+        publicationPass: observation?.integrity?.publicationPass ?? null,
+        status: observation?.status ?? null,
+        report: observation ? `${platform.platformId}/dual-cv-72h/report.html` : null,
+        reportZhCn: observation ? `${platform.platformId}/dual-cv-72h/report.zh-CN.html` : null,
+      };
+    }),
+  };
+  if (!deepEqual(matrix?.longRunObservation, expectedLongRunMatrix)) {
+    fail('generated workload matrix dual-CV 72-hour projection differs from the canonical evidence');
   }
 }
 

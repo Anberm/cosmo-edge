@@ -652,6 +652,23 @@ class PackageProfileTests(unittest.TestCase):
         self.assertIn("rv1126b", workflow)
         self.assertIn("cosmo_edge-build-env_rockchip", workflow)
         self.assertIn("packages: write", workflow)
+        pull_request_paths = workflow.split("  pull_request:", 1)[1].split(
+            "  push:", 1
+        )[0]
+        self.assertNotIn("- 'scripts/**'", pull_request_paths)
+        for build_input in (
+            "scripts/*.sh",
+            "scripts/**/*.sh",
+            "scripts/install_rkllm_sdk.py",
+            "scripts/verify_model_guard_v2_sdk.py",
+            "scripts/verify_package_contents.py",
+        ):
+            self.assertIn(f"- '{build_input}'", pull_request_paths)
+        for docs_only_input in (
+            "scripts/generate-v1.1-benchmark-pages.mjs",
+            "scripts/check-public-benchmark-copy.mjs",
+        ):
+            self.assertNotIn(docs_only_input, pull_request_paths)
         self.assertIn(
             '(cd "build_output/${CHIP}" && sha256sum -c SHA256SUMS)',
             workflow,
