@@ -191,11 +191,18 @@ def verify_runtime_license_bundle(
         raise PackageAuditError(
             "packaged FFmpeg runtime is not identified as LGPL-2.1-or-later"
         )
-    if target_chip in ("rk3576", "rv1126b") and (
-        b"Copyright Statement"
-        not in contents["share/licenses/third-party/rknn-runtime/LICENSE"]
-    ):
-        raise PackageAuditError("packaged RKNN runtime terms are invalid")
+    if target_chip in ("rk3576", "rv1126b"):
+        rknn_terms = contents[
+            "share/licenses/third-party/rknn-runtime/LICENSE"
+        ]
+        required_rknn_terms = (
+            b"RKNN SDK License",
+            b"1. License Grant",
+            b"redistribute its modifications or derivative works",
+            b"compatible with Products",
+        )
+        if any(marker not in rknn_terms for marker in required_rknn_terms):
+            raise PackageAuditError("packaged RKNN runtime terms are invalid")
     if "lib/libcosmo_model_guard.so.2.0.0" in contents and (
         b"does not grant or alter artifact licensing or redistribution rights"
         not in contents[MODEL_GUARD_TERMS_FILE]

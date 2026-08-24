@@ -86,6 +86,7 @@ class PackageProfileTests(unittest.TestCase):
         include_bundle_license: bool = True,
         omit_required_file: str | None = None,
         include_model_guard: bool = False,
+        rknn_terms: bytes | None = None,
     ) -> pathlib.Path:
         root = "cosmo-V1.5.0"
         directory = pathlib.Path(tempfile.mkdtemp())
@@ -137,7 +138,12 @@ class PackageProfileTests(unittest.TestCase):
                 elif name == "lib/libavcodec.so.58.134.100":
                     data = b"libavcodec license: LGPL version 2.1 or later\n"
                 elif name.endswith("rknn-runtime/LICENSE"):
-                    data = b"Copyright Statement\nfixture\n"
+                    data = rknn_terms or (
+                        b"RKNN SDK License\n"
+                        b"1. License Grant\n"
+                        b"redistribute its modifications or derivative works\n"
+                        b"compatible with Products\n"
+                    )
                 elif name == verifier.MODEL_GUARD_TERMS_FILE:
                     data = (
                         b"does not grant or alter artifact licensing or "
@@ -283,6 +289,21 @@ class PackageProfileTests(unittest.TestCase):
         ):
             verifier.verify_package(
                 model_guard, "public-runtime", target_chip="bm1688"
+            )
+
+    def test_rockchip_rejects_incomplete_rknn_sdk_terms(self) -> None:
+        package = self.make_package(
+            "public-runtime",
+            target_chip="rk3576",
+            platform_chip="rk3576",
+            platform_runtime="rk3576-mpp-rga",
+            rknn_terms=b"Copyright Statement\nfixture\n",
+        )
+        with self.assertRaisesRegex(
+            verifier.PackageAuditError, "RKNN runtime terms are invalid"
+        ):
+            verifier.verify_package(
+                package, "public-runtime", target_chip="rk3576"
             )
 
     def test_rv1126b_accepts_identified_community_example_bundle(self) -> None:
