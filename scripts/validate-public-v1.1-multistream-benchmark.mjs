@@ -1116,8 +1116,11 @@ function validateGeneratedPack(outputRoot, manifestValue, platforms, vlmValue, d
       if (!html.includes(platform.platform)) fail(`${relative} is missing long-run platform ${platform.platform}`);
     }
     const zh = relative.endsWith('.zh-CN.html');
-    if (!html.includes(zh ? '不是最大容量' : 'not a maximum-capacity')
-        || !html.includes(zh ? '未生成独立 final-state' : 'no independent final-state')) {
+    const scopeNote = html.match(/<p\b[^>]*class=["'][^"']*\bscope-note\b[^"']*["'][^>]*>[\s\S]*?<\/p>/iu)?.[0] ?? '';
+    const evidenceNotes = html.match(/<details\b[^>]*class=["'][^"']*\bevidence-notes\b[^"']*["'][^>]*>[\s\S]*?<\/details>/iu)?.[0] ?? '';
+    if (!scopeNote.includes(zh ? '未测量最大容量' : 'maximum capacity')
+        || !scopeNote.includes(zh ? 'RTSP 韧性' : 'RTSP resilience')
+        || !evidenceNotes.includes(zh ? '没有生成独立 final-state 侧车' : 'no independent final-state sidecar was emitted')) {
       fail(`${relative} is missing the capacity and independent-final-state limitations`);
     }
   }

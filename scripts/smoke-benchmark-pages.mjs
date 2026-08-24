@@ -68,6 +68,20 @@ for (const report of expectedReports) {
   if (!html.includes('overflow-wrap:anywhere')) failures.push(`${report}: long tokens can escape the mobile viewport`);
   if (!html.includes('class="report-nav"')) failures.push(`${report}: report navigation is missing`);
   if (/\b(?:undefined|NaN)\b|\[object Object\]/u.test(html)) failures.push(`${report}: unresolved generated value`);
+
+  const scopeNotes = countClass(html, 'scope-note');
+  const evidenceNotes = countClass(html, 'evidence-notes');
+  const expectsScopeNote = report === 'report.html'
+    || report === 'report.zh-CN.html'
+    || /^results\/dual-cv-72h\/report(?:\.zh-CN)?\.html$/u.test(report)
+    || /^results\/[^/]+\/(?:dual-cv-72h|vlm-observation)\/report(?:\.zh-CN)?\.html$/u.test(report);
+  const expectsEvidenceNotes = /^results\/dual-cv-72h\/report(?:\.zh-CN)?\.html$/u.test(report);
+  if (scopeNotes !== (expectsScopeNote ? 1 : 0)) {
+    failures.push(`${report}: expected ${expectsScopeNote ? 1 : 0} scope-note block(s), found ${scopeNotes}`);
+  }
+  if (evidenceNotes !== (expectsEvidenceNotes ? 1 : 0)) {
+    failures.push(`${report}: expected ${expectsEvidenceNotes ? 1 : 0} evidence-notes block(s), found ${evidenceNotes}`);
+  }
 }
 
 for (const reportName of ['report.html', 'report.zh-CN.html']) {
@@ -173,6 +187,11 @@ function readJson(relativePath) {
 function compareSets(label, actual, expected) {
   for (const item of expected) if (!actual.has(item)) failures.push(`${label} is missing: ${item}`);
   for (const item of actual) if (!expected.has(item)) failures.push(`${label} contains unexpected entry: ${item}`);
+}
+
+function countClass(html, className) {
+  const pattern = new RegExp(`class=["'][^"']*\\b${className}\\b[^"']*["']`, 'giu');
+  return html.match(pattern)?.length ?? 0;
 }
 
 function walk(directory) {
