@@ -328,7 +328,6 @@ const selectedAlgorithmList = ref([])
 const detailData = ref({})
 const currentSocketData = ref({})
 const audioUnlocked = ref(false)
-let _unlockAudio = null
 
 // Validation
 const validatePopUpDuration = (rule, value, callback) => {
@@ -536,7 +535,7 @@ const handleCameraNodeClick = (node) => {
 }
 
 const handleSettingClick = () => {
-  playAudio()
+  unlockAudio()
   showAlert.value = false
   settingForm.value = { ...realSettingForm.value }
   settingFormRef.value && settingFormRef.value.clearValidate()
@@ -898,8 +897,7 @@ const socketOnMessage = (data) => {
   })
 }
 
-const playAudio = () => {
-  // handleSettingClick 是用户点击触发的，利用此交互解锁音频
+const unlockAudio = () => {
   const audioEl = audio.value
   if (audioEl && !audioUnlocked.value) {
     audioEl.muted = true
@@ -910,6 +908,8 @@ const playAudio = () => {
       audioUnlocked.value = true
     }).catch(() => {})
   }
+  document.removeEventListener('click', unlockAudio)
+  document.removeEventListener('touchstart', unlockAudio)
 }
 
 const checkPropertyKey = (data, key) => {
@@ -933,23 +933,9 @@ onMounted(() => {
   )
   window.addEventListener('mozfullscreenchange', handleFullScreenChange)
 
-  // 用户首次交互时解锁音频元素，使后续 WebSocket 回调中的 play() 不会被浏览器拦截
-  _unlockAudio = () => {
-    const audioEl = audio.value
-    if (audioEl && !audioUnlocked.value) {
-      audioEl.muted = true
-      audioEl.play().then(() => {
-        audioEl.pause()
-        audioEl.muted = false
-        audioEl.currentTime = 0
-        audioUnlocked.value = true
-      }).catch(() => {})
-    }
-    document.removeEventListener('click', _unlockAudio)
-    document.removeEventListener('touchstart', _unlockAudio)
-  }
-  document.addEventListener('click', _unlockAudio)
-  document.addEventListener('touchstart', _unlockAudio)
+  // Unlock audio on the first user interaction so WebSocket callbacks can play it.
+  document.addEventListener('click', unlockAudio)
+  document.addEventListener('touchstart', unlockAudio)
 
   // 点击通道列表外部时自动收起
   document.addEventListener('click', handleClickOutside)
@@ -979,11 +965,8 @@ onBeforeUnmount(() => {
     'mozfullscreenchange',
     handleFullScreenChange
   )
-  // 清理音频解锁监听器
-  if (_unlockAudio) {
-    document.removeEventListener('click', _unlockAudio)
-    document.removeEventListener('touchstart', _unlockAudio)
-  }
+  document.removeEventListener('click', unlockAudio)
+  document.removeEventListener('touchstart', unlockAudio)
   document.removeEventListener('click', handleClickOutside)
 })
 </script>
