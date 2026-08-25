@@ -864,23 +864,20 @@ class PackageProfileTests(unittest.TestCase):
         )
         self.assertIn("cosmo_edge-build-env_rockchip", workflow)
         self.assertIn("packages: write", workflow)
-        pull_request_paths = workflow.split("  pull_request:", 1)[1].split(
-            "  push:", 1
-        )[0]
-        self.assertNotIn("- 'scripts/**'", pull_request_paths)
-        for build_input in (
-            "scripts/*.sh",
-            "scripts/**/*.sh",
-            "scripts/install_rkllm_sdk.py",
-            "scripts/verify_model_guard_v2_sdk.py",
-            "scripts/verify_package_contents.py",
+        workflow_triggers = workflow.split("\npermissions:", 1)[0]
+        self.assertIn("  schedule:", workflow_triggers)
+        self.assertIn("    - cron: '12 18 * * *'", workflow_triggers)
+        self.assertIn("  workflow_dispatch:", workflow_triggers)
+        for disabled_trigger in (
+            "  pull_request:",
+            "  push:",
+            "  workflow_call:",
         ):
-            self.assertIn(f"- '{build_input}'", pull_request_paths)
-        for docs_only_input in (
-            "scripts/generate-v1.1-benchmark-pages.mjs",
-            "scripts/check-public-benchmark-copy.mjs",
-        ):
-            self.assertNotIn(docs_only_input, pull_request_paths)
+            self.assertNotIn(disabled_trigger, workflow_triggers)
+        self.assertIn(
+            "if: github.event_name == 'workflow_dispatch'",
+            workflow,
+        )
         self.assertIn(
             '(cd "build_output/${CHIP}" && sha256sum -c SHA256SUMS)',
             workflow,

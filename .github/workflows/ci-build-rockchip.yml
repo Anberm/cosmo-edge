@@ -1,52 +1,10 @@
 name: Rockchip Cross Build
 
 on:
-  pull_request:
-    paths:
-      - '.dockerignore'
-      - '.github/workflows/ci-build-rockchip.yml'
-      - 'Dockerfile.rockchip'
-      - 'Dockerfile.rockchip.dockerignore'
-      - 'Dockerfile.rk3576'
-      - 'docker-compose.rockchip.yml'
-      - 'docker-compose.rk3576.yml'
-      - 'config/rknn/**'
-      - 'config/rockchip-build/**'
-      - 'config/rockchip-media/**'
-      - 'cmake/**'
-      - 'data/resource/aiboxresource_rknn/**'
-      # Shell scripts are packaged or participate in Rockchip build/package
-      # validation. Documentation generators and checks under scripts/*.mjs do
-      # not affect the target artifacts and must not start this two-chip build.
-      - 'scripts/*.sh'
-      - 'scripts/**/*.sh'
-      - 'scripts/install_rkllm_sdk.py'
-      - 'scripts/verify_model_guard_v2_sdk.py'
-      - 'scripts/verify_package_contents.py'
-      - 'src/**'
-      - 'test/**'
-      - 'tools/rknn/**'
-      - 'CMakeLists.txt'
-  push:
-    branches: [main]
-    paths:
-      - '.dockerignore'
-      - '.github/workflows/ci-build-rockchip.yml'
-      - 'Dockerfile.rockchip'
-      - 'Dockerfile.rockchip.dockerignore'
-      - 'Dockerfile.rk3576'
-      - 'docker-compose.rockchip.yml'
-      - 'docker-compose.rk3576.yml'
-      - 'config/rknn/platforms/**'
-      - 'config/rockchip-build/**'
-      - 'config/rockchip-media/**'
-      - 'scripts/install_rkllm_sdk.py'
-      - 'tools/rknn/media_sysroot_lock.py'
   schedule:
     # Run daily at 02:12 Beijing Time (18:12 UTC on the previous day).
     - cron: '12 18 * * *'
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
@@ -160,7 +118,7 @@ jobs:
 
   publish-builder:
     name: publish-rockchip-builder
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     needs: package
     runs-on: ubuntu-latest
     timeout-minutes: 60
