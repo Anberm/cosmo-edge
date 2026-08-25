@@ -296,8 +296,9 @@ const isVideoFullScreen = ref(null)
 const detailDialogVisible = ref(false)
 const captureDialogVisible = ref(false)
 const showAlert = ref(false)
-const alertPosition = ref(-383)
 const alertTimer = ref(null)
+const alertEnterTimer = ref(null)
+const alertExitTimer = ref(null)
 const socket = ref(null)
 const socketTimer = ref(null)
 const reconnectTimer = ref(null)
@@ -328,6 +329,33 @@ const selectedAlgorithmList = ref([])
 const detailData = ref({})
 const currentSocketData = ref({})
 const audioUnlocked = ref(false)
+const ALERT_ENTER_DELAY_MS = 50
+const ALERT_EXIT_DELAY_MS = 500
+let alertAnimationFrame = null
+
+const clearAlertTimers = () => {
+  if (alertAnimationFrame !== null) {
+    cancelAnimationFrame(alertAnimationFrame)
+    alertAnimationFrame = null
+  }
+  const timers = [alertTimer, alertEnterTimer, alertExitTimer]
+  timers.forEach((timer) => {
+    if (timer.value) {
+      clearTimeout(timer.value)
+      timer.value = null
+    }
+  })
+}
+
+const scheduleAlertDismiss = () => {
+  alertTimer.value = setTimeout(() => {
+    alertTimer.value = null
+    alertExitTimer.value = setTimeout(() => {
+      alertExitTimer.value = null
+      showAlert.value = false
+    }, ALERT_EXIT_DELAY_MS)
+  }, realSettingForm.value.popUpDuration * 1000)
+}
 
 // Validation
 const validatePopUpDuration = (rule, value, callback) => {
@@ -536,6 +564,7 @@ const handleCameraNodeClick = (node) => {
 
 const handleSettingClick = () => {
   unlockAudio()
+  clearAlertTimers()
   showAlert.value = false
   settingForm.value = { ...realSettingForm.value }
   settingFormRef.value && settingFormRef.value.clearValidate()
@@ -848,9 +877,7 @@ const socketOnMessage = (data) => {
     eventList.value.unshift(currentSocketData.value)
   }
 
-  if (alertTimer.value) {
-    clearTimeout(alertTimer.value)
-  }
+  clearAlertTimers()
 
   if (realSettingForm.value.audioPlay == 1 && audioUnlocked.value) {
     const audioEl = audio.value
@@ -868,32 +895,18 @@ const socketOnMessage = (data) => {
     return
 
   if (showAlert.value) {
-    alertTimer.value && clearTimeout(alertTimer.value)
-    alertTimer.value = setTimeout(() => {
-      alertPosition.value = window.innerWidth
-      setTimeout(() => {
-        showAlert.value = false
-      }, 500)
-    }, realSettingForm.value.popUpDuration * 1000)
+    scheduleAlertDismiss()
     return
   }
 
-  alertPosition.value = window.innerWidth
   showAlert.value = true
 
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      // 居中位置 = (窗口宽度 - 弹窗宽度) / 2
-      alertPosition.value = (window.innerWidth - 900) / 2
-
-      alertTimer.value = setTimeout(() => {
-        alertPosition.value = window.innerWidth
-
-        setTimeout(() => {
-          showAlert.value = false
-        }, 500)
-      }, realSettingForm.value.popUpDuration * 1000)
-    }, 50)
+  alertAnimationFrame = requestAnimationFrame(() => {
+    alertAnimationFrame = null
+    alertEnterTimer.value = setTimeout(() => {
+      alertEnterTimer.value = null
+      scheduleAlertDismiss()
+    }, ALERT_ENTER_DELAY_MS)
   })
 }
 
@@ -943,6 +956,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   EventBus.$emit('changeScreen', false)
+  clearAlertTimers()
   timeInterval.value && clearInterval(timeInterval.value)
   socketTimer.value && clearInterval(socketTimer.value)
   reconnectTimer.value && clearTimeout(reconnectTimer.value)
