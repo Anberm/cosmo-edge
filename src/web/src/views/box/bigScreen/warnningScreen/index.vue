@@ -80,7 +80,7 @@
                 </template>
               </el-input>
               <div class="tree-body">
-                <el-tree id="onboarding-camera-tree" ref="tree" class="filter-tree" :data="camearList" :highlight-current="true" node-key="id" default-expand-all :filter-node-method="filterNode" draggable @node-drag-start="handleDragStart" :allow-drop="handleDrop">
+                <el-tree id="onboarding-camera-tree" ref="tree" class="filter-tree" :data="camearList" :highlight-current="true" node-key="id" default-expand-all :filter-node-method="filterNode">
                   <template #default="{ node, data }">
                     <div class="custom-tree-node" :class="{'padding-left-18': nodeLabel(data) !== t('common.all')}" @dblclick="handleCameraNodeClick(data)">
                       <div v-if="data.channelType == 0 && data.status == 0" class="stnode">
@@ -542,9 +542,6 @@ const handleSettingClick = () => {
   settingFormRef.value && settingFormRef.value.clearValidate()
   settingDialogVisible.value = true
 }
-
-const handleDragStart = () => {}
-const handleDrop = () => {}
 
 const handleInput = (val, key) => {
   settingForm.value[key] = val.replace(/[^\d]/g, '')
