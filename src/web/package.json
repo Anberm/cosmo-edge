@@ -26,13 +26,13 @@
     "@vue-flow/controls": "^1.1.3",
     "@vue-flow/core": "^1.48.2",
     "@vue-flow/minimap": "^1.5.4",
-    "axios": "^1.7.0",
+    "axios": "^1.18.0",
     "dagre": "^0.8.5",
-    "echarts": "^6.0.0",
+    "echarts": "^6.1.0",
     "element-plus": "2.13.2",
     "flv.js": "^1.6.2",
     "js-md5": "^0.8.3",
-    "lodash": "^4.17.21",
+    "lodash": "^4.18.0",
     "mitt": "^3.0.1",
     "moment": "^2.30.1",
     "tree-transfer-vue3": "^1.2.2",
@@ -45,7 +45,7 @@
     "@vitejs/plugin-vue": "5.2.4",
     "sass": "^1.100.0",
     "sass-embedded": "^1.100.0",
-    "vite": "6.3.5"
+    "vite": "6.4.3"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.0.0"
